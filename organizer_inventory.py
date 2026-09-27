@@ -575,14 +575,15 @@ def save_design_source(
 
 def save_design_source_text(
     text: str, *, title: str = "Wavefinity", design: dict[str, Any], record: dict[str, Any],
-    row_id: str | None = None,
+    row_id: str | None = None, available_filenames: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Merge changes into browser-owned text and return replacement text, per ``save_design_source``."""
     raw = str(text or "")
     with INVENTORY_LOCK:
         current = parse_inventory(raw)
         bins, layout, used_id, stale = _merge_design_source(
-            current, design=design, record=record, row_id=row_id)
+            current, design=design, record=record, row_id=row_id,
+            available_filenames=available_filenames)
         rendered = render_inventory(str(title or "Wavefinity"), bins, layout)
         result = _text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered))
         return {**result, "row_id": used_id, "design": design_specs(result["layout"])[used_id],
@@ -867,7 +868,7 @@ def _deletion_file_names(current: dict[str, Any], ids: set[str], available: Iter
 
 def _merge_design_source(
     current: dict[str, Any], *, design: dict[str, Any], record: dict[str, Any], row_id: str | None,
-    folder: Path | None = None,
+    folder: Path | None = None, available_filenames: Iterable[str] = (),
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str, bool]:
     bins = current["bins"]
     by_id = {one["id"]: one for one in bins}
@@ -902,7 +903,16 @@ def _merge_design_source(
                 # Remember the old outputs so a later successful refresh can
                 # retire them; until then they are never treated as current.
                 kept = stale.get(target["id"], [])
-                stale[target["id"]] = list(dict.fromkeys(kept + _row_file_names(folder, target)))
+                if folder is not None:
+                    proven = _row_file_names(folder, target)
+                else:
+                    from organizer_drawer import inventory_row_file_names
+                    try:
+                        proven = inventory_row_file_names(available_filenames, target)
+                    except ValueError:
+                        proven = []
+                if proven or kept:
+                    stale[target["id"]] = list(dict.fromkeys(kept + proven))
             target.update(row_fields)
             target.update({"file": "", "status": "in_design", "qty": 0})
         used_id = target["id"]

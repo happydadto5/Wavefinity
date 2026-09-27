@@ -400,6 +400,56 @@ const api = async (_path, payload) => {
         self.assertEqual(out["switched"], [
             ["api", ["Owned.3mf", "Other.3mf"]], ["write"], ["error", "STALE_SPACE_CONTEXT"]])
 
+    def test_hosted_edit_snapshots_before_api_and_edit_then_delete_removes_old_file(self):
+        source = _read("spaces.js")
+        request = source[source.index("SP.inventoryRequest = async"):source.index("// Fix 034 F1", source.index("SP.inventoryRequest = async"))]
+        script = r"""
+const events = [], folder = { handle: {}, name: "Space" }, next = { handle: {}, name: "Next" };
+const state = { browserFolder: folder, activeSpace: { name: "Space" } };
+const DL = { spaceContextCurrent: () => true,
+  staleSpaceError: () => Object.assign(new Error("stale"), { code: "STALE_SPACE_CONTEXT" }) };
+let text = "generated";
+const SP = { _inventoryWriteChain: Promise.resolve(), readInventoryFor: async () => {
+  events.push("read"); return text;
+} };
+const WFFileSystem = {
+  listFilenames: async () => { events.push("list"); return ["Old.3mf", "Unrelated.3mf"]; },
+  writeText: async (_handle, _name, value) => { events.push(["write", value]); text = value; },
+  removeFile: async (_handle, name) => { events.push(["remove", name]); },
+};
+const INVENTORY_FILENAME = "Wavefinity bins.md";
+const api = async (path, payload) => {
+  events.push(["api", path, payload.inventory_text, payload.available_filenames]);
+  return path === "/api/drawer/design-source/save" ? { inventory_text: "edited" }
+    : { inventory_text: "deleted", cleanup_files: ["Old.3mf"] };
+};
+""" + request + r"""
+(async () => {
+  await SP.inventoryRequest("/api/drawer/design-source/save", {
+    row_id: "B1", available_filenames: ["Spoofed.3mf"] }, { context: {} });
+  await SP.inventoryRequest("/api/drawer/save", { delete_ids: ["B1"] }, { context: {} });
+  const lifecycle = [...events];
+  events.length = 0;
+  WFFileSystem.listFilenames = async () => { events.push("list"); state.browserFolder = next; return ["Old.3mf"]; };
+  try { await SP.inventoryRequest("/api/drawer/design-source/save", { row_id: "B1" }, { context: {} }); }
+  catch (error) { events.push(["error", error.code]); }
+  const switchedDuringList = [...events];
+  events.length = 0; state.browserFolder = folder;
+  SP.readInventoryFor = async () => { events.push("read"); state.browserFolder = next; return text; };
+  try { await SP.inventoryRequest("/api/drawer/design-source/save", { row_id: "B1" }, { context: {} }); }
+  catch (error) { events.push(["error", error.code]); }
+  process.stdout.write(JSON.stringify({ lifecycle, switchedDuringList, switchedBeforeList: events }));
+})().catch(error => { console.error(error); process.exit(1); });
+"""
+        out = node_run(script)
+        self.assertEqual(out["lifecycle"], [
+            "read", "list", ["api", "/api/drawer/design-source/save", "generated", ["Old.3mf", "Unrelated.3mf"]],
+            ["write", "edited"], "read", "list",
+            ["api", "/api/drawer/save", "edited", ["Old.3mf", "Unrelated.3mf"]],
+            ["write", "deleted"], ["remove", "Old.3mf"]])
+        self.assertEqual(out["switchedDuringList"], ["read", "list", ["error", "STALE_SPACE_CONTEXT"]])
+        self.assertEqual(out["switchedBeforeList"], ["read", ["error", "STALE_SPACE_CONTEXT"]])
+
 
 class ManualAddRemovalTests(unittest.TestCase):
 

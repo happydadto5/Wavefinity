@@ -867,8 +867,10 @@ SP.inventoryRequest = async (path, extra = {}, { write = true, context = null } 
   const handle = folder?.handle;
   if (!handle) throw new Error("Keeping an inventory needs folder access so Wavefinity can save it with your designs.");
   const title = state.activeSpace?.name || folder.name;
+  const spaceId = state.activeSpaceId || null;
   const requireContext = () => {
     if (state.browserFolder !== folder || state.browserFolder?.handle !== handle ||
+        (state.activeSpaceId || null) !== spaceId ||
         (context && !DL.spaceContextCurrent(context))) {
       throw DL.staleSpaceError();
     }
@@ -877,13 +879,15 @@ SP.inventoryRequest = async (path, extra = {}, { write = true, context = null } 
     requireContext();
     const inventoryText = await SP.readInventoryFor({ ...folder, handle }, { migrate: write });
     const deleting = path === "/api/drawer/save" && Boolean(extra.delete_ids?.length);
-    const availableFilenames = deleting ? await WFFileSystem.listFilenames(handle) : [];
+    const needsFilenameSnapshot = deleting || path === "/api/drawer/design-source/save";
+    requireContext();
+    const availableFilenames = needsFilenameSnapshot ? await WFFileSystem.listFilenames(handle) : [];
     requireContext();
     const data = await api(path, {
       inventory_text: inventoryText,
       inventory_title: title,
-      ...(deleting ? { available_filenames: availableFilenames } : {}),
       ...extra,
+      ...(needsFilenameSnapshot ? { available_filenames: availableFilenames } : {}),
     });
     requireContext();
     if (write && typeof data.inventory_text === "string") {

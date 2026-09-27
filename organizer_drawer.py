@@ -1527,6 +1527,7 @@ def drawer_routes(
                 payload.get("inventory_text") or "",
                 title=str(payload.get("inventory_title") or "Wavefinity"),
                 design=design, record=record, row_id=row_id,
+                available_filenames=payload.get("available_filenames") or (),
             )
         else:
             result = _save_design_source_row(folder(payload), design=design, record=record, row_id=row_id)
