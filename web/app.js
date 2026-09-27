@@ -1044,10 +1044,7 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
 // never saved into a design, a Space or a preference.
 
 const AI_SCHEMA = "wavefinity-ai-design-v1";
-const aiHelp = { session: null, busy: false, generation: 0, failure: null, recognition: null,
-  // The exact trimmed description that produced the current prompt/session, or null.
-  // Generate Prompt stays disabled while the field still holds this same text.
-  generatedDescription: null };
+const aiHelp = { session: null, busy: false, generation: 0, failure: null, recognition: null };
 
 // `stale`: the answer belongs to an older prompt/context - needs a fresh prompt.
 // `operational`: the answer was fine but Wavefinity itself failed (service, save,
@@ -1212,23 +1209,10 @@ function aiSetStatus(message = "", { error = false, repair = false } = {}) {
 
 function aiSetBusy(busy) {
   aiHelp.busy = busy;
-  ["#ai-help-process", "#ai-help-repair", "#ai-help-close"].forEach(selector => {
+  ["#ai-help-generate", "#ai-help-process", "#ai-help-repair", "#ai-help-close"].forEach(selector => {
     const button = $(selector);
     if (button) button.disabled = busy;
   });
-  aiUpdateGenerateButtonState();
-}
-
-// Generate Prompt is disabled once it has produced a prompt for the exact
-// description currently in the field (leading/trailing whitespace ignored) -
-// there is nothing new to ask for until the person changes what they typed, or
-// Wavefinity explicitly says the session is stale and a fresh prompt is needed.
-function aiUpdateGenerateButtonState() {
-  const button = $("#ai-help-generate");
-  if (!button) return;
-  const description = $("#ai-help-description")?.value.trim() || "";
-  button.disabled = aiHelp.busy ||
-    (aiHelp.generatedDescription !== null && description === aiHelp.generatedDescription);
 }
 
 function aiShowPrompt(text) {
@@ -1282,7 +1266,6 @@ async function aiGeneratePrompt() {
         reuse: aiCompositionEmpty(baseline),
       };
       aiShowPrompt(result.prompt);
-      aiHelp.generatedDescription = description;
       aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
       return true;
     }, false);
@@ -1423,9 +1406,6 @@ async function aiProcessResponse() {
     const known = error instanceof AiHelpError;
     const operational = !known || error.operational;
     if (error.applied) aiHelp.session = null;
-    // A stale rejection is Wavefinity explicitly saying the old prompt is spent -
-    // clear the marker so the very same description can produce a fresh one.
-    if (known && error.stale) { aiHelp.session = null; aiHelp.generatedDescription = null; }
     const repairable = known && !error.stale && !operational && Boolean(session);
     if (repairable) aiHelp.failure = { response: text, message: error.message, session };
     aiSetStatus(known ? error.message
@@ -1487,7 +1467,6 @@ function aiWireDictation() {
       if (!heard) return;
       const field = $("#ai-help-description");
       field.value = field.value && !/\s$/.test(field.value) ? `${field.value} ${heard}` : `${field.value}${heard}`;
-      aiUpdateGenerateButtonState();
     };
     recognition.onerror = () => { stop(); aiSetStatus("Dictation is not available right now. You can still type.", { error: true }); };
     recognition.onend = stop;
@@ -1505,7 +1484,6 @@ function aiWireHelp() {
     if (!dialog.open) dialog.showModal();
   });
   $("#ai-help-generate").addEventListener("click", aiGeneratePrompt);
-  $("#ai-help-description").addEventListener("input", aiUpdateGenerateButtonState);
   $("#ai-help-process").addEventListener("click", aiProcessResponse);
   $("#ai-help-repair").addEventListener("click", aiMakeRepairPrompt);
   $("#ai-help-copy").addEventListener("click", async () => {

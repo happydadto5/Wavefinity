@@ -1062,7 +1062,7 @@ AI Design is a Designer workflow for turning a natural-language object descripti
 1. Click **AI Design** beside the Designer's New/Duplicate controls.
 2. Describe one object in a multiline text field. (If you have an unsaved interior part open, Wavefinity saves it into the design first so the prompt matches exactly what you see.)
 3. Optionally use **Dictate** when the browser supports speech recognition.
-4. Click **Generate Prompt**. It greys out once it succeeds, and stays greyed out until the description changes or Wavefinity says the prompt has gone stale and a fresh one is needed.
+4. Click **Generate Prompt**.
 5. Copy the generated Wavefinity prompt.
 6. Paste it into any external AI.
 7. Let that AI ask follow-up questions when measurements or intent are unclear.
