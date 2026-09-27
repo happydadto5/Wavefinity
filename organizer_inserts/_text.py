@@ -252,7 +252,7 @@ def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         OptionDefinition("Letter height", "cap_height", "", minimum=TEXT_CAP_HEIGHT_FLOOR, note="mm; blank = biggest that fits (set text_v2 = true when giving a value)"),
         OptionDefinition("Inlay depth / Raised height", "depth", "0.4", choices=tuple((f"{value:g}", f"{value:g} mm") for value in TEXT_DEPTH_CHOICES), note="mm; recessed depth or raised height of the lettering"),
         OptionDefinition("Text", "text", "", "string", False, note="the words to print; required"),
-        OptionDefinition("Font", "font", "", "string", False, note="leave blank for the default font"),
+        OptionDefinition("Font", "font", "", "string", False, legacy=True, note="not a current Designer control; every Text part uses the one built-in font"),
         OptionDefinition("Raised", "raised", False, "boolean", False, note="true = raised lettering, false = recessed inlay"),
         OptionDefinition("Quarter turns", "quarter_turns", 0, "integer", False, minimum=0, maximum=3, note="90-degree turns of the lettering (base text only)"),
         OptionDefinition("Base or rim", "level", "base", "enum", False, choices=(("base", "On the base"), ("rim", "On the rim ledge"))),

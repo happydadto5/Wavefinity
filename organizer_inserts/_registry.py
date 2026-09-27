@@ -43,6 +43,10 @@ class OptionDefinition:
     note: str = ""
     # Serialized only as an editor/transport marker; never offered to the AI.
     internal: bool = False
+    # A real schema field with no current Designer control - superseded by another
+    # field, or from a retired UI path. It still round-trips in saved designs, but
+    # is never offered to the AI as a choice (see Fix 073 Correction 3).
+    legacy: bool = False
 
 
 @dataclass(frozen=True)

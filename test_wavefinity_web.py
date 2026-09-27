@@ -2122,14 +2122,31 @@ class AiHelpBackendTests(unittest.TestCase):
         manifest = wavefinity_web.ai_capability_manifest()
         catalog = catalog_payload()
         features = {one["kind"]: one for one in manifest["features"] if one["ai"] == "configurable"}
-        implied = {"qty": "count", "along": "along", "item": "item", "alternate": "alternate_ends", "size": "size"}
         for kind, one in features.items():
+            self.assertIn("zone", one["generic_fields"], kind)
+        # Public-control precedence matrix (Fix 073 Correction 3): a capability flag
+        # says a feature HAS this kind of control, not that today's Designer UI
+        # exposes it as this generic top-level field. Exact known exceptions:
+        # Bore moved lean direction to options.angle_towards (top-level `along` is a
+        # legacy fallback); Divider moved quantities entirely to options.count_x/
+        # count_y (top-level `count`/`along` are legacy single-axis compatibility).
+        self.assertNotIn("along", features["bore"]["generic_fields"])
+        self.assertIn("angle_towards", {o["key"] for o in features["bore"]["options"]})
+        self.assertNotIn("count", features["divider"]["generic_fields"])
+        self.assertNotIn("along", features["divider"]["generic_fields"])
+        self.assertEqual({o["key"] for o in features["divider"]["options"]} & {"count_x", "count_y"},
+                         {"count_x", "count_y"})
+        # Every other qty/along/item/alternate holder keeps its ordinary generic field.
+        implied = {"qty": "count", "along": "along", "item": "item", "alternate": "alternate_ends"}
+        for kind, one in features.items():
+            if kind in ("bore", "divider"):
+                continue
             fields = one["generic_fields"]
-            self.assertIn("zone", fields, kind)
             for capability, field_name in implied.items():
-                # A capability flag alone is not enough: the matching field contract must exist,
-                # and must not appear on a holder that lacks the capability.
                 self.assertEqual(capability in one["capabilities"], field_name in fields, (kind, field_name))
+        # full_span/wedge are current-UI-unreachable structure, never an AI choice.
+        self.assertNotIn("full_span", features["divider"]["generic_fields"])
+        self.assertNotIn("wedge", features["divider"]["generic_fields"])
         # Bore offers all six persisted profiles; Cradle never inherits Bore-only shapes.
         bore_item, cradle_item = features["bore"]["generic_fields"]["item"], features["cradle"]["generic_fields"]["item"]
         self.assertEqual([p["value"] for p in bore_item["profiles"]], [v for v, _ in ITEM_PROFILES])
@@ -2163,6 +2180,79 @@ class AiHelpBackendTests(unittest.TestCase):
         self.assertEqual(internal, {("text", "retarget")})
         for kind, one in features.items():
             self.assertFalse({(kind, o["key"]) for o in one["options"]} & internal)
+        # Legacy/derived serialized fields exist for round-tripping old designs but are
+        # never advertised as an alternate AI control, on top of the public precedence above.
+        legacy = {(p["kind"], o["key"]) for p in catalog["parts"] for o in p["options"] if o.get("legacy")}
+        self.assertEqual(legacy, {
+            ("post", "count_x"), ("post", "count_y"),
+            ("cradle", "floor_gap"), ("cradle", "rib_thickness"),
+            ("divider", "angle"), ("divider", "reverse_bottom"),
+            ("text", "font"),
+        })
+        for kind, one in features.items():
+            self.assertFalse({(kind, o["key"]) for o in one["options"]} & legacy, kind)
+
+    def test_ai_public_contract_semantic_preflight_rejects_canonically_valid_defects(self):
+        base = wavefinity_web._ai_example_base()
+        base["box"].update({"x": 96.0, "y": 96.0, "z": 60.0})
+
+        def candidate(feature):
+            design = json.loads(json.dumps(base))
+            design["layout"]["features"] = [feature]
+            return design
+
+        rejections = {
+            "cradle_bore_only_profile": candidate({
+                "kind": "cradle", "zone": [-6, -6, 6, 6],
+                "item": {"name": "x", "profile": "hex", "clearance": 0,
+                         "segments": [{"length": 10, "diameter": 5}]},
+            }),
+            "cradle_nonzero_clearance": candidate({
+                "kind": "cradle", "zone": [-6, -6, 6, 6],
+                "item": {"name": "x", "profile": "round", "clearance": 0.4,
+                         "segments": [{"length": 10, "diameter": 5}]},
+            }),
+            "bore_wrong_clearance": candidate({
+                "kind": "bore", "zone": [-8, -8, 8, 8],
+                "item": {"name": "x", "profile": "round", "clearance": 0.4,
+                         "segments": [{"length": 10, "diameter": 5}]},
+            }),
+            "hex_bit_wrong_dimensions": candidate({
+                "kind": "bore", "zone": [-8, -8, 8, 8],
+                "item": {"name": "x", "profile": "hex_bit_short", "clearance": 0.25,
+                         "segments": [{"length": 99, "diameter": 6.35}]},
+            }),
+            "hex_bit_nonzero_lean": candidate({
+                "kind": "bore", "zone": [-8, -8, 8, 8],
+                "item": {"name": "x", "profile": "hex_bit_short", "clearance": 0.25,
+                         "segments": [{"length": 25.0, "diameter": 6.35}]},
+                "options": {"angle": 10},
+            }),
+            "steps_options_count_conflict": candidate({
+                "kind": "steps", "zone": [-8, -8, 8, 8], "count": 3, "options": {"count": 5},
+            }),
+            "post_legacy_grid_override": candidate({
+                "kind": "post", "zone": [-8, -8, 8, 8], "count": 2, "along": "x",
+                "options": {"count_x": 2, "count_y": 1},
+            }),
+            "divider_legacy_top_level_count": candidate({
+                "kind": "divider", "zone": [-8, -8, 8, 8], "count": 2, "along": "x",
+                "full_span": True, "wedge": True, "options": {},
+            }),
+        }
+        for label, design in rejections.items():
+            with self.assertRaises(ValueError, msg=label) as caught:
+                wavefinity_web.ai_candidate_payload({"design": design})
+            self.assertNotIn("Traceback", str(caught.exception), label)
+        # The exact fixed hex-bit preset is accepted, upright, and preserved unmodified.
+        good = candidate({
+            "kind": "bore", "zone": [-8, -8, 8, 8],
+            "item": {"name": "x", "profile": "hex_bit_short", "clearance": 0.25,
+                     "segments": [{"length": 25.0, "diameter": 6.35}]},
+            "options": {"angle": 0},
+        })
+        accepted = wavefinity_web.ai_candidate_payload({"design": good})
+        self.assertEqual(accepted["problems"], [])
 
     def test_prompt_contract_context_and_privacy(self):
         design = wavefinity_web.default_design()

@@ -1077,7 +1077,7 @@ The prompt contains:
 - the user's object description;
 - current bin context;
 - current typed-Space constraints when applicable;
-- an authoritative capability manifest of current palette-visible parts/options, including the actual legal choices, ranges and defaults for every option (even ones edited through custom controls), plus each part's shared controls: footprint zone, quantity (and what Auto means), run direction, alternate ends, and the stored item's shape, length, diameter and fit (Bore offers all six shapes including the fixed hex-bit sizes; Cradle is always round);
+- an authoritative capability manifest naming, for every current palette-visible part, the exact current Designer control for each field the AI may set (not merely that a capability exists) -- footprint zone, quantity (and what Auto means), run direction, alternate ends, and the stored item's shape/length/diameter/fit (Bore offers all six shapes including the fixed hex-bit sizes; Cradle is always round) -- with legacy/derived fields (for example Bore's older orientation field, Divider's older single-axis quantity, Post's engine-only grid override, Cradle's derived floor gap/rib thickness, Text's unused font field) explained as structure to preserve, never offered as a second control for the same behavior;
 - legal modifier families, with a canonical example of each Lid & Stacking configuration (Stackable Bin, Stackable Lid, Lid with Handle);
 - important compatibility rules;
 - the current bin's interior bounds as a reference only: if the AI changes the bin size, every part must fit the interior of the design it returns;
@@ -1101,7 +1101,8 @@ Before applying an answer, Wavefinity checks:
 - structural-design rejection;
 - actual geometry preview;
 - fit/errors;
-- active Space constraints, including the Pegboard minimum bin sizes New Bin already uses.
+- active Space constraints, including the Pegboard minimum bin sizes New Bin already uses;
+- the manifest's own public-control rules: an item shape not legal for that part, a Cradle item that is not plain round, a Bore item with the wrong fit clearance, a hex-bit item that is not exactly the fixed preset or is leaned, or an answer that tries to set a part's layout through a legacy/derived field instead of its current control.
 
 Invalid designs do not modify the current design.
 

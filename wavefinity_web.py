@@ -99,6 +99,7 @@ from organizer_engine import (
 from organizer_inserts import (
     CARTRIDGE_PITCH,
     EDITOR_SNAP,
+    FEATURE_DEFINITIONS,
     MIN_FEATURE_GAP,
     Feature,
     Item,
@@ -947,6 +948,8 @@ def _option_payload(option) -> dict[str, Any]:
         entry["note"] = option.note
     if option.internal:
         entry["internal"] = True
+    if option.legacy:
+        entry["legacy"] = True
     return entry
 
 
@@ -3520,14 +3523,32 @@ def _ai_legal_values(option: dict[str, Any]) -> str:
     return {"string": "text", "json": "JSON value", "enum": "see note"}.get(kind, kind)
 
 
+# Correction 3: a registry capability flag says a feature HAS this kind of
+# control, not that today's Designer exposes it at the generic top-level field.
+# Bore's lean direction moved to options.angle_towards (top-level `along` is a
+# legacy fallback); Divider's quantities moved entirely to options.count_x /
+# count_y (top-level `count`/`along` are legacy single-axis compatibility).
+# This table is the one place that overrides the mechanical inference.
+_AI_GENERIC_FIELD_EXCLUSIONS: dict[str, set[str]] = {
+    "bore": {"along"},
+    "divider": {"qty", "along"},
+}
+
+
 def _ai_generic_fields(part: dict[str, Any], starter: dict[str, Any],
                        item_rules: dict[str, Any]) -> dict[str, Any]:
     """The shared top-level feature fields (outside ``options``) this holder uses.
 
-    Keyed by the holder's own capabilities, so an AI only sees controls that apply
-    to it. A capability flag alone says nothing about legal values; this does.
+    Driven by the holder's capabilities, then narrowed by
+    ``_AI_GENERIC_FIELD_EXCLUSIONS`` for the cases where the current Designer UI
+    does not actually expose the generic control a capability flag implies (see
+    Fix 073 Correction 3). ``full_span``/``wedge`` are never offered here: the
+    current Designer only builds upright grid dividers and never lets a person
+    edit either field, so they are canonical structure to copy from the example,
+    not an AI-facing choice.
     """
-    caps, kind = set(part["capabilities"]), part["kind"]
+    caps = set(part["capabilities"]) - _AI_GENERIC_FIELD_EXCLUSIONS.get(part["kind"], set())
+    kind = part["kind"]
     zone_note = ("Text's zone is derived from its lettering: copy the example's zone and do not tune it."
                  if kind == "text" else
                  "Width is x1-x0 and depth is y1-y0; make it large enough for the count and item size.")
@@ -3598,15 +3619,11 @@ def _ai_generic_fields(part: dict[str, Any], starter: dict[str, Any],
                              "segment {length, diameter} for the tool laid on its side.")
         fields["item"] = item
     if kind == "divider":
-        fields["full_span"] = {
-            "type": "boolean", "default": True,
-            "meaning": "true = the divider runs edge to edge hugging the bin's wall; false = it fills only its zone",
-        }
-        fields["wedge"] = {
-            "type": "boolean", "default": True,
-            "meaning": "when the divider leans: true = wedge (thick at the floor, tapering up); false = uniform-"
-                       "thickness sloped wall. Meaningless for an upright divider.",
-        }
+        fields["note"] = (
+            "Quantities are options.count_x / options.count_y only; the top-level count/along "
+            "fields are legacy and are not read for a grid divider. Copy full_span and wedge "
+            "from the example unchanged - they are fixed structure, not choices."
+        )
     return fields
 
 
@@ -3666,7 +3683,8 @@ def ai_capability_manifest() -> dict[str, Any]:
             entry["options"] = [
                 {**option, **({"label": labels[option["key"]]} if option["key"] in labels else {}),
                  "legal_values": _ai_legal_values(option)}
-                for option in part["options"] if not option.get("internal")
+                for option in part["options"]
+                if not option.get("internal") and not option.get("legacy")
             ]
             entry["generic_fields"] = _ai_generic_fields(part, starter["feature"], catalog["item_rules"])
             # What Wavefinity fills in for a blank option in the example bin.
@@ -3887,13 +3905,107 @@ def ai_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {"request_id": request_id, "context_fingerprint": fingerprint, "prompt": prompt}
 
 
+def _ai_num(value: Any) -> float | None:
+    """Coerce a JSON-decoded value to float, or None when that is not sound."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _ai_item_profile_violation(kind: str, item: Any) -> str | None:
+    """Item-profile defects a canonically valid design can still carry.
+
+    Runs on the raw item dict, before canonicalization can round an odd hex-bit
+    length/clearance into something that merely builds without complaint - the
+    real bore/cradle geometry ignores a hex-bit item's own numbers entirely and
+    always builds the fixed preset, so a wrong value would otherwise reach an
+    accepted design silently instead of being rejected.
+    """
+    if not isinstance(item, dict):
+        return None
+    profile = item.get("profile", "round")
+    definition = FEATURE_DEFINITIONS.get(kind)
+    allowed = definition.item_profiles if definition else ()
+    if allowed and profile not in allowed:
+        return f"a {kind} may only use item profile {' / '.join(allowed)}, not {profile!r}"
+    if kind == "cradle":
+        if profile != "round":
+            return "a cradle's item profile must be 'round'"
+        if _ai_num(item.get("clearance")) != 0.0:
+            return "a cradle's item clearance must be 0"
+        return None
+    if kind == "bore":
+        fixed = HEX_BIT_FIXED.get(profile)
+        if fixed is None:
+            if _ai_num(item.get("clearance")) != BORE_CLEARANCE:
+                return f"a bore item's clearance must be exactly {BORE_CLEARANCE:g}"
+            return None
+        segments = item.get("segments")
+        segment = segments[0] if isinstance(segments, list) and len(segments) == 1 else None
+        ok = (
+            segment is not None
+            and _ai_close(item.get("clearance"), fixed["clearance_mm"])
+            and _ai_close(segment.get("length"), fixed["length_mm"])
+            and _ai_close(segment.get("diameter"), fixed["diameter_mm"])
+        )
+        if not ok:
+            return (
+                f"{profile} must use exactly the fixed preset: one segment "
+                f"{{length: {fixed['length_mm']:g}, diameter: {fixed['diameter_mm']:g}}}, "
+                f"clearance {fixed['clearance_mm']:g}"
+            )
+    return None
+
+
+def _ai_close(value: Any, target: float) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value - target) < 1e-6
+
+
+def _ai_semantic_violation(raw: Any) -> str | None:
+    """Reject-with-repair defects the canonical/geometry validators would not
+    themselves catch: an AI answer that uses a field this Fix's manifest never
+    offered as a configurable control, or an item that violates its feature's
+    fixed rules. Runs on the raw candidate, before canonicalization can erase or
+    mask the conflict (Fix 073 Correction 3).
+    """
+    if not isinstance(raw, dict):
+        return None
+    features = raw.get("layout", {}).get("features") if isinstance(raw.get("layout"), dict) else None
+    if not isinstance(features, list):
+        return None
+    for feature in features:
+        if not isinstance(feature, dict):
+            continue
+        kind = feature.get("kind")
+        options = feature.get("options") if isinstance(feature.get("options"), dict) else {}
+        violation = _ai_item_profile_violation(kind, feature.get("item"))
+        if violation:
+            return violation
+        if kind == "bore":
+            profile = feature.get("item", {}).get("profile") if isinstance(feature.get("item"), dict) else None
+            if profile in HEX_BIT_FIXED and (_ai_num(options.get("angle")) or 0.0) != 0.0:
+                return f"{profile} stands upright; its angle must be 0, not editable by lean"
+        if kind == "steps" and "count" in options:
+            return "a Steps part's Number of steps is top-level feature.count, not options.count"
+        if kind == "post" and ("count_x" in options or "count_y" in options):
+            return "a Post part's layout is top-level feature.count/along, not options.count_x/count_y"
+        if kind == "divider" and feature.get("count") is not None:
+            return "a Divider's grid is options.count_x/options.count_y, not top-level feature.count"
+    return None
+
+
 def ai_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Prove an AI design in the real geometry path without changing anything.
 
-    Canonical validation, structural/media rejection, then the exact preview
-    owner. The preview rides its own client lane so it can never supersede, or be
-    superseded by, the Designer's own preview requests.
+    A semantic preflight against the manifest's public-control contract runs
+    first, on the raw candidate, then canonical validation, structural/media
+    rejection, and finally the exact preview owner. The preview rides its own
+    client lane so it can never supersede, or be superseded by, the Designer's
+    own preview requests.
     """
+    violation = _ai_semantic_violation(payload.get("design"))
+    if violation:
+        raise ValueError(f"That design is not legal: {violation}.")
     canonical = _ai_bin_design(payload.get("design"))
     request: dict[str, Any] = {"design": canonical}
     if isinstance(payload.get("client_id"), str):
