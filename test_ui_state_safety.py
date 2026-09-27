@@ -40,6 +40,12 @@ class BrowserStateLogicTests(unittest.TestCase):
                      "restoreHistory(", "updateHistoryButtons(",
                      "pendingNudgeHistory", "#undo-design", "#redo-design"):
             self.assertNotIn(dead, APP)
+        spaces = (ROOT / "web" / "spaces.js").read_text(encoding="utf-8")
+        panel = (ROOT / "web" / "drawer-panel.js").read_text(encoding="utf-8")
+        for dead in ("state.history", "state.future", "updateHistoryButtons("):
+            self.assertNotIn(dead, spaces)
+            self.assertNotIn(dead, panel)
+        self.assertIn("DP.syncHistory()", panel)
         model = (ROOT / "web" / "drawer-model.js").read_text(encoding="utf-8")
         self.assertIn("DL.undo", model)
         self.assertIn("DL.redo", model)

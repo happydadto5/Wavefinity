@@ -980,7 +980,7 @@ DP.applyMode = () => {
     button.tabIndex = on ? 0 : -1;
   });
   if (typeof SP !== "undefined" && SP.renderSpaceInfo) SP.renderSpaceInfo();
-  if (typeof updateHistoryButtons === "function") updateHistoryButtons();
+  if (typeof DP.syncHistory === "function") DP.syncHistory();
 };
 
 DP.setMode = mode => {

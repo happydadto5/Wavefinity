@@ -1977,13 +1977,10 @@ SP.resetDesignSession = () => {
   state.spaceStarterPreviewPending = false;
   state.lastOrdinaryDesign = null;
   state.drafts = {};
-  state.history = [];
-  state.future = [];
   state.binResizePending = false;
   state.binFootprintResizePending = false;
   if (typeof resetNestPhotoSession === "function") resetNestPhotoSession();
   if (typeof clearDraftSelection === "function") clearDraftSelection();
-  if (typeof updateHistoryButtons === "function") updateHistoryButtons();
 };
 
 // Builds the clean starter design for `space` into state.design/
