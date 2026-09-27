@@ -4284,8 +4284,7 @@ function cancelPendingDraftWork() {
   state.nestTraceRequest += 1;
   state.nestRetraceRequest += 1;
   state.draftRequest += 1;
-  state.previewRequest += 1;
-  cancelPreviewWait();
+  invalidatePendingPreview();
 }
 
 function resetNestPhotoSession() {
@@ -4733,6 +4732,7 @@ async function selectedFeature(index, force = false, acceptPreviewPick = null) {
   if (!force && index === state.selected) return !acceptPreviewPick || acceptPreviewPick();
   const request = state.selectionRequest = (state.selectionRequest || 0) + 1;
   const design = state.design, source = state.designInventoryId, space = state.activeSpace;
+  const previewRequest = state.previewRequest;
   // Don't drop unsaved work on the part currently open without asking first.
   const switchGuard = force ? null : await deferredDraftSwitch();
   try {
@@ -4740,7 +4740,8 @@ async function selectedFeature(index, force = false, acceptPreviewPick = null) {
   const expectedDesign = switchGuard?.committed ? state.design : design;
   if (request !== state.selectionRequest || expectedDesign !== state.design ||
       source !== state.designInventoryId || space !== state.activeSpace) return false;
-  if (acceptPreviewPick && !acceptPreviewPick(expectedDesign)) return false;
+  if (acceptPreviewPick && !acceptPreviewPick(expectedDesign,
+      switchGuard?.committed && state.previewRequest === previewRequest + 1)) return false;
   const selected = state.design.layout.features[index];
   if (state.draft?.kind === "nest" || selected?.kind === "nest") resetNestPhotoSession();
   if (!commitEdgeMountFormBeforeSwitch()) return false;
@@ -7853,6 +7854,9 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
     throw new Error("The interior part changed while it was being saved. Try again.");
   }
   state.design = committed.design;
+  // A deferred final preview must not leave an older in-flight preview able
+  // to adopt its pre-commit design while the transition is still in progress.
+  if (!previewAfterCommit) invalidatePendingPreview();
   seedPartNameFromText(draft);
   recordHistory(previousDesign);
   state.draftIsNew = false;
@@ -8476,6 +8480,11 @@ function cancelPreviewWait() {
   const notice = $("#preview-wait");
   if (notice) notice.hidden = true;
   if (wrapper) wrapper.classList.remove("preview-recalculating");
+}
+
+function invalidatePendingPreview() {
+  state.previewRequest += 1;
+  cancelPreviewWait();
 }
 
 function beginPreviewWait(requestId) {
@@ -10135,9 +10144,10 @@ function wireSupportLayoutDialog() {
 
 async function selectFromPreview(pick, context) {
   if (!pick) return;
-  const current = (expectedDesign = context.design) => state.design === expectedDesign &&
+  const current = (expectedDesign = context.design, ownCommit = false) =>
+    state.design === expectedDesign &&
     state.designInventoryId === context.source && state.activeSpace === context.space &&
-    state.previewRequest === context.preview && DP.mode === "design";
+    state.previewRequest === context.preview + Number(ownCommit) && DP.mode === "design";
   if (!current()) return;
   const status = $("#preview-state");
   status.textContent = "Selecting part…";
