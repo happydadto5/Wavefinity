@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import unittest
@@ -218,6 +219,160 @@ process.stdout.write(JSON.stringify({zero,ten,handles,crossing,bridged}));
         self.assertEqual(out["handles"], ["10", "90"])
         self.assertLess(out["crossing"]["lower"], out["crossing"]["upper"])
         self.assertLessEqual(out["bridged"]["upper"], 80)
+
+    def test_ai_help_envelope_composition_session_and_space_rules(self):
+        source = "\n".join(function_source(name, APP) for name in (
+            "aiParseEnvelope", "aiCompositionEmpty", "aiCheckSession", "aiSpaceViolation"))
+        error_class = APP[APP.index("class AiHelpError"):APP.index("\n}\n", APP.index("class AiHelpError")) + 3]
+        schema = re.search(r'const AI_SCHEMA = "([^"]+)"', APP).group(1)
+        script = r"""
+__ERROR__
+const AI_SCHEMA='__SCHEMA__',number=(v,f=0)=>{const n=Number(v);return Number.isFinite(n)?n:f},fmt=v=>String(v);
+let draft=false,key='K1',space={kind:'drawer',x:80,y:80,z:50};
+const state={folderMode:'space',get activeSpace(){return space},catalog:{base_unit:8}};
+const draftNeedsSaving=()=>draft,edgeMountActive=d=>Boolean(d.box.edge_mount);
+const isStructuralDesign=d=>Boolean(d.box.b4b?.enabled),drawerSpaceCapacity=mm=>Math.floor(mm/8);
+const aiContextKey=()=>key;
+__FUNCTIONS__
+const ok={schema:AI_SCHEMA,request_id:'R',context_fingerprint:'F',assumptions:[],design:{box:{x:16}}};
+const text=v=>JSON.stringify(v);
+const fail=fn=>{try{fn();return null}catch(e){return e.stale?'stale':e.message}};
+const parsed=[
+  aiParseEnvelope(text(ok)).request_id,
+  aiParseEnvelope('```json\n'+text(ok)+'\n```').request_id,
+  fail(()=>aiParseEnvelope('Here you go: '+text(ok))),
+  fail(()=>aiParseEnvelope(text(ok)+text(ok))),
+  fail(()=>aiParseEnvelope('```json\n```json\n'+text(ok)+'\n```\n```')),
+  fail(()=>aiParseEnvelope(text({...ok,schema:'v2'}))),
+  fail(()=>aiParseEnvelope(text({...ok,assumptions:undefined}))),
+  fail(()=>aiParseEnvelope(text({...ok,design:[]}))),
+];
+const blank={box:{x:16,y:32,z:40,wall:1.2,pegboard:{enabled:true}},label:'',scoop:false,layout:{features:[]}};
+const withBox=extra=>({...blank,box:{...blank.box,...extra}});
+const composed={
+  blank:aiCompositionEmpty(blank),
+  feature:aiCompositionEmpty({...blank,layout:{features:[{kind:'text'}]}}),
+  label:aiCompositionEmpty({...blank,label:'Tools'}),
+  scoop:aiCompositionEmpty({...blank,scoop:true}),
+  lid:aiCompositionEmpty(withBox({lid:{enabled:true}})),
+  stack:aiCompositionEmpty(withBox({stack:{mode:'direct'}})),
+  grip:aiCompositionEmpty(withBox({lift_grabbers:{enabled:true}})),
+  sides:aiCompositionEmpty(withBox({side_openings:{enabled:true}})),
+  edge:aiCompositionEmpty(withBox({edge_mount:{side:'front'}})),
+};
+draft=true;composed.draft=aiCompositionEmpty(blank);draft=false;
+const session={request_id:'R',context_fingerprint:'F',contextKey:'K1'};
+const sessions=[fail(()=>aiCheckSession(ok,session)),fail(()=>aiCheckSession(ok,null)),
+  fail(()=>aiCheckSession({...ok,request_id:'OLD'},session)),
+  fail(()=>{key='K2';aiCheckSession(ok,session)})];
+const base={box:{x:32,y:32,z:40,pegboard:{enabled:true,standard:'standard',cleat_x:'auto'}}};
+space={kind:'drawer',x:80,y:80,z:50};const plain={box:{x:32,y:32,z:40}};
+const rules=[aiSpaceViolation({box:{x:72,y:72,z:50}},plain),aiSpaceViolation({box:{x:88,y:72,z:50}},plain),
+  aiSpaceViolation({box:{x:72,y:72,z:60}},plain),
+  aiSpaceViolation({box:{x:16,y:16,z:40,b4b:{enabled:true}}},plain)];
+space={kind:'pegboard',x:200,y:200,z:100,pegboard_standard:'standard'};
+rules.push(aiSpaceViolation({box:{x:32,y:32,z:60,pegboard:base.box.pegboard}},base),
+  aiSpaceViolation({box:{x:32,y:32,z:60}},base),
+  aiSpaceViolation({box:{x:32,y:32,z:60,pegboard:{...base.box.pegboard,cleat_x:'3'}}},base));
+process.stdout.write(JSON.stringify({parsed,composed,sessions,rules}));
+""".replace("__ERROR__", error_class).replace("__SCHEMA__", schema).replace("__FUNCTIONS__", source)
+        out = node_json(script)
+        self.assertEqual(out["parsed"][:2], ["R", "R"])
+        self.assertTrue(all(out["parsed"][2:]))
+        self.assertEqual(out["composed"], {
+            "blank": True, "feature": False, "label": False, "scoop": False, "lid": False,
+            "stack": False, "grip": False, "sides": False, "edge": False, "draft": False})
+        self.assertEqual(out["sessions"][0], None)
+        self.assertEqual(out["sessions"][1:], ["stale", "stale", "stale"])
+        self.assertIsNone(out["rules"][0])
+        self.assertTrue(all(out["rules"][1:4]))
+        self.assertIsNone(out["rules"][4])
+        self.assertTrue(all(out["rules"][5:]))
+
+    def test_ai_help_install_reuses_or_creates_identity_and_adopts_without_rebuild(self):
+        source = "\n".join(function_source(name, APP) for name in (
+            "aiIdentityKey", "aiSpaceContext", "aiInstallCandidate", "aiProveCandidate", "aiCheckSession"))
+        error_class = APP[APP.index("class AiHelpError"):APP.index("\n}\n", APP.index("class AiHelpError")) + 3]
+        script = r"""
+__ERROR__
+const clone=v=>JSON.parse(JSON.stringify(v)),events=[],previewClientId='C';
+const old={box:{x:16},marker:'old',layout:{features:[]}},proven={marker:'ai',box:{x:32},layout:{features:[]}};
+const state={folderMode:'space',activeSpace:{kind:'drawer',x:80,y:80,z:50},activeSpaceId:'S',
+  designInventoryId:'B1',design:old,cleanDesign:old,previewRequest:0,history:[1]};
+const aiHelp={generation:0};let fullPreviewStarts=0,unsaved=false,confirmed=true,next={problems:[]};
+const aiContextKey=()=>'K',aiSetStatus=()=>{},typedSpaceOrdinaryBin=()=>true;
+const withDeferredDraftSwitch=action=>action({}),beginDesignMutation=()=>true,finishDesignMutation=()=>{};
+const resetNestPhotoSession=()=>{},bindLidMemoryForDesign=()=>{},syncForm=()=>{},clearDraftSelection=()=>{};
+const DP={setMode:()=>{}},activatePreviewView=()=>{},freshDesignForCurrentFolder=()=>clone(old);
+const flushSpaceDesignAutosave=async()=>{events.push('flush');return true};
+const designHasChanges=()=>unsaved,appConfirmAction=async()=>confirmed;
+const invalidatePendingPreview=()=>{state.previewRequest+=1;events.push('invalidate')};
+const adoptPreviewResult=r=>{state.preview=r;state.design=r.design;events.push('adopt')};
+const persistSpaceDesignSource=async(_c,force)=>{events.push('persist:'+force)};
+const refreshPreview=()=>events.push('REBUILD');
+const aiSpaceViolation=()=>null;
+const api=async path=>{events.push('api:'+path);return next};
+__FUNCTIONS__
+const candidate=()=>({design:clone(proven),preview:{design:clone(proven),fits:true}});
+const session=reuse=>({request_id:'R',context_fingerprint:'F',reuse,baseline:old,
+  contextKey:JSON.stringify({identity:aiIdentityKey()})});
+(async()=>{
+  const run=async reuse=>{
+    events.length=0;state.design=clone(old);state.designInventoryId='B1';
+    const ok=await aiInstallCandidate(candidate(),session(reuse));
+    return {ok,marker:state.design.marker,id:state.designInventoryId,events:[...events],
+      previews:fullPreviewStarts,history:state.history.length};
+  };
+  const reuse=await run(true), fresh=await run(false);
+  unsaved=true;confirmed=false;state.activeSpace=state.activeSpace;
+  const noSpace=(state.folderMode='design',state.activeSpace=null,state.activeSpaceId=null,
+    await (async()=>{events.length=0;state.design=clone(old);const ok=await aiInstallCandidate(candidate(),
+      {request_id:'R',context_fingerprint:'F',reuse:false,baseline:old,contextKey:JSON.stringify({identity:aiIdentityKey()})});
+      return {ok,marker:state.design.marker,events:[...events]}})());
+  state.folderMode='space';state.activeSpace={kind:'drawer',x:80,y:80,z:50};state.activeSpaceId='S';
+  state.design=clone(old);events.length=0;next={problems:['post: does not fit'],design:proven};
+  let refusal=null;
+  try{await aiProveCandidate({design:{},request_id:'R',context_fingerprint:'F'},{...session(true),contextKey:'K'})}
+  catch(e){refusal=e.message}
+  const stale=await(async()=>{state.design=clone(old);const bound=session(true);state.activeSpaceId='OTHER';
+    try{await aiInstallCandidate(candidate(),bound);return null}catch(e){return e.stale}})();
+  process.stdout.write(JSON.stringify({reuse,fresh,noSpace,refusal,marker:state.design.marker,stale}));
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__ERROR__", error_class).replace("__FUNCTIONS__", source)
+        out = node_json(script)
+        self.assertEqual((out["reuse"]["previews"], out["fresh"]["previews"]), (1, 2))  # one owner claim each
+        # Blank bin: rewritten in place, keeps its row, saved as an edit, preview adopted not rebuilt.
+        self.assertEqual((out["reuse"]["ok"], out["reuse"]["marker"], out["reuse"]["id"]), (True, "ai", "B1"))
+        self.assertEqual(out["reuse"]["events"], ["invalidate", "adopt", "persist:true"])
+        # Meaningful bin: saved first, then the AI result is a brand-new bin.
+        self.assertEqual((out["fresh"]["ok"], out["fresh"]["marker"], out["fresh"]["id"]), (True, "ai", None))
+        self.assertEqual(out["fresh"]["events"], ["flush", "invalidate", "adopt", "persist:true"])
+        for one in (out["reuse"], out["fresh"]):
+            self.assertNotIn("REBUILD", one["events"])
+            self.assertEqual(one["history"], 0)
+        # Declining the Design-folder discard prompt changes nothing.
+        self.assertEqual(out["noSpace"], {"ok": False, "marker": "old", "events": []})
+        # A candidate with problems is refused before any state or preview owner is touched.
+        self.assertIn("could not build", out["refusal"])
+        self.assertEqual(out["marker"], "old")
+        # A different Space at install time is stale, never applied.
+        self.assertTrue(out["stale"])
+
+    def test_ai_help_ui_is_wired_without_a_provider_and_dictation_is_optional(self):
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        actions = html[html.index('id="bin-actions"'):html.index('id="stack-note"')]
+        self.assertLess(actions.index('id="designer-duplicate"'), actions.index('id="ai-help-open"'))
+        self.assertRegex(html, r'<button[^>]*id="ai-help-dictate"[^>]*\shidden')
+        section = APP[APP.index("// ------------------------------------------------------------ AI Help (Fix 073)"):
+                      APP.index("// New Bin (B1)")]
+        self.assertNotIn("fetch(", section)
+        self.assertEqual(sorted(set(re.findall(r'api\("(/[^"]+)"', section))),
+                         ["/api/ai/candidate", "/api/ai/prompt", "/api/ai/repair-prompt"])
+        script = "\n".join([function_source("aiSpeechRecognitionClass", APP), r"""
+const none=aiSpeechRecognitionClass({}),moz=aiSpeechRecognitionClass({SpeechRecognition:'A'}),
+  webkit=aiSpeechRecognitionClass({webkitSpeechRecognition:'B'});
+process.stdout.write(JSON.stringify({none,moz,webkit}));"""])
+        self.assertEqual(node_json(script), {"none": None, "moz": "A", "webkit": "B"})
 
 
 

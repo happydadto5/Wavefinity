@@ -11,12 +11,14 @@ import argparse
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import replace
+import hashlib
 import ipaddress
 import json
 import math
 import mimetypes
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import secrets
@@ -3430,9 +3432,374 @@ def structural_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     })
 
 
+# ---------------------------------------------------------------- AI Help (Fix 073)
+#
+# Wavefinity never calls an AI provider. This section only builds the prompt a
+# person pastes into any outside AI, and proves a pasted answer is a legal
+# ordinary bin before the browser installs it. Nothing here is stored: the
+# request ID / fingerprint are opaque, and the browser owns the runtime session.
+
+AI_DESIGN_SCHEMA = "wavefinity-ai-design-v1"
+AI_MAX_DESCRIPTION = 4000
+AI_MAX_RESPONSE = 400_000
+AI_SPACE_KINDS = ("drawer", "box", "surface", "portable", "pegboard")
+# Capabilities a text-only AI cannot legally supply. They are offered to the
+# person as a recommendation, never as something the returned JSON may contain.
+AI_MEDIA_CAPABILITIES = ("photo",)
+AI_MEDIA_REASON = (
+    "Needs a photo or traced outline that a text answer cannot supply. "
+    "Recommend the person add it themselves with Photo Nest inside Wavefinity; "
+    "never put this part in the returned design."
+)
+AI_MODIFIER_BLOCKS = (
+    ("lid_stacking", "Lid & Stacking",
+     "Choose ONE of: an ordinary lid (box.lid), a stackable lid (box.lid with "
+     "stackable=true) or a stackable bin (box.stack = {\"mode\": \"direct\"}). "
+     "Never combine a lid with direct stacking.",
+     ("box.lid", "box.stack")),
+    ("inside_handles", "Inside Grip",
+     "A finger grip inside the bin (box.lift_grabbers).", ("box.lift_grabbers",)),
+    ("side_openings", "Side Openings",
+     "Finger-access cutouts through selected walls (box.side_openings).",
+     ("box.side_openings",)),
+    ("edge_mount", "Edge Mount",
+     "A label and/or screw mounting on one outside edge (box.edge_mount). "
+     "Include the block only when the edge mount is wanted.",
+     ("box.edge_mount",)),
+)
+_AI_PATH_RE = re.compile(r"[A-Za-z]:[\\/][^\s\"']*|(?:/[\w.\-]+){2,}")
+
+
+def _ai_example_base() -> dict[str, Any]:
+    """A roomy blank bin, so every example part and modifier is legal in it."""
+    design = default_design()
+    design["box"].update({"x": 64.0, "y": 64.0, "z": 60.0})
+    return design
+
+
+def _ai_modifier_examples() -> dict[str, dict[str, Any]]:
+    """One canonical example block per user-facing modifier.
+
+    Each is produced by running a raw block through the same validator every
+    design uses, so an example can never drift from the real serializer.
+    """
+    raw_blocks = {
+        "lid": {"lid": {"enabled": True}},
+        "stackable_bin": {"stack": {"mode": "direct"}},
+        "inside_handles": {"lift_grabbers": {
+            "enabled": True, "size": "medium", "location": "sides"}},
+        "side_openings": {"side_openings": {
+            "enabled": True, "shape": "curved", "sides": ["front"], "size": "medium",
+            "from_bottom_percent": 0, "from_top_percent": 0,
+            "percent_mode": "inset_v2"}},
+        "edge_mount": {"edge_mount": {
+            "side": "front", "label_enabled": True, "label_text": "Label",
+            "holes_enabled": True}},
+    }
+    examples: dict[str, dict[str, Any]] = {}
+    for name, blocks in raw_blocks.items():
+        design = _ai_example_base()
+        design["box"].update(blocks)
+        design = validate_design_payload({"design": design})["design"]
+        examples[name] = {key: design["box"][key] for key in blocks if key in design["box"]}
+    return examples
+
+
+def ai_capability_manifest() -> dict[str, Any]:
+    """The AI's authoritative list of what it may put in a design.
+
+    Everything is read from the catalog, the feature registry, rule constants and
+    the canonical serializer - there is no second copy of any range or choice.
+    """
+    catalog = catalog_payload()
+    base = _ai_example_base()
+    features: list[dict[str, Any]] = []
+    for part in catalog["parts"]:
+        if not part["palette_visible"] or "box_modifier" in part["capabilities"]:
+            continue
+        entry: dict[str, Any] = {
+            "kind": part["kind"], "title": part["title"],
+            "description": part["description"],
+            "capabilities": part["capabilities"],
+        }
+        if any(cap in AI_MEDIA_CAPABILITIES for cap in part["capabilities"]):
+            entry["ai"] = "recommend_only"
+            entry["reason"] = AI_MEDIA_REASON
+        else:
+            entry["ai"] = "configurable"
+            entry["fields"] = part["fields"]
+            entry["option_keys"] = [option["key"] for option in part["options"]]
+            entry["example"] = default_feature_payload(
+                {"design": base, "kind": part["kind"]})["feature"]
+        features.append(entry)
+    examples = _ai_modifier_examples()
+    modifier_examples = {
+        "lid_stacking": {"ordinary_lid": examples["lid"], "stackable_bin": examples["stackable_bin"]},
+        "inside_handles": examples["inside_handles"],
+        "side_openings": examples["side_openings"],
+        "edge_mount": examples["edge_mount"],
+    }
+    modifier_rules = {
+        "lid_stacking": {
+            "lid_rules": catalog["lid_rules"], "stack_rules": catalog["stack_rules"],
+        },
+        "inside_handles": {"lift_grabbers": catalog["lift_grabbers"]},
+        "side_openings": {"side_openings": catalog["side_openings"]},
+        "edge_mount": {"edge_mount": catalog["edge_mount"]},
+    }
+    modifiers = [
+        {
+            "kind": kind, "title": title, "description": description,
+            "design_paths": list(paths), "ai": "configurable",
+            "rules": modifier_rules[kind], "example": modifier_examples[kind],
+        }
+        for kind, title, description, paths in AI_MODIFIER_BLOCKS
+    ]
+    return {
+        "features": features,
+        "box_modifiers": modifiers,
+        "bin_controls": {
+            "units_are": "millimetres",
+            "base_unit_mm": catalog["base_unit"],
+            "max_box_size_mm": catalog["max_box_size"],
+            "min_height_above_base_mm": catalog["min_height_above_base_mm"],
+            "ordinary_bin_min_height_mm": catalog["drawer_rules"]["ordinary_bin_min_height_mm"],
+            "wall_rules": catalog["wall_rules"],
+            "base_rules": catalog["base_rules"],
+            "scoop_rules": catalog["scoop_rules"],
+            "layout_modes": catalog["modes"],
+            "design_fields": {
+                "box.x / box.y": "footprint, whole multiples of base_unit_mm",
+                "box.z": "height in whole millimetres",
+                "box.wall / box.base_thickness": "use the wall_rules / base_rules choices",
+                "scoop": "true adds the front finger scoop (also available as an interior part)",
+                "label / label_position": "rim ledge label text and its side",
+                "part_name": "the bin name",
+            },
+        },
+        "setting_interactions": catalog["setting_interactions"],
+        "space_restrictions": {
+            "drawer": "X/Y must fit the drawer opening in whole base units; height must not exceed the drawer height.",
+            "box": "Height must not exceed the Space height; X/Y must fit the Space.",
+            "portable": "Height must not exceed the Space height; X/Y must fit the Space.",
+            "surface": "Base thickness and base mode are Space-controlled; keep them exactly as given.",
+            "pegboard": "Keep box.pegboard exactly as given (it is the Space's mounting); stay at or above the pegboard minimum height.",
+            "pegboard_rules": catalog["pegboard_rules"],
+        },
+        "never_offer": [
+            "Storage Box designs (box.b4b) or Base Trim designs (design_kind = base_trim)",
+            "Photo Nest / traced contours (recommend only)",
+            "hidden, internal or legacy-only part kinds",
+        ],
+    }
+
+
+def _ai_clean_text(text: str, limit: int = 600) -> str:
+    """A short user-facing reason: no paths, no tracebacks."""
+    text = re.sub(r"Traceback.*", "", text, flags=re.S)
+    return _AI_PATH_RE.sub("[path]", text).strip()[:limit]
+
+
+def _ai_safe_message(error: BaseException) -> str:
+    if isinstance(error, KeyError):
+        key = error.args[0] if error.args else "a required field"
+        return _ai_clean_text(f"The design is missing required field {key!s}.", 300)
+    if isinstance(error, TypeError):
+        return "The design has a value of the wrong type."
+    if isinstance(error, ValueError):
+        return _ai_clean_text(str(error)) or "The design is not valid."
+    return "The design could not be read as a Wavefinity bin design."
+
+
+def _ai_bin_design(raw: Any) -> dict[str, Any]:
+    """Canonical ordinary-bin design, or a safe ValueError."""
+    if not isinstance(raw, dict):
+        raise ValueError("The response has no design object.")
+    box_raw = raw.get("box")
+    b4b_raw = box_raw.get("b4b") if isinstance(box_raw, dict) else None
+    if _is_base_trim_design(raw) or (isinstance(b4b_raw, dict) and b4b_raw.get("enabled")):
+        raise ValueError("A Storage Box or Base Trim cannot be used as an AI bin design.")
+    try:
+        canonical = validate_design_payload({"design": raw})["design"]
+    except Exception as error:  # every parse failure becomes one safe sentence
+        raise ValueError(_ai_safe_message(error)) from None
+    for feature in canonical["layout"]["features"]:
+        if feature.get("kind") == "nest" or feature.get("contour") or feature.get("source_contour"):
+            raise ValueError(
+                "Photo Nest or traced outlines cannot come from an AI answer. "
+                "Remove that part and add it in Wavefinity."
+            )
+    return canonical
+
+
+def _ai_space_context(raw: Any) -> dict[str, Any]:
+    """Only the user-relevant Space facts; nothing else from the browser."""
+    if not isinstance(raw, dict) or raw.get("kind") not in AI_SPACE_KINDS:
+        return {"typed_space": False}
+    space: dict[str, Any] = {"typed_space": True, "kind": raw["kind"]}
+    for axis in ("x", "y", "z"):
+        value = raw.get(axis)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+            space[f"{axis}_mm"] = round(float(value), 3)
+    if raw["kind"] == "surface" and isinstance(raw.get("trim_size"), str):
+        space["trim_size"] = raw["trim_size"][:24]
+    if raw["kind"] == "pegboard" and isinstance(raw.get("pegboard_standard"), str):
+        space["pegboard_standard"] = raw["pegboard_standard"][:24]
+    return space
+
+
+def _ai_controlled_fields(space: dict[str, Any]) -> list[str]:
+    kind = space.get("kind")
+    if kind == "pegboard":
+        return ["box.pegboard"]
+    if kind == "surface":
+        return ["box.base_thickness", "box.standard_base", "layout.surface_base_mode"]
+    return []
+
+
+def _ai_fingerprint(design: dict[str, Any], space: dict[str, Any]) -> str:
+    text = json.dumps({"design": design, "space": space}, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
+                    context: dict[str, Any], manifest: dict[str, Any],
+                    shape: dict[str, Any]) -> str:
+    def block(value: Any) -> str:
+        return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+    envelope = {
+        "schema": AI_DESIGN_SCHEMA, "request_id": request_id,
+        "context_fingerprint": fingerprint, "assumptions": [],
+        "design": "<complete Wavefinity ordinary-bin design>",
+    }
+    return "\n".join([
+        "You are helping design ONE 3D-printable storage bin for the Wavefinity app.",
+        "Read everything below. Ask the person questions if you need to. When you are",
+        "sure, reply with the final answer exactly as described in RESPONSE CONTRACT.",
+        "",
+        "=== USER REQUEST ===",
+        description,
+        "=== END USER REQUEST ===",
+        "",
+        "=== HOW TO WORK ===",
+        "- Design exactly ONE object. If the request describes several, ask the person to narrow it to one BEFORE giving the final answer.",
+        "- If any critical measurement is missing, ambiguous, suspicious or has conflicting units, ASK the person first. Do not guess it and do not reinterpret the units they gave.",
+        "- All values in the design are millimetres. Convert nothing silently; ask if unsure.",
+        "- You may use any legal part, option or modifier in the CAPABILITY MANIFEST that best solves the request.",
+        "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",
+        "- Interior part zones are [x0,y0,x1,y1] in mm from the bin centre and must stay inside current_layout_bounds_mm. Adjust the example zones, counts and sizes to the real item.",
+        "- Keep every field listed in space_controlled_fields exactly as it is in the current design.",
+        "",
+        "=== WAVEFINITY CONTEXT (JSON) ===",
+        block(context),
+        "",
+        "=== CANONICAL DESIGN SHAPE (JSON; the current bin, a complete design) ===",
+        block(shape),
+        "",
+        "=== CAPABILITY MANIFEST (JSON) ===",
+        block(manifest),
+        "",
+        "=== RESPONSE CONTRACT ===",
+        "Your FINAL answer is exactly one JSON object and nothing else - no text before or after it:",
+        block(envelope),
+        f"- \"schema\" must be exactly \"{AI_DESIGN_SCHEMA}\".",
+        f"- Copy \"request_id\" (\"{request_id}\") and \"context_fingerprint\" (\"{fingerprint}\") exactly.",
+        "- \"design\" is a COMPLETE Wavefinity ordinary-bin design like the canonical shape - not a patch and not a list of UI steps.",
+        "- \"assumptions\" may list only harmless, non-critical assumptions. It is never permission to invent critical dimensions.",
+        "- Do not invent Photo Nest contour or photo data.",
+        "- A single markdown ```json fence around the object is tolerated; prose around it is not.",
+    ])
+
+
+def ai_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    description = payload.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("Describe the object first.")
+    description = description.strip()
+    if len(description) > AI_MAX_DESCRIPTION:
+        raise ValueError(f"Keep the description under {AI_MAX_DESCRIPTION} characters.")
+    design = _ai_bin_design(payload.get("design"))
+    space = _ai_space_context(payload.get("space"))
+    request_id = "wf-ai-" + secrets.token_hex(6)
+    fingerprint = _ai_fingerprint(design, space)
+    box, layout, *_ = _design(design)
+    bounds = layout_zone(box, layout.mode)
+    context = {
+        **space,
+        "space_controlled_fields": _ai_controlled_fields(space),
+        "current_layout_bounds_mm": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
+        "base_unit_mm": BASE_UNIT,
+    }
+    prompt = _ai_prompt_text(
+        description, request_id, fingerprint, context, ai_capability_manifest(), design)
+    return {"request_id": request_id, "context_fingerprint": fingerprint, "prompt": prompt}
+
+
+def ai_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Prove an AI design in the real geometry path without changing anything.
+
+    Canonical validation, structural/media rejection, then the exact preview
+    owner. The preview rides its own client lane so it can never supersede, or be
+    superseded by, the Designer's own preview requests.
+    """
+    canonical = _ai_bin_design(payload.get("design"))
+    request: dict[str, Any] = {"design": canonical}
+    if isinstance(payload.get("client_id"), str):
+        request["client_id"] = payload["client_id"]
+        request["generation"] = payload.get("generation")
+    try:
+        preview = preview_payload(request)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(_ai_safe_message(error)) from None
+    if preview.get("superseded"):
+        return {"superseded": True}
+    problems = [
+        text for text in (
+            preview.get("message"), *preview.get("feature_errors", []), preview.get("draft_error"),
+        ) if text
+    ]
+    if not preview.get("fits") and not problems:
+        problems.append("The design does not fit.")
+    return {"design": preview["design"], "preview": preview, "problems": problems}
+
+
+def ai_repair_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    request_id = payload.get("request_id")
+    fingerprint = payload.get("context_fingerprint")
+    if not isinstance(request_id, str) or not isinstance(fingerprint, str) \
+            or not request_id or not fingerprint:
+        raise ValueError("A repair prompt needs the original request and fingerprint.")
+    response = payload.get("response")
+    if not isinstance(response, str) or not response.strip():
+        raise ValueError("There is no response to repair.")
+    error = _ai_clean_text(str(payload.get("error") or "")) or "The answer was not valid."
+    prompt = "\n".join([
+        "Your previous Wavefinity answer could not be used. Fix it and answer again.",
+        "",
+        f"schema: {AI_DESIGN_SCHEMA}",
+        f"request_id: {request_id}",
+        f"context_fingerprint: {fingerprint}",
+        "",
+        "=== PROBLEM ===",
+        error,
+        "",
+        "=== YOUR PREVIOUS ANSWER ===",
+        response.strip()[:AI_MAX_RESPONSE],
+        "=== END PREVIOUS ANSWER ===",
+        "",
+        "Return exactly ONE corrected JSON object and nothing else. It must keep",
+        f"\"schema\": \"{AI_DESIGN_SCHEMA}\", the same request_id and context_fingerprint,",
+        "and a complete Wavefinity ordinary-bin \"design\" that fixes the problem above.",
+    ])
+    return {"prompt": prompt}
+
+
 POST_ROUTES = {
     "/api/preview": preview_payload,
     "/api/design/validate": validate_design_payload,
+    "/api/ai/prompt": ai_prompt_payload,
+    "/api/ai/candidate": ai_candidate_payload,
+    "/api/ai/repair-prompt": ai_repair_prompt_payload,
     "/api/design/inventory-preview": inventory_preview_payload,
     "/api/pegboard/layouts": pegboard_layouts_payload,
     "/api/feature/default": default_feature_payload,

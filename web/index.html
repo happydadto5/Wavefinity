@@ -66,6 +66,7 @@
               </label>
               <button type="button" id="designer-new-bin" class="button secondary">New Bin</button>
               <button type="button" id="designer-duplicate" class="button secondary">Duplicate Bin</button>
+              <button type="button" id="ai-help-open" class="button secondary">AI Help</button>
             </div>
             <span id="stack-note" class="stack-note" hidden></span>
           </div>
@@ -669,6 +670,34 @@
       </div>
     </dialog>
 
+  <dialog id="ai-help-dialog" class="support-layout-dialog ai-help-dialog" aria-labelledby="ai-help-title">
+    <h2 id="ai-help-title">AI Help</h2>
+    <p>Describe one object. Wavefinity writes a prompt you paste into any AI chat, then you paste its answer back here.</p>
+    <label class="ai-help-field">1. Describe the object
+      <textarea id="ai-help-description" rows="3" maxlength="4000" placeholder="e.g. A tray for my three small screwdrivers"></textarea>
+    </label>
+    <div class="button-row ai-help-row">
+      <button id="ai-help-dictate" type="button" class="button secondary" hidden>Dictate</button>
+      <button id="ai-help-generate" type="button" class="button primary">Generate Prompt</button>
+    </div>
+    <div id="ai-help-prompt-block" class="ai-help-field" hidden>
+      <label class="ai-help-field">2. Copy this prompt into your AI
+        <textarea id="ai-help-prompt" rows="4" readonly></textarea>
+      </label>
+      <div class="button-row ai-help-row">
+        <button id="ai-help-copy" type="button" class="button secondary">Copy Prompt</button>
+      </div>
+    </div>
+    <label class="ai-help-field">3. Paste the AI's answer
+      <textarea id="ai-help-response" rows="5" placeholder="Paste the JSON answer here"></textarea>
+    </label>
+    <p id="ai-help-status" class="ai-help-status" role="status" hidden></p>
+    <div class="button-row ai-help-row">
+      <button id="ai-help-repair" type="button" class="button secondary" hidden>Make AI Fix Its Answer</button>
+      <button id="ai-help-close" type="button" class="button secondary">Close</button>
+      <button id="ai-help-process" type="button" class="button primary">Process AI Response</button>
+    </div>
+  </dialog>
   <dialog id="bin-name-dialog" class="support-layout-dialog" aria-labelledby="bin-name-dialog-title">
     <h2 id="bin-name-dialog-title">Bins must have a name</h2>
     <p id="bin-name-dialog-message">Bins must have a name before you can save or print.</p>

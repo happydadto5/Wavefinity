@@ -1859,9 +1859,12 @@ const tick = () => new Promise(r => setImmediate(r));
         # reports fit/feature/draft errors must not replace the last valid
         # resume checkpoint.
         app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        # refreshPreview() adopts its result through adoptPreviewResult() (shared
+        # with AI Help's already-proven candidate), which owns the checkpoint rule.
         start = app_js.index("async function refreshPreview(")
-        end = app_js.index("\nasync function ", start + 1)
-        source = app_js[start:end]
+        self.assertIn("adoptPreviewResult(result,", app_js[start:app_js.index("\nasync function ", start + 1)])
+        start = app_js.index("function adoptPreviewResult(")
+        source = app_js[start:app_js.index("\n}\n", start)]
 
         previews_has_errors_idx = source.index("const previewHasErrors =")
         queue_idx = source.index("SP.queueResumeCheckpoint(")
@@ -2048,6 +2051,111 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
 
 
 
+
+
+class AiHelpBackendTests(unittest.TestCase):
+    """Fix 073: prompt/manifest, candidate proof and repair prompt (no AI provider)."""
+
+    def _space(self):
+        return {"kind": "pegboard", "x": 96.0, "y": 96.0, "z": 80.0, "pegboard_standard": "standard"}
+
+    def test_manifest_covers_every_user_facing_capability_and_round_trips(self):
+        manifest = wavefinity_web.ai_capability_manifest()
+        catalog = catalog_payload()
+        listed = {one["kind"]: one for one in manifest["features"]}
+        visible = {p["kind"] for p in catalog["parts"]
+                   if p["palette_visible"] and "box_modifier" not in p["capabilities"]}
+        self.assertEqual(set(listed), visible)
+        self.assertNotIn("pocket", listed)  # hidden/legacy kinds are never offered
+        for kind, one in listed.items():
+            expected = "recommend_only" if "photo" in one["capabilities"] else "configurable"
+            self.assertEqual(one["ai"], expected, kind)
+        self.assertEqual(listed["nest"]["ai"], "recommend_only")
+        modifiers = {p["kind"] for p in catalog["parts"] if "box_modifier" in p["capabilities"]}
+        self.assertEqual({one["kind"] for one in manifest["box_modifiers"]}, modifiers)
+        # The rule tables are the catalog's own, not a second copy.
+        by_kind = {one["kind"]: one for one in manifest["box_modifiers"]}
+        self.assertEqual(by_kind["side_openings"]["rules"]["side_openings"], catalog["side_openings"])
+        self.assertEqual(by_kind["lid_stacking"]["rules"]["lid_rules"], catalog["lid_rules"])
+        # Every example is legal in the canonical validator.
+        for one in listed.values():
+            if one["ai"] != "configurable":
+                continue
+            design = wavefinity_web._ai_example_base()
+            design["layout"]["features"] = [one["example"]]
+            wavefinity_web.validate_design_payload({"design": design})
+        for one in manifest["box_modifiers"]:
+            blocks = one["example"]
+            for block in ([blocks] if "ordinary_lid" not in blocks else blocks.values()):
+                design = wavefinity_web._ai_example_base()
+                design["box"].update(block)
+                wavefinity_web.validate_design_payload({"design": design})
+
+    def test_prompt_contract_context_and_privacy(self):
+        design = wavefinity_web.default_design()
+        first = wavefinity_web.ai_prompt_payload(
+            {"description": "  A tray for three screwdrivers  ", "design": design, "space": self._space(),
+             "inventory_id": "B7", "path": "C:\\Users\\someone\\secret"})
+        second = wavefinity_web.ai_prompt_payload(
+            {"description": "A tray for three screwdrivers", "design": design, "space": self._space()})
+        self.assertNotEqual(first["request_id"], second["request_id"])
+        self.assertEqual(first["context_fingerprint"], second["context_fingerprint"])
+        prompt = first["prompt"]
+        for needle in ("A tray for three screwdrivers", first["request_id"], first["context_fingerprint"],
+                       "wavefinity-ai-design-v1", "recommend_only", "box.pegboard", "ASK the person"):
+            self.assertIn(needle, prompt)
+        for private in ("B7", "someone", str(Path(__file__).resolve().parent)):
+            self.assertNotIn(private, prompt)
+        moved = json.loads(json.dumps(design))
+        moved["box"]["z"] = 48.0
+        third = wavefinity_web.ai_prompt_payload({"description": "x", "design": moved, "space": self._space()})
+        self.assertNotEqual(third["context_fingerprint"], first["context_fingerprint"])
+        for bad in ({"description": "  ", "design": design},
+                    {"description": "x", "design": {"design_kind": "base_trim"}},
+                    {"description": "x", "design": {"box": {"b4b": {"enabled": True}}}}):
+            with self.assertRaises(ValueError):
+                wavefinity_web.ai_prompt_payload(bad)
+
+    def test_candidate_is_proven_in_real_geometry_without_side_effects(self):
+        design = wavefinity_web.default_design()
+        before = json.dumps(design, sort_keys=True)
+        registry = dict(wavefinity_web._PREVIEW_REQUESTS)
+        good = wavefinity_web.ai_candidate_payload(
+            {"design": design, "client_id": "ai-lane", "generation": 1})
+        self.assertEqual(good["problems"], [])
+        self.assertTrue(good["preview"]["fits"])
+        self.assertEqual(good["design"], good["preview"]["design"])
+        self.assertEqual(json.dumps(design, sort_keys=True), before)
+        # Only its own lane was touched, so it can never supersede a Designer preview.
+        self.assertEqual({k for k in wavefinity_web._PREVIEW_REQUESTS} - set(registry),
+                         {("ai-lane", "preview")})
+        # A geometry failure is reported, not applied.
+        post = wavefinity_web.default_feature_payload({"design": design, "kind": "post"})["feature"]
+        post["options"]["diameter"] = 60.0
+        broken = json.loads(json.dumps(design))
+        broken["layout"]["features"] = [post]
+        self.assertTrue(wavefinity_web.ai_candidate_payload({"design": broken})["problems"])
+        # Structural, media-derived and unreadable designs are refused with a safe reason.
+        nest = json.loads(json.dumps(design))
+        nest["layout"]["features"] = [{"kind": "nest", "zone": [-4, -4, 4, 4]}]
+        for bad in (nest, {"version": 1}, {"design_kind": "base_trim"}, "not a design"):
+            with self.assertRaises(ValueError) as caught:
+                wavefinity_web.ai_candidate_payload({"design": bad})
+            self.assertNotIn("Traceback", str(caught.exception))
+
+    def test_repair_prompt_is_exact_and_safe(self):
+        made = wavefinity_web.ai_repair_prompt_payload({
+            "request_id": "wf-ai-1", "context_fingerprint": "abc123",
+            "response": '{"schema": "oops"}',
+            "error": "Could not read C:\\Users\\me\\Wavefinity\\x.json\nTraceback (most recent call last): boom",
+        })["prompt"]
+        for needle in ("wavefinity-ai-design-v1", "wf-ai-1", "abc123", '{"schema": "oops"}',
+                       "exactly ONE corrected JSON object"):
+            self.assertIn(needle, made)
+        for private in ("Users", "Traceback", "boom"):
+            self.assertNotIn(private, made)
+        with self.assertRaises(ValueError):
+            wavefinity_web.ai_repair_prompt_payload({"request_id": "", "context_fingerprint": "x", "response": "y"})
 
 
 if __name__ == "__main__":
