@@ -274,33 +274,121 @@ class ThicknessAndLabelTests(unittest.TestCase):
         preview = preview_payload({"design": app.design_to_dict(small, Layout())})
         self.assertEqual(preview["stack"]["lid_thickness_mm"], st.lid_thickness_options(small))
 
-    def test_browser_labels_are_measurement_first_and_stale_reports_are_not_shown(self):
+    def test_thickness_measurements_follow_the_real_design_change_wiring(self):
+        """Fix 071D Correction 1 (C1.1): the actual changedDesign() path, not a
+        direct call to the renderer, stops old measurements showing as current."""
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required")
         source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         key = source[source.index("function lidThicknessKey("):source.index("// Inlay depth / Raised height as shown")]
         render = source[source.index("function renderLidThicknessOptions() {"):source.index("function syncLidForm() {")]
+        changed = source[source.index("function changedDesign("):source.index("function markBinAxisManual(")]
+        reject = source[source.index("function rejectModifierConflict("):source.index("function applyLiveFormWithModifierConflictGuard(")]
         script = "\n".join([
             "const fmt = v => String(Math.round(v * 10) / 10);",
+            "const clone = v => JSON.parse(JSON.stringify(v));",
             "const options = ['thin','medium','thick'].map(v => ({ value: v, textContent: '' }));",
             "const select = { options };",
-            "const $ = () => select;",
-            "const state = { design: { box: { x: 48, y: 48, wall: 0.8, lid: { enabled: true } } }, lidThicknessReport: null };",
-            key, render,
+            "const fields = { '#x-size': '48', '#y-size': '48', '#wall-thickness': '0.8', '#lid-configuration': 'handled_lid' };",
+            "const $ = sel => sel === '#lid-thickness' ? select",
+            "  : { get value() { return fields[sel]; }, set value(v) { fields[sel] = v; } };",
+            "const state = { design: { box: { x: 48, y: 48, wall: 0.8, corner_fillet: 0, flat_inside: 0,",
+            "  lid: { enabled: true, stackable: false } } }, lidThicknessReport: null,",
+            "  lidThicknessEpoch: 0, lidThicknessFormKey: null, canGenerate: true };",
+            "let pendingDesignHistory = null;",
+            "let queuedPreviews = 0;",
+            "const applyChangedDesign = () => { queuedPreviews += 1; };",   # the debounced preview path
+            "let sideOpeningAdjustmentNote = '';",
+            "const syncForm = () => renderLidThicknessOptions();",
+            "const updateGenerateAvailability = () => {};",
+            "const toast = () => {};",
+            key, render, changed, reject,
+            "const labels = () => options.map(o => o.textContent);",
+            "const land = (values, epoch = state.lidThicknessEpoch) => applyLidThicknessReport(",
+            "  { design: clone(state.design), stack: { lid_thickness_mm: values } }, epoch);",
             "const out = {};",
-            "renderLidThicknessOptions(); out.none = options.map(o => o.textContent);",
-            "state.lidThicknessReport = { key: lidThicknessKey(state.design), values: { thin: 2, medium: 2.8, thick: 3.6 } };",
-            "renderLidThicknessOptions(); out.fresh = options.map(o => o.textContent);",
+            # 1. a matching report is visible
+            "changedDesign(); const firstEpoch = state.lidThicknessEpoch;",
+            "land({ thin: 2, medium: 2.8, thick: 3.6 });",
+            "out.shown = labels();",
+            # 2. a real Width edit through changedDesign(): old millimetres go away at once
+            "fields['#x-size'] = '64'; changedDesign();",
+            "out.afterWidth = labels(); out.queued = queuedPreviews;",
+            "const requestEpoch = state.lidThicknessEpoch;",
+            # 3. an older response (requested before the edit) cannot restore them
+            "land({ thin: 2, medium: 2.8, thick: 3.6 }, firstEpoch);",
+            "out.staleResponse = labels();",
+            # 4. the newest matching response restores measurement-first labels
             "state.design.box.x = 64;",
-            "renderLidThicknessOptions(); out.stale = options.map(o => o.textContent);",
+            "land({ thin: 2.4, medium: 3.2, thick: 4 }, requestEpoch);",
+            "out.newest = labels();",
+            # 5. an edit unrelated to the lid rise does not blank the labels
+            "changedDesign(); out.unrelated = labels();",
+            # 6. wall edit
+            "fields['#wall-thickness'] = '1.6'; changedDesign(); out.afterWall = labels();",
+            # 7. Length edit (dimension-handle drags set the field and the design, then call changedDesign)
+            "land({ thin: 2, medium: 2.8, thick: 3.6 });",
+            "state.design.box.y = 80; fields['#y-size'] = '80'; changedDesign(clone(state.design));",
+            "out.afterLength = labels();",
+            # 8. Stacking Method edit
+            "land({ thin: 2, medium: 2.8, thick: 3.6 });",
+            "fields['#lid-configuration'] = 'stackable_lid'; state.design.box.lid.stackable = true; changedDesign();",
+            "out.afterMethod = labels();",
+            # 9. a failed replacement preview never leaves old millimetres visible
+            "land({ thin: 2, medium: 2.8, thick: 3.6 });",
+            "const before = labels();",
+            "fields['#x-size'] = '96'; changedDesign();",
+            "clearLidThicknessReport();",
+            "out.failed = labels(); out.beforeFailed = before;",
+            # 10. a rolled-back edit restores the design the last preview measured
+            "const measured = clone(state.design);",
+            "land({ thin: 2.2, medium: 3, thick: 3.8 });",
+            "fields['#x-size'] = '112'; state.design.box.x = 112; changedDesign();",
+            "out.beforeRollback = labels();",
+            "rejectModifierConflict(measured, true, { message: 'no' });",
+            "out.afterRollback = labels();",
             "process.stdout.write(JSON.stringify(out));",
         ])
         done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
         out = json.loads(done.stdout)
-        self.assertEqual(out["none"], ["Thin", "Medium", "Thick"])
-        self.assertEqual(out["fresh"], ["2 mm — Thin", "2.8 mm — Medium", "3.6 mm — Thick"])
-        self.assertEqual(out["stale"], ["Thin", "Medium", "Thick"])
+        plain = ["Thin", "Medium", "Thick"]
+        self.assertEqual(out["shown"], ["2 mm \u2014 Thin", "2.8 mm \u2014 Medium", "3.6 mm \u2014 Thick"])
+        self.assertEqual(out["afterWidth"], plain)          # gone the moment the edit happens
+        self.assertEqual(out["queued"], 2)                  # and the normal debounced preview path was queued
+        self.assertEqual(out["staleResponse"], plain)       # an older response cannot bring them back
+        self.assertEqual(out["newest"], ["2.4 mm \u2014 Thin", "3.2 mm \u2014 Medium", "4 mm \u2014 Thick"])
+        self.assertEqual(out["unrelated"], out["newest"])   # no flicker for edits that do not move the lid rise
+        self.assertEqual(out["afterWall"], plain)
+        self.assertEqual(out["afterLength"], plain)
+        self.assertEqual(out["afterMethod"], plain)
+        self.assertEqual(out["beforeFailed"], ["2 mm \u2014 Thin", "2.8 mm \u2014 Medium", "3.6 mm \u2014 Thick"])
+        self.assertEqual(out["failed"], plain)
+        self.assertEqual(out["beforeRollback"], plain)
+        self.assertEqual(out["afterRollback"], ["2.2 mm \u2014 Thin", "3 mm \u2014 Medium", "3.8 mm \u2014 Thick"])
+
+    def test_every_lid_rise_input_path_shares_the_one_invalidation_owner(self):
+        source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        # changedDesign() is the single owner and calls it first.
+        changed = source[source.index("function changedDesign("):source.index("function markBinAxisManual(")]
+        self.assertTrue(changed.lstrip().split("\n", 1)[1].lstrip().startswith("noteLidThicknessEdit();"))
+        # Typed Width / Length / Height and wall edits.
+        typed = source[source.index('["#x-size", "#y-size", "#z", "#base-thickness", "#wall-thickness", "#part-name"]'):
+                       source.index('["#surface-base-mode"')]
+        self.assertIn("changedDesign();", typed)
+        # Width / Length dimension-handle drags.
+        drag = source[source.index("function commitDimensionDrag("):source.index("function cancelDimensionDrag(")]
+        self.assertIn("changedDesign(previousDesign);", drag)
+        # Stacking Method (and every other lid control).
+        method = source[source.index('["#lid-configuration", "#lid-thickness", "#lid-fit"'):
+                        source.index('$("#lid-label-text").addEventListener("input"')]
+        self.assertIn("changedDesign(previous);", method)
+        # The preview lifecycle: requested at an epoch, cleared on failure, and
+        # never a browser-owned millimetre table.
+        preview = source[source.index("async function refreshPreview("):source.index("function updateAutoExpandButton()")]
+        self.assertIn("const lidEpochAtRequest = state.lidThicknessEpoch;", preview)
+        self.assertIn("applyLidThicknessReport(result, lidEpochAtRequest);", preview)
+        self.assertIn("clearLidThicknessReport();", preview)
 
     def test_lid_label_depth_and_height_match_preview_and_export(self):
         for style, raised in (("flush", False), ("raised", True)):

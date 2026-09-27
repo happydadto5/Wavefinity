@@ -79,6 +79,9 @@ const state = {
   // restores them. Reseeded from the design's own box.lid (or cleared)
   // whenever a different design is bound to the editor - see syncForm().
   lidMemory: null,
+  lidThicknessReport: null,
+  lidThicknessEpoch: 0,
+  lidThicknessFormKey: null,
   // Set while a user-driven Width/Length edit waits for grow-only minimum
   // enforcement. Consumed by the debounced design update.
   binResizePending: false,
@@ -1881,6 +1884,12 @@ function newModifierConflict(previousDesign, nextDesign) {
 
 function rejectModifierConflict(previousDesign, previousCanGenerate, conflict) {
   state.design = previousDesign;
+  // The restored design is the one the last preview measured, so its lid
+  // thickness values are authoritative again.
+  if (state.lidThicknessReport && state.lidThicknessReport.key === lidThicknessKey(state.design)) {
+    state.lidThicknessEpoch = state.lidThicknessReport.epoch;
+    state.lidThicknessFormKey = null;
+  }
   state.canGenerate = previousCanGenerate;
   state.binResizePending = false;
   state.binFootprintResizePending = false;
@@ -3048,12 +3057,52 @@ function renderLidThicknessOptions() {
   const report = state.lidThicknessReport;
   // A report only labels the bin it was measured for; while a newer one is
   // pending the plain names show rather than another bin's measurements.
-  const fresh = report && report.key === lidThicknessKey(state.design);
+  const fresh = report && report.epoch === state.lidThicknessEpoch
+    && report.key === lidThicknessKey(state.design);
   const names = { thin: "Thin", medium: "Medium", thick: "Thick" };
   [...select.options].forEach(option => {
     const mm = fresh ? report.values?.[option.value] : undefined;
     option.textContent = Number.isFinite(mm) ? `${fmt(mm)} mm \u2014 ${names[option.value]}` : names[option.value];
   });
+}
+
+// Everything that can change the resolved lid rise: the design plus the raw
+// Width / Length / wall / Stacking Method fields, which only reach the design
+// after a debounce. Typed edits, wall and method selects and dimension-handle
+// drags all pass through changedDesign(), so this is the one place that stops
+// the old measurements being presented as current.
+function lidThicknessFormKey() {
+  return JSON.stringify([lidThicknessKey(state.design), $("#x-size")?.value,
+    $("#y-size")?.value, $("#wall-thickness")?.value, $("#lid-configuration")?.value]);
+}
+
+// Called on every design change. When a lid-rise input moved, the measurements
+// on screen stop being authoritative at once: the epoch advances, so only a
+// preview requested after this edit can bring them back.
+function noteLidThicknessEdit() {
+  const key = lidThicknessFormKey();
+  if (key === state.lidThicknessFormKey) return;
+  state.lidThicknessFormKey = key;
+  state.lidThicknessEpoch += 1;
+  renderLidThicknessOptions();
+}
+
+// A landed preview brings back the measurement-first labels only when it was
+// requested at the current epoch; an older response leaves the plain names.
+function applyLidThicknessReport(result, epochAtRequest) {
+  state.lidThicknessReport = result.stack?.lid_thickness_mm
+    ? { key: lidThicknessKey(result.design), epoch: epochAtRequest,
+        values: result.stack.lid_thickness_mm } : null;
+  // An accepted (newest) preview settles the design: later edits that do not
+  // move a lid-rise input compare against this state and leave the labels alone.
+  if (epochAtRequest === state.lidThicknessEpoch) state.lidThicknessFormKey = lidThicknessFormKey();
+  renderLidThicknessOptions();
+}
+
+// A failed replacement preview never leaves the old bin's millimetres shown.
+function clearLidThicknessReport() {
+  state.lidThicknessReport = null;
+  renderLidThicknessOptions();
 }
 
 function syncLidForm() {
@@ -3551,6 +3600,7 @@ function reflowDraftToBin(one) {
 }
 
 function changedDesign(previousDesign = null) {
+  noteLidThicknessEdit();
   // Width/length keyboard, wheel and blur handlers update state immediately so
   // their inline inside-dimension readout stays correct. Preserve the snapshot
   // from before the first such edit until the debounced history entry lands.
@@ -8367,6 +8417,7 @@ function endPreviewWait(requestId) {
 // default) persists exactly as before.
 async function refreshPreview({ persistResume = true } = {}) {
   const request = ++state.previewRequest;
+  const lidEpochAtRequest = state.lidThicknessEpoch;
   beginPreviewWait(request);
   state.canGenerate = false;
   updateGenerateAvailability();
@@ -8394,11 +8445,9 @@ async function refreshPreview({ persistResume = true } = {}) {
     const grownZ = result.design?.box?.z !== state.design?.box?.z;
     state.preview = result;
     state.design = result.design;
-    // Bind the three backend-measured lid thicknesses to the design they were
-    // measured for; a later, different bin never shows them.
-    state.lidThicknessReport = result.stack?.lid_thickness_mm
-      ? { key: lidThicknessKey(result.design), values: result.stack.lid_thickness_mm } : null;
-    renderLidThicknessOptions();
+    // Bind the three backend-measured lid thicknesses to the design and edit
+    // epoch they were measured for; a later bin or a newer edit never shows them.
+    applyLidThicknessReport(result, lidEpochAtRequest);
     syncSurfaceControls();
     state.previewDesignKey = JSON.stringify(result.design);
     updateDraftOverhangNote();
@@ -8497,6 +8546,7 @@ async function refreshPreview({ persistResume = true } = {}) {
   } catch (error) {
     if (request !== state.previewRequest) return;
     endPreviewWait(request);
+    clearLidThicknessReport();
     $("#preview-state").textContent = "Preview could not build";
     $("#preview-state").classList.remove("status-ok");
     $("#preview-state").classList.add("status-error");
