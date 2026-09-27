@@ -1060,7 +1060,7 @@ AI Help is a Designer workflow for turning a natural-language object description
 ## 16.1 User flow
 
 1. Click **AI Help** beside the Designer's New/Duplicate controls.
-2. Describe one object in a multiline text field.
+2. Describe one object in a multiline text field. (If you have an unsaved interior part open, Wavefinity saves it into the design first so the prompt matches exactly what you see.)
 3. Optionally use **Dictate** when the browser supports speech recognition.
 4. Click **Generate Prompt**.
 5. Copy the generated Wavefinity prompt.
@@ -1077,9 +1077,10 @@ The prompt contains:
 - the user's object description;
 - current bin context;
 - current typed-Space constraints when applicable;
-- an authoritative capability manifest of current palette-visible parts/options;
-- legal modifier families;
+- an authoritative capability manifest of current palette-visible parts/options, including the actual legal choices, ranges and defaults for every option (even ones edited through custom controls);
+- legal modifier families, with a canonical example of each Lid & Stacking configuration (Stackable Bin, Stackable Lid, Lid with Handle);
 - important compatibility rules;
+- the current bin's interior bounds as a reference only: if the AI changes the bin size, every part must fit the interior of the design it returns;
 - a complete canonical design example;
 - the required response schema.
 
@@ -1100,7 +1101,7 @@ Before applying an answer, Wavefinity checks:
 - structural-design rejection;
 - actual geometry preview;
 - fit/errors;
-- active Space constraints.
+- active Space constraints, including the Pegboard minimum bin sizes New Bin already uses.
 
 Invalid designs do not modify the current design.
 
@@ -1108,7 +1109,7 @@ Invalid designs do not modify the current design.
 
 An AI answer is rejected if the user changed the relevant:
 
-- design;
+- design (including the bin name);
 - Space;
 - Space dimensions/rules;
 - Inventory identity/binding;
@@ -1121,7 +1122,7 @@ The user must then generate a fresh prompt rather than applying stale AI output.
 ## 16.5 Existing-bin behavior
 
 - If the current bin is composition-empty, a valid AI result can reuse the current bin identity.
-- If the current bin already contains meaningful parts/options/labels/etc., the AI result becomes a new bin rather than overwriting the existing composed bin.
+- If the current bin already contains meaningful parts/options/labels/etc. (including saved label text on a switched-off lid or edge mount), the AI result becomes a new bin rather than overwriting the existing composed bin. In a typed Space the current bin is saved first, and the new bin then updates the Space's remembered defaults the same way the same edits made by hand would.
 
 ## 16.6 Repair prompt
 
@@ -1132,6 +1133,8 @@ If the external AI returns invalid JSON or an invalid design, Wavefinity can cre
 - the previous AI response;
 - a safe validation error;
 - instructions to return one corrected JSON object.
+
+Only a problem in the AI's answer is repairable this way. If the answer was fine but Wavefinity itself failed afterward (service, save or apply), no repair prompt is offered and Wavefinity says whether the design was already applied.
 
 ## 16.7 AI limitations
 
