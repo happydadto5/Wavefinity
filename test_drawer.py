@@ -396,7 +396,7 @@ class DesignSourceTests(unittest.TestCase):
         after = load_inventory(self.folder)
         self.assertEqual(design_specs(after["layout"]), {})
 
-    def test_multi_delete_removes_rows_sources_and_placements_but_keeps_files(self):
+    def test_multi_delete_removes_rows_sources_placements_and_owned_files(self):
         from organizer_inventory import save_design_source, design_specs, change_design_status
         first = save_design_source(self.folder, design=self._design("One"), record=self._record("One"))
         second = save_design_source(self.folder, design=self._design("Two"), record=self._record("Two"))
@@ -416,8 +416,8 @@ class DesignSourceTests(unittest.TestCase):
         self.assertEqual(set(design_specs(after["layout"])), {third["row_id"]})
         self.assertEqual([one["bin"] for one in after["layout"]["drawers"][0]["placements"]],
                          [third["row_id"]])
-        self.assertTrue((self.folder / "One.3mf").exists())
-        self.assertTrue((self.folder / "Two.3mf").exists())
+        self.assertFalse((self.folder / "One.3mf").exists())
+        self.assertFalse((self.folder / "Two.3mf").exists())
 
     def test_stale_layout_save_cannot_replace_newer_design_source(self):
         from organizer_inventory import save_design_source, design_specs
@@ -503,6 +503,63 @@ class DesignSourceTests(unittest.TestCase):
             })
             row = next(one for one in saved["bins"] if one["id"] == duplicate["row_id"])
             self.assertEqual((row["status"], row["qty"]), ("saved", 0))
+
+    def test_hosted_edit_tracks_proven_old_files_for_later_delete(self):
+        hosted = drawer_routes(threading.Lock(), self.folder, hosted=True)
+        create = hosted["/api/drawer/design-source/save"]({
+            "inventory_text": "", "design": self._design("One")})
+        row_id = create["row_id"]
+        saved = hosted["/api/drawer/design-source/status"]({
+            "inventory_text": create["inventory_text"], "row_id": row_id,
+            "action": "saved", "file": "Old, name.3mf, Second.3mf"})
+        survivor = hosted["/api/drawer/design-source/save"]({
+            "inventory_text": saved["inventory_text"], "design": self._design("Survivor")})
+        survivor_saved = hosted["/api/drawer/design-source/status"]({
+            "inventory_text": survivor["inventory_text"], "row_id": survivor["row_id"],
+            "action": "saved", "file": "Old, name.3mf"})
+        names = ["Old, name.3mf", "Second.3mf", "Unrelated.3mf"]
+        edited = hosted["/api/drawer/design-source/save"]({
+            "inventory_text": survivor_saved["inventory_text"], "row_id": row_id,
+            "design": self._design("One edited"), "available_filenames": names})
+        self.assertEqual(edited["bins"][0]["file"], "")
+        self.assertEqual(edited["layout"]["stale_files"][row_id], names[:2])
+        self.assertEqual(load_inventory_text(edited["inventory_text"])["layout"]["stale_files"][row_id], names[:2])
+        saved_again = hosted["/api/drawer/design-source/status"]({
+            "inventory_text": edited["inventory_text"], "row_id": row_id,
+            "action": "saved", "file": "Third.3mf"})
+        names.append("Third.3mf")
+        edited_again = hosted["/api/drawer/design-source/save"]({
+            "inventory_text": saved_again["inventory_text"], "row_id": row_id,
+            "design": self._design("One edited twice"), "available_filenames": names})
+        self.assertEqual(edited_again["layout"]["stale_files"][row_id],
+                         ["Old, name.3mf", "Second.3mf", "Third.3mf"])
+        deleted = hosted["/api/drawer/save"]({
+            "inventory_text": edited_again["inventory_text"], "delete_ids": [row_id],
+            "available_filenames": names})
+        self.assertEqual(deleted["cleanup_files"], ["Second.3mf", "Third.3mf"])
+        self.assertEqual([row["id"] for row in deleted["bins"]], [survivor["row_id"]])
+        self.assertNotIn("stale_files", deleted["layout"])
+
+    def test_hosted_edit_never_guesses_ambiguous_missing_or_unsafe_old_files(self):
+        hosted = drawer_routes(threading.Lock(), self.folder, hosted=True)
+        cases = [
+            ("A.3mf, B.3mf, C.3mf", ["A.3mf", "B.3mf", "C.3mf", "A.3mf, B.3mf", "B.3mf, C.3mf"]),
+            ("Missing.3mf", []),
+            ("../Unsafe.3mf", ["Unsafe.3mf"]),
+        ]
+        for index, (file_text, names) in enumerate(cases):
+            with self.subTest(file=file_text):
+                created = hosted["/api/drawer/design-source/save"]({
+                    "inventory_text": "", "design": self._design(f"Case {index}")})
+                row_id = created["row_id"]
+                saved = hosted["/api/drawer/design-source/status"]({
+                    "inventory_text": created["inventory_text"], "row_id": row_id,
+                    "action": "saved", "file": file_text})
+                edited = hosted["/api/drawer/design-source/save"]({
+                    "inventory_text": saved["inventory_text"], "row_id": row_id,
+                    "design": self._design(f"Edited {index}"), "available_filenames": names})
+                self.assertEqual(edited["bins"][0]["file"], "")
+                self.assertFalse(edited["layout"].get("stale_files", {}).get(row_id))
 
 
 class OpenSpaceTests(unittest.TestCase):

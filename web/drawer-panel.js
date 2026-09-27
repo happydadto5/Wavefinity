@@ -471,7 +471,7 @@ DP.deleteRow = async one => {
   const placed = DL.placedCount(one.id);
   const ok = await appConfirmAction({
     title: "Delete this bin?",
-    message: `Delete ${DL.label(one)} from Inventory?${placed ? " It is placed in this Space; its placement is removed too." : ""} Dragging a bin off the Space only unplaces it. The print file stays in the folder.`,
+    message: `Delete ${DL.label(one)} from Inventory?${placed ? " It is placed in this Space; its placement is removed too." : ""} Generated files owned only by this bin will also be deleted from the folder.`,
     actionLabel: "Delete Bin",
     danger: true,
   });
@@ -480,10 +480,10 @@ DP.deleteRow = async one => {
       !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   if (!DL.spaceContextCurrent(context)) return;
   const wasDesign = one.id === state.designInventoryId;
+  if (!(await DL.editBins({ delete_ids: [one.id] }, { context }))) return;
   DP.open.delete(one.id);
   DP.printSelected.delete(one.id);
   if (DL.selectedRow === one.id) DL.selectedRow = null;
-  if (!(await DL.editBins({ delete_ids: [one.id] }, { context }))) return;
   if (wasDesign) {
     state.designInventoryId = null;
     state.cleanDesign = clone(state.design);
@@ -501,7 +501,7 @@ DP.deleteSelected = async () => {
   const placed = ids.filter(id => DL.placedCount(id)).length;
   const ok = await appConfirmAction({
     title: `Delete ${dlPlural(ids.length, "bin")}?`,
-    message: `Delete all ${ids.length} selected bins, including any hidden by Search or Filter?${placed ? ` ${placed} placed bin${placed === 1 ? "" : "s"} will also be removed from this Space.` : ""} Generated files stay in the folder.`,
+    message: `Delete all ${ids.length} selected bins, including any hidden by Search or Filter?${placed ? ` ${placed} placed bin${placed === 1 ? "" : "s"} will also be removed from this Space.` : ""} Generated files owned only by these bins will also be deleted from the folder.`,
     actionLabel: `Delete ${ids.length} bins`, danger: true,
   });
   if (!ok || !DL.spaceContextCurrent(context)) return;

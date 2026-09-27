@@ -575,14 +575,15 @@ def save_design_source(
 
 def save_design_source_text(
     text: str, *, title: str = "Wavefinity", design: dict[str, Any], record: dict[str, Any],
-    row_id: str | None = None,
+    row_id: str | None = None, available_filenames: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Merge changes into browser-owned text and return replacement text, per ``save_design_source``."""
     raw = str(text or "")
     with INVENTORY_LOCK:
         current = parse_inventory(raw)
         bins, layout, used_id, stale = _merge_design_source(
-            current, design=design, record=record, row_id=row_id)
+            current, design=design, record=record, row_id=row_id,
+            available_filenames=available_filenames)
         rendered = render_inventory(str(title or "Wavefinity"), bins, layout)
         result = _text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered))
         return {**result, "row_id": used_id, "design": design_specs(result["layout"])[used_id],
@@ -827,9 +828,47 @@ def _delete_files(paths: Iterable[Path]) -> None:
             pass  # a locked or already-removed old file must never fail the save
 
 
+def _deletion_file_names(current: dict[str, Any], ids: set[str], available: Iterable[str]) -> list[str]:
+    """Plan only proven row-owned files from the pre-delete folder snapshot."""
+    from organizer_drawer import inventory_row_file_names
+
+    rows = {row["id"]: row for row in current["bins"]}
+    for row_id in ids:
+        if row_id not in rows:
+            raise ValueError(f"no bin {row_id!r} in the inventory")
+    names = {name for name in available if isinstance(name, str) and name == name.strip()
+             and Path(name).name == name and not Path(name).is_absolute()
+             and "/" not in name and "\\" not in name and name.lower().endswith(".3mf")}
+    stale = _stale_files(current["layout"])
+    protected: set[str] = set()
+    candidates: set[str] = set()
+    for row_id, row in rows.items():
+        if row_id in ids:
+            try:
+                candidates.update(inventory_row_file_names(names, row))
+            except ValueError:
+                pass
+            candidates.update(name for name in stale.get(row_id, []) if name in names)
+        else:
+            # A survivor's unresolved cell may still claim any contiguous
+            # comma-joined run. Never turn that uncertainty into deletion.
+            text = str(row.get("file") or "").strip()
+            if text:
+                protected.add(text)
+                try:
+                    protected.update(inventory_row_file_names(names, row))
+                except ValueError:
+                    parts = text.split(", ")
+                    for start in range(len(parts)):
+                        for end in range(start + 1, len(parts) + 1):
+                            protected.add(", ".join(parts[start:end]).strip())
+            protected.update(stale.get(row_id, []))
+    return sorted(candidates - protected)
+
+
 def _merge_design_source(
     current: dict[str, Any], *, design: dict[str, Any], record: dict[str, Any], row_id: str | None,
-    folder: Path | None = None,
+    folder: Path | None = None, available_filenames: Iterable[str] = (),
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str, bool]:
     bins = current["bins"]
     by_id = {one["id"]: one for one in bins}
@@ -864,7 +903,16 @@ def _merge_design_source(
                 # Remember the old outputs so a later successful refresh can
                 # retire them; until then they are never treated as current.
                 kept = stale.get(target["id"], [])
-                stale[target["id"]] = list(dict.fromkeys(kept + _row_file_names(folder, target)))
+                if folder is not None:
+                    proven = _row_file_names(folder, target)
+                else:
+                    from organizer_drawer import inventory_row_file_names
+                    try:
+                        proven = inventory_row_file_names(available_filenames, target)
+                    except ValueError:
+                        proven = []
+                if proven or kept:
+                    stale[target["id"]] = list(dict.fromkeys(kept + proven))
             target.update(row_fields)
             target.update({"file": "", "status": "in_design", "qty": 0})
         used_id = target["id"]
@@ -1028,15 +1076,37 @@ def save_inventory(
     delete_ids: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Merge changes into the file on disk and return the fresh contents."""
+    delete_ids = tuple(delete_ids or ())
     with INVENTORY_LOCK:
         path = resolve_inventory_path(output_dir, migrate=True)
         current = _read(path)
+        ids = {str(one) for one in delete_ids or ()}
+        root = path.parent.resolve()
+        available = [entry.name for entry in root.iterdir() if entry.is_file() and
+                     entry.resolve().parent == root] if ids else []
+        cleanup = _deletion_file_names(current, ids, available) if ids else []
         bins, chosen = _merge_inventory(
             current, layout=layout, bin_updates=bin_updates,
             new_bins=new_bins, delete_ids=delete_ids,
         )
         _write(path, bins, chosen, current["legacy"])
-        return _payload(path, _read(path))
+        failed = []
+        if cleanup:
+            from organizer_drawer import _safe_row_file
+            for name in cleanup:
+                found = _safe_row_file(root, name)
+                if found is None:
+                    continue  # Already removed, or no longer a safe direct child.
+                try:
+                    found.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    failed.append(name)
+        result = _payload(path, _read(path))
+        if failed:
+            result["cleanup_failed"] = failed
+        return result
 
 
 def save_inventory_text(
@@ -1044,17 +1114,24 @@ def save_inventory_text(
     bin_updates: Iterable[dict[str, Any]] = (),
     new_bins: Iterable[dict[str, Any]] = (),
     delete_ids: Iterable[str] = (),
+    available_filenames: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Merge changes into browser-owned text and return replacement text."""
+    delete_ids = tuple(delete_ids or ())
     raw = str(text or "")
     with INVENTORY_LOCK:
         current = parse_inventory(raw)
+        ids = {str(one) for one in delete_ids or ()}
+        cleanup = _deletion_file_names(current, ids, available_filenames) if ids else []
         bins, chosen = _merge_inventory(
             current, layout=layout, bin_updates=bin_updates,
             new_bins=new_bins, delete_ids=delete_ids,
         )
         rendered = render_inventory(str(title or "Wavefinity"), bins, chosen)
-        return _text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered))
+        result = _text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered))
+        if ids:
+            result["cleanup_files"] = cleanup
+        return result
 
 
 def append_bin(
