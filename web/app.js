@@ -1888,13 +1888,13 @@ function rejectModifierConflict(previousDesign, previousCanGenerate, conflict) {
   // thickness values are authoritative again.
   if (state.lidThicknessReport && state.lidThicknessReport.key === lidThicknessKey(state.design)) {
     state.lidThicknessEpoch = state.lidThicknessReport.epoch;
-    state.lidThicknessFormKey = null;
   }
   state.canGenerate = previousCanGenerate;
   state.binResizePending = false;
   state.binFootprintResizePending = false;
   sideOpeningAdjustmentNote = "";
   syncForm();
+  settleLidThicknessFormKey();
   updateGenerateAvailability();
   toast(conflict.message, true, 6000);
 }
@@ -3076,6 +3076,12 @@ function lidThicknessFormKey() {
     $("#y-size")?.value, $("#wall-thickness")?.value, $("#lid-configuration")?.value]);
 }
 
+// Programmatic form updates do not represent a user edit. Capture their final
+// state only after the controls have been synchronized with the measured design.
+function settleLidThicknessFormKey() {
+  state.lidThicknessFormKey = lidThicknessFormKey();
+}
+
 // Called on every design change. When a lid-rise input moved, the measurements
 // on screen stop being authoritative at once: the epoch advances, so only a
 // preview requested after this edit can bring them back.
@@ -3093,9 +3099,6 @@ function applyLidThicknessReport(result, epochAtRequest) {
   state.lidThicknessReport = result.stack?.lid_thickness_mm
     ? { key: lidThicknessKey(result.design), epoch: epochAtRequest,
         values: result.stack.lid_thickness_mm } : null;
-  // An accepted (newest) preview settles the design: later edits that do not
-  // move a lid-rise input compare against this state and leave the labels alone.
-  if (epochAtRequest === state.lidThicknessEpoch) state.lidThicknessFormKey = lidThicknessFormKey();
   renderLidThicknessOptions();
 }
 
@@ -8476,6 +8479,9 @@ async function refreshPreview({ persistResume = true } = {}) {
     formatDimField("x");
     formatDimField("y");
     formatHeightField();
+    // The backend may have grown X/Y. Their displayed values now match the
+    // accepted report, so an unrelated next edit must not look like a size edit.
+    if (lidEpochAtRequest === state.lidThicknessEpoch) settleLidThicknessFormKey();
     const physical = result.base_trim?.outer_mm || [state.design.box.x, state.design.box.y];
     $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(physical[0])} mm`;
     $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(physical[1])} mm`;
