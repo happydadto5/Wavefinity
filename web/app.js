@@ -5397,6 +5397,7 @@ async function selectKind(kind, reset = false) {
         if (state.selected !== null && state.design.layout.features[state.selected]) {
           state.draft = clone(state.design.layout.features[state.selected]);
         }
+        renderDraftFields();
         renderPlaced();
         updateSelectionButtons();
       } catch (applyErr) {
@@ -5998,6 +5999,21 @@ function updateReferenceAxis(draft, axis, raw) {
   return true;
 }
 
+function referenceAddReady() {
+  return !state.draftIsNew && Number.isInteger(draftCommitIndex());
+}
+
+function addReferenceToCurrentDraft() {
+  const draft = state.draft;
+  if (!draft || !referenceAddReady()) return;
+  markDraftChanged(true);
+  draft.reference_object = referenceSeedForDraft(draft, state.draftResolvedOptions, state.design);
+  state.draftAutoCommit = true;
+  state.referenceEditPending = true;
+  renderDraftFields();
+  commitReferenceEditSoon();
+}
+
 const commitReferenceEditSoon = debounce(commitReferenceEdit, 180);
 
 async function commitReferenceEdit() {
@@ -6587,12 +6603,11 @@ function renderDraftFields() {
           { unit: "mm", min: "0", step: "any", dataAttribute: "data-reference-axis" });
       }
       referenceFields += `<button type="button" class="button secondary" data-action="remove-reference">Remove reference</button>`;
-    } else if (ready) {
+    } else if (ready && referenceAddReady()) {
       referenceFields += `<button type="button" class="button secondary" data-action="add-reference">Add object reference</button>`;
     }
     html += editorGroup("Reference object", referenceFields);
   }
-  if (one.kind === "bore") html += `<p class="bore-ceiling-warning" data-bore-ceiling-warning hidden></p>`;
   const activeDraft = document.activeElement?.dataset?.draft;
   $("#draft-fields").innerHTML = html;
   applyDivisionGridLayout($("#draft-fields"));
@@ -6728,15 +6743,7 @@ function renderDraftFields() {
   if (state.draft?.kind === "nest") wireNestFieldActions();
   const duplicateTextButton = $('[data-action="duplicate-text"]', $("#draft-fields"));
   if (duplicateTextButton) duplicateTextButton.addEventListener("click", duplicateText);
-  $('[data-action="add-reference"]', $("#draft-fields"))?.addEventListener("click", () => {
-    const draft = state.draft;
-    if (!draft) return;
-    markDraftChanged(true);
-    draft.reference_object = referenceSeedForDraft(draft, state.draftResolvedOptions, state.design);
-    state.draftAutoCommit = true;
-    state.referenceEditPending = true;
-    renderDraftFields(); commitReferenceEditSoon();
-  });
+  $('[data-action="add-reference"]', $("#draft-fields"))?.addEventListener("click", addReferenceToCurrentDraft);
   $('[data-action="remove-reference"]', $("#draft-fields"))?.addEventListener("click", () => {
     markDraftChanged(true);
     delete state.draft.reference_object;
@@ -9569,13 +9576,7 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   state.textMeta = result.text_meta || [];
   const duplicateToRim = $('[data-action="duplicate-text"]', $("#draft-fields"));
   if (duplicateToRim) duplicateToRim.hidden = !result.duplicate_text_indexes?.includes(state.selected);
-  const boreWarning = $('[data-bore-ceiling-warning]', $("#draft-fields"));
-  if (boreWarning) {
-    const warning = result.bore_ceiling_warning;
-    boreWarning.hidden = !warning || state.draft?.kind !== "bore";
-    if (!boreWarning.hidden) boreWarning.textContent =
-      `Object reaches ${warning.top_mm} mm; this ${warning.space_kind === "drawer" ? "Drawer" : "Storage Box"} is ${warning.cap_mm} mm high. The object may not fit when closed.`;
-  }
+  updateBoreCeilingWarning(result.bore_ceiling_warning);
   state.fitError = Boolean(result.feature_errors.length || result.draft_error);
   updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
   updateAutoExpandButton();
@@ -9586,6 +9587,15 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   renderPreview3D();
   renderLayout2D();
   renderPlaced();
+}
+
+function updateBoreCeilingWarning(warning) {
+  const element = $("#bore-ceiling-warning");
+  if (!element) return;
+  element.hidden = !warning;
+  element.textContent = warning
+    ? `Object reaches ${warning.top_mm} mm; this ${warning.space_kind === "drawer" ? "Drawer" : "Storage Box"} is ${warning.cap_mm} mm high. The object may not fit when closed.`
+    : "";
 }
 
 // `persistResume: false` (Fix 032 Correction 4, C4.2) renders a normal,
@@ -9600,6 +9610,9 @@ async function refreshPreview({ persistResume = true } = {}) {
   fullPreviewStarts += 1;
   const request = ++state.previewRequest;
   const lidEpochAtRequest = state.lidThicknessEpoch;
+  if (state.folderMode !== "space" || !["drawer", "portable", "box"].includes(state.activeSpace?.kind)) {
+    updateBoreCeilingWarning(null);
+  }
   beginPreviewWait(request);
   state.canGenerate = false;
   updateGenerateAvailability();

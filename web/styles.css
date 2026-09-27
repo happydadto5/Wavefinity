@@ -676,7 +676,7 @@ input[type="number"]::-webkit-inner-spin-button {
    it doesn't read as a border inside a border. */
 .draft-fields .editor-group > .editor-toggle { border: 0; background: none; padding: 2px 0; }
 .draft-fields .inline-help { grid-column: 1 / -1; margin: 0; font-size: 11px; color: var(--muted); line-height: 1.4; }
-.draft-fields .bore-ceiling-warning { grid-column: 1 / -1; margin: 0; padding: 8px; color: #8a5200; background: #fff3d6; border-left: 3px solid #dc9700; }
+#bore-ceiling-warning { margin: 0; padding: 8px; color: #8a5200; background: #fff3d6; border-left: 3px solid #dc9700; }
 .draft-fields .checkbox-row { margin: 4px 0 2px; }
 .draft-fields .division-table { grid-column: 1 / -1; width: 100%; border-collapse: collapse; }
 .draft-fields .division-table td { padding: 3px 6px 3px 0; vertical-align: middle; }

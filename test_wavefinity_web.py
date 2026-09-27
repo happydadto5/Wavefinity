@@ -138,6 +138,36 @@ class ObjectReferenceWebTests(unittest.TestCase):
         self.assertIsNone(wavefinity_web._ai_space_cap_violation(
             result["design"], {"kind": "drawer", "z": math.ceil(top * 1000) / 1000}))
 
+    def test_stacked_bore_manual_and_ai_use_the_same_physical_body(self):
+        from organizer_stack import stack_effective_box
+        design = default_design()
+        design["box"].update({"x": 128, "y": 128, "z": 80, "stack": {"mode": "direct"}})
+        feature = default_feature_payload({"design": design, "kind": "bore"})["feature"]
+        feature["zone"] = [-22, -22, 22, 22]
+        feature["item"]["segments"] = [{"length": 50, "diameter": 16}]
+        feature["options"] = {"bore_style": "base_straight", "height_size_mode": "bore_to_bin",
+                              "depth": 20, "angle": 35, "columns": 1, "rows": 1}
+        design["layout"]["features"] = [feature]
+        box, layout, *_ = design_from_dict(design)
+        physical_box = stack_effective_box(box)
+        # The existing tilted-Bore test covers mesh-top geometry. Here a
+        # lightweight top spy isolates which physical box each caller passes.
+        raw_top = box.z + 10
+        physical_top = physical_box.z + 10
+        self.assertGreater(physical_top, raw_top)
+        cap = (raw_top + physical_top) / 2
+        space = {"kind": "drawer", "z": cap}
+        with patch.object(wavefinity_web, "bore_reference_top", side_effect=lambda box, *_: box.z + 10):
+            warning = wavefinity_web._capped_bore_warning(box, layout, layout.features, space)
+        self.assertAlmostEqual(warning["top_mm"], math.ceil(physical_top * 1000) / 1000)
+        with patch.object(wavefinity_web, "bore_reference_top", side_effect=lambda box, *_: box.z + 10):
+            self.assertIn(f"{physical_top:.3f}", wavefinity_web._ai_space_cap_violation(design, space))
+        clear_space = {"kind": "drawer", "z": math.ceil(physical_top * 1000) / 1000}
+        with patch.object(wavefinity_web, "bore_reference_top", side_effect=lambda box, *_: box.z + 10):
+            self.assertIsNone(wavefinity_web._capped_bore_warning(box, layout, layout.features, clear_space))
+        with patch.object(wavefinity_web, "bore_reference_top", side_effect=lambda box, *_: box.z + 10):
+            self.assertIsNone(wavefinity_web._ai_space_cap_violation(design, clear_space))
+
     def test_text_duplicate_uses_one_legal_rim_destination(self):
         design = default_design()
         design["box"].update({"x": 64, "y": 64, "z": 40})

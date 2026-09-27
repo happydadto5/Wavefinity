@@ -1995,20 +1995,7 @@ def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
     duplicate_text_indexes = [index for index in range(len(layout.features))
                               if effective[index].kind == "text" and _text_duplicate_destination(
                                   stack_request, effective_layout, index, label, label_location, scoop) is not None]
-    space = _ai_space_context(payload.get("space"))
-    bore_warning = None
-    cap_z = _capped_space_height(payload.get("space"))
-    if cap_z is not None:
-        for one in effective:
-            if one.kind == "bore" and one.item is not None:
-                try:
-                    top = bore_reference_top(box, one, base_height(box, layout.mode))
-                except Exception:
-                    continue
-                if top > cap_z + 1e-6:
-                    bore_warning = {"top_mm": math.ceil(top * 1000) / 1000, "cap_mm": cap_z,
-                                    "space_kind": space["kind"]}
-                    break
+    bore_warning = _capped_bore_warning(stack_request, layout, effective, payload.get("space"))
     return {
         "design": canonical,
         "planning": planning,
@@ -4177,6 +4164,38 @@ def ai_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {"design": preview["design"], "preview": preview, "problems": problems}
 
 
+def _capped_bore_violation(
+    box: BoxSpec, layout: Layout, features: list[Feature] | tuple[Feature, ...], cap_z: float,
+) -> tuple[int, float] | None:
+    """Evaluate Bore objects against the same physical body used by preview."""
+    physical_box = _interior_work_box(box)
+    base_z = base_height(physical_box, layout.mode)
+    for index, feature in enumerate(features):
+        if feature.kind != "bore" or feature.item is None:
+            continue
+        try:
+            top = bore_reference_top(physical_box, feature, base_z)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if top > cap_z + 1e-6:
+            return index, top
+    return None
+
+
+def _capped_bore_warning(
+    box: BoxSpec, layout: Layout, features: list[Feature] | tuple[Feature, ...], raw_space: Any,
+) -> dict[str, Any] | None:
+    cap_z = _capped_space_height(raw_space)
+    if cap_z is None:
+        return None
+    violation = _capped_bore_violation(box, layout, features, cap_z)
+    if violation is None:
+        return None
+    _index, top = violation
+    return {"top_mm": math.ceil(top * 1000) / 1000, "cap_mm": cap_z,
+            "space_kind": _ai_space_context(raw_space)["kind"]}
+
+
 def _ai_space_cap_violation(design: dict[str, Any], raw_space: Any) -> str | None:
     """Fix 078: in a capped Space (Drawer/Storage Box), no Bore-held object's
     highest point may exceed the Space's own ``z`` - a hard legality rule, not
@@ -4193,20 +4212,14 @@ def _ai_space_cap_violation(design: dict[str, Any], raw_space: Any) -> str | Non
         box, layout, *_ = _design(design)
     except (KeyError, TypeError, ValueError):
         return None
-    base_z = base_height(box, layout.mode)
-    for feature in layout.features:
-        if feature.kind != "bore" or feature.item is None:
-            continue
-        try:
-            object_top_z = bore_reference_top(box, feature, base_z)
-        except (KeyError, TypeError, ValueError):
-            continue
-        if object_top_z > cap_z + 1e-6:
-            return (
-                f"a Bore-held object's top would reach {object_top_z:.3f} mm, above this "
-                f"capped Space's {cap_z:.3f} mm ceiling; use a shorter bin and/or a shallower "
-                "insertion depth so useful grip stays below the cap"
-            )
+    violation = _capped_bore_violation(box, layout, layout.features, cap_z)
+    if violation is not None:
+        _index, object_top_z = violation
+        return (
+            f"a Bore-held object's top would reach {object_top_z:.3f} mm, above this "
+            f"capped Space's {cap_z:.3f} mm ceiling; use a shorter bin and/or a shallower "
+            "insertion depth so useful grip stays below the cap"
+        )
     return None
 
 

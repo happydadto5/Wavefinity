@@ -35,6 +35,54 @@ def node_json(source: str):
 
 
 class BrowserStateLogicTests(unittest.TestCase):
+    def test_bore_ceiling_warning_stays_at_design_level_and_clears(self):
+        source = function_source("updateBoreCeilingWarning", APP)
+        script = r"""
+const element={hidden:true,textContent:''};
+const $=selector=>selector==='#bore-ceiling-warning' ? element : null;
+__SOURCE__
+updateBoreCeilingWarning({top_mm:72,cap_mm:64,space_kind:'drawer'});
+const whileEditingAnotherBore={hidden:element.hidden,text:element.textContent};
+updateBoreCeilingWarning(null);
+process.stdout.write(JSON.stringify({whileEditingAnotherBore,afterCorrection:{hidden:element.hidden,text:element.textContent}}));
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {
+            "whileEditingAnotherBore": {"hidden": False,
+                "text": "Object reaches 72 mm; this Drawer is 64 mm high. The object may not fit when closed."},
+            "afterCorrection": {"hidden": True, "text": ""},
+        })
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertLess(html.index('id="bore-ceiling-warning"'), html.index('class="canvas-wrap'))
+        self.assertNotIn("data-bore-ceiling-warning", APP)
+
+    def test_new_part_reference_action_waits_for_initial_add(self):
+        source = "\n".join(function_source(name, APP) for name in
+                           ("referenceAddReady", "addReferenceToCurrentDraft"))
+        script = r"""
+const state={draftIsNew:true,selected:null,draftSourceIndex:null,draft:{kind:'post',zone:[-10,-8,10,8]},
+ design:{layout:{features:[]}},draftResolvedOptions:{height:30},referenceEditPending:false};
+const draftCommitIndex=()=>state.selected!==null ? state.selected : state.draftIsNew ? null : state.draftSourceIndex;
+const markDraftChanged=()=>{},renderDraftFields=()=>{};
+const referenceSeedForDraft=()=>({width:20,depth:16,height:30});
+let referenceCommits=0;
+const commitReferenceEditSoon=()=>{referenceCommits++;state.design.layout.features[0].reference_object=state.draft.reference_object};
+__SOURCE__
+const initial=referenceAddReady();
+const initialApply=new Promise(resolve=>globalThis.acceptInitial=resolve);
+addReferenceToCurrentDraft();
+const clickedWhilePending=referenceCommits;
+acceptInitial({kind:'post',zone:[-10,-8,10,8]});
+initialApply.then(feature=>{
+ state.design.layout.features.push(feature);state.selected=0;state.draftSourceIndex=0;state.draftIsNew=false;state.draft=feature;
+ const after=referenceAddReady();
+ addReferenceToCurrentDraft();
+ process.stdout.write(JSON.stringify({initial,clickedWhilePending,after,referenceCommits,features:state.design.layout.features}));
+});
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {"initial": False, "clickedWhilePending": 0,
+            "after": True, "referenceCommits": 1, "features": [{"kind": "post", "zone": [-10, -8, 10, 8],
+                                         "reference_object": {"width": 20, "depth": 16, "height": 30}}]})
+
     def test_reference_commit_uses_reference_route_without_resizing(self):
         source = function_source("commitReferenceEdit", APP)
         script = r"""
