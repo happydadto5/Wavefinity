@@ -6053,6 +6053,16 @@ function addReferenceToCurrentDraft() {
   commitReferenceEditSoon();
 }
 
+function removeReferenceFromCurrentDraft() {
+  if (!state.draft?.reference_object) return;
+  markDraftChanged(true);
+  delete state.draft.reference_object;
+  state.draftAutoCommit = true;
+  state.referenceEditPending = true;
+  renderDraftFields();
+  commitReferenceEditSoon();
+}
+
 const commitReferenceEditSoon = debounce(commitReferenceEdit, 180);
 
 async function commitReferenceEdit() {
@@ -6074,6 +6084,7 @@ async function commitReferenceEdit() {
     state.selected = result.selected;
     state.draftSourceIndex = result.selected;
     state.draft = clone(state.design.layout.features[result.selected]);
+    updateReferenceAddAvailability();
     renderPlaced(); updateSelectionButtons();
     await refreshPreview();
   } catch (error) {
@@ -6783,13 +6794,7 @@ function renderDraftFields() {
   const duplicateTextButton = $('[data-action="duplicate-text"]', $("#draft-fields"));
   if (duplicateTextButton) duplicateTextButton.addEventListener("click", duplicateText);
   $('[data-action="add-reference"]', $("#draft-fields"))?.addEventListener("click", addReferenceToCurrentDraft);
-  $('[data-action="remove-reference"]', $("#draft-fields"))?.addEventListener("click", () => {
-    markDraftChanged(true);
-    delete state.draft.reference_object;
-    state.draftAutoCommit = true;
-    state.referenceEditPending = true;
-    renderDraftFields(); commitReferenceEditSoon();
-  });
+  $('[data-action="remove-reference"]', $("#draft-fields"))?.addEventListener("click", removeReferenceFromCurrentDraft);
   $$('[data-reference-axis]', $("#draft-fields")).forEach(input => input.addEventListener("input", () => {
     const valid = input.value.trim() !== "" && Number.isFinite(Number(input.value)) && Number(input.value) > 0;
     input.setCustomValidity(valid ? "" : "Enter a positive number of mm.");
@@ -8067,6 +8072,8 @@ async function uploadNestPhoto(event) {
 }
 
 function markDraftChanged(referenceOnly = false) {
+  const keepReferenceResolution = referenceOnly &&
+    state.referenceResolutionRequest === state.draftRequest;
   if (!referenceOnly) {
     commitReferenceEditSoon.cancel();
     state.referenceEditPending = false;
@@ -8076,6 +8083,7 @@ function markDraftChanged(referenceOnly = false) {
   // which the older response can replace the newer edit.
   state.draftTouched = true;
   state.draftRequest += 1;
+  if (keepReferenceResolution) state.referenceResolutionRequest = state.draftRequest;
   updateReferenceAddAvailability();
   state.canGenerate = false;
   updateGenerateAvailability();

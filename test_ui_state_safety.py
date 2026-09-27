@@ -35,6 +35,85 @@ def node_json(source: str):
 
 
 class BrowserStateLogicTests(unittest.TestCase):
+    def test_reference_add_remove_readd_preserves_only_current_height_authority(self):
+        source = "\n".join(function_source(name, APP) for name in (
+            "referencePhysicalHeight", "referenceSeedForDraft", "referenceAddReady",
+            "updateReferenceAddAvailability", "addReferenceToCurrentDraft",
+            "removeReferenceFromCurrentDraft", "markDraftChanged", "commitReferenceEdit"))
+        script = r"""
+const clone=value=>JSON.parse(JSON.stringify(value));
+const number=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
+const _nestMeasuredThickness=()=>null;
+const button={hidden:true};
+const fields={};
+const $=selector=>selector==='#draft-fields'?fields:
+ selector==='[data-action="add-reference"]'?(state.draft?.reference_object?null:button):
+ {textContent:'',classList:{add(){}}};
+const draftCommitIndex=()=>state.selected;
+const updateGenerateAvailability=()=>{};
+const renderDraftFields=()=>{};
+const renderPlaced=()=>{};
+const updateSelectionButtons=()=>{};
+const refreshPreview=async()=>{};
+const calls=[];
+const recordHistory=()=>calls.push('history');
+const api=async(path,payload)=>{
+ calls.push(path);const design=clone(payload.design);
+ design.layout.features[payload.index]=clone(payload.feature);
+ return {design,selected:payload.index};
+};
+const toast=()=>{};
+const commitReferenceEditSoon=()=>{};commitReferenceEditSoon.cancel=()=>{};
+const state={draft:null,design:null,draftRequest:10,referenceResolutionRequest:10,
+ draftResolvedOptions:{height:16,lip:1},draftIsNew:false,draftTouched:false,
+ draftAutoCommit:true,referenceEditPending:false,selected:0,draftSourceIndex:0};
+__SOURCE__
+async function lifecycle(kind, options, resolvedOptions){
+ state.draft={kind,zone:[-10,-8,10,8],options};state.design={layout:{features:[clone(state.draft)]}};
+ state.draftRequest++;state.referenceResolutionRequest=state.draftRequest;
+ state.draftResolvedOptions=resolvedOptions;state.draftTouched=false;state.referenceEditPending=false;
+ const before=calls.length;
+ addReferenceToCurrentDraft();await commitReferenceEdit();
+ removeReferenceFromCurrentDraft();await commitReferenceEdit();
+ const addVisible=referenceAddReady()&&!button.hidden;
+ addReferenceToCurrentDraft();
+ const seeded=state.draft.reference_object?.height;
+ await commitReferenceEdit();
+ return {kind,addVisible,seeded,count:state.design.layout.features.length,
+   calls:calls.slice(before).filter(call=>call==='/api/feature/reference').length};
+}
+(async()=>{
+ const cycles=[];
+ cycles.push(await lifecycle('slot',{}, {height:16}));
+ cycles.push(await lifecycle('steps',{}, {height:16,lip:1}));
+ cycles.push(await lifecycle('post',{height:12},{}));
+ state.draft={kind:'slot',zone:[-10,-8,10,8],options:{}};
+ state.draftRequest=40;state.referenceResolutionRequest=40;state.draftResolvedOptions={height:16};
+ state.draftIsNew=false;state.draftTouched=false;state.selected=0;state.draftSourceIndex=0;
+ markDraftChanged(false);
+ state.draftTouched=false; // holder edit saved; no fresh resolution has arrived
+ const afterHolderEdit=referenceAddReady();
+ markDraftChanged(true);
+ state.draftTouched=false; // reference-only save cannot restore the stale owner
+ const afterReferenceEdit=referenceAddReady();
+ state.draftRequest++;state.referenceResolutionRequest=state.draftRequest;
+ state.draftResolvedOptions={height:18};
+ const afterFreshResolution=referenceAddReady();
+ process.stdout.write(JSON.stringify({cycles,afterHolderEdit,afterReferenceEdit,afterFreshResolution,
+   allCalls:calls.filter(call=>call==='/api/feature/reference').length}));
+})();
+""".replace("__SOURCE__", source)
+        result = node_json(script)
+        self.assertEqual(result["cycles"], [
+            {"kind": "slot", "addVisible": True, "seeded": 16, "count": 1, "calls": 3},
+            {"kind": "steps", "addVisible": True, "seeded": 17, "count": 1, "calls": 3},
+            {"kind": "post", "addVisible": True, "seeded": 12, "count": 1, "calls": 3},
+        ])
+        self.assertFalse(result["afterHolderEdit"])
+        self.assertFalse(result["afterReferenceEdit"])
+        self.assertTrue(result["afterFreshResolution"])
+        self.assertEqual(result["allCalls"], 9)
+
     def test_reopened_auto_height_reference_waits_for_accepted_draft_response(self):
         source = "\n".join(function_source(name, APP) for name in (
             "referencePhysicalHeight", "referenceSeedForDraft", "referenceAddReady",
@@ -214,6 +293,7 @@ const draftCommitIndex=()=>0;
 const calls=[];
 const api=async(path,payload)=>{calls.push(path);return {design:{layout:{features:[clone(payload.feature)]}},selected:0}};
 const recordHistory=()=>calls.push('history'),renderPlaced=()=>{},updateSelectionButtons=()=>{};
+const updateReferenceAddAvailability=()=>{};
 const refreshPreview=async()=>calls.push('preview');
 const $=()=>({textContent:'',classList:{add(){}}});
 __SOURCE__
