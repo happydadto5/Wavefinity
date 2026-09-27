@@ -24,6 +24,7 @@ Design summary
 """
 
 from __future__ import annotations
+from functools import cache
 
 from dataclasses import dataclass, field
 import hashlib
@@ -2242,6 +2243,7 @@ def _font() -> FontProperties:
     return FontProperties(family=TEXT_FONT_FAMILY, weight=TEXT_FONT_WEIGHT)
 
 
+@cache
 def _cap_ratio() -> float:
     """Cap height per unit of font size, for this font.
 

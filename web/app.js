@@ -2,6 +2,8 @@
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const previewClientId = [...crypto.getRandomValues(new Uint8Array(16))]
+  .map(byte => byte.toString(16).padStart(2, "0")).join("");
 
 let engineeringInputId = 0;
 const engineeringInputSelector = 'input[type="number"], input[inputmode="numeric"], input[inputmode="decimal"]';
@@ -1222,10 +1224,13 @@ async function restoreHistory(redo = false) {
     // Fold any values still visible only in controls/the live part draft into
     // history first. Undo then removes that newest edit; a new edit correctly
     // invalidates Redo instead of applying an obsolete future state.
-    await commitVisibleDraft();
+    await commitVisibleDraft({ previewAfterCommit: false });
     const from = redo ? state.future : state.history;
     const to = redo ? state.history : state.future;
-    if (!from.length) return;
+    if (!from.length) {
+      await refreshPreview();
+      return;
+    }
     to.push(clone(state.design));
     state.design = from.pop();
     bindLidMemoryForDesign();
@@ -1411,11 +1416,11 @@ function renderCatalog() {
         if (previousSelected !== null && previousSelected < state.design.layout.features.length) {
           // The visible draft was already folded in by commitVisibleDraft above
           // and the layout has just been reconverted - reselect straight through.
-          selectedFeature(previousSelected, true);
+          if (!(await selectedFeature(previousSelected, true))) refreshPreview();
         } else {
           clearDraftSelection();
+          refreshPreview();
         }
-        refreshPreview();
       } catch (error) {
         modes.value = oldMode;
         toast(error.message, true);
@@ -3648,9 +3653,8 @@ const commitNudge = debounce(async request => {
     renderDraftFields();
     renderPlaced();
     updateSelectionButtons();
-    await refreshPreview();
+    await refreshDraft();
     if (request !== state.draftRequest) return;
-    refreshDraft();
     renderLayout2D();
   } catch (error) {
     if (!ownsRequest()) return;
@@ -4153,8 +4157,8 @@ function wireControls() {
     }
 
     recordHistory(previousDesign);
-    refreshPreview();
     if (state.draft) refreshDraft();
+    else refreshPreview();
   });
   ["#output-folder", "#keep-log", "#connector-tolerance", "#connector-length",
     "#connector-arm-thickness", "#connector-bin-a-height", "#connector-bin-b-height"]
@@ -7568,8 +7572,7 @@ async function refreshDraft() {
   if (state.draft.kind === "nest" && !state.draft.contour) {
     $("#draft-status").textContent = "Upload one part photo to create the cavity outline.";
     $("#draft-status").classList.remove("error");
-    refreshPreview();
-    return;
+    return await refreshPreview();
   }
   // A divider always splits the whole bin, so keep its footprint pinned to
   // the usable inside - re-stretched here every rebuild, which is what makes
@@ -7587,14 +7590,13 @@ async function refreshDraft() {
   if (state.draft.kind === "nest") {
     $("#draft-status").textContent = "Resizing bin around cavity…";
     if (state.draftAutoCommit && !(await autoCommitDraft(request))) {
-      refreshPreview();
-      return;
+      if (request !== state.draftRequest) return;
+      return await refreshPreview();
     }
     if (request !== state.draftRequest) return;
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
-    refreshPreview();
-    return;
+    return await refreshPreview();
   }
   $("#draft-status").textContent = "Rebuilding…";
   try {
@@ -7602,8 +7604,10 @@ async function refreshDraft() {
     const result = await api("/api/feature/draft", {
       design: state.design, feature: state.draft,
       ...(index === false ? {} : { index }),
+      client_id: previewClientId, generation: request,
     });
     if (request !== state.draftRequest) return;
+    if (result.superseded) throw new Error("Current draft was unexpectedly superseded. Try again.");
     state.draftResolvedOptions = result.resolved_options || {};
     if (state.draft.kind === "text" && result.feature) {
       if (Array.isArray(result.feature.zone)) state.draft.zone = result.feature.zone.slice();
@@ -7655,6 +7659,7 @@ async function refreshDraft() {
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
     if (state.draftAutoCommit) await autoCommitDraft(request);
+    if (request !== state.draftRequest) return;
     // "Auto size bin to bore" (Width / Length or Height) keeps the bin fitted to
     // this Bore after every edit.
     if (request === state.draftRequest && await reconcileBoreBin(result)) return;
@@ -7690,7 +7695,7 @@ async function refreshDraft() {
     state.fitError = true;
     updateAutoExpandButton();
   }
-  refreshPreview();
+  if (request === state.draftRequest) return await refreshPreview();
 }
 
 // Anything that is only a size - "8", "12mm" - names a compartment, not the
@@ -7747,6 +7752,11 @@ async function autoCommitDraft(request) {
   if (state.draft?.kind === "nest" && !state.draft.contour) return false;
   const index = draftCommitIndex();
   if (index === false) return false;   // stale edit - don't append a duplicate
+  if (!state.draftIsNew && Number.isInteger(index) &&
+      JSON.stringify(state.design.layout.features[index]) === JSON.stringify(state.draft)) {
+    state.draftTouched = false;
+    return true;
+  }
   try {
     const wasNew = state.draftIsNew;
     const previousDesign = clone(state.design);
@@ -7779,7 +7789,7 @@ async function autoCommitDraft(request) {
   }
 }
 
-async function commitVisibleDraft() {
+async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
   if (!state.draft) return false;
   if (state.draft?.kind === "nest" && !state.draft.contour) return false;
   const index = draftCommitIndex();
@@ -7815,7 +7825,7 @@ async function commitVisibleDraft() {
   renderDraftFields();
   renderPlaced();
   updateSelectionButtons();
-  if (typedSpaceOrdinaryBin()) refreshPreview();
+  if (previewAfterCommit && typedSpaceOrdinaryBin()) refreshPreview();
   return true;
 }
 
@@ -7995,8 +8005,7 @@ async function applySupport(index) {
     renderDraftFields();
     renderPlaced();
     updateSelectionButtons();
-    await refreshPreview();
-    refreshDraft();
+    await refreshDraft();
     for (const warning of result.warnings || []) toast(warning, false, 6500);
     if (index === null && state.draft?.kind !== "text") await maybePromptSurfaceObjectHeight();
     return true;
@@ -8013,13 +8022,16 @@ async function applySupport(index) {
 async function saveCurrentPart() {
   if (state.modifierEditing) return saveEdgeMountPart();
   if (!state.draft || !beginDesignMutation()) return;
+  let committed = false;
   try {
-    await commitVisibleDraft();
+    committed = await commitVisibleDraft({ previewAfterCommit: false });
     state.paletteBrowsing = true;
     clearDraftSelection();
     renderPlaced();
     await refreshPreview();
+    committed = false;
   } catch (error) {
+    if (committed) await refreshPreview();
     toast(error.message, true, 5000);
   } finally {
     finishDesignMutation();
@@ -8431,7 +8443,7 @@ async function refreshPreview({ persistResume = true } = {}) {
   $("#preview-state").classList.remove("status-ok", "status-error");
   setError();
   try {
-    const payload = { design: state.design };
+    const payload = { design: state.design, client_id: previewClientId, generation: request };
     if (state.draft && !(state.draft.kind === "nest" && !state.draft.contour)) {
       payload.draft = state.draft;
       // A draft opened from a placed part replaces that part for preview
@@ -8442,6 +8454,7 @@ async function refreshPreview({ persistResume = true } = {}) {
     }
     const result = await api("/api/preview", payload);
     if (request !== state.previewRequest) return;
+    if (result.superseded) throw new Error("Current preview was unexpectedly superseded. Try again.");
     endPreviewWait(request);
     const grownX = result.design?.box?.x !== state.design?.box?.x;
     const grownY = result.design?.box?.y !== state.design?.box?.y;
@@ -9127,8 +9140,10 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   }
   // Leaned-bore centre lines are annotation, not solid faces - pull them out so
   // the painter below doesn't cull them, and draw them on top at the end.
-  const boreAxes = geometry.filter(face => face.kind?.endsWith("bore_axis"));
-  if (boreAxes.length) geometry = geometry.filter(face => !face.kind?.endsWith("bore_axis"));
+  const partitions = b4bEnabled() || baseTrimEnabled() ? null : ordinaryPreviewPartitions(state.preview);
+  const boreAxes = partitions?.boreAxes || geometry.filter(face => face.kind?.endsWith("bore_axis"));
+  if (partitions) geometry = partitions.solidGeometry;
+  else if (boreAxes.length) geometry = geometry.filter(face => !face.kind?.endsWith("bore_axis"));
   const vector = cameraVector(camera);
   const yawRad = camera.yaw * Math.PI / 180;
   const elevationRad = camera.elevation * Math.PI / 180;
@@ -9253,7 +9268,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
     if (penWidth !== inkWidth) { context.lineWidth = inkWidth; penWidth = inkWidth; }
     context.stroke();
   }
-  drawUsableFloor(context, geometry, camera, project);
+  drawUsableFloor(context, partitions?.floorZ ?? null, camera, project);
   drawBoreAxes(context, boreAxes, camera, project);
   draw3DDimensions(context, state.design?.box, camera, project, b4bAssembledEnvelope());
   addPreviewPickProxies(camera, point => project(iso(point, camera)), visibleGroups);
@@ -9309,14 +9324,10 @@ function drawBoreAxes(context, boreAxes, camera, project) {
 // returns - flat on the bin floor. The wavy cavity floor painted behind it is
 // larger, so a tool as long as the bin can still be rejected for want of room;
 // this makes that gap visible. The margin between the two is tinted.
-function drawUsableFloor(context, geometry, camera, project) {
+function drawUsableFloor(context, floorZ, camera, project) {
   if (!state.binVisible) return;
   const box = state.design?.box;
-  const floors = (geometry || []).filter(face => face.kind === "floor");
-  if (!box || !floors.length) return;
-  const floorZ = Math.max(
-    ...floors.flatMap(face => face.points.map(point => point[2])),
-  );
+  if (!box || floorZ === null) return;
   const flat = point => project(iso([point[0], point[1], floorZ], camera));
   const [insideX, insideY] = binInsideExtent(box);
   const halfX = insideX / 2, halfY = insideY / 2;
@@ -9630,6 +9641,31 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
 let glRenderer = null;
 let glInitAttempted = false;
 let glBuffersCache = null; // { source, b4b, generation, buffers, xray }
+let ordinaryPartitionsCache = null;
+
+function ordinaryPreviewPartitions(preview) {
+  if (ordinaryPartitionsCache?.source === preview) return ordinaryPartitionsCache;
+  const geometry = preview.geometry || [];
+  const boreAxes = [];
+  const solidGeometry = [];
+  let floorZ = null;
+  for (const face of geometry) {
+    if (face.kind?.endsWith("bore_axis")) {
+      boreAxes.push(face);
+    } else {
+      solidGeometry.push(face);
+    }
+    if (face.kind === "floor") {
+      for (const point of face.points) floorZ = Math.max(floorZ ?? -Infinity, point[2]);
+    }
+  }
+  ordinaryPartitionsCache = {
+    source: preview, boreAxes,
+    solidGeometry: boreAxes.length ? solidGeometry : geometry,
+    floorZ, pickProxies: preview.pick_proxies || [],
+  };
+  return ordinaryPartitionsCache;
+}
 
 function ensurePreviewGL() {
   if (glInitAttempted) return glRenderer;
@@ -9774,10 +9810,9 @@ function renderPreview3DGL(renderer, overlayCanvas, b4b, fullGeometry, meshes, c
   // polygons apply to B4B (it has no bores, no "floor" kind, and no
   // interior-part editing - see _reject_if_b4b), so the overlay gets an
   // empty face list for it rather than a parallel code path.
-  const boreAxes = b4b ? [] : fullGeometry.filter(face => face.kind?.endsWith("bore_axis"));
-  const solidGeometry = b4b ? [] : (boreAxes.length
-    ? fullGeometry.filter(face => !face.kind?.endsWith("bore_axis"))
-    : fullGeometry);
+  const partitions = b4b ? null : ordinaryPreviewPartitions(state.preview);
+  const boreAxes = partitions?.boreAxes || [];
+  const solidGeometry = partitions?.solidGeometry || [];
   const classify = currentPreviewClassify();
   const source = b4b ? meshes : fullGeometry;
   // Keyed on renderer.generation, not on having observed `lost` at some
@@ -9831,7 +9866,8 @@ function renderPreview3DGL(renderer, overlayCanvas, b4b, fullGeometry, meshes, c
   const aabb = chosen.aabb || buffers.allAabb;
   const frame = window.Preview3DGL.computeFrame(camera, aabb, width, height);
   window.Preview3DGL.draw(renderer, drawBuffers, frame, width, height, chosen.passes);
-  drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, frame, classify, chosen.visible);
+  drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, frame, classify,
+    chosen.visible, partitions);
 }
 
 // Everything that is not solid geometry: the contact shadow, the usable-
@@ -9840,7 +9876,8 @@ function renderPreview3DGL(renderer, overlayCanvas, b4b, fullGeometry, meshes, c
 // part from a click on empty canvas. Drawn on the transparent 2D canvas
 // layered over the WebGL solid pass, using the same camera frame so
 // everything lines up with it pixel-for-pixel.
-function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, frame, classify, visibleGroups) {
+function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, frame, classify,
+    visibleGroups, partitions) {
   const vector = cameraVector(camera);
   const project = point => [
     width / 2 + (point[0] - frame.midX) * frame.scale,
@@ -9854,10 +9891,11 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
     if (dot(face.normal, vector) <= 0) continue;
     addPreviewPickFace(face, face.points.map(point => project(iso(point, camera))), camera);
   }
-  addPreviewPickProxies(camera, point => project(iso(point, camera)), visibleGroups);
+  addPreviewPickProxies(camera, point => project(iso(point, camera)), visibleGroups,
+    partitions?.pickProxies);
   const box = dimensionDragBoxOverride(state.design?.box, "3d");
   drawContactShadow(context, b4bShadowBox(), camera, project, b4bAssembledEnvelope());
-  drawUsableFloor(context, solidGeometry, camera, project);
+  drawUsableFloor(context, partitions?.floorZ ?? null, camera, project);
   drawBoreAxes(context, boreAxes, camera, project);
   const outerXYZ = dimensionDisplayOverride(b4bAssembledEnvelope());
   draw3DDimensions(context, box, camera, project, outerXYZ);
@@ -9903,10 +9941,10 @@ function addPreviewPickFace(face, polygon, camera) {
   });
 }
 
-function addPreviewPickProxies(camera, project, visibleGroups) {
+function addPreviewPickProxies(camera, project, visibleGroups, proxies = state.preview?.pick_proxies || []) {
   if (baseTrimEnabled() || (b4bEnabled()
     ? !visibleGroups.has("base") : !visibleGroups.has("interior"))) return;
-  for (const proxy of state.preview?.pick_proxies || []) {
+  for (const proxy of proxies) {
     if (!proxy.points?.length || !proxy.pick) continue;
     state.previewSupportPolygons.push({
       polygon: proxy.points.map(project),

@@ -8,6 +8,8 @@ validation and export comes from the existing Python geometry engine.
 from __future__ import annotations
 
 import argparse
+from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import replace
 import ipaddress
 import json
@@ -266,6 +268,57 @@ API_COMPAT_VERSION = 2
 SERVER_INSTANCE = uuid.uuid4().hex
 SERVER_BUILD = os.environ.get("RENDER_GIT_COMMIT", SERVER_VERSION)[:12]
 GEOMETRY_LOCK = threading.RLock()
+_PREVIEW_REQUEST_LOCK = threading.Lock()
+_PREVIEW_REQUESTS: OrderedDict[tuple[str, str], tuple[int, float]] = OrderedDict()
+
+
+class _SupersededGeometry(Exception):
+    pass
+
+
+def _register_preview_request(payload: dict[str, Any], lane: str) -> tuple[str, str, int] | None:
+    if not isinstance(payload, dict):
+        return None
+    client = payload.get("client_id")
+    generation = payload.get("generation")
+    if (not isinstance(client, str) or not 0 < len(client) <= 128
+            or type(generation) is not int or generation < 0):
+        return None
+    key = (client, lane)
+    now = time.monotonic()
+    with _PREVIEW_REQUEST_LOCK:
+        previous = _PREVIEW_REQUESTS.get(key)
+        _PREVIEW_REQUESTS[key] = (max(generation, previous[0]) if previous else generation, now)
+        _PREVIEW_REQUESTS.move_to_end(key)
+        while _PREVIEW_REQUESTS and (len(_PREVIEW_REQUESTS) > 256
+                                     or now - next(iter(_PREVIEW_REQUESTS.values()))[1] > 600):
+            _PREVIEW_REQUESTS.popitem(last=False)
+    return client, lane, generation
+
+
+@contextmanager
+def _preview_geometry_lock(token: tuple[str, str, int] | None):
+    while True:
+        GEOMETRY_LOCK.acquire()
+        if token is None:
+            break
+        if _PREVIEW_REQUEST_LOCK.acquire(blocking=False):
+            try:
+                latest = _PREVIEW_REQUESTS.get(token[:2])
+            finally:
+                _PREVIEW_REQUEST_LOCK.release()
+            if latest is not None and token[2] < latest[0]:
+                GEOMETRY_LOCK.release()
+                raise _SupersededGeometry()
+            break
+        GEOMETRY_LOCK.release()
+        # Never wait for the registry lock while holding the geometry lock.
+        with _PREVIEW_REQUEST_LOCK:
+            pass
+    try:
+        yield
+    finally:
+        GEOMETRY_LOCK.release()
 LEGACY_PREFERENCES_FILE = APP_DIR / "wavefinity_prefs.json"
 
 
@@ -616,6 +669,7 @@ def _resolve_photo_nest_edit(
     scoop: bool,
     *,
     index: int | None = None,
+    request_token=None,
 ) -> tuple[BoxSpec, BoxSpec, Layout, Feature, list[str], list[Any]]:
     """Repair a live Nest edit before anything can reject stale dimensions."""
     if one.kind != "nest" or not one.contour:
@@ -661,7 +715,7 @@ def _resolve_photo_nest_edit(
     validate_customization_clearance(
         box, updated.features, label, label_location, scoop, updated.mode
     )
-    with GEOMETRY_LOCK:
+    with _preview_geometry_lock(request_token):
         solids = build_features(
             box, updated.features, base_height(box, updated.mode),
             layout_zone(box, updated.mode), updated.mode,
@@ -1587,7 +1641,7 @@ def _base_trim_preview_meshes(spec) -> list[dict[str, Any]]:
     }]
 
 
-def _base_trim_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _base_trim_preview_payload(payload: dict[str, Any], token=None) -> dict[str, Any]:
     raw = payload["design"]
     spec = base_trim_from_design(raw)
     part_name = str(raw.get("part_name") or "")
@@ -1595,7 +1649,7 @@ def _base_trim_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     canonical["base_trim"]["auto_size"] = bool(
         isinstance(raw.get("base_trim"), dict) and raw["base_trim"].get("auto_size")
     )
-    with GEOMETRY_LOCK:
+    with _preview_geometry_lock(token):
         summary = base_trim_summary(spec)
         meshes = _base_trim_preview_meshes(spec)
     inner = base_trim_inner_polygon(spec)
@@ -1691,7 +1745,7 @@ def _resolved_text(
         base_z=base_height(box, mode), mode=mode,
     )
 
-def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _b4b_preview_payload(payload: dict[str, Any], token=None) -> dict[str, Any]:
     """Preview for a Storage Box design: body/lid/latch/label meshes plus the
     authoritative capacity + hardware readout.  Shares the ordinary response
     shape so the frontend needs no special case to render it."""
@@ -1739,34 +1793,40 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     meshes: list[dict[str, Any]] = []
     b4b_block: dict[str, Any] | None = None
     try:
-        with GEOMETRY_LOCK:
+        with _preview_geometry_lock(token):
             validate_b4b_design(
                 box,
                 layout_feature_kinds=tuple(f.kind for f in display_features),
             )
             b4b_block = b4b_summary(box)
             meshes = b4b_preview_meshes(box, features=display_features)
+    except _SupersededGeometry:
+        raise
     except Exception as error:
         if draft_feature is not None and display_features == [draft_feature]:
             draft_error = str(error)
             showing_draft = False
             try:
-                with GEOMETRY_LOCK:
+                with _preview_geometry_lock(token):
                     validate_b4b_design(
                         box,
                         layout_feature_kinds=tuple(f.kind for f in normalized_saved),
                     )
                     b4b_block = b4b_summary(box)
                     meshes = b4b_preview_meshes(box, features=normalized_saved)
+            except _SupersededGeometry:
+                raise
             except Exception as saved_err:
                 if not feature_errors and normalized_saved:
                     feature_errors.append(str(saved_err))
                     invalid_feature_indexes.extend(range(len(normalized_saved)))
                 try:
-                    with GEOMETRY_LOCK:
+                    with _preview_geometry_lock(token):
                         validate_b4b_design(box)
                         b4b_block = b4b_summary(box)
                         meshes = b4b_preview_meshes(box, features=())
+                except _SupersededGeometry:
+                    raise
                 except Exception as base_err:
                     message = str(base_err)
         else:
@@ -1774,10 +1834,12 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 feature_errors.append(str(error))
                 invalid_feature_indexes.extend(range(len(display_features)))
             try:
-                with GEOMETRY_LOCK:
+                with _preview_geometry_lock(token):
                     validate_b4b_design(box)
                     b4b_block = b4b_summary(box)
                     meshes = b4b_preview_meshes(box, features=())
+            except _SupersededGeometry:
+                raise
             except Exception as base_err:
                 message = str(base_err)
 
@@ -1835,13 +1897,21 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    token = _register_preview_request(payload, "preview")
+    try:
+        return _preview_payload(payload, token)
+    except _SupersededGeometry:
+        return {"superseded": True}
+
+
+def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
     if _is_base_trim_design(payload.get("design")):
-        return _base_trim_preview_payload(payload)
+        return _base_trim_preview_payload(payload, token)
     if isinstance(payload.get("design"), dict):
         box_raw = payload["design"].get("box", {})
         b4b_raw = box_raw.get("b4b") if isinstance(box_raw, dict) else None
         if isinstance(b4b_raw, dict) and b4b_raw.get("enabled"):
-            return _b4b_preview_payload(payload)
+            return _b4b_preview_payload(payload, token)
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     draft_raw = payload.get("draft")
     draft = _feature_from_json(draft_raw, layout.mode) if draft_raw else None
@@ -1861,7 +1931,7 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         validate_stack_design(box)
         stack_block = stack_summary(box)
         box = stack_effective_box(box)
-    with GEOMETRY_LOCK:
+    with _preview_geometry_lock(token):
         scene = preview_geometry(
             box, label, layout.features, layout.mode, label_location, scoop, draft,
             selected=selected, layout=layout,
@@ -2094,6 +2164,14 @@ def _bore_height_bin(
 
 
 def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    token = _register_preview_request(payload, "draft")
+    try:
+        return _draft_payload(payload, token)
+    except _SupersededGeometry:
+        return {"superseded": True}
+
+
+def _draft_payload(payload: dict[str, Any], token) -> dict[str, Any]:
     box, layout, label, _part, label_location, scoop = _design(payload["design"])
     if box.b4b.enabled:
         one = _feature_from_json(payload["feature"], "fused")
@@ -2103,18 +2181,10 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 "Storage Box Parts & options supports Dividers only"
             )
         one = normalize_b4b_divider(box, one)
-        with GEOMETRY_LOCK:
-            solids = b4b_divider_solids(box, [one])
-        geometry = []
-        for solid in solids:
-            geometry.extend(_mesh_preview_geometry(solid, "feature_divider", owner="base"))
+        with _preview_geometry_lock(token):
+            b4b_divider_solids(box, [one])
         work = b4b_divider_work_box(box)
         return {
-            "geometry": [
-                 {"points": points, "kind": kind, "normal": normal,
-                  "layer": layer, "owner": owner, "pick": {"type": "draft"}}
-                for points, kind, normal, layer, owner in geometry
-            ],
             "feature": feature_to_dict(one, "fused"),
             "resolved_options": resolved_options(work, one, work.base_thickness),
             "divider_cells": _divider_cells_payload(work, one, "fused"),
@@ -2130,6 +2200,7 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if one.kind == "nest":
         request_box, box, _updated, one, _warnings, nest_solids = _resolve_photo_nest_edit(
             request_box, layout, one, label, label_location, scoop, index=payload.get("index"),
+            request_token=token,
         )
     if one.kind == "divider":
         one = normalize_divider_scoop(
@@ -2143,16 +2214,8 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ))
     if one.kind == "text" and one.options.get("level") == "rim":
         from organizer_inserts._text import rim_text_geometry
-        geometry = []
-        ledge, glyph, effective_cap, _surface = rim_text_geometry(box, one)
-        geometry.extend(_mesh_preview_geometry(ledge, "top_label_ledge"))
-        geometry.extend(_mesh_preview_geometry(glyph, "feature_text"))
+        _ledge, _glyph, effective_cap, _surface = rim_text_geometry(box, one)
         return {
-            "geometry": [
-                 {"points": points, "kind": kind, "normal": normal,
-                  "layer": layer, "owner": owner, "pick": {"type": "draft"}}
-                for points, kind, normal, layer, owner in geometry
-            ],
             "feature": feature_to_dict(one, layout.mode),
             "resolved_options": {"cap_height": round(effective_cap, 3)},
         }
@@ -2161,24 +2224,13 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if one.kind == "nest" else
         resolved_options(box, one, base_height(box, layout.mode))
     )
-    if nest_solids is not None:
-        solids = nest_solids
-    else:
-        with GEOMETRY_LOCK:
-            solids = build_features(
+    if nest_solids is None:
+        with _preview_geometry_lock(token):
+            build_features(
                 box, [one], base_height(box, layout.mode),
                 layout_zone(box, layout.mode), layout.mode, include_text=True,
             )
-    geometry = []
-    part_kind = "feature" if layout.mode == "fused" else "insert"
-    for solid in solids:
-        geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_{one.kind}"))
     result = {
-        "geometry": [
-             {"points": points, "kind": kind, "normal": normal,
-              "layer": layer, "owner": owner, "pick": {"type": "draft"}}
-            for points, kind, normal, layer, owner in geometry
-        ],
         "feature": feature_to_dict(one, layout.mode),
         "resolved_options": shown,
     }
