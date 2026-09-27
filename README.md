@@ -1743,6 +1743,9 @@ layered implementation:
 | `organizer_inventory.py` | The drawer inventory file (`Wavefinity bins.md`): parsing, legacy upgrade, merge-saves, bin logging. | No. |
 | `organizer_drawer.py` | Drawer layout: grid fit, drawer report, spacer planning and export, and its `/api/drawer/*` routes. | No. |
 | `organizer_pegboard.py` | Pegboard standards, size derivation, receiver layout/geometry, standard-specific adapters, and mount footprints. | No. |
+| `web/spaces.js` | Typed Space setup and opening, folder and Space activation, resume and startup handoff, and Space setup lifecycle. | No. |
+| `web/browser-files.js` | Hosted-browser writable-folder permission and handle persistence, plus browser-owned file operations; Python receives no fake client path. | No. |
+| `web/preview3d-webgl.js` | Shared depth-buffered WebGL renderer for solid 3D preview geometry; `app.js` owns 2D overlay annotations. | No. |
 | `test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest`. |
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
 | `test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest`. |

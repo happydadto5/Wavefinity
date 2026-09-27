@@ -11,6 +11,14 @@
 - Side Openings: the vertical control is now **Opening Height** with plain **Top of bin** / **Base of bin** cues instead of percentages.
 - An invalid design now shows a clear red **Invalid settings** message right on the 3D/2D preview itself, not only in the footer.
 
+## 2026-09-27 — Inventory deletion cleans owned files (Fix 075)
+
+- Deleting a bin from Space Inventory also removes its current and stale generated files when they are provably owned by that bin. Shared, ambiguous, and unrelated files stay in place; cleanup failures are reported without claiming deletion succeeded.
+
+## 2026-09-27 — AI Design introduced (Fix 073)
+
+- AI Design added a Design-side copy/paste workflow for an outside AI, with optional dictation in supported browsers. It builds a capability and Space-context prompt for one object at a time, then validates the returned complete-design JSON before applying it and offers a repair prompt when needed.
+
 ## 2026-09-26 — Lid & Stacking fit and handles (Fix 071D)
 
 - Lid & Stacking now offers three **Stacking Methods**: Stackable bin on bin, Stackable bin on lid, and Lid with handle — non-stackable. Remove the option to go back to no lid.
@@ -34,6 +42,14 @@
 - Inventory filters reset to All for each new session and Space. Sort stays remembered. Bin and spacer badges identify placements, and placement is shown separately from design status.
 - The 3D preview can select the exact visible option and open its 2D editor. Its FRONT marker follows the physical front side.
 - Side Openings now use a two-handle vertical range while retaining saved percentages. Auto-fitted manual dimensions round safely to half-millimetre steps.
+
+## 2026-09-26 — Space and Designer control cleanup (Fix 071A)
+
+- Space and Inventory presentation is cleaner, with compact Bin Name and actions. Options naming and chooser controls are clearer, and Edit/Delete target the exact selected option. Bottom controls are consolidated, and engineering inputs fill in more consistently.
+
+## 2026-09-26 — Edge Mount and direct stacking conflict (Fix 070)
+
+- Separate Edge Mount labels and direct Stackable Bin now conflict. An older saved design with both remains editable, but Preview and Generate are blocked until the conflict is corrected.
 
 ## 2026-09-25 — Product updates through Fix 068
 

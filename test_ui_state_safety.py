@@ -35,6 +35,73 @@ def node_json(source: str):
 
 
 class BrowserStateLogicTests(unittest.TestCase):
+    def test_designer_history_removed_but_space_undo_remains(self):
+        for dead in ("state.history", "state.future", "recordHistory(",
+                     "restoreHistory(", "updateHistoryButtons(",
+                     "pendingNudgeHistory", "#undo-design", "#redo-design"):
+            self.assertNotIn(dead, APP)
+        model = (ROOT / "web" / "drawer-model.js").read_text(encoding="utf-8")
+        self.assertIn("DL.undo", model)
+        self.assertIn("DL.redo", model)
+
+    def test_committed_change_only_clears_starter_for_real_change(self):
+        source = function_source("noteCommittedDesignChange", APP)
+        script = r"""
+const state={design:{box:{x:16}},spaceStarterPreviewPending:true};
+__SOURCE__
+const same=noteCommittedDesignChange({box:{x:16}});
+const stillPending=state.spaceStarterPreviewPending;
+state.design.box.x=24;
+const changed=noteCommittedDesignChange({box:{x:16}});
+state.spaceStarterPreviewPending=true;
+const known=noteCommittedDesignChange();
+process.stdout.write(JSON.stringify({same,stillPending,changed,known,
+ pending:state.spaceStarterPreviewPending}));
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {"same": False, "stillPending": True,
+                                            "changed": True, "known": True, "pending": False})
+
+    def test_surface_height_label_resets_without_reload(self):
+        source = function_source("syncSurfaceControls", APP)
+        script = r"""
+const state={shown:true,design:{layout:{},box:{base_thickness:0.6}},
+ activeSpace:{trim_size:'medium'}};
+const nodes={};
+const $=selector=>nodes[selector]??=( {hidden:false,textContent:'',value:'',checked:false} );
+const isSurfaceBinDesign=()=>state.shown,surfaceTrimHeight=()=>7.5;
+const surfaceStackingBlocked=()=>false,fmt=String;
+const document={activeElement:null};
+__SOURCE__
+const labels=[];
+for(const shown of [true,false,true]){
+ state.shown=shown;syncSurfaceControls();labels.push($('#z-size-label').textContent);
+}
+process.stdout.write(JSON.stringify(labels));
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), ["Bin height", "Height", "Bin height"])
+
+    def test_nudge_failure_keeps_draft_rollback_without_undo_snapshot(self):
+        source = APP[APP.index("const commitNudge = debounce("):
+                     APP.index("}, 200);", APP.index("const commitNudge = debounce(")) + len("}, 200);")]
+        handler = function_source("handleLayoutArrowKeys", APP)
+        self.assertIn("if (!pendingNudgeDraft)", handler)
+        script = r"""
+const clone=v=>JSON.parse(JSON.stringify(v));
+const debounce=fn=>fn;
+let pendingNudgeDraft={kind:'post',zone:[0,0,2,2]};
+const state={draftRequest:1,selected:0,draft:{kind:'post',zone:[1,0,3,2]},
+ design:{layout:{features:[{kind:'post',zone:[0,0,2,2]}]}},spaceStarterPreviewPending:true};
+const api=async()=>{throw Error('rejected')};
+const toast=()=>{},renderDraftFields=()=>{},refreshDraft=()=>{},renderLayout2D=()=>{};
+const renderPlaced=()=>{},updateSelectionButtons=()=>{};
+const noteCommittedDesignChange=()=>{state.spaceStarterPreviewPending=false};
+__SOURCE__
+commitNudge(1).then(()=>process.stdout.write(JSON.stringify({zone:state.draft.zone,
+ pending:pendingNudgeDraft,starter:state.spaceStarterPreviewPending})));
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {"zone": [0, 0, 2, 2],
+                                            "pending": None, "starter": True})
+
     def test_reference_add_remove_readd_preserves_only_current_height_authority(self):
         source = "\n".join(function_source(name, APP) for name in (
             "referencePhysicalHeight", "referenceSeedForDraft", "referenceAddReady",
@@ -56,7 +123,7 @@ const renderPlaced=()=>{};
 const updateSelectionButtons=()=>{};
 const refreshPreview=async()=>{};
 const calls=[];
-const recordHistory=()=>calls.push('history');
+const noteCommittedDesignChange=()=>calls.push('change');
 const api=async(path,payload)=>{
  calls.push(path);const design=clone(payload.design);
  design.layout.features[payload.index]=clone(payload.feature);
@@ -292,7 +359,7 @@ const state={design:{layout:{features:[original]}},draft:{...clone(original),
 const draftCommitIndex=()=>0;
 const calls=[];
 const api=async(path,payload)=>{calls.push(path);return {design:{layout:{features:[clone(payload.feature)]}},selected:0}};
-const recordHistory=()=>calls.push('history'),renderPlaced=()=>{},updateSelectionButtons=()=>{};
+const noteCommittedDesignChange=()=>calls.push('change'),renderPlaced=()=>{},updateSelectionButtons=()=>{};
 const updateReferenceAddAvailability=()=>{};
 const refreshPreview=async()=>calls.push('preview');
 const $=()=>({textContent:'',classList:{add(){}}});
@@ -300,7 +367,7 @@ __SOURCE__
 commitReferenceEdit().then(()=>process.stdout.write(JSON.stringify({calls,
  zone:state.design.layout.features[0].zone,pending:state.referenceEditPending})));
 """.replace("__SOURCE__", source)
-        self.assertEqual(node_json(script), {"calls": ["/api/feature/reference", "history", "preview"],
+        self.assertEqual(node_json(script), {"calls": ["/api/feature/reference", "change", "preview"],
                                             "zone": [-10, -8, 10, 8], "pending": False})
 
     def test_reference_editor_seed_and_positive_edit_leave_holder_size_alone(self):
@@ -353,13 +420,13 @@ const clone=v=>JSON.parse(JSON.stringify(v));
 const cases=[['edge_mount','label_text','Last label'],
  ['inside_grip','size','large'],['side_openings','shape','square']];
 const seen=[];
-let state,pendingDesignHistory,visible,debounced,histories,fail;
+let state,pendingDesignHistory,visible,debounced,changes,fail;
 const beginDesignMutation=()=>true,finishDesignMutation=()=>{};
 const cancelChangedDesignDebounce=()=>{debounced=false};
 const applyLiveFormWithModifierConflictGuard=()=>{
  state.design.box[state.modifierEditing][visible.key]=visible.value;return true;
 };
-const recordHistory=before=>{if(JSON.stringify(before)!==JSON.stringify(state.design))histories++};
+const noteCommittedDesignChange=before=>{if(JSON.stringify(before)!==JSON.stringify(state.design))changes++};
 const api=async()=>{if(fail)throw Error('validation failed');return {design:clone(state.design)}};
 const clearDraftSelection=()=>{state.modifierEditing=null},renderPlaced=()=>{},refreshPreview=async()=>{};
 const toast=()=>{};
@@ -367,12 +434,12 @@ __SOURCE__
 (async()=>{
  for(const [kind,key,value] of cases){
   state={modifierEditing:kind,design:{box:{[kind]:{[key]:'old',label_enabled:true}}},canGenerate:true};
-  pendingDesignHistory=clone(state.design);visible={key,value};debounced=true;histories=0;fail=false;
+  pendingDesignHistory=clone(state.design);visible={key,value};debounced=true;changes=0;fail=false;
   await saveModifierPart();
-  seen.push({kind,value:state.design.box[kind][key],debounced,histories,closed:state.modifierEditing===null});
+  seen.push({kind,value:state.design.box[kind][key],debounced,changes,closed:state.modifierEditing===null});
  }
  state={modifierEditing:'inside_grip',design:{box:{inside_grip:{size:'old'}}},canGenerate:true};
- pendingDesignHistory=clone(state.design);visible={key:'size',value:'medium'};debounced=true;histories=0;fail=true;
+ pendingDesignHistory=clone(state.design);visible={key:'size',value:'medium'};debounced=true;changes=0;fail=true;
  await saveModifierPart();
  seen.push({kind:'failed',value:state.design.box.inside_grip.size,closed:state.modifierEditing===null});
  process.stdout.write(JSON.stringify(seen));
@@ -382,7 +449,7 @@ __SOURCE__
         for actual, expected in zip(result[:3], ("Last label", "large", "square")):
             self.assertEqual(actual["value"], expected)
             self.assertFalse(actual["debounced"])
-            self.assertEqual(actual["histories"], 1)
+            self.assertEqual(actual["changes"], 1)
             self.assertTrue(actual["closed"])
         self.assertEqual(result[3], {"kind": "failed", "value": "medium", "closed": False})
 
@@ -862,7 +929,7 @@ const clone=v=>JSON.parse(JSON.stringify(v)),events=[],previewClientId='C';
 const old={part_name:'Lipstick',box:{x:16},marker:'old',layout:{features:[]}},
   proven={part_name:'Lipstick',marker:'ai',box:{x:32},layout:{features:[]}};
 const state={folderMode:'space',activeSpace:{kind:'drawer',x:80,y:80,z:50},activeSpaceId:'S',
-  designInventoryId:'B1',design:old,cleanDesign:old,previewRequest:0,history:[1]};
+  designInventoryId:'B1',design:old,cleanDesign:old,previewRequest:0};
 const DL={active:true,layout:{},bins:[{id:'B1',name:'Lipstick'},{id:'B2',name:'Lipstick (2)'}]};
 const aiHelp={generation:0};let fullPreviewStarts=0,unsaved=false,confirmed=true,next={problems:[]};
 const aiContextKey=()=>'K',aiSetStatus=()=>{},typedSpaceOrdinaryBin=()=>true;
@@ -886,7 +953,7 @@ const session=()=>({request_id:'R',context_fingerprint:'F',baseline:old,
     events.length=0;state.design=clone(old);state.designInventoryId='B1';
     const ok=await aiInstallCandidate(candidate(),session(),mode);
     return {ok,marker:state.design.marker,id:state.designInventoryId,name:state.design.part_name,events:[...events],
-      previews:fullPreviewStarts,history:state.history.length,clean:state.cleanDesign.marker};
+      previews:fullPreviewStarts,clean:state.cleanDesign.marker};
   };
   const reuse=await run('modify'), fresh=await run('new');
   unsaved=true;confirmed=false;state.activeSpace=state.activeSpace;
@@ -919,7 +986,6 @@ const session=()=>({request_id:'R',context_fingerprint:'F',baseline:old,
         self.assertEqual(out["fresh"]["events"], ["flush", "invalidate", "adopt", "persist:true"])
         for one in (out["reuse"], out["fresh"]):
             self.assertNotIn("REBUILD", one["events"])
-            self.assertEqual(one["history"], 0)
         # Declining the Design-folder discard prompt changes nothing.
         self.assertEqual(out["noSpace"], {"ok": False, "marker": "old", "events": []})
         # A candidate with problems is refused before any state or preview owner is touched.

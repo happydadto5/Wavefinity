@@ -153,8 +153,6 @@ const state = {
   // All/Base/Lid preview state for a Storage Box preview response. The Designer
   // only ever holds ordinary bins now, so this stays "all".
   b4bView: "all",
-  history: [],
-  future: [],
   serverInstance: null,
   apiCompat: null,
   kindRequest: 0,
@@ -721,8 +719,6 @@ async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
   state.spaceStarterPreviewPending = state.folderMode === "space";
   // Showing a fresh starter does not create an Inventory row.
   state.drafts = {};
-  state.history = [];
-  state.future = [];
   state.binResizePending = false;
   state.binFootprintResizePending = false;
   bindLidMemoryForDesign();
@@ -941,8 +937,6 @@ async function installLoadedDesignSource(rowId, spec, {
     state.designInventoryId = rowId;
     state.surfaceHeightPromptSkipped = false;
     state.drafts = {};
-    state.history = [];
-    state.future = [];
     state.binResizePending = false;
     state.binFootprintResizePending = false;
     bindLidMemoryForDesign();
@@ -1471,8 +1465,6 @@ async function aiInstallCandidate(candidate, session, mode) {
       state.spaceStarterPreviewPending = false;
       state.surfaceHeightPromptSkipped = false;
       state.drafts = {};
-      state.history = [];
-      state.future = [];
       state.binResizePending = false;
       state.binFootprintResizePending = false;
       bindLidMemoryForDesign();
@@ -1813,8 +1805,6 @@ async function designerDuplicate() {
     state.designInventoryId = null;
     state.surfaceHeightPromptSkipped = false;
     state.drafts = {};
-    state.history = [];
-    state.future = [];
     state.binResizePending = false;
     state.binFootprintResizePending = false;
     bindLidMemoryForDesign();
@@ -1836,21 +1826,10 @@ function pinDraftAxis(axis) {
   state.pinnedZone[axis] = true;
 }
 
-function recordHistory(before) {
-  if (!before || JSON.stringify(before) === JSON.stringify(state.design)) return;
+function noteCommittedDesignChange(before = null) {
+  if (before && JSON.stringify(before) === JSON.stringify(state.design)) return false;
   state.spaceStarterPreviewPending = false;
-  state.history.push(clone(before));
-  if (state.history.length > 50) state.history.shift();
-  state.future = [];
-  updateHistoryButtons();
-  // Accepted paths refresh the preview, or the next boundary flushes them.
-}
-
-function updateHistoryButtons() {
-  const undo = $("#undo-design");
-  const redo = $("#redo-design");
-  if (undo) undo.disabled = state.designMutationBusy || !state.history.length;
-  if (redo) redo.disabled = state.designMutationBusy || !state.future.length;
+  return true;
 }
 
 function updateGenerateAvailability() {
@@ -1874,33 +1853,6 @@ function updateGenerateAvailability() {
     if (!printButton) continue;
     printButton.disabled = state.designMutationBusy || !state.canGenerate;
     if (!state.canGenerate) printButton.title = "Resolve the highlighted issue before printing";
-  }
-}
-
-async function restoreHistory(redo = false) {
-  if (!(redo ? state.future : state.history).length) return;
-  if (!beginDesignMutation()) return;
-  try {
-    // Fold any values still visible only in controls/the live part draft into
-    // history first. Undo then removes that newest edit; a new edit correctly
-    // invalidates Redo instead of applying an obsolete future state.
-    await commitVisibleDraft({ previewAfterCommit: false });
-    const from = redo ? state.future : state.history;
-    const to = redo ? state.history : state.future;
-    if (!from.length) {
-      await refreshPreview();
-      return;
-    }
-    to.push(clone(state.design));
-    state.design = from.pop();
-    bindLidMemoryForDesign();
-    syncForm();
-    clearDraftSelection();
-    updateHistoryButtons();
-    await refreshPreview();
-    if (typedSpaceOrdinaryBin()) queueSpaceDesignAutosave();
-  } finally {
-    finishDesignMutation();
   }
 }
 
@@ -2087,7 +2039,7 @@ function renderCatalog() {
         const previousSelected = state.selected;
         const result = await api("/api/layout/mode", { design: state.design, mode: modes.value });
         state.design = result.design;
-        recordHistory(previousDesign);
+        noteCommittedDesignChange(previousDesign);
         syncForm();
         // A support that was already saved keeps being edited, just in its
         // converted form - only fall back to a fresh, not-yet-saved
@@ -3428,10 +3380,10 @@ function syncSurfaceControls() {
   if (!controls) return;
   controls.hidden = !shown;
   $("#base-thickness-setting").hidden = shown;
+  $("#z-size-label").textContent = shown ? "Bin height" : "Height";
   if (!shown) return;
   const layout = state.design.layout || {};
   const edge = surfaceTrimHeight(state.activeSpace.trim_size);
-  $("#z-size-label").textContent = "Bin height";
   $("#surface-base-mode").value = layout.surface_base_mode === "edge" ? "edge" : "custom";
   $("#surface-base-custom-row").hidden = layout.surface_base_mode === "edge";
   if (document.activeElement !== $("#surface-base-custom"))
@@ -3632,7 +3584,7 @@ function rememberedLidSnapshot(design = state.design) {
 
 // Fix 060 Correction 3: the only safe moment to reseed/clear the remembered
 // Lid/Handle/Label values is when a genuinely different design is bound to
-// the editor (New, Open, Duplicate, Undo/Redo, a Space activating/resuming a
+// the editor (New, Open, Duplicate, a Space activating/resuming a
 // design, app bootstrap) - never a routine same-design syncForm() refresh
 // (modifier add/remove/rollback, feature apply, Nest operations, preview
 // auto-grow, and every other syncForm() caller not listed here). Call this
@@ -4255,7 +4207,7 @@ const applyChangedDesign = debounce(() => {
   }
 
   if (checkWall) maybeWarnSpaceWallMismatch(state.design.box.wall);
-  recordHistory(previousDesign);
+  noteCommittedDesignChange(previousDesign);
   // Re-fit contents-driven drafts after the bin changes. Arbitrarily sized
   // parts keep the size the user chose; if the bin was made too small, the
   // automatic grow pass below restores enough room instead of trimming them.
@@ -4294,7 +4246,7 @@ function changedDesign(previousDesign = null) {
   noteLidThicknessEdit();
   // Width/length keyboard, wheel and blur handlers update state immediately so
   // their inline inside-dimension readout stays correct. Preserve the snapshot
-  // from before the first such edit until the debounced history entry lands.
+  // from before the first such edit until the debounced commit lands.
   if (previousDesign && pendingDesignHistory === null) {
     pendingDesignHistory = clone(previousDesign);
   }
@@ -4306,14 +4258,12 @@ function markBinAxisManual(_axis) {
   state.binFootprintResizePending = true;
 }
 
-let pendingNudgeHistory = null;
 let pendingNudgeDraft = null;
 const commitNudge = debounce(async request => {
   if (request !== state.draftRequest || state.selected === null || !state.draft) return;
   const index = state.selected;
   const draft = state.draft;
   const snapshot = JSON.stringify(draft);
-  const historySnapshot = pendingNudgeHistory || clone(state.design);
   const ownsRequest = () => request === state.draftRequest
     && state.selected === index
     && state.draft === draft
@@ -4326,9 +4276,8 @@ const commitNudge = debounce(async request => {
     });
     if (!ownsRequest()) return;
     state.design = result.design;
-    pendingNudgeHistory = null;
     pendingNudgeDraft = null;
-    recordHistory(historySnapshot);
+    noteCommittedDesignChange();
     if (request !== state.draftRequest) return;
     state.selected = result.selected;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
@@ -4342,7 +4291,6 @@ const commitNudge = debounce(async request => {
   } catch (error) {
     if (!ownsRequest()) return;
     const restoreDraft = pendingNudgeDraft;
-    pendingNudgeHistory = null;
     pendingNudgeDraft = null;
     toast(error.message, true, 5000);
     if (restoreDraft || state.design?.layout?.features?.[index]) {
@@ -4859,7 +4807,7 @@ function wireControls() {
       return;
     }
 
-    recordHistory(previousDesign);
+    noteCommittedDesignChange(previousDesign);
     if (state.draft) refreshDraft();
     else refreshPreview();
   });
@@ -4922,11 +4870,7 @@ function wireControls() {
 
   // Editing a part: "Save Part" finalises it and returns to the 10-part
   // palette; "Delete Part" removes the part being edited and does the same.
-  // Fix 034 I: the global top-right lifecycle/history controls are gone -
-  // New Bin/Duplicate/Save/Load live at the bottom of the Designer instead
-  // (Section E1), and Undo/Redo have no replacement (autosave + explicit
-  // Duplicate cover their role). Internal history snapshot plumbing remains
-  // for the algorithms that still use it (e.g. size-drag history).
+  // New Bin/Duplicate/Save/Load live at the bottom of the Designer.
   $("#designer-new-bin").addEventListener("click", designerNewBin);
   $("#designer-duplicate").addEventListener("click", designerDuplicate);
   aiWireHelp();
@@ -4965,7 +4909,6 @@ function starterItem() {
 function cancelPendingDraftWork() {
   refreshDraftSoon.cancel();
   commitNudge.cancel();
-  pendingNudgeHistory = null;
   pendingNudgeDraft = null;
   state.kindRequest += 1;
   state.fitRequest += 1;
@@ -5172,7 +5115,7 @@ async function addModifier(kind) {
       holes_enabled: false,
       label_text: "",
     };
-    recordHistory(previous);
+    noteCommittedDesignChange(previous);
     syncForm();
     await openModifier(kind);
     await refreshPreview();
@@ -5211,7 +5154,7 @@ async function addModifier(kind) {
     };
     clampSideOpeningTopForLid(state.design, true);
   }
-  recordHistory(previous);
+  noteCommittedDesignChange(previous);
   syncForm();
   await openModifier(kind);
   refreshPreview();
@@ -5240,7 +5183,7 @@ async function removeModifier(kind) {
     }
     const result = await api("/api/design/validate", { design: state.design });
     state.design = result.design;
-    recordHistory(previous);
+    noteCommittedDesignChange(previous);
     state.paletteBrowsing = true;
     clearDraftSelection();
     // Forms must match the validated design before any later form read, or a
@@ -5270,7 +5213,7 @@ function flushModifierForm() {
     return false;
   }
 
-  recordHistory(previousDesign);
+  noteCommittedDesignChange(previousDesign);
   return true;
 }
 
@@ -5284,7 +5227,7 @@ async function flushVisibleDesignEditsBeforeModeSwitch({ previewAfterCommit = tr
   cancelChangedDesignDebounce();
   pendingDesignHistory = null;
   if (!applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate)) return false;
-  recordHistory(previousDesign);
+  noteCommittedDesignChange(previousDesign);
   return true;
 }
 window.flushVisibleDesignEditsBeforeModeSwitch = flushVisibleDesignEditsBeforeModeSwitch;
@@ -5391,7 +5334,7 @@ async function selectKind(kind, reset = false) {
         const previousDesign = clone(state.design);
         state.design = applyResult.design;
         seedPartNameFromText(state.draft);
-        recordHistory(previousDesign);
+        noteCommittedDesignChange(previousDesign);
         state.selected = applyResult.selected;
         state.draftIsNew = false;
         state.draftTouched = false;
@@ -6077,7 +6020,7 @@ async function commitReferenceEdit() {
     const result = await api("/api/feature/reference", { design: before, feature: draft, index });
     if (request !== state.draftRequest || state.draft !== draft || JSON.stringify(draft) !== snapshot) return;
     state.design = result.design;
-    recordHistory(before);
+    noteCommittedDesignChange(before);
     state.draftIsNew = false;
     state.draftTouched = false;
     state.referenceEditPending = false;
@@ -6922,7 +6865,7 @@ async function duplicateText() {
     const before = clone(state.design);
     const result = await api("/api/feature/duplicate", { design: state.design, index: state.selected });
     state.design = result.design;
-    recordHistory(before);
+    noteCommittedDesignChange(before);
     state.selected = result.selected;
     state.draftSourceIndex = result.selected;
     state.draft = clone(state.design.layout.features[result.selected]);
@@ -7315,7 +7258,7 @@ async function duplicateNest() {
     previousSelected = index;
     const result = await api("/api/feature/duplicate", { design: state.design, index });
     state.design = result.design;
-    recordHistory(previousDesign);
+    noteCommittedDesignChange(previousDesign);
     resetNestPhotoSession();
     state.selected = result.selected;
     state.draftSourceIndex = result.selected;
@@ -7553,7 +7496,7 @@ async function finishPhotoNestIfReady() {
     }
     const result = await api("/api/nest/photo", payload);
     state.design = result.design;
-    recordHistory(previousDesign);
+    noteCommittedDesignChange(previousDesign);
     state.selected = result.selected;
     state.draftKind = "nest";
     state.draft = clone(state.design.layout.features[state.selected]);
@@ -8806,7 +8749,7 @@ async function autoCommitDraft(request) {
     if (request !== state.draftRequest) return;
     state.design = result.design;
     seedPartNameFromText(state.draft);
-    recordHistory(previousDesign);
+    noteCommittedDesignChange(previousDesign);
     state.draftIsNew = false;
     state.draftTouched = false;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
@@ -8855,7 +8798,7 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
   // to adopt its pre-commit design while the transition is still in progress.
   if (!previewAfterCommit) invalidatePendingPreview();
   seedPartNameFromText(draft);
-  recordHistory(previousDesign);
+  noteCommittedDesignChange(previousDesign);
   state.draftIsNew = false;
   state.draftTouched = false;
   state.referenceEditPending = false;
@@ -9080,7 +9023,7 @@ async function applySupport(index) {
     const previousDesign = clone(state.design);
     const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index });
     state.design = result.design;
-    recordHistory(previousDesign);
+    noteCommittedDesignChange(previousDesign);
     state.selected = result.selected;
     state.draftIsNew = false;
     state.draftTouched = false;
@@ -9207,7 +9150,7 @@ async function deleteSupportAt(index) {
     const result = await api("/api/feature/delete", { design: state.design, index });
     state.design = result.design;
     if (deletingNest) resetNestPhotoSession();
-    recordHistory(previousDesign);
+    noteCommittedDesignChange(previousDesign);
     state.selected = null;
     clearDraftSelection();
     renderPlaced();
@@ -9263,12 +9206,11 @@ function beginDesignMutation() {
   // The mutation is now allowed to own a new design snapshot. Pending draft
   // work calculated against the old snapshot must not land afterward.
   cancelPendingDraftWork();
-  recordHistory(beforeForm);
+  noteCommittedDesignChange(beforeForm);
   state.designMutationBusy = true;
   setMutationSurfacesInert(true);
   mutationControls().forEach(control => control.disabled = true);
   updateSelectionButtons();
-  updateHistoryButtons();
   updateGenerateAvailability();
   return true;
 }
@@ -9280,7 +9222,6 @@ function finishDesignMutation() {
   mutationControls().forEach(control => control.disabled = false);
   syncLidForm();
   updateSelectionButtons();
-  updateHistoryButtons();
   updateGenerateAvailability();
 }
 
@@ -9904,7 +9845,7 @@ async function sizeBinHeightToBore({ button = null, silent = false, guard = null
     });
     if (guard && !guard()) return "stale";
     state.design = result.design;
-    if (result.changed) recordHistory(previousDesign);
+    if (result.changed) noteCommittedDesignChange(previousDesign);
     state.selected = draftIndex;
     state.draftSourceIndex = draftIndex;
     state.draftIsNew = false;
@@ -9979,7 +9920,7 @@ async function autoExpandBin({ keepDraft = false, silent = false, fit = false, b
     if (guard && !guard()) return "stale";
     const changed = result.changed ?? result.grew;
     state.design = result.design;
-    if (changed) recordHistory(previousDesign);
+    if (changed) noteCommittedDesignChange(previousDesign);
     state.fitError = false;
     if (opts.keepDraft && state.draft) {
       // Keep editing the same part with whatever zone the resize settled on.
@@ -11322,9 +11263,9 @@ function releaseDimensionPointerCapture(canvas, pointerId) {
   try { if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId); } catch (_error) {}
 }
 
-// One completed drag = one Undo entry (see item 12 of fix3d.md) - the same
-// design-change path a typed Width/Length/Height edit uses, so manual-size
-// and auto-grow semantics stay identical between mouse and keyboard.
+// A completed drag uses the same design-change path as a typed
+// Width/Length/Height edit, so manual-size and auto-grow semantics stay
+// identical between mouse and keyboard.
 function commitDimensionDrag(canvas) {
   const drag = state.dimensionDrag;
   if (!drag) return;
@@ -13160,8 +13101,7 @@ function handleLayoutArrowKeys(event) {
     toast(dividerLockMessage(), true, 6500);
     return;
   }
-  if (!pendingNudgeHistory) {
-    pendingNudgeHistory = clone(state.design);
+  if (!pendingNudgeDraft) {
     pendingNudgeDraft = clone(state.draft);
   }
   const request = ++state.draftRequest;
@@ -13295,8 +13235,6 @@ async function openDesign(event) {
     state.spaceStarterPreviewPending = false;
     if (state.folderMode === "space") state.designInventoryId = null;
     state.drafts = {};
-    state.history = [];
-    state.future = [];
     state.binResizePending = false;
     state.binFootprintResizePending = false;
     bindLidMemoryForDesign();
@@ -13329,7 +13267,7 @@ async function newDesign() {
   state.cleanDesign = clone(state.design);
   state.binResizePending = false;
   state.binFootprintResizePending = false;
-  recordHistory(previousDesign);
+  noteCommittedDesignChange(previousDesign);
   state.drafts = {};
   bindLidMemoryForDesign();
   syncForm();
@@ -13463,7 +13401,7 @@ async function generateParts(target) {
   if (!applyLiveFormWithModifierConflictGuard(beforeForm, previousCanGenerate)) {
     return;
   }
-  recordHistory(beforeForm);
+  noteCommittedDesignChange(beforeForm);
 
   if ((target === "all" || target === "bin") && !state.canGenerate) {
     toast("Resolve the highlighted issue before saving.", true);
@@ -13510,7 +13448,6 @@ async function generateParts(target) {
   state.designMutationBusy = true;
   setMutationSurfacesInert(true);
   updateGenerateAvailability();
-  updateHistoryButtons();
 
   if (dialog && typeof dialog.showModal === "function") {
     try {
@@ -13699,7 +13636,6 @@ async function generateParts(target) {
     state.designMutationBusy = false;
     setMutationSurfacesInert(false);
     updateGenerateAvailability();
-    updateHistoryButtons();
   }
 }
 
@@ -14074,7 +14010,6 @@ async function init() {
     bindLidMemoryForDesign();
     syncForm();
     watchServerVersion();
-    updateHistoryButtons();
     clearDraftSelection();
 
     // Space startup owns the first preview. Catalog/UI initialization is

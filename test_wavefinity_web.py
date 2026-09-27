@@ -1551,8 +1551,11 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn("Showing a fresh starter does not create an Inventory row", fresh)
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         first = panel[panel.index("DP.designFirstBin = "):]
-        self.assertIn('DP.setMode("design")', first[:first.index("};")])
+        self.assertIn("DP.newBinFromSpace()", first[:first.index("};")])
         self.assertNotIn("markWorking", first[:first.index("};")])
+        transition = panel[panel.index("DP.newBinFromSpace = "):]
+        transition = transition[:transition.index("};")]
+        self.assertIn('DP.setMode("design")', transition)
         # The Surface first-run edge handoff is gone: Base Trim is a Space Action.
         self.assertNotIn("surfaceEdgeSucceeded", app)
         self.assertNotIn("DP.startBinNow", panel)
@@ -2059,6 +2062,15 @@ class WebServerTests(unittest.TestCase):
     def get(self, path):
         with urlopen(self.base + path, timeout=20) as response:
             return response.status, response.headers, response.read()
+
+    def test_about_brochure_is_served_from_repo_root(self):
+        brochure = Path(wavefinity_web.APP_DIR) / "Brochure.md"
+        self.assertTrue(brochure.is_file())
+        self.assertTrue(brochure.read_text(encoding="utf-8").startswith("# Introducing Wavefinity"))
+        status, headers, body = self.get("/Brochure.md")
+        self.assertEqual(status, 200)
+        self.assertIn("text/markdown", headers["Content-Type"])
+        self.assertTrue(body.decode("utf-8").startswith("# Introducing Wavefinity"))
 
     def post(self, path, payload):
         request = Request(
