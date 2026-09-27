@@ -66,6 +66,7 @@
             <div id="bin-actions" class="designer-major-actions" role="group" aria-label="Bin actions">
               <button type="button" id="designer-new-bin" class="button secondary major-action">New Bin</button>
               <button type="button" id="designer-duplicate" class="button secondary major-action">Duplicate Bin</button>
+              <button type="button" id="ai-help-open" class="button secondary major-action">AI Design</button>
             </div>
             <span id="stack-note" class="stack-note" hidden></span>
           </div>
@@ -86,10 +87,10 @@
               <select id="mode-select"></select>
             </label>
             <div id="thickness-grabber-row" class="thickness-grabber-row">
-              <label id="base-thickness-setting" class="inline-select compact-select">Base
+              <label id="base-thickness-setting" class="inline-select compact-select">Base thickness
                 <select id="base-thickness"><option value="standard">Standard</option></select>
               </label>
-              <label id="wall-thickness-setting" class="inline-select compact-select">Walls
+              <label id="wall-thickness-setting" class="inline-select compact-select">Wall thickness
                 <select id="wall-thickness"><option value="standard">Standard</option></select>
               </label>
             </div>
@@ -122,7 +123,6 @@
         <div class="section-body">
           <div class="subheading-row">
             <div><h2>Options</h2></div>
-            <button type="button" id="ai-help-open" class="button secondary major-action">AI Design</button>
           </div>
           <div id="lid-option" class="lid-option-card" hidden>
             <div id="lid-option-panel">
@@ -209,21 +209,36 @@
                   </label>
                 </div>
               </div>
-              <div class="setting-group"><span class="setting-group-label">Opening Height</span>
-                <span class="side-opening-range-cue">Top of bin</span>
-                <div class="side-opening-range" role="group" aria-label="Opening height range">
-                  <div class="side-opening-range-track" aria-hidden="true"><div id="side-opening-range-fill"></div></div>
-                  <input id="side-opening-lower" type="range" min="0" max="99.9" step="any" aria-label="Lower edge of opening">
-                  <input id="side-opening-upper" type="range" min="0.1" max="100" step="any" aria-label="Upper edge of opening">
-                </div>
-                <span class="side-opening-range-cue">Base / bottom of bin</span>
-              </div>
-              <div class="setting-group"><span class="setting-group-label">Walls</span>
-                <div class="segmented four" aria-label="Side Opening walls">
-                  <button id="side-opening-front" type="button" aria-pressed="false">Front</button>
-                  <button id="side-opening-back" type="button" aria-pressed="false">Back</button>
-                  <button id="side-opening-left" type="button" aria-pressed="false">Left</button>
-                  <button id="side-opening-right" type="button" aria-pressed="false">Right</button>
+              <!-- Fix 081 G: a compact wall cross-section with the opening drawn on
+                   it, its two handles off to the side with arrow cues to the edges
+                   they control, and the four wall checkboxes beside the whole
+                   visual instead of a full-width row underneath. -->
+              <div class="setting-group side-opening-height-group">
+                <span class="setting-group-label">Opening Height</span>
+                <div class="side-opening-compact">
+                  <div class="side-opening-visual">
+                    <span class="side-opening-range-cue">Top of bin</span>
+                    <div class="side-opening-visual-row">
+                      <div class="side-opening-wall" aria-hidden="true">
+                        <div id="side-opening-range-fill" class="side-opening-wall-cut"></div>
+                      </div>
+                      <div class="side-opening-connectors" aria-hidden="true">
+                        <div id="side-opening-connector-upper" class="side-opening-connector"></div>
+                        <div id="side-opening-connector-lower" class="side-opening-connector"></div>
+                      </div>
+                      <div class="side-opening-range" role="group" aria-label="Opening height range">
+                        <input id="side-opening-upper" type="range" min="0.1" max="100" step="any" aria-label="Upper edge of opening">
+                        <input id="side-opening-lower" type="range" min="0" max="99.9" step="any" aria-label="Lower edge of opening">
+                      </div>
+                    </div>
+                    <span class="side-opening-range-cue">Base / bottom of bin</span>
+                  </div>
+                  <div class="segmented four side-opening-walls" aria-label="Side Opening walls">
+                    <button id="side-opening-front" type="button" aria-pressed="false">Front</button>
+                    <button id="side-opening-back" type="button" aria-pressed="false">Back</button>
+                    <button id="side-opening-left" type="button" aria-pressed="false">Left</button>
+                    <button id="side-opening-right" type="button" aria-pressed="false">Right</button>
+                  </div>
                 </div>
               </div>
             </div>

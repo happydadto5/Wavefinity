@@ -688,7 +688,8 @@ DP.renderDrawer = () => {
     .map(([side, gap]) => [side, gap - wall]).filter(([, play]) => play >= 0.1)
     .map(([side, play]) => `${side} ${play.toFixed(1)} mm`);
   const units = value => fmt(value * grid.step / DL.UNIT);
-  $("#dl-grid-note").textContent = `Grid ${units(grid.cols)} × ${units(grid.rows)} units (${fmt(grid.cols * grid.step)} × ${fmt(grid.rows * grid.step)} mm). `
+  // Fix 081 E: physical mm first, then the spelled-out unit count.
+  $("#dl-grid-note").textContent = `Grid ${fmt(grid.cols * grid.step)} × ${fmt(grid.rows * grid.step)} mm (${units(grid.cols)} × ${units(grid.rows)} units). `
     + (edges.length ? `Left over at the edges: ${edges.join(", ")}.` : "No spare strip at the edges.");
 };
 

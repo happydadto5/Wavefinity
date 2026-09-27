@@ -105,7 +105,7 @@ WALL_STEP = 0.2
 # UI simply shows it as a legacy value until the user picks a current preset.
 WALL_PRESETS = (
     (0.4, "Very thin / prototype"),
-    (0.8, "Standard"),
+    (0.8, "Default"),
     (1.2, "Strong"),
     (1.6, "Heavy"),
     (2.0, "Extra heavy"),
@@ -132,7 +132,7 @@ DEFAULT_BASE_THICKNESS = 0.6
 BASE_PRESETS = (
     (0.4, "Very thin"),
     (0.6, "Good"),
-    (0.8, "Heavy"),
+    (0.8, "Default"),
     (1.0, "Extra Heavy"),
     (1.2, "Maximum"),
 )

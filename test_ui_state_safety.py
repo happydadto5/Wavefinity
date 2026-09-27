@@ -1160,8 +1160,9 @@ process.stdout.write(JSON.stringify({distinct:new Set(keys).size}));
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
         actions = html[html.index('id="bin-actions"'):html.index('id="stack-note"')]
         self.assertIn('id="designer-duplicate"', actions)
-        options = html[html.index('data-section="parts-options"'):html.index('id="ai-help-open"') + 50]
-        self.assertIn('id="ai-help-open"', options)
+        # Fix 081 B: AI Design now lives in the same Bin Actions group as
+        # New Bin / Duplicate Bin, not inside the Options section.
+        self.assertIn('id="ai-help-open"', actions)
         self.assertRegex(html, r'<button[^>]*id="ai-help-dictate"[^>]*\shidden')
         # Product name is "AI Design"; internal ai-help-* IDs are implementation detail only.
         dialog = html[html.index('id="ai-help-dialog"'):html.index('</dialog>', html.index('id="ai-help-dialog"'))]

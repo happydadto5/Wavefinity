@@ -2692,7 +2692,15 @@ function populateSideOpeningChoices() {
 // Mirrors readEdgeMountForm/readLiftGrabberForm: only resets an *existing*
 // key to defaults when off, so a design that never touched Side Openings
 // keeps no key at all and design_to_dict omits the block while disabled.
-function readSideOpeningForm(design) {
+// Fix 081 F: `changed` names which handle the caller actually just moved
+// ("lower" or "upper"), so an illegal pair is walked back toward THAT edge.
+// A caller with no specific handle in play (shape/size change, a side
+// toggled, or a lid/stack change forcing a re-check) defaults to "lower",
+// matching normalizeSideOpeningPair's own default. Previously this always
+// hard-coded "upper" regardless of which handle the user had just dragged,
+// which could silently move the wrong edge whenever the drag handler's own
+// (correctly-directed) normalization disagreed with a fresh legality check.
+function readSideOpeningForm(design, changed = "lower") {
   design.box = design.box || {};
   // Ordinary bins only - never surfaced for B4B or Base Trim.
   if (b4bEnabled() || baseTrimEnabled(design)) {
@@ -2709,7 +2717,7 @@ function readSideOpeningForm(design) {
   }
   const current = { ...SIDE_OPENING_DEFAULTS, ...(design.box.side_openings || {}) };
   const shape = $("#side-opening-shape")?.value || current.shape;
-  const pair = normalizeSideOpeningPair(design, sideOpeningPairFromControls(), "upper");
+  const pair = normalizeSideOpeningPair(design, sideOpeningPairFromControls(), changed);
   const fromBottom = pair.lower;
   const fromTop = 100 - pair.upper;
   const allowed = sideOpeningAllowedSizes({
@@ -2786,7 +2794,7 @@ function wallPresetChoices(box = state.design?.box) {
     ? rules.choices
     : [
         { value: 0.4, label: "Very thin / prototype" },
-        { value: 0.8, label: "Standard" },
+        { value: 0.8, label: "Default" },
         { value: 1.2, label: "Strong" },
         { value: 1.6, label: "Heavy" },
         { value: 2.0, label: "Extra heavy" },
@@ -2898,7 +2906,7 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
     : [
         { value: 0.4, label: "Very thin" },
         { value: 0.6, label: "Good" },
-        { value: 0.8, label: "Heavy" },
+        { value: 0.8, label: "Default" },
         { value: 1.0, label: "Extra Heavy" },
         { value: 1.2, label: "Maximum" },
       ];
@@ -4345,7 +4353,9 @@ function formatDimField(axis) {
   // authoritative base unit.
   const unit = state.catalog?.base_unit || 8;
   const units = Math.round(val / unit);
-  input.value = `${fmt(val)}mm (${units}X ${fmt(inside)}mm inside)`;
+  // Fix 081 E: physical mm first, then usable-inside mm, then the spelled-out
+  // unit count - never a count glued to a letter like "30X".
+  input.value = `${fmt(val)} mm (${fmt(inside)} mm inside) — ${units} unit${units === 1 ? "" : "s"}`;
 }
 
 function formatHeightField() {
@@ -4697,7 +4707,7 @@ function wireControls() {
       const pair = normalizeSideOpeningPair(state.design, sideOpeningPairFromControls(), changed);
       $("#side-opening-lower").value = String(pair.lower);
       $("#side-opening-upper").value = String(pair.upper);
-      readSideOpeningForm(state.design);
+      readSideOpeningForm(state.design, changed);
       syncSideOpeningControls();
       changedDesign(previous);
     }));
@@ -5241,7 +5251,10 @@ function syncDraftEditorIdentity(kind, info) {
   description.textContent = "";
   description.hidden = true;
 
-  title.hidden = isNest || kind === "bore";
+  // Fix 081 C: Bore now identifies itself above its settings like every
+  // other kind, so its editor no longer needs a standalone "Type" card to
+  // stand in for a name.
+  title.hidden = isNest;
   // Fix 058 Correction 1, C1.4A: the palette keeps its short description for
   // discoverability, but the Edge Mount editor's own Label/Screw Mounting
   // hierarchy makes the redundant "Add a label and/or screw mounting..."
@@ -5497,6 +5510,12 @@ function syncSideOpeningRange(spec) {
     fill.style.bottom = `${pair.lower}%`;
     fill.style.height = `${pair.upper - pair.lower}%`;
   }
+  // Fix 081 G: the two dotted connectors point from each handle to the wall
+  // edge it controls, at that same handle's live position.
+  const connectorUpper = $("#side-opening-connector-upper");
+  const connectorLower = $("#side-opening-connector-lower");
+  if (connectorUpper) connectorUpper.style.bottom = `${pair.upper}%`;
+  if (connectorLower) connectorLower.style.bottom = `${pair.lower}%`;
   // Fix 078: the visible UI shows only the Top of bin / Base of bin cues and
   // the fill span - no visible percent-from-top/bottom text. The exact
   // percentages remain available to assistive technology via aria-valuetext
@@ -6144,11 +6163,15 @@ function renderDraftFields() {
       };
       const gridField = (key, label) => field(label, `option:${key}`,
         one.options?.[key] ?? state.draftResolvedOptions?.[key] ?? 1, { step: "1", min: "1" });
+      // Fix 081 D: the size field is named for the hole shape it actually
+      // cuts, not a generic "Diameter" that reads oddly for a square/diamond.
+      const boreSizeLabels = { round: "Hole size", hex: "Hex size", square: "Diamond size", square_axis: "Square size" };
+      const diameterLabel = boreSizeLabels[draftProfile] || "Diameter";
       // Diameter is locked to the preset for a hex-bit profile.
       const diameterField = hexBit
-        ? `<label><span class="field-label">Diameter<span class="unit">mm</span></span>
+        ? `<label><span class="field-label">${diameterLabel}<span class="unit">mm</span></span>
             <input type="number" value="${HEX_BIT_PROFILES[draftProfile].diameter}" disabled></label>`
-        : field("Diameter", "item_diameter", fmt(boreFirst.diameter), { unit: "mm" });
+        : field(diameterLabel, "item_diameter", fmt(boreFirst.diameter), { unit: "mm" });
       const boreProfiles = [
         ["round", "Round"], ["hex", "Hex"], ["square", "Diamond"],
         ["square_axis", "Square"],
@@ -6173,11 +6196,6 @@ function renderDraftFields() {
         ${boreProfiles.map(([value, label]) => `<option value="${value}" ${draftProfile === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>`;
 
-      html += `<div class="bore-group wide">
-        <span class="bore-group-label">Type</span>
-        <div class="bore-group-fields">${styleField}</div>
-      </div>`;
-
       // Base: the zone the Bore occupies and the hole grid that fills it. Sizing
       // is one persistent mode per relationship (never a one-shot button); the
       // X / Y counts are always explicit.
@@ -6189,15 +6207,21 @@ function renderDraftFields() {
           ["bin_to_bore", "Auto size bin to bore"]]);
       const showXy = !wallsOnly && xyMode === "manual";
       const showHeight = heightMode !== "bore_to_bin";
+      // Fix 081 C/D: Bore now names itself above its settings (like every
+      // other option), so the old standalone "Type" card is gone - Style
+      // instead sits on the left of the same row as Set base width / length.
       html += `<div class="bore-group wide bore-group-nolabel">
         <div class="bore-group-fields">
           <div class="bore-auto-row">
+            ${styleField}
             ${xySelect}
-            ${showXy
-              ? field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" }) +
-                field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })
-              : ""}
           </div>
+          ${showXy
+            ? `<div class="bore-auto-row">
+                ${field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" })}
+                ${field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
+              </div>`
+            : ""}
           <div class="bore-auto-row">
             ${modeSelect("Set height", "height_size_mode", heightMode, [
               ["manual", "Manually"], ["bore_to_bin", "Auto size bore to bin"],
@@ -6213,6 +6237,22 @@ function renderDraftFields() {
       // Hole: everything about the holes cut into that block.
       const walllsOnlyDepthTip = "How far the held object can insert downward from the Bore mouth "
         + "before it hits its stop. Blank reaches the normal bin floor.";
+      // Fix 081 D: Bore angle is now one of exactly eight fixed degrees
+      // (never a free-typed number), defaulting to 90° - upright.
+      const boreAngleSteps = [20, 30, 40, 50, 60, 70, 80, 90];
+      const boreAngleField = () => {
+        const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, "angle");
+        const stored = explicit ? one.options.angle
+          : state.draftResolvedOptions?.angle ?? info.fields.find(f => f.key === "angle")?.default ?? 0;
+        const shown = 90 - number(stored, 0);
+        const nearest = boreAngleSteps.reduce((best, value) =>
+          Math.abs(value - shown) < Math.abs(best - shown) ? value : best, boreAngleSteps[0]);
+        return `<label><span class="field-label">Bore angle<span class="unit">°</span></span>
+          <select data-draft="option:angle" title="90° is upright. Smaller angles lean the Bore toward the selected direction.">
+            ${boreAngleSteps.map(value => `<option value="${value}" ${value === nearest ? "selected" : ""}>${value}°</option>`).join("")}
+          </select>
+        </label>`;
+      };
       html += `<div class="bore-group wide">
         <span class="bore-group-label">Hole</span>
         <div class="bore-group-fields bore-hole-fields">
@@ -6222,7 +6262,7 @@ function renderDraftFields() {
             ? optionField("walls_depth", "Depth", { unit: "mm", step: "0.5", tip: walllsOnlyDepthTip })
             : optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
           ${wallsOnly ? dividerThicknessField(boreWallShown, "option:wall") : ""}
-          ${hexBit || boreStyle !== "base_straight" ? "" : optionField("angle", "Bore angle", { unit: "°", step: "1", min: "20", max: "90", transform: value => 90 - number(value, 0), tip: "90° is upright. Smaller angles lean the Bore toward the selected direction." })}
+          ${hexBit || boreStyle !== "base_straight" ? "" : boreAngleField()}
           ${hexBit || boreStyle !== "base_straight" || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Angle towards</span><select data-draft="option:angle_towards">
             ${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]].map(([value, label]) => `<option value="${value}" ${(one.options?.angle_towards || (one.along === "y" ? "front" : "left")) === value ? "selected" : ""}>${label}</option>`).join("")}
           </select></label>`}
@@ -6382,8 +6422,11 @@ function renderDraftFields() {
     const lengthTip = isCradle
       ? "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool."
       : undefined;
+    // Fix 081 D: the size label matches the shape actually chosen below.
+    const itemSizeLabels = { round: "Hole size", hex: "Hex size", square: "Square size" };
+    const itemSizeLabel = isCradle ? "Diameter" : (itemSizeLabels[item.profile] || "Diameter");
     html += field("Length", "item_length", fmt(first.length), { unit: "mm", step: measuredStep, tip: lengthTip });
-    html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: measuredStep, tip: lengthTip });
+    html += field(itemSizeLabel, "item_diameter", fmt(first.diameter), { unit: "mm", step: measuredStep, tip: lengthTip });
     if (!isCradle) {
       const profiles = [["round", "Round"], ["hex", "Hex"], ["square", "Square"]];
       html += `<label>Shape<select data-draft="profile">

@@ -736,7 +736,7 @@ input[type="number"]::-webkit-inner-spin-button {
 /* Fix 078: New Bin / Duplicate Bin / AI Design are major Designer actions,
    not a cramped Bin Name row - they share the same rendered size as the
    Space header's Open Space / Edit Space buttons. */
-.designer-major-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
+.designer-major-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin: 0; }
 .major-action { flex: 0 0 auto; white-space: nowrap; }
 .placed-item-content {
   flex: 1; min-width: 0; border: 0; background: none; padding: 0; text-align: left;
@@ -893,29 +893,63 @@ input[type="number"]::-webkit-inner-spin-button {
 .view-tab { border: 0; border-radius: 6px; background: transparent; padding: 8px 12px; cursor: pointer; font-weight: 700; font-size: 13px; }
 .view-tab.active { background: var(--teal-soft); color: var(--teal-dark); }
 /* Fix 078: plain Top of bin / Base of bin cues replace the visible percent
-   readout; the exact percentages stay available via aria-valuetext only. */
+   readout; the exact percentages stay available via aria-valuetext only.
+   Fix 081 G: the control is now a compact wall cross-section (the actual cut
+   drawn on it) with its two drag handles moved off to the side, connected to
+   their edge of the opening by a small dotted arrow, plus the wall checkboxes
+   beside the whole visual instead of a full-width row underneath. */
+.side-opening-height-group { margin-top: 4px; }
+.side-opening-compact { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.side-opening-visual { display: flex; flex-direction: column; align-items: center; }
 .side-opening-range-cue { display: block; text-align: center; font-size: 11px; color: var(--muted); margin: 2px auto; }
-.side-opening-range { position: relative; width: 64px; height: 190px; margin: 8px auto; }
-.side-opening-range-track { position: absolute; left: 29px; top: 8px; bottom: 8px;
-  width: 6px; border-radius: 5px; background: #b8c8cc; pointer-events: none; }
-#side-opening-range-fill { position: absolute; left: 0; right: 0;
-  background: var(--teal); border-radius: 5px; }
+.side-opening-visual-row { display: flex; align-items: stretch; gap: 2px; }
+
+/* The wall: a small rectangle standing in for the bin wall in cross-section,
+   with the actual cut opening drawn on it at its real vertical span. */
+.side-opening-wall {
+  position: relative; width: 30px; height: 128px; margin: 8px 0;
+  border: 1px solid var(--line-dark); border-radius: 4px;
+  background: repeating-linear-gradient(135deg, #dbe4e3 0 4px, #eef3f2 4px 8px);
+}
+.side-opening-wall-cut {
+  position: absolute; left: 2px; right: 2px; background: white; border-radius: 2px;
+  box-shadow: inset 0 0 0 1px var(--teal);
+}
+
+/* A dotted line from each handle to the opening edge it controls. */
+.side-opening-connectors { position: relative; width: 20px; height: 128px; margin: 8px 0; }
+.side-opening-connector {
+  position: absolute; left: 0; right: 0; height: 0; border-top: 2px dotted var(--teal-dark);
+}
+.side-opening-connector::after {
+  content: "\25B8"; position: absolute; right: -1px; top: -7px; color: var(--teal-dark);
+  font-size: 11px; line-height: 1;
+}
+
+.side-opening-range { position: relative; width: 40px; height: 128px; margin: 8px 0; }
 .side-opening-range input[type="range"] { position: absolute; inset: 0;
-  width: 64px; height: 190px; margin: 0; writing-mode: vertical-lr; direction: rtl;
+  width: 40px; height: 128px; margin: 0; writing-mode: vertical-lr; direction: rtl;
   appearance: none; background: transparent; pointer-events: none; }
 .side-opening-range input[type="range"]::-webkit-slider-runnable-track { background: transparent; }
 .side-opening-range input[type="range"]::-webkit-slider-thumb { appearance: none;
-  width: 22px; height: 14px; border: 2px solid white; border-radius: 7px;
+  width: 20px; height: 13px; border: 2px solid white; border-radius: 6px;
   background: var(--teal-dark); box-shadow: 0 0 0 1px var(--teal-dark);
   pointer-events: auto; cursor: grab; }
-#side-opening-lower::-webkit-slider-thumb { transform: translateX(-13px); }
-#side-opening-upper::-webkit-slider-thumb { transform: translateX(13px); }
+#side-opening-lower::-webkit-slider-thumb { transform: translateX(-10px); }
+#side-opening-upper::-webkit-slider-thumb { transform: translateX(10px); }
 .side-opening-range input[type="range"]::-moz-range-track { background: transparent; }
-.side-opening-range input[type="range"]::-moz-range-thumb { width: 20px; height: 12px;
-  border: 2px solid white; border-radius: 7px; background: var(--teal-dark);
+.side-opening-range input[type="range"]::-moz-range-thumb { width: 18px; height: 11px;
+  border: 2px solid white; border-radius: 6px; background: var(--teal-dark);
   pointer-events: auto; cursor: grab; }
-#side-opening-lower::-moz-range-thumb { transform: translateX(-13px); }
-#side-opening-upper::-moz-range-thumb { transform: translateX(13px); }
+#side-opening-lower::-moz-range-thumb { transform: translateX(-10px); }
+#side-opening-upper::-moz-range-thumb { transform: translateX(10px); }
+
+/* The four wall checkboxes sit beside the visual, a compact 2x2 block rather
+   than a full-width row. */
+.segmented.four.side-opening-walls {
+  grid-template-columns: repeat(2, 1fr); align-self: center; width: auto; min-width: 128px;
+}
+.side-opening-walls button { padding: 7px 8px; font-size: 12px; }
 .preview-hint { text-align: right; color: var(--muted); font-size: 11px; }
 .preview-hint span { display: block; }
 #preview-state { color: var(--teal-dark); font-weight: 700; margin-bottom: 2px; }
@@ -1703,11 +1737,19 @@ dialog:not([open]) { display: none; }
     width: 100%;
   }
 }
+/* Fix 081 B: New Bin / Duplicate Bin / AI Design form one compact group at
+   the upper-right of the Designer header, beside the Bin Name field. */
 .part-name-block {
   display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto;
+  align-items: start;
   gap: 10px 12px;
   margin: 0 0 14px;
   padding: 0;
+}
+@media (max-width: 480px) {
+  .part-name-block { grid-template-columns: 1fr; }
+  .designer-major-actions { justify-content: flex-start; }
 }
 .stack-note {
   grid-column: 1 / -1;

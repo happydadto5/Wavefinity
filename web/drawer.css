@@ -179,33 +179,42 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .space-head-edit-host .space-form,
 .space-head-edit-host .space-type-fields { display: grid; gap: 8px; margin: 0; padding: 0; }
 .space-head-edit-host .space-buttons { margin-top: 10px; }
+/* Fix 081 A: Space and Design read as two connected tabs attached to the
+   content panel directly beneath them - the tab row sits flush against that
+   panel (no gap, matching border colour) and the active tab shares the
+   panel's own background so the seam between them disappears. */
 .space-mode-row {
-  display: flex; align-items: center; gap: 8px; margin: 10px 12px;
+  display: flex; align-items: flex-end; gap: 6px; margin: 10px 12px 0;
 }
 .space-mode-row[hidden] { display: none; }
 #space-mode-busy { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .space-mode-toggle button.pending { background: var(--teal-soft); color: var(--teal-dark); }
 .space-mode-toggle {
-  display: inline-flex; flex: 1; border: 1px solid var(--line-dark);
-  border-radius: 8px; background: #eef5f4; overflow: hidden; margin: 0;
+  display: inline-flex; flex: 1; gap: 4px; border: 0; border-radius: 0;
+  background: transparent; margin: 0;
 }
 .space-mode-toggle button {
-  flex: 1 1 0; border: 0; border-radius: 0; padding: 6px 12px;
-  background: transparent; color: var(--muted); font-weight: 700;
-  font-size: 12px; cursor: pointer; margin: 0; text-align: center;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.space-mode-toggle button + button {
-  border-left: 1px solid var(--line-dark);
+  flex: 1 1 0; border: 1px solid var(--line-dark); border-bottom: none;
+  border-radius: 8px 8px 0 0; padding: 7px 12px; background: #e6efee;
+  color: var(--muted); font-weight: 700; font-size: 12px; cursor: pointer;
+  margin: 0; text-align: center; transition: background 0.15s ease, color 0.15s ease;
 }
 .space-mode-toggle button:hover:not(.active) {
-  background: rgba(0,0,0,0.04); color: var(--ink);
+  background: #dbe8e7; color: var(--ink);
 }
 .space-mode-toggle button.active {
-  background: var(--teal); color: white;
+  background: var(--panel); color: var(--ink); border-color: var(--line-dark);
 }
 .space-mode-toggle button:focus-visible {
   outline: 2px solid var(--teal-dark); outline-offset: -2px; z-index: 1;
+}
+/* The content panel the active tab joins: flush against the tab row above,
+   with square top corners so the tab and panel read as one connected shape. */
+#space-mode-row + #space-head,
+#space-mode-row ~ .control-section[data-section="build"] {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 @media (max-width: 700px) {
