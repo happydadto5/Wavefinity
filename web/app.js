@@ -2887,8 +2887,29 @@ const LID_DEFAULTS = {
   enabled: false, stackable: false, thickness: "thin",
   label_enabled: false, label_style: "flush", label_orientation: "horizontal",
   label_text: "", division_labels: [], handle_type: "knob",
-  handle_size: "medium", handle_position: "middle",
+  handle_size: "medium", handle_position: "middle", fit: "standard",
 };
+
+// Everything that changes the resolved lid rise for the current bin. The three
+// Thin/Medium/Thick measurements the backend returns belong to exactly this key.
+function lidThicknessKey(design = state.design) {
+  const box = design?.box || {};
+  return JSON.stringify([box.x, box.y, box.wall, box.corner_fillet, box.flat_inside,
+    Boolean(box.lid?.enabled), Boolean(box.lid?.stackable), (box.stack?.mode || "none")]);
+}
+
+// Inlay depth / Raised height as shown: an explicit saved value wins; an older
+// file with none was 0.4 mm inlaid and 0.6 mm raised. Both numbers come from
+// the backend catalog, never from a table kept here.
+function lidLabelDepthShown(lid) {
+  if (lid.label_depth_mm !== undefined && lid.label_depth_mm !== null && lid.label_depth_mm !== "") {
+    return Number(lid.label_depth_mm);
+  }
+  const rules = state.catalog?.lid_rules || {};
+  return lid.label_style === "raised"
+    ? Number(rules.legacy_raised_label_relief_mm ?? 0.6)
+    : Number(rules.default_label_relief_mm ?? 0.4);
+}
 
 function lidState(design = state.design) {
   const boxLid = design?.box?.lid;
@@ -3007,13 +3028,44 @@ function renderLidLabelEditor() {
   }));
 }
 
+// Fit and label-depth choices, and the Thin/Medium/Thick measurements, are all
+// read from the backend (catalog + the latest matching preview report).
+function populateLidChoices() {
+  const rules = state.catalog?.lid_rules || {};
+  const fit = $("#lid-fit");
+  if (fit && Array.isArray(rules.fits) && fit.options.length !== rules.fits.length) {
+    fit.replaceChildren(...rules.fits.map(choice => new Option(choice.label, choice.value)));
+  }
+  const depth = $("#lid-label-depth");
+  if (depth && Array.isArray(rules.label_reliefs) && depth.options.length !== rules.label_reliefs.length) {
+    depth.replaceChildren(...rules.label_reliefs.map(choice => new Option(choice.label, String(choice.value))));
+  }
+}
+
+function renderLidThicknessOptions() {
+  const select = $("#lid-thickness");
+  if (!select) return;
+  const report = state.lidThicknessReport;
+  // A report only labels the bin it was measured for; while a newer one is
+  // pending the plain names show rather than another bin's measurements.
+  const fresh = report && report.key === lidThicknessKey(state.design);
+  const names = { thin: "Thin", medium: "Medium", thick: "Thick" };
+  [...select.options].forEach(option => {
+    const mm = fresh ? report.values?.[option.value] : undefined;
+    option.textContent = Number.isFinite(mm) ? `${fmt(mm)} mm \u2014 ${names[option.value]}` : names[option.value];
+  });
+}
+
 function syncLidForm() {
   const active = lidPartActive();
   const lid = lidState();
   const config = lidConfiguration();
+  populateLidChoices();
   $("#lid-option-panel").hidden = !active;
   $("#lid-configuration").value = config;
   $("#lid-thickness").value = lid.thickness;
+  renderLidThicknessOptions();
+  if ($("#lid-fit")) $("#lid-fit").value = lid.fit || "standard";
   $("#lid-handle-type").value = lid.handle_type;
   $("#lid-handle-size").value = lid.handle_size;
   $("#lid-handle-position").value = lid.handle_position;
@@ -3021,6 +3073,14 @@ function syncLidForm() {
   $("#lid-label-orientation").value = lid.label_orientation;
   $("#lid-label-style").value = lid.label_style;
   $("#lid-label-text").value = lid.label_text || "";
+  const depthField = $("#lid-label-depth");
+  if (depthField) {
+    const shown = lidLabelDepthShown(lid);
+    if (![...depthField.options].some(option => Number(option.value) === shown)) {
+      depthField.append(new Option(`${fmt(shown)} mm \u00b7 Existing`, String(shown)));
+    }
+    depthField.value = String(shown);
+  }
   const hasLid = config !== "stackable_bin";
   const handled = config === "handled_lid";
   // Fix 060 A: Lid / Handle / Label now read as separate groups instead of one
@@ -3040,6 +3100,17 @@ function syncLidForm() {
   // engine already forces Flush), so it is hidden there rather than shown
   // disabled; Handled Lid keeps the real Level-with-top/Raised choice.
   $("#lid-label-style-row").hidden = !labelOn || !handled;
+  // Inlay depth / Raised height follows the active style; a Stackable Lid is
+  // always Inlaid, so it shows Inlay depth.
+  const depthRow = $("#lid-label-depth-row");
+  if (depthRow) {
+    depthRow.hidden = !labelOn;
+    const raisedActive = handled && $("#lid-label-style").value === "raised";
+    $("#lid-label-depth-name").textContent = raisedActive ? "Raised height" : "Inlay depth";
+    depthRow.title = raisedActive
+      ? "How far the lid lettering projects above the lid top."
+      : "How deeply the lid lettering is cut into the lid; the lid keeps material under it.";
+  }
   const raised = [...$("#lid-label-style").options].find(option => option.value === "raised");
   if (raised) raised.disabled = config === "stackable_lid";
   if (config === "stackable_lid" && $("#lid-label-style").value === "raised") {
@@ -3047,10 +3118,10 @@ function syncLidForm() {
   }
   const note = $("#lid-option-note");
   note.textContent = config === "stackable_bin"
-    ? "No lid. This bin stacks directly into another matching bin."
+    ? "No lid. This bin stacks directly onto another matching bin. Remove Lid & Stacking to go back to no lid and no stacking."
     : config === "stackable_lid"
       ? "Handle and raised lettering are unavailable because the next bin needs a flat seating surface."
-      : "One removable handled lid. This bin is not stackable.";
+      : "One removable lid with a handle. This bin is not stackable.";
   renderLidLabelEditor();
   applyStackVisibility();
 }
@@ -3202,6 +3273,11 @@ function readStackForm(design) {
     handle_type: $("#lid-handle-type").value || remembered.handle_type,
     handle_size: $("#lid-handle-size").value || remembered.handle_size,
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
+    // Written explicitly on every save, so a missing value only ever means an
+    // older file.
+    fit: $("#lid-fit")?.value || remembered.fit || "standard",
+    ...(($("#lid-label-depth")?.value || remembered.label_depth_mm)
+      ? { label_depth_mm: Number($("#lid-label-depth")?.value || remembered.label_depth_mm) } : {}),
   };
 }
 
@@ -3879,8 +3955,9 @@ function wireControls() {
     syncPegboardMountForm();
     changedDesign();
   }));
-  ["#lid-configuration", "#lid-thickness", "#lid-handle-type", "#lid-handle-size",
-   "#lid-handle-position", "#lid-label-enabled", "#lid-label-orientation", "#lid-label-style"]
+  ["#lid-configuration", "#lid-thickness", "#lid-fit", "#lid-handle-type", "#lid-handle-size",
+   "#lid-handle-position", "#lid-label-enabled", "#lid-label-orientation", "#lid-label-style",
+   "#lid-label-depth"]
     .forEach(selector => $(selector).addEventListener("change", () => {
       const previous = clone(state.design);
       readStackForm(state.design);
@@ -7982,8 +8059,8 @@ function mutationControls() {
     '#x-size, #y-size, #z, #base-thickness, #wall-thickness, #part-name, ' +
     '#lift-grabber-size, #lift-grabber-location, #connector-height-mode, ' +
     '#mode-select, ' +
-    '#lid-option-toggle, #lid-configuration, #lid-thickness, #lid-handle-type, #lid-handle-size, ' +
-    '#lid-handle-position, #lid-label-enabled, #lid-label-orientation, #lid-label-style, #lid-label-text, ' +
+    '#lid-option-toggle, #lid-configuration, #lid-thickness, #lid-fit, #lid-handle-type, #lid-handle-size, ' +
+    '#lid-handle-position, #lid-label-enabled, #lid-label-orientation, #lid-label-style, #lid-label-depth, #lid-label-text, ' +
     '#designer-new-bin, #designer-duplicate, ' +
     '#designer-save-file, #designer-open-file'
   );
@@ -8097,7 +8174,10 @@ function placedRowData() {
     : null;
   const modifierDetail = kind => {
     const box = state.design.box || {};
-    if (kind === "lid_stacking") return box.lid?.enabled ? "Lid" : "Stackable Bin";
+    if (kind === "lid_stacking") {
+      return !box.lid?.enabled ? "Stackable bin on bin"
+        : box.lid.stackable ? "Stackable bin on lid" : "Lid with handle";
+    }
     if (kind === "inside_handles") {
       return `${box.lift_grabbers?.size || "medium"} · ${box.lift_grabbers?.location || "sides"}`;
     }
@@ -8314,6 +8394,11 @@ async function refreshPreview({ persistResume = true } = {}) {
     const grownZ = result.design?.box?.z !== state.design?.box?.z;
     state.preview = result;
     state.design = result.design;
+    // Bind the three backend-measured lid thicknesses to the design they were
+    // measured for; a later, different bin never shows them.
+    state.lidThicknessReport = result.stack?.lid_thickness_mm
+      ? { key: lidThicknessKey(result.design), values: result.stack.lid_thickness_mm } : null;
+    renderLidThicknessOptions();
     syncSurfaceControls();
     state.previewDesignKey = JSON.stringify(result.design);
     updateDraftOverhangNote();

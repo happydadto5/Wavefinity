@@ -365,6 +365,16 @@ LID_LABEL_ORIENTATIONS = ("horizontal", "vertical")
 LID_HANDLE_TYPES = ("knob", "pull")
 LID_HANDLE_SIZES = ("small", "medium", "large")
 LID_HANDLE_POSITIONS = ("left", "right", "front", "back", "middle")
+# Removable-lid plug clearance per side. Only the lid's own bottom plug uses
+# this; the direct stack foot and a stackable lid's top recess keep STACK_FIT.
+LID_FITS = ("tight", "standard", "loose")
+LID_FIT_MM = {"tight": 0.15, "standard": 0.25, "loose": 0.35}
+LID_FIT_NAMES = {"tight": "Tight", "standard": "Standard", "loose": "Loose"}
+# Lid label relief (Inlay depth / Raised height), same presets as Text.
+LID_LABEL_RELIEFS = (0.2, 0.4, 0.6, 0.8)
+LID_LABEL_RELIEF_NAMES = {0.2: "Thin", 0.4: "Default", 0.6: "Thick", 0.8: "Thickest"}
+LID_LABEL_LEGACY_INLAY_MM = 0.4
+LID_LABEL_LEGACY_RAISED_MM = 0.6
 
 
 @dataclass(frozen=True)
@@ -382,9 +392,14 @@ class LidSpec:
     handle_type: str = "knob"
     handle_size: str = "medium"
     handle_position: str = "middle"
+    fit: str = "standard"
+    # None is the legacy "no saved value" signal: an old inlaid label was
+    # 0.4 mm and an old raised label 0.6 mm. Canonical saves always write it.
+    label_depth_mm: float | None = None
 
     def __post_init__(self) -> None:
         choices = (
+            (self.fit, LID_FITS, "lid fit"),
             (self.thickness, LID_THICKNESSES, "lid thickness"),
             (self.label_style, LID_LABEL_STYLES, "lid label style"),
             (self.label_orientation, LID_LABEL_ORIENTATIONS, "lid label orientation"),
@@ -395,10 +410,31 @@ class LidSpec:
         for value, allowed, name in choices:
             if value not in allowed:
                 raise ValueError(f"{name} must be one of {', '.join(allowed)}")
+        if self.label_depth_mm is not None and not any(
+            math.isclose(float(self.label_depth_mm), preset, abs_tol=1e-9)
+            for preset in LID_LABEL_RELIEFS
+        ):
+            raise ValueError(
+                "lid label depth must be one of "
+                + ", ".join(f"{preset:g}" for preset in LID_LABEL_RELIEFS) + " mm"
+            )
         if self.stackable and not self.enabled:
             raise ValueError("a stackable lid must be enabled")
         if self.stackable and self.label_style == "raised" and self.label_enabled:
             raise ValueError("a stackable lid cannot use raised lettering")
+
+
+def lid_fit_mm(box: "BoxSpec") -> float:
+    """Sliding clearance per side of the removable lid's bottom plug."""
+    return LID_FIT_MM[lid_spec(box).fit]
+
+
+def lid_label_relief_mm(spec: LidSpec) -> float:
+    """Resolved Inlay depth / Raised height, honouring legacy missing values."""
+    if spec.label_depth_mm is not None:
+        return float(spec.label_depth_mm)
+    return (LID_LABEL_LEGACY_RAISED_MM if spec.label_style == "raised"
+            else LID_LABEL_LEGACY_INLAY_MM)
 
 
 def lid_spec(box: "BoxSpec") -> LidSpec:

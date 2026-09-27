@@ -71,6 +71,12 @@ from organizer_engine import (
     WALL_STEP,
     BoxSpec,
     ConnectorSpec,
+    LID_FIT_MM,
+    LID_FIT_NAMES,
+    LID_FITS,
+    LID_LABEL_LEGACY_RAISED_MM,
+    LID_LABEL_RELIEF_NAMES,
+    LID_LABEL_RELIEFS,
     LidSpec,
     StackSpec,
     differing_connector_plan,
@@ -983,6 +989,21 @@ def catalog_payload() -> dict[str, Any]:
             "handle_positions": ["left", "right", "front", "back", "middle"],
             "label_styles": ["flush", "raised"],
             "label_orientations": ["horizontal", "vertical"],
+            # Backend-owned: the browser builds its choices from these, it
+            # carries no mm table of its own.
+            "fits": [
+                {"value": name, "mm": LID_FIT_MM[name],
+                 "label": f"{LID_FIT_NAMES[name]} — {LID_FIT_MM[name]:g} mm per side"}
+                for name in LID_FITS
+            ],
+            "default_fit": "standard",
+            "label_reliefs": [
+                {"value": value, "name": LID_LABEL_RELIEF_NAMES[value],
+                 "label": f"{LID_LABEL_RELIEF_NAMES[value]} {value:g} mm"}
+                for value in LID_LABEL_RELIEFS
+            ],
+            "default_label_relief_mm": 0.4,
+            "legacy_raised_label_relief_mm": LID_LABEL_LEGACY_RAISED_MM,
         },
         "b4b_rules": {
             "grid_pitch_mm": GRID_PITCH,

@@ -59,6 +59,7 @@ from organizer_engine import (
     lift_grabber_collision_volumes,
     lift_grabber_summary,
     lid_enabled,
+    lid_label_relief_mm,
     lid_spec,
     lid_stackable,
     direct_stack_enabled,
@@ -2148,7 +2149,8 @@ def generate_organizer_files(
             label=label,
             part_name=part_name,
             scoop=scoop,
-            design_spec=design_to_dict(box, layout, label, part_name, location, scoop),
+            # The editable design is the request, never the shortened effective body.
+            design_spec=design_to_dict(stack_request, layout, label, part_name, location, scoop),
         )
         result["log_file"] = str(log_file)
     return result
@@ -2913,6 +2915,9 @@ def design_to_dict(
             "handle_type": lid.handle_type,
             "handle_size": lid.handle_size,
             "handle_position": lid.handle_position,
+            # Written explicitly so a missing value only ever means a legacy file.
+            "fit": lid.fit,
+            "label_depth_mm": lid_label_relief_mm(lid),
         }
     grabbers = getattr(box, "lift_grabbers", None) or LiftGrabberSpec()
     if grabbers.enabled:
@@ -2969,8 +2974,11 @@ def design_to_dict(
         # reject a B4B design instead of silently loading it as an ordinary bin.
         # Version 4 carried stacking with Z as detached closed height. Version
         # 5 makes Z the authoritative stack-module/pitch height. Version 6
-        # separates ordinary lids from direct vertical stacking.
-        "version": 6 if (stack.mode == "direct" or lid.enabled) else (3 if b4b.enabled else 1),
+        # separates ordinary lids from direct vertical stacking. Version 7 is
+        # written only with an ordinary lid: it adds the lid fit preset and
+        # the explicit lid label Inlay depth / Raised height.
+        "version": 7 if lid.enabled else (
+            6 if stack.mode == "direct" else (3 if b4b.enabled else 1)),
         "box": box_block,
         "label": label,
         "label_position": label_position(label_location),
@@ -2984,7 +2992,7 @@ def design_from_dict(
     data: dict, *, validate_layout: bool = True
 ) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     design_version = data.get("version", 1)
-    if design_version not in (1, 2, 3, 4, 5, 6):
+    if design_version not in (1, 2, 3, 4, 5, 6, 7):
         raise ValueError(f"unsupported design version {data.get('version')!r}")
     raw = data["box"]
     stack_raw = raw.get("stack")
@@ -3012,6 +3020,11 @@ def design_from_dict(
             handle_type=str(lid_raw.get("handle_type", "knob")),
             handle_size=str(lid_raw.get("handle_size", "medium")),
             handle_position=str(lid_raw.get("handle_position", "middle")),
+            # A missing fit is an older file: Standard, the exact old plug fit.
+            fit=str(lid_raw.get("fit", "standard")),
+            # A missing depth is an older file: 0.4 mm inlaid, 0.6 mm raised.
+            label_depth_mm=(None if lid_raw.get("label_depth_mm") in (None, "")
+                            else float(lid_raw["label_depth_mm"])),
         )
     grabbers_raw = raw.get("lift_grabbers")
     lift_grabbers = LiftGrabberSpec()

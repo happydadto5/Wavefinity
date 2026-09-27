@@ -239,7 +239,8 @@ class StackSerializationTests(unittest.TestCase):
                     lid=LidSpec(enabled=True, stackable=True) if mode == "lid" else LidSpec(),
                 )
                 data = design_to_dict(box, Layout((), "fused"))
-                self.assertEqual(data["version"], 6)
+                # An ordinary lid writes version 7; direct stacking stays 6.
+                self.assertEqual(data["version"], 7 if mode == "lid" else 6)
                 self.assertFalse(data["box"]["standard_walls"])
                 self.assertFalse(data["box"]["standard_base"])
                 self.assertGreaterEqual(data["box"]["wall"], st.STACK_MIN_WALL)
@@ -284,7 +285,7 @@ class LidContractTests(unittest.TestCase):
         self.assertEqual(legal.base_thickness, 0.6)
         self.assertEqual(legal.wall, st.STACK_MIN_WALL)
         data = design_to_dict(legal, Layout())
-        self.assertEqual(data["version"], 6)
+        self.assertEqual(data["version"], 7)          # ordinary lid: fit + label depth
         self.assertNotIn("stack", data["box"])
         back, *_ = design_from_dict(data)
         self.assertEqual(back.lid.handle_type, "pull")

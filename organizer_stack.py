@@ -39,8 +39,11 @@ from organizer_engine import (
     TEXT_DEPTH,
     _lock_profile,
     direct_stack_enabled,
+    LID_THICKNESSES,
     lid_enabled,
+    lid_fit_mm,
     lid_has_handle,
+    lid_label_relief_mm,
     lid_spec,
     lid_stackable,
     text_outline,
@@ -49,6 +52,7 @@ from organizer_engine import (
     wavy_cavity_polygon,
     wavy_outer_polygon,
 )
+from organizer_lid_handle import handle_height, handle_keepout, resolve_lid_handle
 from organizer_geometry import (
     _align_ring,
     _extrude_polygon,
@@ -76,8 +80,6 @@ STACK_SNAP = 0.30         # bead protrusion past the mouth face
 STACK_BEAD = 0.40         # groove depth: the snap plus seating clearance
 STACK_BEAD_DROP = 1.5     # bead centre below the rim it snaps under
 STACK_FIT = 0.25          # clearance per side on every sliding face
-STACK_LID_RIM_SEAT_WIDTH = 0.6      # flat bearing shoulder on the lid underside
-STACK_LID_RIM_SEAT_THICKNESS = 0.4  # its thickness, uses half the min stacking wall
 STACK_MIN_FLOOR_SKIN = 0.8   # floor left under the stepped base
 # A groove this deep needs wall behind it.  0.8 mm would leave 0.45 mm, which
 # splits; 1.2 mm leaves 0.85 mm, which holds.
@@ -99,19 +101,9 @@ LID_LOCK_DROP = 1.5
 LID_LOCK_EMBED = 0.20
 LID_FOUR_SNAP_MIN_SPAN = 40.0
 LID_THICKNESS_EXTRA = {"thin": 0.0, "medium": 0.8, "thick": 1.6}
-LID_LABEL_RAISE = 0.6
 LID_LABEL_MARGIN = 2.0
 LID_LABEL_MIN_CAP = 2.5
-LID_HANDLE_EDGE_MARGIN = 5.0
-LID_KNOB_SCALE = {"small": 0.12, "medium": 0.18, "large": 0.24}
-LID_KNOB_DIAMETER_LIMITS = (6.0, 28.0)
-LID_KNOB_HEIGHT_RATIO = 0.55
-LID_KNOB_HEIGHT_LIMITS = (4.0, 16.0)
-LID_PULL_SCALE = {"small": 0.30, "medium": 0.45, "large": 0.60}
-LID_PULL_CLEARANCE = {"small": 6.0, "medium": 8.0, "large": 10.0}
-LID_PULL_WIDTH_LIMITS = (12.0, 70.0)
-LID_PULL_BAR_DEPTH = 4.0
-LID_PULL_BAR_THICKNESS = 3.0
+LID_LABEL_MIN_BACKING = 0.4   # lid left under an inlaid label pocket
 
 _EPS = 1e-6
 _PROFILE_EPS = 0.02
@@ -129,8 +121,9 @@ def stack_lid_rise(box: BoxSpec) -> float:
     """How far the lid rises above the body rim.
 
     A thick custom body wall moves the mouth farther from the outside face.
-    The lid grows vertically when needed so its plug-to-plate flare remains at
-    45 degrees or shallower when printed plug-down.
+    The lid grows vertically when needed so a 45 degree or shallower flare
+    still fits.  The exterior itself meets the rim flush: there is no shoulder
+    or flare above the rim to recess it.
     """
     if not lid_enabled(box):
         return 0.0
@@ -141,7 +134,6 @@ def stack_lid_rise(box: BoxSpec) -> float:
     requirements = [
         STACK_LID_SKIN + extra,
         stack_foot_flare_height(wall_box),
-        STACK_LID_RIM_SEAT_THICKNESS + _lid_outer_flare_height(wall_box),
     ]
     if lid_stackable(box):
         requirements.append(STACK_SEAT_DEPTH + STACK_MIN_FLOOR_SKIN + extra)
@@ -225,18 +217,25 @@ def stack_grew(box: BoxSpec) -> bool:
 # --------------------------------------------------------------------------- #
 # shared outlines
 # --------------------------------------------------------------------------- #
-def _plug_polygon(eff: BoxSpec) -> Polygon:
-    """Outline of anything that plugs into the bin mouth.
+def _plug_polygon(eff: BoxSpec, fit: float = STACK_FIT) -> Polygon:
+    """Outline of anything that plugs into the bin mouth at ``fit`` per side.
 
-    One outline serves the bin's own stepped base, the lid's plug and the lid's
-    top recess, so a base always fits a recess and a plug always fits a mouth.
+    Three interfaces share this shape, but only the first two must keep the
+    accepted 0.25 mm stack fit: the bin stepped base (direct foot) and a
+    stackable lid top recess, so a base always fits a recess.  The removable
+    lid bottom plug asks for its own fit through ``_lid_plug_polygon``.
     """
-    plug = wavy_cavity_polygon(eff).buffer(-STACK_FIT)
+    plug = wavy_cavity_polygon(eff).buffer(-fit)
     if plug.is_empty or not isinstance(plug, Polygon):
         raise ValueError(
             "this bin is too small to stack - widen it or turn stacking off"
         )
     return plug
+
+
+def _lid_plug_polygon(eff: BoxSpec) -> Polygon:
+    """Outline of the removable lid bottom plug: Tight / Standard / Loose."""
+    return _plug_polygon(eff, lid_fit_mm(eff))
 
 
 def _groove_band(eff: BoxSpec) -> Polygon:
@@ -268,26 +267,6 @@ def _outline_run(inner: Polygon, outer: Polygon) -> float:
 def stack_foot_flare_height(eff: BoxSpec) -> float:
     """Vertical run needed for a <=45 degree foot/lid flare."""
     run = _outline_run(_plug_polygon(eff), wavy_outer_polygon(eff))
-    return math.ceil((run + _EPS) * 100.0) / 100.0
-
-
-def _lid_rim_seat_outline(eff: BoxSpec) -> Polygon:
-    """Flat bearing shoulder on the lid underside that lands on the wall top.
-
-    Sized off the cavity, not the (already inset) plug, so it reaches out to
-    the wall regardless of the plug's own running clearance.
-    """
-    cavity = wavy_cavity_polygon(eff)
-    outer = wavy_outer_polygon(eff)
-    seat = cavity.buffer(STACK_LID_RIM_SEAT_WIDTH).intersection(outer)
-    if seat.is_empty or not isinstance(seat, Polygon):
-        raise ValueError("this bin is too small for the stacking lid rim seat")
-    return seat
-
-
-def _lid_outer_flare_height(eff: BoxSpec) -> float:
-    """Vertical run needed for the <=45 degree flare above the rim seat."""
-    run = _outline_run(_lid_rim_seat_outline(eff), wavy_outer_polygon(eff))
     return math.ceil((run + _EPS) * 100.0) / 100.0
 
 
@@ -367,7 +346,11 @@ def _snap_grooves(eff: BoxSpec) -> list[trimesh.Trimesh]:
 
 
 def _lid_lock_masks(eff: BoxSpec) -> list[Polygon]:
-    """Two centred points on small lids, one per side on larger lids."""
+    """Two centred points on small lids, one per side on larger lids.
+
+    Sized from the bin cavity alone, so the lock positions - and the body
+    notches cut with the same masks - never move with the lid fit preset.
+    """
     plug = _plug_polygon(eff)
     outer = wavy_outer_polygon(eff)
     min_x, min_y, max_x, max_y = plug.bounds
@@ -419,13 +402,20 @@ def _clip_lid_locks(
 
 
 def _lid_lock_bumps(eff: BoxSpec, rim: float) -> list[trimesh.Trimesh]:
-    """Small discrete bumps on the lid plug."""
-    profile = _lid_lock_profile(
-        STACK_FIT + LID_LOCK_INTERFERENCE, rim,
-    )
-    plug = _plug_polygon(eff)
+    """Small discrete bumps on the lid plug.
+
+    The bump reaches the plug fit plus the retention interference, so its tip
+    always ends the same distance past the cavity wall whatever the Tight /
+    Standard / Loose plug fit is: the click strength does not change with it.
+    """
+    fit = lid_fit_mm(eff)
+    profile = _lid_lock_profile(fit + LID_LOCK_INTERFERENCE, rim)
+    cavity = wavy_cavity_polygon(eff)
+    # ``t`` is measured from the plug edge; re-measured from the cavity wall it
+    # is ``t - fit``, which puts the bump tip LID_LOCK_INTERFERENCE past the wall
+    # for Tight, Standard and Loose alike.
     solid = _profile_loft(
-        [plug.buffer(t) for t, _ in profile],
+        [cavity.buffer(t - fit) for t, _ in profile],
         [z for _, z in profile],
     )
     return _clip_lid_locks(solid, eff, profile)
@@ -489,135 +479,52 @@ def stack_body_adders(eff: BoxSpec) -> list[trimesh.Trimesh]:
 # --------------------------------------------------------------------------- #
 # the lid
 # --------------------------------------------------------------------------- #
-def _clamp(value: float, limits: tuple[float, float]) -> float:
-    return max(limits[0], min(limits[1], value))
-
-
-def _handle_centre(box: BoxSpec, span_x: float, span_y: float) -> tuple[float, float]:
-    position = lid_spec(box).handle_position
-    offset_x = max(0.0, span_x * 0.28)
-    offset_y = max(0.0, span_y * 0.28)
-    return {
-        "left": (-offset_x, 0.0), "right": (offset_x, 0.0),
-        "front": (0.0, -offset_y), "back": (0.0, offset_y),
-        "middle": (0.0, 0.0),
-    }[position]
-
-
-def _lid_handle(box: BoxSpec, top_z: float, outer: Polygon) -> trimesh.Trimesh:
+def _lid_handle_mesh(box: BoxSpec) -> trimesh.Trimesh:
+    """The one resolved handle for this lid, lid-top plane at ``z = 0``."""
     spec = lid_spec(box)
-    min_x, min_y, max_x, max_y = outer.bounds
-    span_x = max(1.0, max_x - min_x - 2.0 * LID_HANDLE_EDGE_MARGIN)
-    span_y = max(1.0, max_y - min_y - 2.0 * LID_HANDLE_EDGE_MARGIN)
-    cx, cy = _handle_centre(box, span_x, span_y)
-    if spec.handle_type == "knob":
-        diameter = min(min(span_x, span_y), _clamp(
-            min(span_x, span_y) * LID_KNOB_SCALE[spec.handle_size],
-            LID_KNOB_DIAMETER_LIMITS,
-        ))
-        height = _clamp(
-            diameter * LID_KNOB_HEIGHT_RATIO, LID_KNOB_HEIGHT_LIMITS,
-        )
-        knob = trimesh.creation.cone(
-            radius=diameter / 2.0, height=height, sections=48,
-        )
-        knob.apply_translation((cx, cy, top_z))
-        return knob
+    outer = wavy_outer_polygon(stack_effective_box(box))
+    return resolve_lid_handle(outer.bounds, spec.handle_type, spec.handle_size,
+                              spec.handle_position)
 
-    position = spec.handle_position
-    run_x = position in ("front", "back") or (
-        position == "middle" and span_x >= span_y
-    )
-    available = span_x if run_x else span_y
-    width = _clamp(
-        available * LID_PULL_SCALE[spec.handle_size], LID_PULL_WIDTH_LIMITS,
-    )
-    width = min(width, available)
-    clearance = min(
-        LID_PULL_CLEARANCE[spec.handle_size], max(4.0, min(span_x, span_y) * 0.28),
-    )
-    post_height = clearance + LID_PULL_BAR_THICKNESS
-    cross_span = span_y if run_x else span_x
-    bar_depth = min(LID_PULL_BAR_DEPTH, max(1.0, cross_span * 0.5))
-    post_size = min(bar_depth, max(1.0, width / 3.0))
-    bar_extents = (
-        (width, bar_depth, LID_PULL_BAR_THICKNESS)
-        if run_x else
-        (bar_depth, width, LID_PULL_BAR_THICKNESS)
-    )
-    bar = trimesh.creation.box(extents=bar_extents)
-    bar.apply_translation((cx, cy, top_z + clearance + LID_PULL_BAR_THICKNESS / 2.0))
-    supports = []
-    for sign in (-1.0, 1.0):
-        px = cx + (sign * (width - post_size) / 2.0 if run_x else 0.0)
-        py = cy + (0.0 if run_x else sign * (width - post_size) / 2.0)
-        support = trimesh.creation.cone(
-            radius=post_size / 2.0, height=post_height, sections=24,
-        )
-        support.apply_translation((px, py, top_z))
-        supports.append(support)
-    return union([bar, *supports])
+
+def _lid_has_lettering(spec) -> bool:
+    return bool(str(spec.label_text or "").strip()
+                or any(str(value or "").strip() for value in spec.division_labels))
 
 
 def lid_handle_height(box: BoxSpec) -> float:
+    """Height of the handle above the lid top - read from the real mesh."""
     if not lid_has_handle(box):
         return 0.0
-    outer = wavy_outer_polygon(stack_effective_box(box))
-    min_x, min_y, max_x, max_y = outer.bounds
-    span_x = max(1.0, max_x - min_x - 2.0 * LID_HANDLE_EDGE_MARGIN)
-    span_y = max(1.0, max_y - min_y - 2.0 * LID_HANDLE_EDGE_MARGIN)
-    spec = lid_spec(box)
-    if spec.handle_type == "knob":
-        diameter = min(min(span_x, span_y), _clamp(
-            min(span_x, span_y) * LID_KNOB_SCALE[spec.handle_size],
-            LID_KNOB_DIAMETER_LIMITS,
-        ))
-        return _clamp(diameter * LID_KNOB_HEIGHT_RATIO, LID_KNOB_HEIGHT_LIMITS)
-    clearance = min(
-        LID_PULL_CLEARANCE[spec.handle_size], max(4.0, min(span_x, span_y) * 0.28),
-    )
-    return clearance + LID_PULL_BAR_THICKNESS
+    return handle_height(_lid_handle_mesh(box))
 
 
-def _lid_handle_keepout(
-    box: BoxSpec, outer: Polygon,
-) -> tuple[float, float, float, float]:
-    """Conservative XY rectangle labels must stay out of."""
+def lid_label_height(box: BoxSpec) -> float:
+    """Height Raised lid lettering stands above the lid top (0 when none)."""
     spec = lid_spec(box)
-    min_x, min_y, max_x, max_y = outer.bounds
-    span_x = max(1.0, max_x - min_x - 2.0 * LID_HANDLE_EDGE_MARGIN)
-    span_y = max(1.0, max_y - min_y - 2.0 * LID_HANDLE_EDGE_MARGIN)
-    cx, cy = _handle_centre(box, span_x, span_y)
-    if spec.handle_type == "knob":
-        diameter = min(min(span_x, span_y), _clamp(
-            min(span_x, span_y) * LID_KNOB_SCALE[spec.handle_size],
-            LID_KNOB_DIAMETER_LIMITS,
-        ))
-        half_x = half_y = diameter / 2.0 + 1.0
-    else:
-        run_x = spec.handle_position in ("front", "back") or (
-            spec.handle_position == "middle" and span_x >= span_y
-        )
-        available = span_x if run_x else span_y
-        width = min(
-            _clamp(available * LID_PULL_SCALE[spec.handle_size], LID_PULL_WIDTH_LIMITS),
-            available,
-        )
-        cross_span = span_y if run_x else span_x
-        bar_depth = min(LID_PULL_BAR_DEPTH, max(1.0, cross_span * 0.5))
-        half_x = (width / 2.0 + 1.0) if run_x else (bar_depth / 2.0 + 1.0)
-        half_y = (bar_depth / 2.0 + 1.0) if run_x else (width / 2.0 + 1.0)
-    return cx - half_x, cy - half_y, cx + half_x, cy + half_y
+    if not (lid_has_handle(box) and spec.label_enabled and spec.label_style == "raised"
+            and _lid_has_lettering(spec)):
+        return 0.0
+    return lid_label_relief_mm(spec)
+
+
+def lid_above_top_height(box: BoxSpec) -> float:
+    """Tallest thing standing above the lid top: handle or Raised lettering."""
+    return max(lid_handle_height(box), lid_label_height(box))
+
+
+def _lid_handle_keepout(box: BoxSpec) -> tuple[float, float, float, float]:
+    """XY rectangle labels must stay out of, from the real handle mesh."""
+    return handle_keepout(_lid_handle_mesh(box))
 
 
 def _regions_avoiding_handle(
     box: BoxSpec,
-    outer: Polygon,
     regions: list[tuple[str, tuple[float, float, float, float]]],
 ) -> list[tuple[str, tuple[float, float, float, float]]]:
     if not lid_has_handle(box):
         return regions
-    hx0, hy0, hx1, hy1 = _lid_handle_keepout(box, outer)
+    hx0, hy0, hx1, hy1 = _lid_handle_keepout(box)
     safe: list[tuple[str, tuple[float, float, float, float]]] = []
     for text, (x0, y0, x1, y1) in regions:
         if hx1 <= x0 or hx0 >= x1 or hy1 <= y0 or hy0 >= y1:
@@ -639,6 +546,15 @@ def _regions_avoiding_handle(
     return safe
 
 
+def lid_label_backing(box: BoxSpec) -> float:
+    """Lid material under an inlaid label's surface before the pocket is cut.
+
+    A handled lid label sits on the lid top; a stackable lid label sits on the
+    floor of the recess that receives the next bin stepped foot.
+    """
+    return stack_lid_rise(box) - (STACK_SEAT_DEPTH if lid_stackable(box) else 0.0)
+
+
 def _lid_text_parts(
     box: BoxSpec,
     top_z: float,
@@ -650,6 +566,13 @@ def _lid_text_parts(
     raised = spec.label_style == "raised"
     if raised and spec.stackable:
         raise ValueError("raised lettering cannot be used on a stackable lid")
+    depth = lid_label_relief_mm(spec)
+    if not raised and lid_label_backing(box) - depth < LID_LABEL_MIN_BACKING - _EPS:
+        raise ValueError(
+            f"a {depth:g} mm Inlay depth would leave only "
+            f"{max(0.0, lid_label_backing(box) - depth):.1f} mm under the lid label; "
+            "choose a shallower depth or a thicker lid"
+        )
     parts: list[tuple[str, trimesh.Trimesh, bool]] = []
     for text, (x0, y0, x1, y1) in regions:
         text = str(text or "").strip()
@@ -671,7 +594,6 @@ def _lid_text_parts(
         if spec.label_orientation == "vertical":
             outline = affinity.rotate(outline, 90.0, origin=(0.0, 0.0))
         outline = affinity.translate(outline, xoff=(x0 + x1) / 2.0, yoff=(y0 + y1) / 2.0)
-        depth = LID_LABEL_RAISE if raised else TEXT_DEPTH
         parts.append((text, text_prism(outline, top_z, depth=depth, raised=raised), raised))
     return parts
 
@@ -687,49 +609,40 @@ def make_lid_parts(
 
     rim = eff.z
     rise = stack_lid_rise(eff)
-    plug_outline = _plug_polygon(eff)
+    plug_outline = _lid_plug_polygon(eff)
     outer = wavy_outer_polygon(eff)
 
-    # The lid has two independent jobs: a flat rim shoulder that carries the
-    # vertical stack load straight into the body wall, and (below, unioned in
-    # separately) a plug with its own running clearance.  The shoulder must
-    # never tighten or wedge that plug - it lives entirely above the rim.
-    rim_seat_outline = _lid_rim_seat_outline(eff)
-    outer_flare = _lid_outer_flare_height(eff)
-    rim_seat = _extrude_polygon(rim_seat_outline, STACK_LID_RIM_SEAT_THICKNESS)
-    rim_seat.apply_translation((0.0, 0.0, rim))
-
-    flare_start = rim + STACK_LID_RIM_SEAT_THICKNESS
-    flare_end = flare_start + outer_flare
-    flare = _profile_loft(
-        [rim_seat_outline, outer], [flare_start, flare_end],
-    )
-    plate_parts = [rim_seat, flare]
-    if rim + rise > flare_end + _EPS:
-        cap = _extrude_polygon(outer, rim + rise - flare_end)
-        cap.apply_translation((0.0, 0.0, flare_end))
-        plate_parts.append(cap)
+    # Flush seat: the plate is the bin full outer outline from the rim up, so
+    # its underside bears on the whole rim top and the exterior meets the wall
+    # with no step.  The plug below it keeps its own running clearance, and the
+    # lid lock bumps keep their own interference, both independent of the
+    # plate.  Nothing here is a preview-only offset.
+    plate = _extrude_polygon(outer, rise)
+    plate.apply_translation((0.0, 0.0, rim))
 
     plug = _extrude_polygon(plug_outline, STACK_PLUG_DEPTH)
     plug.apply_translation((0.0, 0.0, rim - STACK_PLUG_DEPTH))
 
-    lid = union([*plate_parts, plug, *_lid_lock_bumps(eff, rim)])
+    lid = union([plate, plug, *_lid_lock_bumps(eff, rim)])
 
     if lid_stackable(eff):
-        # Recess accepting the next stackable-lid bin's stepped base.
+        # Recess accepting the next stackable-lid bin stepped base. It keeps
+        # the direct-foot fit, whatever the lid own plug fit is.
         seat = _extrude_polygon(
-            plug_outline.buffer(STACK_FIT), STACK_SEAT_DEPTH + 1.0
+            _plug_polygon(eff).buffer(STACK_FIT), STACK_SEAT_DEPTH + 1.0
         )
         seat.apply_translation((0.0, 0.0, rim + rise - STACK_SEAT_DEPTH))
         lid = difference([lid, seat])
     elif lid_has_handle(eff):
-        lid = union([lid, _lid_handle(eff, rim + rise, outer)])
+        handle = _lid_handle_mesh(eff)
+        handle.apply_translation((0.0, 0.0, rim + rise))
+        lid = union([lid, handle])
 
     regions = label_regions or []
     if lid_spec(eff).label_enabled and not regions:
-        safe = plug_outline if lid_stackable(eff) else outer
+        safe = _plug_polygon(eff) if lid_stackable(eff) else outer
         regions = [(lid_spec(eff).label_text, tuple(float(v) for v in safe.bounds))]
-    regions = _regions_avoiding_handle(eff, outer, regions)
+    regions = _regions_avoiding_handle(eff, regions)
     label_surface = rim + rise - (STACK_SEAT_DEPTH if lid_stackable(eff) else 0.0)
     labels = _lid_text_parts(eff, label_surface, regions)
     sunk = [mesh for _text, mesh, raised in labels if not raised]
@@ -744,9 +657,25 @@ def make_stack_lid(box: BoxSpec) -> trimesh.Trimesh:
     return make_lid_parts(box)[0]
 
 
+def lid_thickness_options(box: BoxSpec) -> dict[str, float]:
+    """Resolved physical lid rise for every Thin/Medium/Thick choice.
+
+    Read-only: each candidate is a throwaway copy of the requested design, so
+    the active thickness is never touched.
+    """
+    if not lid_enabled(box):
+        return {}
+    spec = lid_spec(box)
+    return {
+        name: round(stack_lid_rise(replace(box, lid=replace(spec, thickness=name))), 3)
+        for name in LID_THICKNESSES
+    }
+
+
 def stack_closed_height(box: BoxSpec) -> float:
-    """Detached physical envelope, including the interlocking foot depth."""
-    return stack_effective_box(box).z + stack_lid_rise(box) + lid_handle_height(box)
+    """Detached physical envelope, including the interlocking foot depth and
+    the tallest thing above the lid (handle or Raised lettering)."""
+    return stack_effective_box(box).z + stack_lid_rise(box) + lid_above_top_height(box)
 
 
 def stack_module_height(box: BoxSpec) -> float:
@@ -773,6 +702,9 @@ def stack_summary(box: BoxSpec) -> dict:
         "engagement_mm": round(stack_step_depth(box), 3),
         "body_z_mm": round(eff.z, 3),
         "lid_rise_mm": round(stack_lid_rise(box), 3),
+        "lid_thickness_mm": lid_thickness_options(box),
+        "lid_fit_mm": round(lid_fit_mm(box), 3) if lid_enabled(box) else None,
+        "lid_above_top_mm": round(lid_above_top_height(box), 3),
         "wall_mm": round(eff.wall, 3),
         "wall_raised": eff.wall > box.wall + _EPS,
         "base_mm": round(eff.base_thickness, 3),
@@ -808,10 +740,21 @@ def validate_stack_design(box: BoxSpec) -> None:
         if lid_stackable(box) and stack_lid_rise(eff) - STACK_SEAT_DEPTH < STACK_MIN_FLOOR_SKIN - _EPS:
             raise ValueError("the stacking lid does not leave enough material under its seat")
         bump_profile = _lid_lock_profile(
-            STACK_FIT + LID_LOCK_INTERFERENCE, eff.z,
+            lid_fit_mm(eff) + LID_LOCK_INTERFERENCE, eff.z,
         )
         if min(z for _, z in bump_profile) < eff.z - STACK_PLUG_DEPTH - _EPS:
             raise ValueError("the stacking lid plug is too short for its lock points")
+        if lid_has_handle(box):
+            _lid_handle_mesh(box)         # raises if the chosen handle cannot fit
+        spec = lid_spec(box)
+        if spec.label_enabled and spec.label_style != "raised":
+            depth = lid_label_relief_mm(spec)
+            if lid_label_backing(eff) - depth < LID_LABEL_MIN_BACKING - _EPS:
+                raise ValueError(
+                    f"a {depth:g} mm Inlay depth would leave only "
+                    f"{max(0.0, lid_label_backing(eff) - depth):.1f} mm under the lid label; "
+                    "choose a shallower depth or a thicker lid"
+                )
     elif direct_stack_enabled(box):
         _groove_band(eff)
     _plug_polygon(eff)

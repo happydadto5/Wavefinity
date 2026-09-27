@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-26 — Lid & Stacking fit and handles (Fix 071D)
+
+- Lid & Stacking now offers three **Stacking Methods**: Stackable bin on bin, Stackable bin on lid, and Lid with handle — non-stackable. Remove the option to go back to no lid.
+- The lid seats **flush** at the rim: no recessed step or gap at the seam. New **Lid fit** (Tight 0.15 / Standard 0.25 / Loose 0.35 mm per side) changes only the lid plug; direct stacking and the stackable-lid top recess keep their fit, and the snap lock keeps its strength at every fit.
+- Lid thickness shows real measurements for your bin, for example `2.8 mm — Medium`.
+- Lid labels are Inlaid or Raised with Inlay depth / Raised height of 0.2–0.8 mm. Older files keep their old depths.
+- New rounded **Knob** and arched **Pull** handles replace the cone and square bar. A handle that cannot fit a very small lid is refused with a clear message. Closed height now includes the handle and any raised lettering.
+- Saving a stackable or handled lid locally now keeps your requested settings instead of the shortened body.
+
 ## 2026-09-26 — Text, Divider labels and Bore supports (Fix 071C)
 
 - **Text** has one **Text Type**: On base or At rim, Inlaid or Raised, with Inlay depth / Raised height presets (0.2–0.8 mm). Footprint, Place it for me and Text dragging are gone; Text is centered automatically, with Letter height and Turn kept. One On-base Text per bin and one At-rim Text per rim side. Old Text and the old single rim label open and migrate.

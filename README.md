@@ -53,10 +53,34 @@ own Base Trim, both from the Space header controls. Lid & Stacking is
 a bin-level option. The selected wall/base values are shown and saved; they are
 never silent generation-only overrides.
 
-**Lid & Stacking** offers three ordinary-bin configurations: **Stackable Bin**
-stacks directly with no lid, **Stackable Lid** closes the bin and keeps a flat
-seat for the next bin, and **Handled Lid** adds a knob or pull but does not
-stack. Lid labels may be flush or raised; stackable lids use flush labels only.
+**Lid & Stacking** offers three ordinary-bin **Stacking Methods**: **Stackable
+bin on bin** stacks directly with no lid, **Stackable bin on lid** closes the bin
+and keeps a flat seat for the next bin, and **Lid with handle — non-stackable**
+adds a knob or pull but does not stack. Remove the Lid & Stacking option to go
+back to no lid and no stacking. Controls follow the method: bin on bin shows no
+lid controls; bin on lid shows Lid thickness, Lid fit and the label controls;
+lid with handle also shows Handle type, size and position and full label
+choices. Choices you set under one method are remembered when you switch away
+and back, but hidden ones never change what is generated.
+
+The lid closes **flush**: its exterior meets the bin outside wall at the rim with
+no step or gap, and its underside rests on the rim. Only the plug that enters
+the bin mouth has running clearance, set by **Lid fit** — **Tight 0.15**,
+**Standard 0.25** (default, and the fit older designs always had) or **Loose
+0.35 mm per side**. Lid fit changes only that plug; the direct bin-on-bin foot
+and a stackable lid's top recess keep the accepted 0.25 mm stack fit, and the
+lid's snap lock keeps the same interference at every fit. **Lid thickness** shows
+each choice as a measurement first — for example `2.8 mm — Medium` — resolved
+for the current bin by the same geometry that builds the lid. **Lid labels** are
+**Inlaid** or **Raised**, with **Inlay depth** or **Raised height** of 0.2, 0.4,
+0.6 or 0.8 mm (new labels start at 0.4 mm; older files keep their 0.4 mm inlaid
+and 0.6 mm raised). Inlay never cuts into the lid's required floor or seat, and
+a stackable lid cannot be Raised. The **Knob** is a rounded dome that flares into
+the lid and the **Pull** a smooth arch with flared roots; a handle too large for
+a very small lid is refused with a message to choose a smaller size or a larger
+lid, never shrunk. The reported closed height is the tallest point of the whole
+lid, handle and lettering included. Storage Box (B4B) lids are a separate system
+and are not changed by any of this.
 A Divider can supply one lid label per compartment. Once any compartment lid
 label contains text, clear those labels before changing the Divider layout.
 Side connectors are unavailable while a lid is fitted.
@@ -82,7 +106,7 @@ lid's *Label* choice → its label text). One setting has exactly one control.
 Anything naming the output file — the *Bin Name* — sits at the top of the
 Designer, before the dimensions, not in the middle of the build form. The
 Storage Box case settings group their selects as *Lid*, *Case options*, *Label*
-and *Material*, and the ordinary bin's Lid & Stacking editor groups *Configuration*,
+and *Material*, and the ordinary bin's Lid & Stacking editor groups *Stacking Method*,
 *Lid*, *Handle* and *Label* the same way.
 
 **Automatic changes are shown, never silent.** When the app overrides what was
