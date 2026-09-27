@@ -95,45 +95,8 @@ def cradle_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, fl
     }
 
 
-@feature(
-    "cradle", title="Cradle", display="Cradle — tools laid down",
-    description="A half-circle notch that holds a tool on its side.",
-    capabilities=("qty", "along", "item", "alternate"),
-    item_profiles=("round",),  # a cradle is a half-round notch; it never offers Bore's shapes
-    options=(
-        OptionDefinition("Spacing", "spacing", "0", minimum=0.0, note="mm of clear air between neighbouring troughs; 0 = touching"),
-        # Legacy: still tolerated in saved data, but the geometry always uses the
-        # fixed CRADLE_FLOOR_GAP, so it is not an editor control.
-        OptionDefinition("Floor gap", "floor_gap", "2", editor=False, legacy=True, minimum=CRADLE_MIN_FLOOR_GAP, note="always the fixed floor gap; not a current control"),
-        OptionDefinition("% from ends", "end_margin", "10", minimum=0.0, maximum=CRADLE_ALTERNATE_END_MARGIN_MAX * 100.0, note="percent of the run kept clear at each end (used with alternate ends)"),
-        OptionDefinition("Offset from center", "run_offset", "0", editor=False, minimum=-CRADLE_RUN_OFFSET_MAX * 100.0, maximum=CRADLE_RUN_OFFSET_MAX * 100.0, note="percent shift of the row along its run"),
-        OptionDefinition("Rib thickness", "rib_thickness", "", editor=False, legacy=True, maximum=CRADLE_RIB_MAX, note="always worked out from the held item; not a current control"),
-    ), order=10,
-)
-def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
-    """Half-round troughs holding a tool lying along X or Y.
-
-    Each tool beds into a block the length of the tool with a half-cylinder
-    channel cut the whole way along its top - the entire tool, shaft and
-    handle, in one continuous channel rather than balancing on two ribs. The
-    channel's mouth sits on the block's top face, so the tool drops straight
-    in and no layer overhangs the one below it.
-
-    ``spacing`` sets how a row of troughs relates:
-
-    * ``0`` - neighbours join into **one continuous body**. Their facing side
-      walls fully overlap, so the joint is no thicker than an exposed side.
-    * up to half a wall thickness - still one body, while the shared joint
-      widens from one side-wall thickness to two.
-    * beyond that - each trough is its **own** solid, with the remaining
-      ``spacing`` opening as clear air between them.
-
-    ``alternate_ends`` places every second trough near the opposite end of the
-    run axis, leaving ``options['end_margin']`` percent (default ten) of that
-    axis clear at each end. With ``alternate_ends`` off, ``options['run_offset']``
-    percent slides every trough together along the run - signed, 0 centres them,
-    +/-100 pushes a trough edge to a zone wall.
-    """
+def _cradle_seat_plan(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
+    """The builder and preview share one trough seat/offset calculation."""
     item = _need_item(spec_feature)
     zone = spec_feature.zone
     along = spec_feature.along
@@ -209,6 +172,89 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
         else _cradle_offset(spec_feature) * max(0.0, (run - length) / 2.0)
     )
 
+    alternate_shift = ((run - length) / 2.0 - end_margin * run if alternating else 0.0)
+    return {
+        "item": item, "along": along, "radius": radius, "axis_z": axis_z,
+        "length": length, "trough_height": trough_height, "body": body,
+        "count": count, "alternating": alternating, "spacing": spacing,
+        "side_wall": side_wall, "centre_along": centre_along,
+        "centre_across": centre_across, "used": used, "seats": seats,
+        "offset_shift": offset_shift, "alternate_shift": alternate_shift,
+    }
+
+
+def cradle_reference_meshes(box: BoxSpec, one: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    """Physical tool segments resting in the exact trough seats."""
+    plan = _cradle_seat_plan(box, one, base_z)
+    item, along = plan["item"], plan["along"]
+    meshes = []
+    for index, seat in enumerate(plan["seats"]):
+        shift = ((plan["alternate_shift"] if index % 2 else -plan["alternate_shift"])
+                 if plan["alternating"] else plan["offset_shift"])
+        run = -item.length / 2.0
+        segments = tuple(reversed(item.segments)) if plan["alternating"] and index % 2 else item.segments
+        for segment in segments:
+            mesh = trimesh.creation.cylinder(radius=segment.diameter / 2.0,
+                                              height=segment.length, sections=48)
+            mesh.apply_transform(trimesh.transformations.rotation_matrix(
+                math.pi / 2.0, (0, 1, 0) if along == "x" else (1, 0, 0)))
+            offset = run + segment.length / 2.0
+            mesh.apply_translation((plan["centre_along"] + shift + offset, seat, plan["axis_z"])
+                                   if along == "x" else
+                                   (seat, plan["centre_along"] + shift + offset, plan["axis_z"]))
+            meshes.append(mesh)
+            run += segment.length
+    return meshes
+
+
+@feature(
+    "cradle", title="Cradle", display="Cradle — tools laid down",
+    description="A half-circle notch that holds a tool on its side.",
+    capabilities=("qty", "along", "item", "alternate"),
+    item_profiles=("round",),  # a cradle is a half-round notch; it never offers Bore's shapes
+    options=(
+        OptionDefinition("Spacing", "spacing", "0", minimum=0.0, note="mm of clear air between neighbouring troughs; 0 = touching"),
+        # Legacy: still tolerated in saved data, but the geometry always uses the
+        # fixed CRADLE_FLOOR_GAP, so it is not an editor control.
+        OptionDefinition("Floor gap", "floor_gap", "2", editor=False, legacy=True, minimum=CRADLE_MIN_FLOOR_GAP, note="always the fixed floor gap; not a current control"),
+        OptionDefinition("% from ends", "end_margin", "10", minimum=0.0, maximum=CRADLE_ALTERNATE_END_MARGIN_MAX * 100.0, note="percent of the run kept clear at each end (used with alternate ends)"),
+        OptionDefinition("Offset from center", "run_offset", "0", editor=False, minimum=-CRADLE_RUN_OFFSET_MAX * 100.0, maximum=CRADLE_RUN_OFFSET_MAX * 100.0, note="percent shift of the row along its run"),
+        OptionDefinition("Rib thickness", "rib_thickness", "", editor=False, legacy=True, maximum=CRADLE_RIB_MAX, note="always worked out from the held item; not a current control"),
+    ), order=10,
+)
+def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    """Half-round troughs holding a tool lying along X or Y.
+
+    Each tool beds into a block the length of the tool with a half-cylinder
+    channel cut the whole way along its top - the entire tool, shaft and
+    handle, in one continuous channel rather than balancing on two ribs. The
+    channel's mouth sits on the block's top face, so the tool drops straight
+    in and no layer overhangs the one below it.
+
+    ``spacing`` sets how a row of troughs relates:
+
+    * ``0`` - neighbours join into **one continuous body**. Their facing side
+      walls fully overlap, so the joint is no thicker than an exposed side.
+    * up to half a wall thickness - still one body, while the shared joint
+      widens from one side-wall thickness to two.
+    * beyond that - each trough is its **own** solid, with the remaining
+      ``spacing`` opening as clear air between them.
+
+    ``alternate_ends`` places every second trough near the opposite end of the
+    run axis, leaving ``options['end_margin']`` percent (default ten) of that
+    axis clear at each end. With ``alternate_ends`` off, ``options['run_offset']``
+    percent slides every trough together along the run - signed, 0 centres them,
+    +/-100 pushes a trough edge to a zone wall.
+    """
+    plan = _cradle_seat_plan(box, spec_feature, base_z)
+    along, radius, axis_z, length = (plan[key] for key in ("along", "radius", "axis_z", "length"))
+    trough_height, body, count, alternating = (plan[key] for key in
+                                                ("trough_height", "body", "count", "alternating"))
+    spacing, side_wall, centre_along, centre_across = (plan[key] for key in
+                                                       ("spacing", "side_wall", "centre_along", "centre_across"))
+    used, seats, offset_shift, alternate_shift = (plan[key] for key in
+                                                  ("used", "seats", "offset_shift", "alternate_shift"))
+
     def _channel(seat: float, shift: float) -> trimesh.Trimesh:
         cut = trimesh.creation.cylinder(
             radius=radius, height=length + 2.0, sections=48
@@ -249,10 +295,6 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
         return [_body(centre_across, used, seats, offset_shift)]
 
     solids: list[trimesh.Trimesh] = []
-    alternate_shift = (
-        (run - length) / 2.0 - end_margin * run
-        if alternating else 0.0
-    )
     for index, seat in enumerate(seats):
         shift = (
             (alternate_shift if index % 2 else -alternate_shift)

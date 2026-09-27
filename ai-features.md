@@ -53,7 +53,9 @@ Wavefinity may be used without a typed Space or inside one of these typed Spaces
 
 ## Hard object-height cap
 
-Drawer and Storage Box are a hard vertical ceiling: no part of a Bore-held object may end up above the Space's own height. Surface and Pegboard have no such cap, and neither does an ordinary Design with no active Space. The generated prompt always states which applies and, when capped, the exact height. This is a legality rule enforced by Wavefinity's own candidate check, not merely a style preference.
+Drawer and Storage Box are a hard vertical ceiling: the full physical envelope of a Bore-held object, including its width/profile and tilt, must remain below the Space's own height. Surface and Pegboard have no such cap, and neither does an ordinary Design with no active Space. The generated prompt always states which applies and, when capped, the exact height. This is a legality rule enforced by Wavefinity's own candidate check, not merely a style preference. Manual Design shows an advisory warning rather than blocking generation.
+
+Pocket, Post, Slot and Steps may include an optional `reference_object` with positive finite `width`, `depth` and `height` in millimetres. It is a 3D Preview/planning envelope only; it does not alter the holder or print. Include it only when the person supplies or confirms all three measurements. Bore and Cradle use their existing measured `item` instead. Photo Nest is recommend-only for AI Design.
 
 ## Drawer
 

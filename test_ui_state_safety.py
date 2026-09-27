@@ -35,6 +35,110 @@ def node_json(source: str):
 
 
 class BrowserStateLogicTests(unittest.TestCase):
+    def test_reference_commit_uses_reference_route_without_resizing(self):
+        source = function_source("commitReferenceEdit", APP)
+        script = r"""
+const clone=v=>JSON.parse(JSON.stringify(v));
+const original={kind:'post',zone:[-10,-8,10,8]};
+const state={design:{layout:{features:[original]}},draft:{...clone(original),
+ reference_object:{width:22,depth:16,height:16}},draftRequest:3,referenceEditPending:true,
+ selected:0,draftIsNew:false};
+const draftCommitIndex=()=>0;
+const calls=[];
+const api=async(path,payload)=>{calls.push(path);return {design:{layout:{features:[clone(payload.feature)]}},selected:0}};
+const recordHistory=()=>calls.push('history'),renderPlaced=()=>{},updateSelectionButtons=()=>{};
+const refreshPreview=async()=>calls.push('preview');
+const $=()=>({textContent:'',classList:{add(){}}});
+__SOURCE__
+commitReferenceEdit().then(()=>process.stdout.write(JSON.stringify({calls,
+ zone:state.design.layout.features[0].zone,pending:state.referenceEditPending})));
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {"calls": ["/api/feature/reference", "history", "preview"],
+                                            "zone": [-10, -8, 10, 8], "pending": False})
+
+    def test_reference_editor_seed_and_positive_edit_leave_holder_size_alone(self):
+        source = "\n".join(function_source(name, APP) for name in
+                           ("referenceSeedForDraft", "updateReferenceAxis"))
+        script = r"""
+const number=(v,f)=>Number.isFinite(Number(v))?Number(v):f;
+const _nestMeasuredThickness=o=>o?.tool_thickness || null;
+__SOURCE__
+const draft={kind:'post',zone:[-10,-8,10,8],options:{}};
+const before=JSON.stringify(draft.zone);
+draft.reference_object=referenceSeedForDraft(draft,{height:16},{box:{z:40,base_thickness:.6}});
+const rejected=updateReferenceAxis(draft,'width','0');
+const accepted=updateReferenceAxis(draft,'width','22');
+process.stdout.write(JSON.stringify({ref:draft.reference_object,before,after:JSON.stringify(draft.zone),rejected,accepted}));
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {"ref": {"width": 22, "depth": 16, "height": 16},
+                                            "before": "[-10,-8,10,8]", "after": "[-10,-8,10,8]",
+                                            "rejected": False, "accepted": True})
+
+    def test_reference_preview_group_follows_interior_visibility_and_framing(self):
+        source = "\n".join(function_source(name, APP) for name in
+                           ("classifyOrdinaryFace", "previewAabbWithoutReference", "currentPreviewPasses"))
+        script = r"""
+const state={binVisible:true,interiorVisible:true,xrayOn:false};
+const b4bEnabled=()=>false,baseTrimEnabled=()=>false;
+const buffers={allAabb:{min:[-5,-5,0],max:[5,5,100]},groups:{
+ bin:{aabb:{min:[-5,-5,0],max:[5,5,30]}},
+ interior:{aabb:{min:[-3,-3,1],max:[3,3,25]}},
+ reference:{aabb:{min:[-2,-2,1],max:[2,2,100]}}}};
+__SOURCE__
+const shown=currentPreviewPasses(buffers);
+state.interiorVisible=false;
+const hidden=currentPreviewPasses(buffers);
+process.stdout.write(JSON.stringify({group:classifyOrdinaryFace({kind:'reference_object'}),
+ shown:shown.passes,shownZ:shown.aabb.max[2],hidden:hidden.passes,hiddenZ:hidden.aabb.max[2]}));
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {
+            "group": "reference",
+            "shown": [{"group": "bin", "alpha": 1}, {"group": "interior", "alpha": 1},
+                      {"group": "reference", "alpha": .3}], "shownZ": 100,
+            "hidden": [{"group": "bin", "alpha": 1}], "hiddenZ": 30,
+        })
+
+    def test_modifier_immediate_save_flushes_edge_grip_and_opening(self):
+        source = "\n".join(function_source(name, APP) for name in
+                           ("flushModifierForm", "saveModifierPart"))
+        script = r"""
+const clone=v=>JSON.parse(JSON.stringify(v));
+const cases=[['edge_mount','label_text','Last label'],
+ ['inside_grip','size','large'],['side_openings','shape','square']];
+const seen=[];
+let state,pendingDesignHistory,visible,debounced,histories,fail;
+const beginDesignMutation=()=>true,finishDesignMutation=()=>{};
+const cancelChangedDesignDebounce=()=>{debounced=false};
+const applyLiveFormWithModifierConflictGuard=()=>{
+ state.design.box[state.modifierEditing][visible.key]=visible.value;return true;
+};
+const recordHistory=before=>{if(JSON.stringify(before)!==JSON.stringify(state.design))histories++};
+const api=async()=>{if(fail)throw Error('validation failed');return {design:clone(state.design)}};
+const clearDraftSelection=()=>{state.modifierEditing=null},renderPlaced=()=>{},refreshPreview=async()=>{};
+const toast=()=>{};
+__SOURCE__
+(async()=>{
+ for(const [kind,key,value] of cases){
+  state={modifierEditing:kind,design:{box:{[kind]:{[key]:'old',label_enabled:true}}},canGenerate:true};
+  pendingDesignHistory=clone(state.design);visible={key,value};debounced=true;histories=0;fail=false;
+  await saveModifierPart();
+  seen.push({kind,value:state.design.box[kind][key],debounced,histories,closed:state.modifierEditing===null});
+ }
+ state={modifierEditing:'inside_grip',design:{box:{inside_grip:{size:'old'}}},canGenerate:true};
+ pendingDesignHistory=clone(state.design);visible={key:'size',value:'medium'};debounced=true;histories=0;fail=true;
+ await saveModifierPart();
+ seen.push({kind:'failed',value:state.design.box.inside_grip.size,closed:state.modifierEditing===null});
+ process.stdout.write(JSON.stringify(seen));
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__SOURCE__", source)
+        result = node_json(script)
+        for actual, expected in zip(result[:3], ("Last label", "large", "square")):
+            self.assertEqual(actual["value"], expected)
+            self.assertFalse(actual["debounced"])
+            self.assertEqual(actual["histories"], 1)
+            self.assertTrue(actual["closed"])
+        self.assertEqual(result[3], {"kind": "failed", "value": "medium", "closed": False})
+
     def test_space_canvas_switch_remembers_design_view_and_uses_space_renderer(self):
         source = function_source("activatePreviewView", APP) + "\n" + function_source("preferredDesignView", APP)
         script = r"""
@@ -300,7 +404,7 @@ const state={design,activeSpace:space,designInventoryId:'B1',previewRequest:7,
 let release; const deferredDraftSwitch=()=>new Promise(resolve=>release=resolve);
 const $=()=>({hidden:false}),$$=()=>[];
 const clone=v=>JSON.parse(JSON.stringify(v));
-const resetNestPhotoSession=()=>{},commitEdgeMountFormBeforeSwitch=()=>true;
+const resetNestPhotoSession=()=>{},flushModifierForm=()=>true;
 const cancelPendingDraftWork=()=>{},updateNudgeUI=()=>{},AUTO_FOOTPRINT_KINDS=new Set();
 const updateInteriorModeVisibility=()=>{},partInfo=()=>({}),syncDraftEditorIdentity=()=>{};
 const renderDraftFields=()=>{},renderPlaced=()=>{},updateSelectionButtons=()=>{};

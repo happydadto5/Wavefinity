@@ -158,6 +158,18 @@ class Zone:
 
 
 @dataclass(frozen=True)
+class ReferenceObject:
+    width: float
+    depth: float
+    height: float
+
+    def __post_init__(self) -> None:
+        if not all(math.isfinite(value) and value > 0 for value in
+                   (self.width, self.depth, self.height)):
+            raise ValueError("Reference object Width, Depth and Height must be positive finite mm")
+
+
+@dataclass(frozen=True)
 class Feature:
     """One holder, of one kind, occupying one zone."""
 
@@ -188,10 +200,16 @@ class Feature:
     # legacy save from before this field existed (Reset then falls back to
     # the current ``contour`` as its own baseline).
     source_contour: tuple[tuple[float, float], ...] | None = None
+    reference_object: ReferenceObject | None = None
 
     def __post_init__(self) -> None:
         if not self.kind:
             raise ValueError("a feature needs a kind")
+        if self.reference_object is not None:
+            if self.kind not in {"pocket", "post", "slot", "steps", "nest"}:
+                raise ValueError(f"{self.kind} cannot have a reference object")
+            if not isinstance(self.reference_object, ReferenceObject):
+                raise ValueError("reference_object must have Width, Depth and Height in mm")
         if self.along not in {"x", "y"}:
             raise ValueError("feature orientation must be 'x' or 'y'")
         if self.count is not None and self.count < 1:
@@ -436,10 +454,26 @@ def layout_to_dict(layout: Layout) -> dict:
                     [list(point) for point in one.source_contour]
                     if one.source_contour else None
                 ),
+                **({"reference_object": {
+                    "width": one.reference_object.width,
+                    "depth": one.reference_object.depth,
+                    "height": one.reference_object.height,
+                }} if one.reference_object is not None else {}),
             }
             for one in layout.features
         ],
     }
+
+
+def _reference_from_dict(raw: object) -> ReferenceObject | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or set(raw) != {"width", "depth", "height"}:
+        raise ValueError("reference_object needs exactly Width, Depth and Height in mm")
+    values = [raw[axis] for axis in ("width", "depth", "height")]
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
+        raise ValueError("reference_object dimensions must be positive finite numbers in mm")
+    return ReferenceObject(*(float(value) for value in values))
 
 
 def layout_from_dict(data: dict) -> Layout:
@@ -482,6 +516,7 @@ def layout_from_dict(data: dict) -> Layout:
             float(raw.get("scale", 1.0)),
             (tuple((float(point[0]), float(point[1])) for point in raw["source_contour"])
              if raw.get("source_contour") else None),
+            _reference_from_dict(raw.get("reference_object")),
         )
         # Legacy auto-placement and a fresh Text Type move are resolved once, by
         # resolve_text_features, which has the bin to place them in.

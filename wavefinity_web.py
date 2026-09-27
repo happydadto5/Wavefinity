@@ -141,7 +141,7 @@ from organizer_inserts import (
     snapped_zone,
     text_of,
 )
-from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED, is_walls_only, normalize_bore_style
+from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED, is_walls_only, normalize_bore_style, bore_reference_top
 from organizer_inserts._core import ITEM_CLEARANCE, ITEM_PROFILES, feature_touches_wall
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from bambu_handoff import is_bambu_studio_executable, stage_bambu_inputs
@@ -1985,9 +1985,35 @@ def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
     planning_record = inventory_bin_record(stack_request, resolved, None, label, part_name, scoop)
     planning = object_height_plan(canonical, resolved.object_height_mm)
     planning["effective_mm"] = max(stack_part_height(planning_record), planning["object_top_mm"] or 0.0)
+    effective = list(layout.features)
+    if draft is not None:
+        if selected is not None and 0 <= selected < len(effective):
+            effective[selected] = draft
+        else:
+            effective.append(draft)
+    effective_layout = replace(layout, features=tuple(effective))
+    duplicate_text_indexes = [index for index in range(len(layout.features))
+                              if effective[index].kind == "text" and _text_duplicate_destination(
+                                  stack_request, effective_layout, index, label, label_location, scoop) is not None]
+    space = _ai_space_context(payload.get("space"))
+    bore_warning = None
+    cap_z = _capped_space_height(payload.get("space"))
+    if cap_z is not None:
+        for one in effective:
+            if one.kind == "bore" and one.item is not None:
+                try:
+                    top = bore_reference_top(box, one, base_height(box, layout.mode))
+                except Exception:
+                    continue
+                if top > cap_z + 1e-6:
+                    bore_warning = {"top_mm": math.ceil(top * 1000) / 1000, "cap_mm": cap_z,
+                                    "space_kind": space["kind"]}
+                    break
     return {
         "design": canonical,
         "planning": planning,
+        "bore_ceiling_warning": bore_warning,
+        "duplicate_text_indexes": duplicate_text_indexes,
         "stack": stack_block,
         "label_outline": scene["label_outline"],
         "label_meta": scene["label_meta"],
@@ -2430,37 +2456,77 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def apply_reference_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Commit preview/planning data without running holder sizing owners."""
+    _reject_if_b4b(payload, "editing a reference object")
+    request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    one = _feature_from_json(payload["feature"], layout.mode)
+    features = list(layout.features)
+    index = payload.get("index")
+    if index is None:
+        if one.reference_object is None:
+            raise ValueError("a new reference edit needs a reference object")
+        features.append(one)
+        selected = len(features) - 1
+    else:
+        selected = int(index)
+        if not 0 <= selected < len(features):
+            raise ValueError("the selected interior part no longer exists")
+        if replace(one, reference_object=features[selected].reference_object) != features[selected]:
+            raise ValueError("Reference edit also changed printable holder settings")
+        features[selected] = one
+    updated = replace(layout, features=tuple(features))
+    box = _interior_work_box(request_box)
+    updated.validate(box)
+    validate_customization_clearance(box, updated.features, label, label_location, scoop, updated.mode)
+    return {"design": design_to_dict(request_box, updated, label, part_name, label_location, scoop),
+            "selected": selected}
+
+
+def _text_duplicate_destination(request_box: BoxSpec, layout: Layout, index: int,
+                                label: str, label_location: str, scoop: bool):
+    """One authority for the preview action and the duplicate endpoint."""
+    from organizer_engine import top_label_zone
+    from organizer_inserts._text import canonical_text_feature
+    features = list(layout.features)
+    if not 0 <= index < len(features) or features[index].kind != "text":
+        return None
+    source = features[index]
+    if source.options.get("level") == "rim" or any(
+        one.kind == "text" and one.options.get("level") == "rim" for one in features
+    ):
+        return None
+    box = _interior_work_box(request_box)
+    for side in ("back", "front", "left", "right"):
+        options = {**source.options, "level": "rim", "rim_side": side, "quarter_turns": 0}
+        clone = canonical_text_feature(replace(source, zone=Zone(*top_label_zone(box, side).bounds),
+                                               options=options))
+        updated = replace(layout, features=tuple(features + [clone]))
+        try:
+            updated.validate(box)
+            validate_customization_clearance(box, updated.features, label, label_location, scoop, updated.mode)
+            scene = preview_geometry(box, label, updated.features, updated.mode,
+                                     label_location, scoop, layout=updated)
+            if scene["fits"] and not scene["feature_errors"]:
+                return side, clone
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
 def duplicate_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Duplicate a Text to a free destination or a completed Photo Nest."""
     request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     index = int(payload["index"])
     features = list(layout.features)
     if 0 <= index < len(features) and features[index].kind == "text":
-        from organizer_engine import top_label_zone
-        from organizer_inserts._text import canonical_text_feature
-        box = _interior_work_box(request_box)
-        used = {("rim", str(f.options.get("rim_side") or "back")) if f.options.get("level") == "rim"
-                else ("base", "") for f in features if f.kind == "text"}
-        available = [("rim", side) for side in ("back", "front", "left", "right")
-                     if ("rim", side) not in used]
-        if ("base", "") not in used:
-            available.append(("base", ""))
-        if not available:
-            raise ValueError("No free Text destination. Remove a Text or change a rim side first.")
-        level, side = available[0]
-        source = features[index]
-        options = {**source.options, "level": level, "rim_side": side or "back",
-                   "quarter_turns": 0 if level == "rim" else source.options.get("quarter_turns", 0)}
-        if level == "rim":
-            zone = Zone(*top_label_zone(box, side).bounds)
-        else:
-            zone = default_feature(box, "text", mode=layout.mode).zone
-        clone = canonical_text_feature(replace(source, zone=zone, options=options))
+        destination = _text_duplicate_destination(request_box, layout, index, label, label_location, scoop)
+        if destination is None:
+            raise ValueError("This Text has no legal rim side for Duplicate to rim.")
+        side, clone = destination
         updated = replace(layout, features=tuple(features + [clone]))
-        updated.validate(box)
-        validate_customization_clearance(box, updated.features, label, label_location, scoop, updated.mode)
         return {"design": design_to_dict(request_box, updated, label, part_name, label_location, scoop),
-                "selected": len(features)}
+                "selected": len(features), "rim_side": side}
     if not 0 <= index < len(features) or features[index].kind != "nest" or not features[index].contour:
         raise ValueError("the selected Photo Nest no longer exists")
     if any(one.kind != "nest" for one in features):
@@ -3681,7 +3747,7 @@ def ai_capability_manifest() -> dict[str, Any]:
     base = _ai_example_base()
     features: list[dict[str, Any]] = []
     for part in catalog["parts"]:
-        if not part["palette_visible"] or "box_modifier" in part["capabilities"]:
+        if (not part["palette_visible"] and part["kind"] != "pocket") or "box_modifier" in part["capabilities"]:
             continue
         entry: dict[str, Any] = {
             "kind": part["kind"], "title": part["title"],
@@ -3702,6 +3768,13 @@ def ai_capability_manifest() -> dict[str, Any]:
                 if not option.get("internal") and not option.get("legacy")
             ]
             entry["generic_fields"] = _ai_generic_fields(part, starter["feature"], catalog["item_rules"])
+            if part["kind"] in {"pocket", "post", "slot", "steps"}:
+                entry["generic_fields"]["reference_object"] = {
+                    "type": "optional object or null",
+                    "shape": {"width": "positive finite mm", "depth": "positive finite mm",
+                              "height": "positive finite mm"},
+                    "rules": "Preview/planning only; never changes holder geometry. Include only measured dimensions supplied or confirmed by the person; never invent them.",
+                }
             # What Wavefinity fills in for a blank option in the example bin.
             entry["resolved_defaults"] = starter["resolved_options"]
             entry["example"] = starter["feature"]
@@ -3768,7 +3841,7 @@ def ai_capability_manifest() -> dict[str, Any]:
         "never_offer": [
             "Storage Box designs (box.b4b) or Base Trim designs (design_kind = base_trim)",
             "Photo Nest / traced contours (recommend only)",
-            "hidden, internal or legacy-only part kinds",
+            "hidden, internal or legacy-only part kinds other than Pocket",
         ],
     }
 
@@ -3835,6 +3908,13 @@ def _ai_space_context(raw: Any) -> dict[str, Any]:
     return space
 
 
+def _capped_space_height(raw: Any) -> float | None:
+    if not isinstance(raw, dict) or raw.get("kind") not in ("drawer", "portable", "box"):
+        return None
+    z = raw.get("z")
+    return float(z) if isinstance(z, (int, float)) and not isinstance(z, bool) and math.isfinite(z) else None
+
+
 def _ai_controlled_fields(space: dict[str, Any]) -> list[str]:
     kind = space.get("kind")
     if kind == "pegboard":
@@ -3865,7 +3945,7 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         z_mm = context.get("z_mm")
         cap_line = (
             f"- Active Space type: {context.get('kind')}. Hard object-height cap: {z_mm:g} mm - "
-            "no part of a held object may end up above this height."
+            "the full physical envelope of a Bore-held object, including tilt and width, must stay below this height."
             if context.get("capped") and isinstance(z_mm, (int, float))
             else f"- Active Space type: {context.get('kind')}. No hard vertical cap."
         )
@@ -3886,6 +3966,7 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "- All values in the design are millimetres. Convert nothing silently; ask if unsure.",
         "- You may use any legal part, option or modifier in the CAPABILITY MANIFEST that best solves the request.",
         "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",
+        "- Optional reference_object {width, depth, height} is only for Pocket, Post, Slot and Steps. It is a preview/planning envelope, never holder geometry. Include it only when the person supplied or confirmed all three measurements; never invent them. Bore and Cradle use their existing item instead.",
         "- Interior part zones are [x0,y0,x1,y1] in mm from the bin centre. current_baseline_layout_bounds_mm is only the interior of the CURRENT bin size. If you change box.x/box.y/box.z, the legal interior changes with it (each axis keeps about interior_margin_mm of shell in total): every zone you return must fit inside the interior of the design you RETURN, not the old one. Adjust the example zones, counts and sizes to the real item.",
         "- Keep every field listed in space_controlled_fields exactly as it is in the current design.",
         cap_line,
@@ -4035,6 +4116,8 @@ def _ai_semantic_violation(raw: Any) -> str | None:
         if not isinstance(feature, dict):
             continue
         kind = feature.get("kind")
+        if feature.get("reference_object") is not None and kind not in {"pocket", "post", "slot", "steps"}:
+            return f"reference_object is not an AI-configurable field for {kind}"
         options = feature.get("options") if isinstance(feature.get("options"), dict) else {}
         if kind == "text" and options.get("level") == "rim":
             rim_text_count += 1
@@ -4103,8 +4186,8 @@ def _ai_space_cap_violation(design: dict[str, Any], raw_space: Any) -> str | Non
     space = _ai_space_context(raw_space)
     if not space.get("capped"):
         return None
-    cap_z = space.get("z_mm")
-    if not isinstance(cap_z, (int, float)):
+    cap_z = _capped_space_height(raw_space)
+    if cap_z is None:
         return None
     try:
         box, layout, *_ = _design(design)
@@ -4115,23 +4198,13 @@ def _ai_space_cap_violation(design: dict[str, Any], raw_space: Any) -> str | Non
         if feature.kind != "bore" or feature.item is None:
             continue
         try:
-            resolved = resolved_options(box, feature, base_z)
-            style = normalize_bore_style(resolved.get("bore_style"))
-            height = float(resolved["height"])
-            angle = float(resolved.get("angle", 0.0) or 0.0)
-            effective_depth = (
-                float(resolved.get("walls_depth", height)) if is_walls_only(style)
-                else float(resolved["depth"])
-            )
-            object_length = float(feature.item.length)
+            object_top_z = bore_reference_top(box, feature, base_z)
         except (KeyError, TypeError, ValueError):
             continue
-        bore_mouth_z = base_z + height
-        object_top_z = bore_mouth_z + max(0.0, object_length - effective_depth) * math.cos(math.radians(angle))
         if object_top_z > cap_z + 1e-6:
             return (
-                f"a Bore-held object's top would reach {object_top_z:.1f} mm, above this "
-                f"capped Space's {cap_z:.1f} mm ceiling; use a shorter bin and/or a shallower "
+                f"a Bore-held object's top would reach {object_top_z:.3f} mm, above this "
+                f"capped Space's {cap_z:.3f} mm ceiling; use a shorter bin and/or a shallower "
                 "insertion depth so useful grip stays below the cap"
             )
     return None
@@ -4184,6 +4257,7 @@ POST_ROUTES = {
     "/api/feature/fit": feature_fit_payload,
     "/api/feature/apply": apply_feature_payload,
     "/api/feature/duplicate": duplicate_feature_payload,
+    "/api/feature/reference": apply_reference_payload,
     "/api/feature/delete": delete_feature_payload,
     "/api/nest/trace": nest_trace_payload,
     "/api/nest/photo": photo_nest_payload,

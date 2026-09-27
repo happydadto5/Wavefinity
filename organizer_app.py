@@ -130,6 +130,8 @@ from organizer_stack import (
     validate_stack_design,
 )
 from organizer_inventory import append_bin
+from organizer_inserts._bore import bore_reference_meshes
+from organizer_inserts._cradle import cradle_reference_meshes
 from organizer_inserts import (
     CRADLE_FLOOR_GAP,
     BASE_PLATE,
@@ -819,6 +821,22 @@ def _mesh_preview_geometry(
         (triangle, kind, normal, layer, owner)
         for triangle, normal in zip(corners, normals)
     ]
+
+
+def _reference_preview_meshes(box: BoxSpec, one: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    if one.kind == "bore" and one.item is not None:
+        return bore_reference_meshes(box, one, base_z)
+    if one.kind == "cradle" and one.item is not None:
+        return cradle_reference_meshes(box, one, base_z)
+    if one.kind == "nest" and not one.contour:
+        return []
+    ref = one.reference_object
+    if ref is None:
+        return []
+    x, y = one.zone.centre
+    mesh = trimesh.creation.box(extents=(ref.width, ref.depth, ref.height))
+    mesh.apply_translation((x, y, base_z + ref.height / 2.0))
+    return [mesh]
 
 
 def _customization_zones(
@@ -1610,6 +1628,15 @@ def preview_geometry(
 
     side_openings_meta = side_opening_summary(box) if box.side_openings.enabled else None
     pegboard_meta = receiver_layout(box) if box.pegboard.enabled else None
+
+    # The effective list has already replaced a selected saved part with its
+    # live draft. These faces never enter any printable builder or pick map.
+    for one in effective_features:
+        try:
+            for mesh in _reference_preview_meshes(box, one, base_z):
+                geometry.extend(_mesh_preview_geometry(mesh, "reference_object"))
+        except Exception:
+            pass
 
     inside_x, inside_y = box.usable_opening
     return {

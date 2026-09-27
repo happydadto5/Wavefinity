@@ -388,6 +388,38 @@ class DesignSourceTests(unittest.TestCase):
         reloaded = load_inventory(self.folder)
         self.assertEqual(design_specs(reloaded["layout"]).get(row_id), design)
 
+    def test_reference_only_source_edit_keeps_generated_file_local_and_browser_text(self):
+        from organizer_inventory import (save_design_source, save_design_source_text,
+                                         change_design_status, load_inventory, render_inventory)
+        original = self._design("Tools")
+        original["layout"] = {"features": [{"kind": "post", "zone": [-4, -4, 4, 4]}]}
+        first = save_design_source(self.folder, design=original, record=self._record("Tools"))
+        row_id = first["row_id"]
+        (self.folder / "Tools.3mf").write_bytes(b"existing output")
+        change_design_status(self.folder, row_id, "printed", "Tools.3mf")
+        edited = json.loads(json.dumps(original))
+        edited["layout"]["features"][0]["reference_object"] = {"width": 3, "depth": 4, "height": 5}
+        local = save_design_source(self.folder, design=edited, record=self._record("Tools"), row_id=row_id)
+        self.assertFalse(local["files_became_stale"])
+        self.assertEqual((local["bins"][0]["file"], local["bins"][0]["status"], local["bins"][0]["qty"]),
+                         ("Tools.3mf", "printed", 1))
+        self.assertEqual(local["layout"]["design_specs"][row_id], edited)
+        self.assertFalse(local["layout"].get("stale_files"))
+        text = render_inventory("Wavefinity", load_inventory(self.folder)["bins"], local["layout"])
+        removed = json.loads(json.dumps(original))
+        browser = save_design_source_text(text, design=removed, record=self._record("Tools"),
+                                          row_id=row_id, available_filenames=["Tools.3mf"])
+        self.assertFalse(browser["files_became_stale"])
+        self.assertEqual(browser["bins"][0]["file"], "Tools.3mf")
+        self.assertEqual(browser["layout"]["design_specs"][row_id], removed)
+        printable = json.loads(json.dumps(edited))
+        printable["part_name"] = "Different"
+        stale = save_design_source_text(browser["inventory_text"], design=printable,
+                                        record=self._record("Different"), row_id=row_id,
+                                        available_filenames=["Tools.3mf"])
+        self.assertTrue(stale["files_became_stale"])
+        self.assertEqual(stale["bins"][0]["file"], "")
+
     def test_deleting_a_row_prunes_its_spec(self):
         from organizer_inventory import save_design_source, design_specs
         result = save_design_source(self.folder, design=self._design(), record=self._record())

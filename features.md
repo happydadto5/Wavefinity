@@ -366,6 +366,10 @@ Current palette-visible families are listed below.
 
 # 6. Interior parts
 
+Pocket, Post, Slot, Steps and Photo Nest can carry an optional **Reference object** with measured Width (X), Depth (Y) and Height (Z). It appears as a translucent, non-selectable object in 3D Preview and follows the holder when moved. It does not resize the holder or change printed geometry. Photo Nest offers it after a contour and tool thickness are accepted. Bore and Cradle instead show their existing measured items in 3D Preview, including their physical profiles and placement.
+
+In a Drawer or Storage Box, a Bore-held object's full physical envelope crossing the Space ceiling produces an amber warning in manual Design. The warning does not block generation. Surface, Pegboard and Design without a typed Space have no ceiling warning.
+
 ## 6.1 Cradle
 
 **Purpose:** Hold a tool horizontally in a half-round/contoured support.
@@ -1196,7 +1200,7 @@ The repair prompt is shown, never auto-copied; **Copy Prompt** owns copying it t
 
 ## 16.7 Space object-height cap (Fix 078)
 
-The generated prompt states the active Space type and either a hard cap (Drawer and Storage Box: the Space's own height) or "no hard vertical cap" (Surface, Pegboard, or no active Space). AI Design distinguishes an object's own length from how far it inserts into a Bore and from the bin's height, and targets roughly 30 mm of a hand-retrieved object staying grippable above the bin rim — but in a capped Space that preference never overrides the hard cap: no part of a held object may end up above it. AI Design also prefers a wavy Bore variant over its straight counterpart when the two are otherwise equally suitable, without switching between the Base and Walls Only families just to get "wavy".
+The generated prompt states the active Space type and either a hard cap (Drawer and Storage Box: the Space's own height) or "no hard vertical cap" (Surface, Pegboard, or no active Space). AI Design distinguishes an object's own length from how far it inserts into a Bore and from the bin's height, and targets roughly 30 mm of a hand-retrieved object staying grippable above the bin rim — but in a capped Space that preference never overrides the hard cap: the full object envelope, including width and tilt, must stay below it. AI Design also prefers a wavy Bore variant over its straight counterpart when the two are otherwise equally suitable, without switching between the Base and Walls Only families just to get "wavy".
 
 ## 16.8 AI limitations
 

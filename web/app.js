@@ -382,6 +382,7 @@ function spaceBinPreferences() {
 // absolute position), count, orientation and options - never literal text,
 // photos or traced contours.
 function partDefaultsFromFeature(feature) {
+  // reference_object is object-specific; reusable Space settings exclude it.
   if (!feature?.kind || !Array.isArray(feature.zone) || feature.zone.length !== 4) return null;
   const copy = {
     kind: feature.kind,
@@ -434,6 +435,7 @@ function cleanPartDefaultEntry(entry) {
   // Item measurements/profile/clearance are reusable; a user's item name is
   // identity and never carries into another bin.
   if (plainObject(entry.item)) clean.item = { ...clone(entry.item), name: "Custom item" };
+  delete clean.reference_object;
   return clean;
 }
 
@@ -485,6 +487,7 @@ function seedFeatureFromPartDefaults(feature, entry) {
   if (remembered.item && !partInfo(feature.kind)?.flags?.photo) seeded.item = clone(remembered.item);
   delete seeded.contour;
   delete seeded.source_contour;
+  delete seeded.reference_object;
   return seeded;
 }
 
@@ -5002,6 +5005,8 @@ function clearDraftSelection(resetLocks = true) {
   // context. Invalidate every in-flight draft operation so an old palette
   // response, fit, photo upload, or auto-save cannot alter the new design.
   cancelPendingDraftWork();
+  commitReferenceEditSoon.cancel();
+  state.referenceEditPending = false;
   resetNestPhotoSession();
   state.draft = null;
   state.draftKind = null;
@@ -5074,7 +5079,7 @@ async function openModifier(kind, fromPlaced = false) {
   if (state.draft && !(await guardDraftSwitch())) return;
   resetNestPhotoSession();
   if (state.modifierEditing && state.modifierEditing !== kind &&
-      !commitEdgeMountFormBeforeSwitch()) {
+      !flushModifierForm()) {
     return;
   }
   cancelPendingDraftWork();
@@ -5251,7 +5256,7 @@ async function removeModifier(kind) {
   });
 }
 
-function commitEdgeMountFormBeforeSwitch() {
+function flushModifierForm() {
   if (!state.modifierEditing) return true;
 
   const previousDesign = pendingDesignHistory || clone(state.design);
@@ -5271,7 +5276,7 @@ function commitEdgeMountFormBeforeSwitch() {
 async function flushVisibleDesignEditsBeforeModeSwitch({ previewAfterCommit = true } = {}) {
   if (state.designMutationBusy) return false;
   if (state.draft && !(await guardDraftSwitch({ previewAfterCommit }))) return false;
-  if (state.modifierEditing) return commitEdgeMountFormBeforeSwitch();
+  if (state.modifierEditing) return flushModifierForm();
 
   const previousDesign = pendingDesignHistory || clone(state.design);
   const previousCanGenerate = state.canGenerate;
@@ -5320,7 +5325,7 @@ async function selectKind(kind, reset = false) {
   try {
   if (switchGuard && !switchGuard.proceed) return;
   if (!keepsSameDraft && state.draft?.kind === "nest") resetNestPhotoSession();
-  if (!commitEdgeMountFormBeforeSwitch()) return;
+  if (!flushModifierForm()) return;
   state.edgeMountEditing = false;
   $("#draft-fields").hidden = false;
   $("#edge-mount-editor").hidden = true;
@@ -5428,7 +5433,7 @@ async function selectedFeature(index, force = false, acceptPreviewPick = null) {
       switchGuard?.committed && state.previewRequest === previewRequest + 1)) return false;
   const selected = state.design.layout.features[index];
   if (state.draft?.kind === "nest" || selected?.kind === "nest") resetNestPhotoSession();
-  if (!commitEdgeMountFormBeforeSwitch()) return false;
+  if (!flushModifierForm()) return false;
   cancelPendingDraftWork();
   state.edgeMountEditing = false;
   $("#draft-fields").hidden = false;
@@ -5977,6 +5982,52 @@ function pocketWallReach(wall, style) {
   return 2 * amplitude + wall * depthFactor + waveNoiseFloor;
 }
 
+function referenceSeedForDraft(draft, resolvedOptions, design) {
+  const zone = draft.zone;
+  const usable = Math.max(0.1, number(design?.box?.z, 8) - number(design?.box?.base_thickness, 0.6));
+  const resolved = draft.kind === "nest" ? _nestMeasuredThickness(draft.options)
+    : number(resolvedOptions?.height ?? draft.options?.height, NaN);
+  return { width: zone[2] - zone[0], depth: zone[3] - zone[1],
+    height: Number.isFinite(resolved) && resolved > 0 ? resolved : usable };
+}
+
+function updateReferenceAxis(draft, axis, raw) {
+  const value = Number(raw);
+  if (!raw.trim() || !Number.isFinite(value) || value <= 0) return false;
+  draft.reference_object[axis] = value;
+  return true;
+}
+
+const commitReferenceEditSoon = debounce(commitReferenceEdit, 180);
+
+async function commitReferenceEdit() {
+  if (!state.draft || !state.referenceEditPending) return;
+  const index = draftCommitIndex();
+  if (index === false) return;
+  const draft = state.draft;
+  const snapshot = JSON.stringify(draft);
+  const request = state.draftRequest;
+  const before = clone(state.design);
+  try {
+    const result = await api("/api/feature/reference", { design: before, feature: draft, index });
+    if (request !== state.draftRequest || state.draft !== draft || JSON.stringify(draft) !== snapshot) return;
+    state.design = result.design;
+    recordHistory(before);
+    state.draftIsNew = false;
+    state.draftTouched = false;
+    state.referenceEditPending = false;
+    state.selected = result.selected;
+    state.draftSourceIndex = result.selected;
+    state.draft = clone(state.design.layout.features[result.selected]);
+    renderPlaced(); updateSelectionButtons();
+    await refreshPreview();
+  } catch (error) {
+    if (request !== state.draftRequest) return;
+    $("#draft-status").textContent = error.message;
+    $("#draft-status").classList.add("error");
+  }
+}
+
 function renderDraftFields() {
   if (!state.draft) return;
   const info = partInfo();
@@ -6044,8 +6095,8 @@ function renderDraftFields() {
         ${[0, 1, 2, 3].map(turn => `<label><input type="radio" name="draft-turns" value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "checked" : ""}><span>${turn * 90}°</span></label>`).join("")}
       </div></fieldset>`;
     }
-    if (Number.isInteger(state.selected) && !state.draftIsNew) {
-      textGroup += `<button type="button" class="button secondary" data-action="duplicate-text">Duplicate to another side</button>`;
+    if (textLevel !== "rim" && Number.isInteger(state.selected) && !state.draftIsNew) {
+      textGroup += `<button type="button" class="button secondary" data-action="duplicate-text" ${state.preview?.duplicate_text_indexes?.includes(state.selected) ? "" : "hidden"}>Duplicate to rim</button>`;
     }
     html += editorGroup("Text", textGroup);
   }
@@ -6527,6 +6578,21 @@ function renderDraftFields() {
   // Informational only - a legal fused part above the rim still generates
   // fine. No checkbox, no warning styling; just a plain note of the fact.
   html += `<p class="inline-help" data-draft-overhang hidden></p>`;
+  if (["pocket", "post", "slot", "steps", "nest"].includes(one.kind)) {
+    const ready = one.kind !== "nest" || (one.contour && _nestMeasuredThickness(one.options) != null);
+    let referenceFields = `<p class="inline-help">Reference only — does not resize this holder. Shown in 3D Preview.</p>`;
+    if (one.reference_object) {
+      for (const [axis, title] of [["width", "Width (X)"], ["depth", "Depth (Y)"], ["height", "Height (Z)"]]) {
+        referenceFields += field(title, axis, String(one.reference_object[axis]),
+          { unit: "mm", min: "0", step: "any", dataAttribute: "data-reference-axis" });
+      }
+      referenceFields += `<button type="button" class="button secondary" data-action="remove-reference">Remove reference</button>`;
+    } else if (ready) {
+      referenceFields += `<button type="button" class="button secondary" data-action="add-reference">Add object reference</button>`;
+    }
+    html += editorGroup("Reference object", referenceFields);
+  }
+  if (one.kind === "bore") html += `<p class="bore-ceiling-warning" data-bore-ceiling-warning hidden></p>`;
   const activeDraft = document.activeElement?.dataset?.draft;
   $("#draft-fields").innerHTML = html;
   applyDivisionGridLayout($("#draft-fields"));
@@ -6662,6 +6728,32 @@ function renderDraftFields() {
   if (state.draft?.kind === "nest") wireNestFieldActions();
   const duplicateTextButton = $('[data-action="duplicate-text"]', $("#draft-fields"));
   if (duplicateTextButton) duplicateTextButton.addEventListener("click", duplicateText);
+  $('[data-action="add-reference"]', $("#draft-fields"))?.addEventListener("click", () => {
+    const draft = state.draft;
+    if (!draft) return;
+    markDraftChanged(true);
+    draft.reference_object = referenceSeedForDraft(draft, state.draftResolvedOptions, state.design);
+    state.draftAutoCommit = true;
+    state.referenceEditPending = true;
+    renderDraftFields(); commitReferenceEditSoon();
+  });
+  $('[data-action="remove-reference"]', $("#draft-fields"))?.addEventListener("click", () => {
+    markDraftChanged(true);
+    delete state.draft.reference_object;
+    state.draftAutoCommit = true;
+    state.referenceEditPending = true;
+    renderDraftFields(); commitReferenceEditSoon();
+  });
+  $$('[data-reference-axis]', $("#draft-fields")).forEach(input => input.addEventListener("input", () => {
+    const valid = input.value.trim() !== "" && Number.isFinite(Number(input.value)) && Number(input.value) > 0;
+    input.setCustomValidity(valid ? "" : "Enter a positive number of mm.");
+    if (!valid) return;
+    markDraftChanged(true);
+    updateReferenceAxis(state.draft, input.dataset.referenceAxis, input.value);
+    state.draftAutoCommit = true;
+    state.referenceEditPending = true;
+    commitReferenceEditSoon();
+  }));
   if (state.draft?.kind === "bore") {
     const fields = $("#draft-fields");
     const angleField = $('[data-draft="option:angle"]', fields);
@@ -6789,7 +6881,7 @@ async function duplicateText() {
     state.draftAutoCommit = true;
     syncForm(); renderDraftFields(); renderPlaced(); await refreshPreview();
     committedDraft = false;
-    toast("Text duplicated on a free rim side.");
+    toast(`Text duplicated to ${result.rim_side[0].toUpperCase()}${result.rim_side.slice(1)} rim.`);
   } catch (error) {
     if (committedDraft) refreshPreview();
     toast(error.message, true, 6500);
@@ -7928,7 +8020,11 @@ async function uploadNestPhoto(event) {
   await runNestTrace();
 }
 
-function markDraftChanged() {
+function markDraftChanged(referenceOnly = false) {
+  if (!referenceOnly) {
+    commitReferenceEditSoon.cancel();
+    state.referenceEditPending = false;
+  }
   // Invalidate an auto-save immediately, at the moment the user changes the
   // visible draft. Waiting for the debounced rebuild leaves a short window in
   // which the older response can replace the newer edit.
@@ -8690,7 +8786,7 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
   const snapshot = JSON.stringify(draft);
   const previousDesign = clone(state.design);
   state.draftRequest += 1;
-  const committed = await api("/api/feature/apply", {
+  const committed = await api(state.referenceEditPending ? "/api/feature/reference" : "/api/feature/apply", {
     design: state.design, feature: draft, index,
   });
   if (state.draft !== draft || JSON.stringify(draft) !== snapshot) {
@@ -8704,6 +8800,7 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
   recordHistory(previousDesign);
   state.draftIsNew = false;
   state.draftTouched = false;
+  state.referenceEditPending = false;
   state.selected = committed.selected;
   if (Number.isInteger(committed.selected)) {
     state.draftSourceIndex = committed.selected;
@@ -8951,7 +9048,10 @@ async function applySupport(index) {
 // Done flushes the latest valid edit, then exits editing. Persistence belongs
 // to auto-add/auto-save; this action never appends a second copy.
 async function saveCurrentPart() {
-  if (state.modifierEditing) return saveEdgeMountPart();
+  if (state.modifierEditing) return saveModifierPart();
+  commitReferenceEditSoon.cancel();
+  const badReference = $('#draft-fields [data-reference-axis]:invalid');
+  if (badReference) { badReference.reportValidity(); return; }
   if (!state.draft || !beginDesignMutation()) return;
   // An incomplete Photo Nest (no traced cavity outline yet) has nothing legal
   // to commit. Save must not silently discard it - stay in the editor with
@@ -8979,16 +9079,16 @@ async function saveCurrentPart() {
   }
 }
 
-async function saveEdgeMountPart() {
+async function saveModifierPart() {
   const kind = state.modifierEditing;
   if (!kind) return;
-  if (kind === "edge_mount" && ($("#edge-mount-label-mode")?.value || "none") === "none" &&
-      !$("#edge-mount-holes-enabled")?.checked) {
-    toast("Choose a Label or turn on Screw Mounting first.", true, 5000);
-    return;
-  }
   if (!beginDesignMutation()) return;
   try {
+    if (!flushModifierForm()) return;
+    if (kind === "edge_mount" && !state.design?.box?.edge_mount?.label_enabled &&
+        !state.design?.box?.edge_mount?.holes_enabled) {
+      throw new Error("Choose a Label or turn on Screw Mounting first.");
+    }
     const result = await api("/api/design/validate", { design: state.design });
     state.design = result.design;
     state.paletteBrowsing = true;
@@ -9467,6 +9567,15 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   updateGenerateAvailability();
   if (actions.length) setError("", actions);
   state.textMeta = result.text_meta || [];
+  const duplicateToRim = $('[data-action="duplicate-text"]', $("#draft-fields"));
+  if (duplicateToRim) duplicateToRim.hidden = !result.duplicate_text_indexes?.includes(state.selected);
+  const boreWarning = $('[data-bore-ceiling-warning]', $("#draft-fields"));
+  if (boreWarning) {
+    const warning = result.bore_ceiling_warning;
+    boreWarning.hidden = !warning || state.draft?.kind !== "bore";
+    if (!boreWarning.hidden) boreWarning.textContent =
+      `Object reaches ${warning.top_mm} mm; this ${warning.space_kind === "drawer" ? "Drawer" : "Storage Box"} is ${warning.cap_mm} mm high. The object may not fit when closed.`;
+  }
   state.fitError = Boolean(result.feature_errors.length || result.draft_error);
   updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
   updateAutoExpandButton();
@@ -9502,7 +9611,8 @@ async function refreshPreview({ persistResume = true } = {}) {
   setError();
   setDesignInvalidOverlay();
   try {
-    const payload = { design: state.design, client_id: previewClientId, generation: request };
+    const payload = { design: state.design, client_id: previewClientId, generation: request,
+      space: state.folderMode === "space" ? state.activeSpace : null };
     if (state.draft && !(state.draft.kind === "nest" && !state.draft.contour)) {
       payload.draft = state.draft;
       // A draft opened from a placed part replaces that part for preview
@@ -9858,6 +9968,7 @@ const enforceBinMinimumSoon = debounce(() => {
 }, 120);
 
 function kindColor(kind) {
+  if (kind === "reference_object") return "#9db8c2";
   if (COLORS[kind]) return COLORS[kind];
   if (kind === "draft_invalid") return COLORS.invalid;
   if (kind.endsWith("_divider_slope")) return COLORS.divider_slope;
@@ -10085,7 +10196,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   const visibleGroups = b4bEnabled()
     ? new Set(state.b4bView === "base" ? ["base"] : state.b4bView === "lid" ? ["lid"] : ["base", "lid"])
     : baseTrimEnabled() ? new Set(["bin"])
-      : new Set([...(state.binVisible ? ["bin"] : []), ...(state.interiorVisible ? ["interior"] : [])]);
+      : new Set([...(state.binVisible ? ["bin"] : []), ...(state.interiorVisible ? ["interior", "reference"] : [])]);
   if (!geometry?.length) {
     context.fillStyle = "#8b989e";
     context.textAlign = "center";
@@ -10202,7 +10313,8 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
     for (let at = 0; at < corners; at += 1) {
       polygon[at] = [originX + flat[at * 2] * scale, originY + flat[at * 2 + 1] * scale];
     }
-    if (!b4bEnabled()) addPreviewPickFace(face, polygon, camera);
+    if (!b4bEnabled() && kind !== "reference_object") addPreviewPickFace(face, polygon, camera);
+    context.globalAlpha = kind === "reference_object" ? 0.3 : 1;
     const fill = shadedColor(kind, face.normal);
     if (fill !== penFill) { context.fillStyle = fill; penFill = fill; }
     context.fill();
@@ -10222,6 +10334,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
     if (penWidth !== inkWidth) { context.lineWidth = inkWidth; penWidth = inkWidth; }
     context.stroke();
   }
+  context.globalAlpha = 1;
   drawUsableFloor(context, partitions?.floorZ ?? null, camera, project);
   drawBoreAxes(context, boreAxes, camera, project);
   draw3DDimensions(context, state.design?.box, camera, project, b4bAssembledEnvelope());
@@ -10652,11 +10765,21 @@ function classifyB4BFace(face) {
 }
 
 function classifyOrdinaryFace(face) {
+  if (face.kind === "reference_object") return "reference";
   return isBinFace(face.kind) ? "bin" : "interior";
 }
 
 function currentPreviewGroups() {
-  return b4bEnabled() ? ["base", "lid"] : ["bin", "interior"];
+  return b4bEnabled() ? ["base", "lid"] : ["bin", "interior", "reference"];
+}
+
+function previewAabbWithoutReference(buffers) {
+  const selected = [buffers.groups.bin?.aabb, buffers.groups.interior?.aabb].filter(Boolean);
+  if (!selected.length) return null;
+  return {
+    min: [0, 1, 2].map(axis => Math.min(...selected.map(box => box.min[axis]))),
+    max: [0, 1, 2].map(axis => Math.max(...selected.map(box => box.max[axis]))),
+  };
 }
 
 function currentPreviewClassify() {
@@ -10694,8 +10817,11 @@ function currentPreviewPasses(buffers) {
   const passes = [];
   const visible = new Set();
   if (state.binVisible) { passes.push({ group: "bin", alpha: 1 }); visible.add("bin"); }
-  if (state.interiorVisible) { passes.push({ group: "interior", alpha: 1 }); visible.add("interior"); }
-  return { passes, aabb: buffers.allAabb, visible };
+  if (state.interiorVisible) {
+    passes.push({ group: "interior", alpha: 1 }); visible.add("interior");
+    passes.push({ group: "reference", alpha: 0.3 }); visible.add("reference");
+  }
+  return { passes, aabb: state.interiorVisible ? buffers.allAabb : previewAabbWithoutReference(buffers), visible };
 }
 
 function renderPreview3D() {
@@ -10842,7 +10968,7 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
     const kind = face.kind;
     if (!visibleGroups.has(classify(face))) continue;
     if (state.xrayOn && isFacingBinWall(face, camera)) continue;
-    if (dot(face.normal, vector) <= 0) continue;
+    if (dot(face.normal, vector) <= 0 || face.kind === "reference_object") continue;
     addPreviewPickFace(face, face.points.map(point => project(iso(point, camera))), camera);
   }
   addPreviewPickProxies(camera, point => project(iso(point, camera)), visibleGroups,

@@ -956,6 +956,39 @@ def _bore_hole_centres(grid: dict, count: int | None):
             made += 1
 
 
+def bore_reference_meshes(box: BoxSpec, one: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    """Physical stored items seated at the resolved hole stops, preview only."""
+    grid = _bore_grid(box, one, base_z)
+    item = _need_item(one)
+    sides = _hole_sides(item.profile)
+    axis = (0.0, 1.0, 0.0) if grid["lean_axis"] == "x" else (1.0, 0.0, 0.0)
+    sign = grid["lean_sign"] if grid["lean_axis"] == "x" else -grid["lean_sign"]
+    rotation = trimesh.transformations.rotation_matrix(sign * grid["lean"], axis)
+    meshes = []
+    for x, y in _bore_hole_centres(grid, one.count):
+        run = -grid["depth"]
+        for segment in item.segments:
+            # Polygon diameters are measured across flats, like their Bore
+            # holes. Clearance is deliberately absent from this physical mesh.
+            radius = segment.diameter / 2.0
+            if sides < 8:
+                radius /= math.cos(math.pi / sides)
+            mesh = trimesh.creation.cylinder(radius=radius, height=segment.length, sections=sides)
+            if _axis_square(item.profile):
+                mesh.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 4.0, (0, 0, 1)))
+            mesh.apply_translation((0, 0, run + segment.length / 2.0))
+            mesh.apply_transform(rotation)
+            mesh.apply_translation((x, y, base_z + grid["height"]))
+            meshes.append(mesh)
+            run += segment.length
+    return meshes
+
+
+def bore_reference_top(box: BoxSpec, one: Feature, base_z: float) -> float:
+    """Highest world point of the same physical meshes drawn in Preview."""
+    return max(float(mesh.bounds[1][2]) for mesh in bore_reference_meshes(box, one, base_z))
+
+
 def bore_hole_axes(
     box: BoxSpec, spec_feature: Feature, base_z: float
 ) -> list[tuple[tuple[float, float, float], ...]]:

@@ -894,10 +894,19 @@ def _merge_design_source(
     }
     previous = design_specs(layout).get(target["id"]) if target is not None else None
     changed = previous != canonical
+    def printable_design(value):
+        if not isinstance(value, dict):
+            return value
+        result = copy.deepcopy(value)
+        for feature in result.get("layout", {}).get("features", []):
+            if isinstance(feature, dict):
+                feature.pop("reference_object", None)
+        return result
+    printable_changed = printable_design(previous) != printable_design(canonical)
     files_became_stale = False
     stale = _stale_files(layout)
     if target is not None:
-        if changed:
+        if changed and printable_changed:
             if str(target.get("file") or "").strip():
                 files_became_stale = True
                 # Remember the old outputs so a later successful refresh can
