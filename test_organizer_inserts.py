@@ -1449,6 +1449,29 @@ class BoreWallOnlyTests(unittest.TestCase):
         block = self.ZONE.width * self.ZONE.depth * 10.0
         self.assertLess(mesh.volume, block / 10.0)
 
+    def test_walls_depth_creates_a_raised_local_stop(self) -> None:
+        # Fix 078: an explicit Depth shorter than Height stops the open
+        # cavity there, leaving a solid support-free pedestal below it.
+        through_floor = self._build(wall_style="straight", height=20.0, walls_depth=20.0)
+        shallow = self._build(wall_style="straight", height=20.0, walls_depth=6.0)
+        self.assertTrue(shallow.is_watertight)
+        self.assertGreater(shallow.volume, through_floor.volume)
+        pedestal_point = np.array([[0.0, 0.0, shallow.bounds[0][2] + 1.0]])
+        self.assertTrue(shallow.contains(pedestal_point)[0])
+        self.assertFalse(through_floor.contains(pedestal_point)[0])
+
+    def test_missing_walls_depth_keeps_legacy_through_floor(self) -> None:
+        legacy = self._build(wall_style="straight", height=20.0)  # no walls_depth at all
+        explicit = self._build(wall_style="straight", height=20.0, walls_depth=20.0)
+        np.testing.assert_allclose(legacy.bounds, explicit.bounds, atol=1e-4)
+        self.assertAlmostEqual(legacy.volume, explicit.volume, places=2)
+
+    def test_walls_depth_out_of_range_is_a_clear_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Depth"):
+            self._build(wall_style="straight", height=10.0, walls_depth=15.0)
+        with self.assertRaisesRegex(ValueError, "Depth"):
+            self._build(wall_style="straight", height=10.0, walls_depth=0.0)
+
     def test_clear_opening_is_never_reduced(self) -> None:
         for wall_style in ("straight", "wavy"):
             mesh = self._build(wall_style=wall_style)
@@ -1620,6 +1643,28 @@ class BoreWavyBaseTests(unittest.TestCase):
             self.assertGreaterEqual(
                 radii[radii < diameter / 2.0 + 0.5].min(), diameter / 2.0 - 1e-6, style)
 
+
+    def test_base_straight_now_joins_the_wall_it_touches(self) -> None:
+        # Fix 078: Base - Straight Walls was previously excluded from wall-join
+        # eligibility (JOIN_STYLES = UPRIGHT_STYLES); a fused Bore that touches
+        # the bin wall now follows the real interior wall contour there too.
+        box = replace(BIN, x=64.0, y=48.0)
+        inside_x = box.usable_inside[0]
+        zone = Zone(-inside_x / 2.0, -15.0, inside_x / 2.0, 15.0)
+        one = self._one(zone, style="base_straight", diameter=10.0, depth=6.0)
+        outer = wavy_outer_polygon(box).bounds
+        mesh = build_features(box, [one], box.base_thickness)[0]
+        # The block reaches past its own nominal zone toward both touched
+        # walls, but never past the true outside face (JOIN_SKIN margin).
+        self.assertGreater(mesh.bounds[1][0], zone.x1 + 0.5)
+        self.assertLess(mesh.bounds[0][0], zone.x0 - 0.5)
+        self.assertLessEqual(mesh.bounds[1][0], outer[2] - JOIN_SKIN + 1e-3)
+        self.assertGreaterEqual(mesh.bounds[0][0], outer[0] + JOIN_SKIN - 1e-3)
+        # The hole itself stays fully open where the join material was added
+        # (excluding the mouth chamfer's own single apex vertex on the axis).
+        radii = np.hypot(mesh.vertices[:, 0], mesh.vertices[:, 1])
+        near_hole = radii[(radii > 1.0) & (radii < 5.5)]
+        self.assertGreaterEqual(near_hole.min(), 5.0 - 1e-6)
 
     def test_removable_insert_never_claims_to_join_the_bin_wall(self) -> None:
         box, diameter, whole = self._touching()
@@ -1890,6 +1935,13 @@ class TextPartTests(unittest.TestCase):
         right = text_part("M4", zone=Zone(10.0, 4.0, 40.0, 16.0))
         with self.assertRaisesRegex(ValueError, "Only one Text"):
             check_layout(BIN, [left, right], base_z=BIN.base_thickness)
+
+    def test_two_rim_text_parts_on_different_sides_cannot_share_a_bin(self) -> None:
+        # Fix 078: at most one rim Text total, not one per rim side.
+        back = text_part("M3", zone=Zone(-20.0, 6.0, 20.0, 15.0), level="rim", rim_side="back")
+        front = text_part("M4", zone=Zone(-20.0, -15.0, 20.0, -6.0), level="rim", rim_side="front")
+        with self.assertRaisesRegex(ValueError, "Only one rim Text"):
+            check_layout(BIN, [back, front], base_z=BIN.base_thickness)
 
     def test_overlapping_text_and_holder_is_refused(self) -> None:
         said = text_part("M3", zone=Zone(-20.0, -6.0, 20.0, 6.0))

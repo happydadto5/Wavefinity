@@ -37,8 +37,8 @@
           <div id="space-head-summary" class="muted"></div>
           <div id="space-actions" class="space-actions" role="group" aria-label="Space controls">
             <div class="button-row">
-              <button id="space-head-open" class="button secondary dl-small" type="button">Open Space…</button>
-              <button id="space-head-edit" class="button secondary dl-small" type="button">Edit Space</button>
+              <button id="space-head-open" class="button secondary dl-small major-action" type="button">Open Space…</button>
+              <button id="space-head-edit" class="button secondary dl-small major-action" type="button">Edit Space</button>
               <button id="space-head-show" class="button secondary dl-small" type="button">Show Folder</button>
               <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
             </div>
@@ -60,13 +60,12 @@
       <section class="control-section open" data-section="build">
         <div class="section-body">
           <div class="part-name-block">
-            <div id="bin-actions" class="bin-actions" role="group" aria-label="Bin name and actions">
-              <label class="part-name-row"><span id="part-name-label">Bin Name</span>
-                <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
-              </label>
-              <button type="button" id="designer-new-bin" class="button secondary">New Bin</button>
-              <button type="button" id="designer-duplicate" class="button secondary">Duplicate Bin</button>
-              <button type="button" id="ai-help-open" class="button secondary">AI Design</button>
+            <label class="part-name-row"><span id="part-name-label">Bin Name</span>
+              <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
+            </label>
+            <div id="bin-actions" class="designer-major-actions" role="group" aria-label="Bin actions">
+              <button type="button" id="designer-new-bin" class="button secondary major-action">New Bin</button>
+              <button type="button" id="designer-duplicate" class="button secondary major-action">Duplicate Bin</button>
             </div>
             <span id="stack-note" class="stack-note" hidden></span>
           </div>
@@ -123,6 +122,7 @@
         <div class="section-body">
           <div class="subheading-row">
             <div><h2>Options</h2></div>
+            <button type="button" id="ai-help-open" class="button secondary major-action">AI Design</button>
           </div>
           <div id="lid-option" class="lid-option-card" hidden>
             <div id="lid-option-panel">
@@ -209,13 +209,14 @@
                   </label>
                 </div>
               </div>
-              <div class="setting-group"><span class="setting-group-label">Vertical position</span>
+              <div class="setting-group"><span class="setting-group-label">Opening Height</span>
+                <span class="side-opening-range-cue">Top of bin</span>
                 <div class="side-opening-range" role="group" aria-label="Opening height range">
                   <div class="side-opening-range-track" aria-hidden="true"><div id="side-opening-range-fill"></div></div>
                   <input id="side-opening-lower" type="range" min="0" max="99.9" step="any" aria-label="Lower edge of opening">
                   <input id="side-opening-upper" type="range" min="0.1" max="100" step="any" aria-label="Upper edge of opening">
                 </div>
-                <p id="side-opening-range-readout" class="inline-help" aria-live="polite"></p>
+                <span class="side-opening-range-cue">Base / bottom of bin</span>
               </div>
               <div class="setting-group"><span class="setting-group-label">Walls</span>
                 <div class="segmented four" aria-label="Side Opening walls">
@@ -230,12 +231,6 @@
           </div>
           <div class="palette-wrap">
             <div id="support-palette" class="support-palette" role="list"></div>
-          </div>
-
-
-          <div class="added-parts-block">
-            <h3>Already added to this bin</h3>
-            <div id="added-parts-list" class="placed-supports"></div>
           </div>
 
           <div class="support-editor" hidden>
@@ -373,6 +368,11 @@
             </div>
           </div>
 
+          <div class="added-parts-block">
+            <h3>Already added to this bin</h3>
+            <div id="added-parts-list" class="placed-supports"></div>
+          </div>
+
         </div>
       </section>
 
@@ -460,6 +460,10 @@
       <div class="canvas-wrap active" data-canvas="3d">
         <canvas id="preview-3d-solid" aria-hidden="true"></canvas>
         <canvas id="preview-3d" role="img" aria-label="3D design preview" aria-describedby="preview-help"></canvas>
+        <div id="design-invalid-overlay-3d" class="design-invalid-overlay" hidden>
+          <strong class="design-invalid-heading">Invalid settings</strong>
+          <p class="design-invalid-message"></p>
+        </div>
         <button id="divider-edit-breadcrumb" class="divider-edit-breadcrumb" type="button" hidden>Grid divider · Remove segments in 2D →</button>
         <div id="preview-wait" class="preview-wait" hidden aria-live="polite">
           <span class="preview-wait-spinner" aria-hidden="true"></span>
@@ -502,6 +506,10 @@
       </div>
       <div class="canvas-wrap" data-canvas="2d">
         <canvas id="preview-2d" role="img" aria-label="Top-down layout preview" aria-describedby="preview-help layout-help"></canvas>
+        <div id="design-invalid-overlay-2d" class="design-invalid-overlay" hidden>
+          <strong class="design-invalid-heading">Invalid settings</strong>
+          <p class="design-invalid-message"></p>
+        </div>
         <div id="nest-scan-controls" class="nest-scan-controls" hidden>
           <div class="nest-scan-controls-title">Outline editor</div>
 
@@ -672,13 +680,24 @@
 
   <dialog id="ai-help-dialog" class="support-layout-dialog ai-help-dialog" aria-labelledby="ai-help-title">
     <h2 id="ai-help-title">AI Design</h2>
-    <p>Describe one object. Wavefinity writes a prompt you paste into any AI chat, then you paste its answer back here.</p>
+    <p class="ai-help-guide">
+      <span>Describe object</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
+      <span>Generate Prompt</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
+      <span>Give prompt to AI</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
+      <span>Copy response</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
+      <span>Paste answer</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
+      <span>Generate Bin</span>
+    </p>
     <label class="ai-help-field">1. Describe the object
       <textarea id="ai-help-description" rows="3" maxlength="4000" placeholder="e.g. A tray for my three small screwdrivers"></textarea>
     </label>
+    <div id="ai-help-recent-block" class="ai-help-recent-block" hidden>
+      <button type="button" id="ai-help-recent-toggle" class="button secondary" aria-expanded="false" aria-controls="ai-help-recent-list">Recent descriptions</button>
+      <div id="ai-help-recent-list" class="ai-help-recent-list" role="listbox" aria-label="Recent descriptions" hidden></div>
+    </div>
     <div class="button-row ai-help-row">
       <button id="ai-help-dictate" type="button" class="button secondary" hidden>Dictate</button>
-      <button id="ai-help-generate" type="button" class="button primary">Generate Prompt</button>
+      <button id="ai-help-generate" type="button" class="button primary" disabled>Generate Prompt</button>
     </div>
     <div id="ai-help-prompt-block" class="ai-help-field" hidden>
       <label class="ai-help-field">2. Copy this prompt into your AI
@@ -694,8 +713,9 @@
     <p id="ai-help-status" class="ai-help-status" role="status" hidden></p>
     <div class="button-row ai-help-row">
       <button id="ai-help-repair" type="button" class="button secondary" hidden>Make AI Fix Its Answer</button>
-      <button id="ai-help-close" type="button" class="button secondary">Close</button>
-      <button id="ai-help-process" type="button" class="button primary">Process AI Response</button>
+      <button id="ai-help-cancel" type="button" class="button secondary">Cancel</button>
+      <button id="ai-help-modify" type="button" class="button secondary">Modify Current Bin</button>
+      <button id="ai-help-generate-new" type="button" class="button primary">Generate as New Bin</button>
     </div>
   </dialog>
   <dialog id="bin-name-dialog" class="support-layout-dialog" aria-labelledby="bin-name-dialog-title">

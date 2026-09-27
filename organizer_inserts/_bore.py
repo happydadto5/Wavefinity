@@ -10,7 +10,7 @@ import trimesh
 from shapely.affinity import translate
 import numpy as np
 import shapely
-from shapely.geometry import LineString, Polygon, box as shapely_box
+from shapely.geometry import LineString, Point, Polygon, box as shapely_box
 from shapely.ops import unary_union
 
 from organizer_engine import (
@@ -481,15 +481,27 @@ def _build_wall_only_bore(
     grid: dict, count: int | None, box: BoxSpec | None = None, join: bool = False,
     hug: bool = False,
 ) -> trimesh.Trimesh:
-    """Perimeter sleeves rising from the base; no raised rectangular block."""
+    """Perimeter sleeves rising from the base; no raised rectangular block.
+
+    ``grid["depth"]`` is the resolved Walls Only insertion depth (Fix 078):
+    the open cavity only occupies the top ``depth`` of the sleeve, and the
+    local body below that stays material, forming a support-free pedestal
+    down to the floor. At ``depth == height`` this is exactly the legacy
+    through-to-floor geometry, including its clean-cut overtravel below the
+    real floor.
+    """
     profile = grid["item"].profile
     outer, inner, clear = _wall_only_ring(
         profile, grid["held"], grid["wall"], grid["wall_style"])
     height, base_z = grid["height"], grid["base_z"]
+    walls_depth = min(max(grid.get("depth") or height, 0.0), height)
+    through_floor = walls_depth >= height - 1e-9
+    cavity_bottom = -1.0 if through_floor else (height - walls_depth)
+    cavity_height = (height + 2.0) if through_floor else (walls_depth + 1.0)
     # Cut the inner wall out of the outer body with a boolean; that is sturdier
     # than triangulating a ring with a hole.
-    bore = _extrude_polygon(inner, height + 2.0)
-    bore.apply_translation((0.0, 0.0, -1.0))
+    bore = _extrude_polygon(inner, cavity_height)
+    bore.apply_translation((0.0, 0.0, cavity_bottom))
     foot_layers = []
     layers = 5
     for index in range(layers):
@@ -499,8 +511,11 @@ def _build_wall_only_bore(
         layer.apply_translation((0.0, 0.0, index * WALL_ONLY_FOOT / layers))
         foot_layers.append(layer)
     sleeve = difference([_union([_extrude_polygon(outer, height), *foot_layers]), bore])
-    opening = _extrude_polygon(clear, height + 2.0)
-    opening.apply_translation((0.0, 0.0, -1.0))
+    # The wider "keep clear" re-cut (below) shares the same cavity range, so a
+    # wall-join blend or a neighbour's sleeve can never re-close the open top
+    # cavity, but never drills through the new pedestal either.
+    opening = _extrude_polygon(clear, cavity_height)
+    opening.apply_translation((0.0, 0.0, cavity_bottom))
     sleeves, openings = [], []
     centres = list(_bore_hole_centres(grid, count))
     for x, y in centres:
@@ -641,12 +656,22 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         resolved_height = hole + 2.0
     else:
         resolved_height = one.options.get("depth", hole) + 2.0
+    # Fix 078: a legacy Walls Only Bore with no explicit Depth shows and keeps
+    # its real through-to-floor insertion depth, not a hidden stale number -
+    # that is whatever Height actually resolves to, explicit or default.
+    try:
+        explicit_height = (float(one.options["height"])
+                            if one.options.get("height") not in (None, "") else None)
+    except (TypeError, ValueError):
+        explicit_height = None
+    walls_depth_default = explicit_height if explicit_height is not None else resolved_height
     return {
         "depth": hole,
         # A leaned bore takes a thicker wall by default so the extra material
         # between slanting holes still prints; an explicit Wall overrides it.
         "wall": default_wall,
         "height": resolved_height,
+        "walls_depth": walls_depth_default,
         # X/Y counts are always explicit: a new Bore is one hole, and quantities
         # grow the footprint (and, in a bin-sizing mode, the bin) from there.
         "columns": 1.0,
@@ -810,9 +835,18 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
     if style not in BORE_STYLES:
         raise ValueError(f"bore style must be one of {', '.join(BORE_STYLES)}")
     if is_walls_only(style):
+        # Fix 078: how far the held object can insert downward from the Bore
+        # mouth before it hits its stop. A legacy Bore with no explicit value
+        # keeps the through-to-floor form (effective depth = full height).
+        raw_walls_depth = options.get("walls_depth")
+        walls_depth = height if raw_walls_depth in (None, "") else float(raw_walls_depth)
+        if not math.isfinite(walls_depth) or walls_depth <= 0.0 or walls_depth > height + 1e-9:
+            raise ValueError(
+                f"{item.name}: Bore Depth must be positive and no more than its height"
+            )
         return _wall_only_grid(
             item, zone, spec_feature, held, wall, height, angle, style,
-            (box, base_z), options,
+            (box, base_z), options, depth=walls_depth,
         )
     # A cavity as deep as the Bore is tall is valid: it reaches the normal
     # Bore/base Z, so the ordinary bin floor stays its bottom.
@@ -996,11 +1030,17 @@ def bore_tool_clearance_zone(
             ("walls_straight", "Walls Only - Straight"), ("walls_wavy", "Walls Only - Wavy")),
             note="Walls Only and Base - Wavy Walls stand upright, so their angle must be 0"),
         OptionDefinition("Height", "height", "", minimum=0.1, note="mm; blank = worked out from the bin"),
-        OptionDefinition("Hole depth", "depth", "", minimum=0.1, note="mm; no more than the height"),
+        OptionDefinition("Hole depth", "depth", "", minimum=0.1, note="mm; Base styles only; no more than the height"),
+        OptionDefinition("Depth", "walls_depth", "", minimum=0.1,
+            note="mm; Walls Only styles only - how far the held object inserts from the Bore mouth before its stop; "
+                 "blank = through to the normal bin floor (legacy Walls Only default), never more than the height"),
         OptionDefinition("Wall", "wall", "1.6", minimum=0.1, note="mm wall around each hole"),
         OptionDefinition("X quantity", "columns", "", "integer", minimum=1, note="whole number; blank = as many as fit"),
         OptionDefinition("Y quantity", "rows", "", "integer", minimum=1, note="whole number; blank = as many as fit"),
-        OptionDefinition("Angle °", "angle", "0", minimum=0.0, maximum=BORE_MAX_TILT, note="degrees off vertical; only Base - Straight may lean"),
+        OptionDefinition("Angle °", "angle", "0", minimum=0.0, maximum=BORE_MAX_TILT,
+            note="degrees off vertical (0 = upright); the Designer's \"Bore angle\" field shows 90 minus this "
+                 "value (so displayed 90 = upright = 0 here, displayed 20 = the steepest lean = 70 here); "
+                 "only Base - Straight may lean"),
         OptionDefinition("Angle towards", "angle_towards", "front", "enum", False, choices=SIDE_CHOICES, note="direction of the lean; only meaningful when angle > 0"),
         OptionDefinition("Width / Length sizing", "xy_size_mode", "manual", "enum", False, choices=(
             ("manual", "Manual"), ("bore_to_bin", "Bore to bin"), ("bin_to_bore", "Bin to bore")),
@@ -1027,6 +1067,7 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     lean = grid["lean"]
     lean_axis = grid["lean_axis"]
     lean_sign = grid["lean_sign"]
+    reach = grid["reach"]
     pitch_x = grid["pitch_x"]
     pitch_y = grid["pitch_y"]
     columns = grid["columns"]
@@ -1045,6 +1086,7 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     lean_shift = grid["lean_shift"]
 
     holes = []
+    hole_centres = []
     made = 0
     for row in range(rows):
         for column in range(columns):
@@ -1056,6 +1098,7 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
                 x += lean_shift
             else:
                 y += lean_shift
+            hole_centres.append((x, y))
 
             # A cavity as deep as the Bore is tall reaches the bin floor; a hair
             # of overtravel keeps that boolean clean (never changes stored depth).
@@ -1103,6 +1146,32 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     # above), and the zone was widened by ``reach`` to keep the leaning bottoms
     # buried. The whole block is never rotated.
     result = difference([block, union(holes)])
+    if join and box is not None:
+        # Fix 078: a fused Base - Straight Walls Bore that touches the bin
+        # wall now follows the real interior cavity contour on every touched
+        # side, the same wall-join web the wavy styles already use. The
+        # keep-clear circle at each hole's mouth and leaned bottom is a safe
+        # over-approximation of its tilted footprint, so a join web can never
+        # graze into a cavity.
+        footprint = shapely_box(
+            centre_x - zone.width / 2.0, centre_y - zone.depth / 2.0,
+            centre_x + zone.width / 2.0, centre_y + zone.depth / 2.0,
+        )
+        keep_clear_circles = []
+        tilt_sign = lean_sign if lean_axis == "x" else -lean_sign
+        for x, y in hole_centres:
+            keep_clear_circles.append(Point(x, y).buffer(hole_radius, quad_segs=16))
+            if tilted:
+                bx = x + (tilt_sign * reach if lean_axis == "x" else 0.0)
+                by = y + (tilt_sign * reach if lean_axis == "y" else 0.0)
+                keep_clear_circles.append(Point(bx, by).buffer(hole_radius, quad_segs=16))
+        keep_clear = unary_union(keep_clear_circles)
+        tabs = _tab_meshes(
+            _join_tabs(box, footprint, keep_clear, JOIN_BAND, wavy=False, web_width=wall),
+            height, base_z,
+        )
+        if tabs:
+            result = union([result] + tabs)
     return [result]
 
 

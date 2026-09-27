@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-27 — Manual-acceptance UX, AI Design and Bore retrieval (Fix 078)
+
+- Space and Design now always show the matching left/right pair: opening or resuming an existing Space always shows its layout (even with an empty Inventory), and Design remembers whether you were last in 2D or 3D instead of forcing 3D every time.
+- Parts & Options: the option you are editing shows **Save**/**Delete**; every other added option shows **Edit**/**Delete**; the palette, editor and "Already added to this bin" list are in that reading order.
+- A bin may hold at most **one rim Text** total, not one per side; the manual editor, Preview/Generate, and AI Design all enforce it, and an older design with more than one stays readable so you can fix it.
+- **AI Design** is renamed off the cramped Bin Name row into its own major action beside Options, is about 50% wider with a compact six-step guide, keeps a per-Space **Recent descriptions** list, and always offers **Modify Current Bin** / **Generate as New Bin** / **Cancel** — no more guessing which button appears. Generate Prompt and Copy Prompt now grey out and reset correctly instead of a static "Copied." message.
+- AI Design now understands Space height caps (Drawer/Storage Box are capped at the Space height; Surface/Pegboard are not), prefers wavy Bore variants, and plans real retrieval depth instead of burying an object at its full length.
+- Bore: Walls Only styles gain a real **Depth** stop so a short object can sit higher in the bin; a Fused Base Bore that touches the bin wall (including Base - Straight, not just the wavy styles) now follows the real interior wall with no sliver gap; the misleading "Base" label is gone; the angle field is renamed **Bore angle**, can be typed over directly without losing your place, defaults its lean to Back (or away from a rim Text), and asks before growing the bin.
+- Side Openings: the vertical control is now **Opening Height** with plain **Top of bin** / **Base of bin** cues instead of percentages.
+- An invalid design now shows a clear red **Invalid settings** message right on the 3D/2D preview itself, not only in the footer.
+
 ## 2026-09-26 — Lid & Stacking fit and handles (Fix 071D)
 
 - Lid & Stacking now offers three **Stacking Methods**: Stackable bin on bin, Stackable bin on lid, and Lid with handle — non-stackable. Remove the option to go back to no lid.

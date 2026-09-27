@@ -155,14 +155,14 @@ def build_features(
         if one in recessed_nests:
             continue
         recessed_deck_footprint = None
-        if (mode == "fused" and one.kind == "bore"
-                and normalize_bore_style(
-                    one.options.get("bore_style"), one.options.get("wall_style")) in JOIN_STYLES):
+        if mode == "fused" and one.kind == "bore" and (
+                (style := normalize_bore_style(
+                    one.options.get("bore_style"), one.options.get("wall_style")))
+                in JOIN_STYLES or style == "base_straight"):
             # Only a bore fused into the bin can join its wall; removable and
-            # cartridge inserts never touch it.
+            # cartridge inserts never touch it. Fix 078: Base - Straight Walls
+            # is now join-capable too, not just the upright styles.
             joined = {**one.options, WALL_JOIN_FLAG: True}
-            style = normalize_bore_style(
-                one.options.get("bore_style"), one.options.get("wall_style"))
             if is_walls_only(style) and bore_xy_size_mode(one.options, style) == "bin_to_bore":
                 # The bin is sized around it, so the sleeves bridge the rest of
                 # the way to the wall on every side.

@@ -1550,23 +1550,24 @@ class TextExportTests(unittest.TestCase):
         )
 
     def test_several_texts_export_as_one_object_each(self) -> None:
+        # Fix 078: a design may hold at most one base Text and one rim Text
+        # total, so "several" here is the legal maximum of two.
         spec = BoxSpec(48.0, 48.0, 40.0)
         layout = organizer_app.Layout((
             self._text("M3", (-20.0, 6.0, -2.0, 15.0)),
-            self._text("M4", (2.0, 6.0, 20.0, 15.0), level="rim", rim_side="back"),
-            self._text("M5", (-20.0, -15.0, -2.0, -6.0), level="rim", rim_side="front", raised=True),
+            self._text("M4", (2.0, 6.0, 20.0, 15.0), level="rim", rim_side="back", raised=True),
         ), "fused")
         with tempfile.TemporaryDirectory() as directory:
             result = organizer_app.generate_organizer_files(
                 spec, layout, Path(directory), part_name="Fasteners"
             )
-            self.assertEqual(result["text_objects"], ["M3", "M4", "M5"])
+            self.assertEqual(result["text_objects"], ["M3", "M4"])
             output = Path(result["box"]["output"])
             # The body plus one object per text, strict and warning-free.
-            report = validate_3mf(output, 4, multipart=("M3", "M4", "M5"))
+            report = validate_3mf(output, 3, multipart=("M3", "M4"))
             self.assertEqual(report["warnings"], 0)
             self.assertEqual(
-                report["names"], ["M3", "M4", "M5", "fused_organizer"]
+                report["names"], ["M3", "M4", "fused_organizer"]
             )
 
     def test_a_lettered_file_is_one_assembly_with_the_lettering_on_filament_2(self) -> None:

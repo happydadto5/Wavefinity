@@ -141,7 +141,7 @@ from organizer_inserts import (
     snapped_zone,
     text_of,
 )
-from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED
+from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED, is_walls_only, normalize_bore_style
 from organizer_inserts._core import ITEM_CLEARANCE, ITEM_PROFILES, feature_touches_wall
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from bambu_handoff import is_bambu_studio_executable, stage_bambu_inputs
@@ -3816,6 +3816,9 @@ def _ai_space_context(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict) or raw.get("kind") not in AI_SPACE_KINDS:
         return {"typed_space": False}
     space: dict[str, Any] = {"typed_space": True, "kind": raw["kind"]}
+    # Fix 078: Drawer and Storage Box (current `portable`, legacy `box`) are a
+    # hard vertical ceiling at their Space z; Surface and Pegboard are not.
+    space["capped"] = raw["kind"] in ("drawer", "box", "portable")
     for axis in ("x", "y", "z"):
         value = raw.get(axis)
         if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
@@ -3856,6 +3859,18 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "context_fingerprint": fingerprint, "assumptions": [],
         "design": "<complete Wavefinity ordinary-bin design>",
     }
+    # Fix 078: state the Space cap in plain language - do not expect the
+    # outside AI to infer it merely from bin/Space dimensions.
+    if context.get("typed_space"):
+        z_mm = context.get("z_mm")
+        cap_line = (
+            f"- Active Space type: {context.get('kind')}. Hard object-height cap: {z_mm:g} mm - "
+            "no part of a held object may end up above this height."
+            if context.get("capped") and isinstance(z_mm, (int, float))
+            else f"- Active Space type: {context.get('kind')}. No hard vertical cap."
+        )
+    else:
+        cap_line = "- No active typed Space. No hard vertical cap."
     return "\n".join([
         "You are helping design ONE 3D-printable storage bin for the Wavefinity app.",
         "Read everything below. Ask the person questions if you need to. When you are",
@@ -3873,6 +3888,12 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",
         "- Interior part zones are [x0,y0,x1,y1] in mm from the bin centre. current_baseline_layout_bounds_mm is only the interior of the CURRENT bin size. If you change box.x/box.y/box.z, the legal interior changes with it (each axis keeps about interior_margin_mm of shell in total): every zone you return must fit inside the interior of the design you RETURN, not the old one. Adjust the example zones, counts and sizes to the real item.",
         "- Keep every field listed in space_controlled_fields exactly as it is in the current design.",
+        cap_line,
+        "- design.part_name must be a short, descriptive, non-blank name (1-80 characters) for what the bin holds - for example \"Lipstick\" or \"Hex Drivers\", never a generic \"Bin\" or dimensions-only text. Existing Inventory names, when supplied below, are advisory: avoid an obvious duplicate, but Wavefinity enforces final uniqueness itself, so do not invent your own numbering suffix.",
+        "- A design may contain at most one rim Text feature in total, not one per rim side.",
+        "- Bore: when Base - Straight Walls vs Base - Wavy Walls, or Straight Walls Only vs Wavy Walls Only, are otherwise equally suitable, prefer the wavy one. Choose the correct structural family (Base vs Walls Only) first; never switch families merely to get \"wavy\".",
+        "- Bore: an object's length, its insertion depth (Base styles: options.depth; Walls Only: options.walls_depth), and the bin's own height are three different numbers - do not set the insertion depth equal to the object's full length just because that is the length you were given. For an upright hand-retrieved object, plan for roughly 30 mm of it to remain grippable above the bin rim; in a capped Space (see above) this preference never overrides the hard cap.",
+        "- Bore angle: the Designer's user-facing \"Bore angle\" runs 90 (upright) down to 20 (steepest lean). This JSON's canonical options.angle is the same lean measured the other way: 0 (upright) up to 70 (steepest) - displayed_bore_angle = 90 - options.angle. When you lean a Bore with no object-specific reason for a direction, prefer options.angle_towards \"back\", or the side opposite the design's one rim Text's rim_side if the design has one.",
         "",
         "=== WAVEFINITY CONTEXT (JSON) ===",
         block(context),
@@ -3914,12 +3935,19 @@ def ai_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
     fingerprint = _ai_fingerprint(design, space)
     box, layout, *_ = _design(design)
     bounds = layout_zone(box, layout.mode)
+    # Fix 078: existing Inventory names are advisory context only for the
+    # prompt, so they are added after the fingerprint - an unrelated
+    # Inventory change must not make an otherwise-current prompt go stale.
+    raw_names = payload.get("existing_names")
+    existing_names = [str(name).strip()[:80] for name in raw_names
+                       if isinstance(name, str) and name.strip()][:200] if isinstance(raw_names, list) else []
     context = {
         **space,
         "space_controlled_fields": _ai_controlled_fields(space),
         "current_baseline_layout_bounds_mm": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
         "interior_margin_mm": [round(box.x - bounds.width, 3), round(box.y - bounds.depth, 3)],
         "base_unit_mm": BASE_UNIT,
+        "existing_bin_names": existing_names,
     }
     prompt = _ai_prompt_text(
         description, request_id, fingerprint, context, ai_capability_manifest(), design)
@@ -3991,14 +4019,28 @@ def _ai_semantic_violation(raw: Any) -> str | None:
     """
     if not isinstance(raw, dict):
         return None
+    # Fix 078: the AI must return a short, descriptive, non-blank bin name -
+    # Wavefinity normalizes/dedupes it on adoption, but a missing or garbled
+    # name is the AI's own answer defect and is repairable like any other.
+    part_name = raw.get("part_name")
+    if not isinstance(part_name, str) or not part_name.strip():
+        return "design.part_name must be a short, non-blank name describing the bin's intended contents"
+    if len(part_name.strip()) > 80:
+        return "design.part_name must be 80 characters or fewer"
     features = raw.get("layout", {}).get("features") if isinstance(raw.get("layout"), dict) else None
     if not isinstance(features, list):
         return None
+    rim_text_count = 0
     for feature in features:
         if not isinstance(feature, dict):
             continue
         kind = feature.get("kind")
         options = feature.get("options") if isinstance(feature.get("options"), dict) else {}
+        if kind == "text" and options.get("level") == "rim":
+            rim_text_count += 1
+            # Fix 078: a design may contain at most one rim Text total.
+            if rim_text_count > 1:
+                return "a design may contain at most one rim Text; remove the extra rim Text"
         violation = _ai_item_profile_violation(kind, feature.get("item"))
         if violation:
             return violation
@@ -4045,7 +4087,54 @@ def ai_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     if not preview.get("fits") and not problems:
         problems.append("The design does not fit.")
+    if not problems:
+        cap_problem = _ai_space_cap_violation(preview["design"], payload.get("space"))
+        if cap_problem:
+            problems.append(cap_problem)
     return {"design": preview["design"], "preview": preview, "problems": problems}
+
+
+def _ai_space_cap_violation(design: dict[str, Any], raw_space: Any) -> str | None:
+    """Fix 078: in a capped Space (Drawer/Storage Box), no Bore-held object's
+    highest point may exceed the Space's own ``z`` - a hard legality rule, not
+    merely the ~30 mm grip preference. Uncapped Spaces (Surface/Pegboard) and
+    no active Space never gain an artificial ceiling here.
+    """
+    space = _ai_space_context(raw_space)
+    if not space.get("capped"):
+        return None
+    cap_z = space.get("z_mm")
+    if not isinstance(cap_z, (int, float)):
+        return None
+    try:
+        box, layout, *_ = _design(design)
+    except (KeyError, TypeError, ValueError):
+        return None
+    base_z = base_height(box, layout.mode)
+    for feature in layout.features:
+        if feature.kind != "bore" or feature.item is None:
+            continue
+        try:
+            resolved = resolved_options(box, feature, base_z)
+            style = normalize_bore_style(resolved.get("bore_style"))
+            height = float(resolved["height"])
+            angle = float(resolved.get("angle", 0.0) or 0.0)
+            effective_depth = (
+                float(resolved.get("walls_depth", height)) if is_walls_only(style)
+                else float(resolved["depth"])
+            )
+            object_length = float(feature.item.length)
+        except (KeyError, TypeError, ValueError):
+            continue
+        bore_mouth_z = base_z + height
+        object_top_z = bore_mouth_z + max(0.0, object_length - effective_depth) * math.cos(math.radians(angle))
+        if object_top_z > cap_z + 1e-6:
+            return (
+                f"a Bore-held object's top would reach {object_top_z:.1f} mm, above this "
+                f"capped Space's {cap_z:.1f} mm ceiling; use a shorter bin and/or a shallower "
+                "insertion depth so useful grip stays below the cap"
+            )
+    return None
 
 
 def ai_repair_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:

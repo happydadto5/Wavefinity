@@ -1386,15 +1386,9 @@ SP.openTypedSpacePreferredView = async () => {
     toast(`Could not read this Space's inventory: ${error.message}`, true, 7000);
     return false;
   }
-  const preferred = DL.bins.some(one => ["bin", "b4b", "manual"].includes(one.kind))
-    ? "space" : "design";
-  if (preferred === "space") {
-    if (!(await DP.enter("space", true))) return false;
-  } else {
-    if (!(await DP.enter("design", true))) return false;
-    activatePreviewView("3d");
-  }
-  return true;
+  // An empty Inventory is not a reason to land in Design (Fix 078): opening
+  // or resuming an existing typed Space always shows its Space layout.
+  return DP.enter("space", true);
 };
 
 SP.confirmResume = async () => {

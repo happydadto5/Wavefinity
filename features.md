@@ -453,14 +453,27 @@ Photo Nest is a **media-derived feature**. AI Design may recommend it, but text 
 
 - held-item/profile dimensions;
 - height;
-- hole depth;
+- hole depth (Base styles) or Depth (Walls Only styles — see below);
 - wall thickness;
 - X quantity;
 - Y quantity;
-- angle;
-- angle direction;
+- **Bore angle** (labeled this way in the Designer — 90° upright down to 20°, the steepest lean);
+- angle direction (**Angle towards**);
 - footprint sizing behavior;
 - height sizing behavior.
+
+The Type / Hole editor groups no longer label the middle sizing group "Base",
+since a Walls Only Bore's middle controls are not a base block.
+
+### Walls Only Depth (Fix 078)
+
+Both Walls Only styles show a **Depth** field in the Hole group: how far the
+held object can insert downward from the Bore mouth before it hits its stop.
+An explicit Depth shorter than the Bore's Height creates a raised local stop
+so the object's grippable top stays higher; a blank Depth (including every
+older Walls Only design saved before this Fix) keeps the original
+through-to-the-floor behavior. Base styles keep their existing hole-depth
+field and behavior unchanged.
 
 ### Sizing relationships
 
@@ -477,8 +490,25 @@ Walls-only styles omit base-only controls.
 
 - Straight-wall or wavy-wall Bore geometry.
 - Wavy Bore walls can blend into bin walls they reach.
+- A **Fused into box** Base - Straight or Base - Wavy Bore that touches or is
+  auto-sized to the bin now follows the bin's actual interior wall contour on
+  every touched side, with no printable sliver gap between the Base and the
+  shell — Base - Straight was previously excluded from this wall-join
+  behavior. Removable inserts are unaffected and never fuse to the shell.
 - Gap supports use thin straight/wavy webs where required.
 - Upright profiles include current supported shape/orientation behavior such as square/diamond cases where applicable.
+
+### Bore angle entry
+
+Typing directly into **Bore angle** (for example replacing 20 with 90) works
+normally and is never interrupted mid-keystroke; the dependent **Angle
+towards** control only updates once a typed value is committed (Enter, Tab,
+or clicking away). A first lean with no direction chosen yet defaults to
+**Back**, or the side opposite the bin's one rim Text if it has one; picking
+a direction by hand always wins after that. If a committed angle or
+direction change would require a bigger bin, Wavefinity asks
+**"Angled option will require a bigger bin. OK to size bin?"** before
+resizing anything; Cancel leaves the design exactly as it was.
 
 ---
 
@@ -600,7 +630,7 @@ Compatibility logic protects nearby shell features such as front Inside Grips.
 
 - Text is centered automatically.
 - One On-base Text can be used per bin.
-- Rim Text can be used on available rim sides subject to conflict rules.
+- A bin may contain **at most one rim Text total** (Fix 078), not one per rim side. Once a rim Text exists, every other Text's At-rim choices are unavailable and rim Text no longer offers Duplicate to another side; the existing rim Text can still change its own side. A legacy design saved with more than one rim Text remains loadable so it can be corrected, but Preview/Generate reports it invalid until only one remains.
 - Current relief choices are 0.2, 0.4, 0.6, and 0.8 mm.
 - Inlaid text is represented in the preview without changing the visible exterior envelope incorrectly.
 
@@ -728,12 +758,14 @@ Rules include:
 
 - Current opening-size choices from the authoritative catalog.
 
-### Vertical position
+### Opening Height
 
-Two-handle vertical-range control:
-
-- lower edge from bottom;
-- upper edge / distance from top.
+Two-handle vertical-range control, labeled **Top of bin** above the slider
+and **Base / bottom of bin** below it (Fix 078; formerly "Vertical
+position"). The visible control no longer shows a percent-from-top/bottom
+readout or a bin silhouette; the underlying stored percentages and their
+geometry/validation are unchanged, and exact values remain available to
+assistive technology.
 
 ### Wall selection
 
@@ -984,6 +1016,19 @@ The preview is also part of the product validation loop:
 
 A design that cannot pass real geometry validation should not be treated as printable.
 
+### Invalid-settings overlay (Fix 078)
+
+When the current design is invalid, the active Design preview (2D or 3D,
+whichever is showing) overlays a prominent red **Invalid settings** heading
+with the actual problem underneath, so the message sits where the user is
+already looking rather than only in a footer strip. A hard preview build
+failure shows the same overlay. Switching between the 2D and 3D views
+carries the same invalid state with it; the overlay never appears over the
+Space/Drawer view, and only the latest preview request may show, update, or
+clear it. The existing error panel below the preview remains for additional
+actionable detail (for example a clickable jump to the offending part) and
+is secondary to the overlay.
+
 ---
 
 # 13. Printing, saving, and generated files
@@ -1051,7 +1096,7 @@ Spaces can use **Spacers** to fill leftover physical area.
 
 ---
 
-# 16. AI Design — Fix 073
+# 16. AI Design — Fix 073, revised Fix 078
 
 **Status: Current — accepted and integrated into `main`.**
 
@@ -1059,16 +1104,18 @@ AI Design is a Designer workflow for turning a natural-language object descripti
 
 ## 16.1 User flow
 
-1. Click **AI Design** beside the Designer's New/Duplicate controls.
-2. Describe one object in a multiline text field. (If you have an unsaved interior part open, Wavefinity saves it into the design first so the prompt matches exactly what you see.)
+1. Click **AI Design**, a persistent major action in the Options area (moved off the cramped Bin Name row in Fix 078; it stays visible even while an option is being edited).
+2. Describe one object in a multiline text field, or pick a saved entry from **Recent descriptions** (this Space's last 10 successful descriptions; selecting one only fills the field, it never generates by itself). (If you have an unsaved interior part open, Wavefinity saves it into the design first so the prompt matches exactly what you see.)
 3. Optionally use **Dictate** when the browser supports speech recognition.
-4. Click **Generate Prompt**.
-5. Copy the generated Wavefinity prompt.
+4. Click **Generate Prompt** (disabled until the description is non-blank, and again once a prompt has been generated for the exact current text).
+5. Click **Copy Prompt** (the button itself reads **Copied** after a successful copy, and resets whenever a new prompt is generated).
 6. Paste it into any external AI.
 7. Let that AI ask follow-up questions when measurements or intent are unclear.
 8. Paste the final JSON response back into Wavefinity.
-9. Click **Process AI Response**.
-10. Wavefinity validates the result and, if valid, adopts it as a real design.
+9. Click **Modify Current Bin** to apply the result to the bin you have open, or **Generate as New Bin** to keep the current bin and create a new one from the result.
+10. Wavefinity proves the result (schema, request/context identity, canonical validation, real geometry, Space rules) and, if valid, adopts it exactly as the chosen button describes; an invalid result changes nothing and can be repaired (16.6).
+
+Every time the dialog is opened it starts a fresh transaction: description, prompt, pasted answer and status all clear (Recent descriptions does not). The dialog is sized for reading a real prompt (about 840 px wide on desktop) and opens on a compact six-step guide — Describe object → Generate Prompt → Give prompt to AI → Copy response → Paste answer → Generate Bin — instead of a paragraph of instructions.
 
 ## 16.2 What the AI is told
 
@@ -1103,7 +1150,12 @@ Before applying an answer, Wavefinity checks:
 - actual geometry preview;
 - fit/errors;
 - active Space constraints, including the Pegboard minimum bin sizes New Bin already uses;
-- the manifest's own public-control rules: an item shape not legal for that part, a Cradle item that is not plain round, a Bore item with the wrong fit clearance, a hex-bit item that is not exactly the fixed preset or is leaned, or an answer that tries to set a part's layout through a legacy/derived field instead of its current control.
+- the manifest's own public-control rules: an item shape not legal for that part, a Cradle item that is not plain round, a Bore item with the wrong fit clearance, a hex-bit item that is not exactly the fixed preset or is leaned, or an answer that tries to set a part's layout through a legacy/derived field instead of its current control;
+- (Fix 078) a non-blank, 1–80 character `part_name`;
+- (Fix 078) at most one rim Text feature in the returned design;
+- (Fix 078) in a capped Space (Drawer, Storage Box), that no Bore-held object's computed top exceeds the Space's height — Surface and Pegboard have no such cap.
+
+Both **Modify Current Bin** and **Generate as New Bin** run this identical proof before either may change anything; the button clicked is only the adoption choice, never a shortcut around validation.
 
 Invalid designs do not modify the current design.
 
@@ -1121,14 +1173,18 @@ after the prompt was created.
 
 The user must then generate a fresh prompt rather than applying stale AI output.
 
-## 16.5 Existing-bin behavior
+## 16.5 Adoption and naming (Fix 078)
 
-- If the current bin is composition-empty, a valid AI result can reuse the current bin identity.
-- If the current bin already contains meaningful parts/options/labels/etc. (including saved label text on a switched-off lid or edge mount), the AI result becomes a new bin rather than overwriting the existing composed bin. In a typed Space the current bin is saved first, and the new bin then updates the Space's remembered defaults the same way the same edits made by hand would.
+There is no "clean vs. edited" auto-chooser any more. Every AI Design dialog for an ordinary bin always offers the same two adoption buttons, and the person's click is the only thing that decides what happens:
+
+- **Modify Current Bin** replaces the open bin's design with the proven result, keeping its current Inventory identity. If the bin already has a non-blank name, that name is kept exactly even when the AI proposed a different one; only a blank current name may adopt the AI's proposed name.
+- **Generate as New Bin** keeps the current bin (saving it first in a typed Space) and installs the proven result as a new bin, using the AI's proposed name.
+
+Either way, Wavefinity — never the outside AI — has the final say on the name: trimmed, case-insensitive comparison against every other surviving ordinary-bin Inventory row, with a colliding name suffixed `Name (2)`, `Name (3)`, and so on (one existing ` (N)` suffix is stripped first so renumbering doesn't stack). The AI is asked for a short, descriptive name and may see existing Inventory names as an advisory hint to avoid an obvious duplicate, but it never has to invent its own numbering.
 
 ## 16.6 Repair prompt
 
-If the external AI returns invalid JSON or an invalid design, Wavefinity can create a **Make AI Fix Its Answer / Copy Repair Prompt** containing:
+If the external AI returns invalid JSON or an invalid design, Wavefinity can create a **Make AI Fix Its Answer** repair prompt containing:
 
 - the required schema;
 - the same request/context identity;
@@ -1136,9 +1192,13 @@ If the external AI returns invalid JSON or an invalid design, Wavefinity can cre
 - a safe validation error;
 - instructions to return one corrected JSON object.
 
-Only a problem in the AI's answer is repairable this way. If the answer was fine but Wavefinity itself failed afterward (service, save or apply), no repair prompt is offered and Wavefinity says whether the design was already applied.
+The repair prompt is shown, never auto-copied; **Copy Prompt** owns copying it the same way it owns the initial prompt. Only a problem in the AI's answer is repairable this way. If the answer was fine but Wavefinity itself failed afterward (service, save or apply), no repair prompt is offered and Wavefinity says whether the design was already applied.
 
-## 16.7 AI limitations
+## 16.7 Space object-height cap (Fix 078)
+
+The generated prompt states the active Space type and either a hard cap (Drawer and Storage Box: the Space's own height) or "no hard vertical cap" (Surface, Pegboard, or no active Space). AI Design distinguishes an object's own length from how far it inserts into a Bore and from the bin's height, and targets roughly 30 mm of a hand-retrieved object staying grippable above the bin rim — but in a capped Space that preference never overrides the hard cap: no part of a held object may end up above it. AI Design also prefers a wavy Bore variant over its straight counterpart when the two are otherwise equally suitable, without switching between the Base and Walls Only families just to get "wavy".
+
+## 16.8 AI limitations
 
 - One object per AI request in V1.
 - No built-in OpenAI/Anthropic/Gemini account, API key, SDK, or direct provider call.

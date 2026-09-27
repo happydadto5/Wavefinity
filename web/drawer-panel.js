@@ -438,7 +438,7 @@ DP.openInventoryRow = async id => {
     if (!(await designerEditInventoryRow(id, acceptTransition)) || !acceptTransition()) return false;
     DL.selectRow(id);
     DP.setMode("design");
-    activatePreviewView("3d");
+    activatePreviewView(preferredDesignView());
     return true;
   } finally {
     if (request === DP.modeRequest) DP.showPendingMode(null);
@@ -1029,7 +1029,7 @@ DP.selectMode = async mode => {
       if (!DL.active) { DL.active = true; DP.build(); DP.applyMode(); }
     }
     DP.setMode(mode);
-    activatePreviewView(mode === "space" ? "drawer" : "3d");
+    activatePreviewView(mode === "space" ? "drawer" : preferredDesignView());
     if (mode === "space") DP.update();
     return true;
   } finally {
@@ -1066,8 +1066,9 @@ DP.leave = () => {
   DV.drag = null;
   DV.pan = null;
   if (DL.dirty) DL.save();
-  // The Space canvas has nothing to show any more.
-  if ($('.canvas-wrap[data-canvas="drawer"]')?.classList.contains("active")) activatePreviewView("3d");
+  // The Space canvas has nothing to show any more; return to the remembered
+  // Design view rather than forcing 3D.
+  if ($('.canvas-wrap[data-canvas="drawer"]')?.classList.contains("active")) activatePreviewView(preferredDesignView());
 };
 
 (() => {

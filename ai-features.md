@@ -51,22 +51,29 @@ This file is supplemental explanation. Do not substitute values from this file f
 
 Wavefinity may be used without a typed Space or inside one of these typed Spaces.
 
+## Hard object-height cap
+
+Drawer and Storage Box are a hard vertical ceiling: no part of a Bore-held object may end up above the Space's own height. Surface and Pegboard have no such cap, and neither does an ordinary Design with no active Space. The generated prompt always states which applies and, when capped, the exact height. This is a legality rule enforced by Wavefinity's own candidate check, not merely a style preference.
+
 ## Drawer
 
 - Real usable drawer width, depth, and height.
 - Returned bins must fit the active drawer constraints.
 - Bin placement in the drawer happens later in Wavefinity.
+- Hard object-height cap: the Drawer's own height.
 
 ## Surface
 
 - Open-surface organization using a Space-owned Base Trim.
 - Surface bin base behavior may be Space-controlled.
 - Preserve any fields the generated prompt marks as Space-controlled.
+- No hard object-height cap.
 
 ## Storage Box
 
 - Ordinary bins may be designed to fit inside a Storage Box Space.
 - The AI result is still an ordinary bin, not the Storage Box case itself.
+- Hard object-height cap: the Storage Box Space's own height.
 
 ## Pegboard
 
@@ -74,6 +81,7 @@ Wavefinity may be used without a typed Space or inside one of these typed Spaces
 - Pegboard mount metadata is Space-controlled.
 - Preserve the current mount data exactly unless the generated prompt explicitly says otherwise.
 - The returned bin must satisfy the current board/minimum-size rules supplied in the generated prompt.
+- No hard object-height cap.
 
 ---
 
@@ -162,15 +170,27 @@ Current style families:
 Typical controls include:
 
 - held-item profile/measurements;
-- hole depth;
+- insertion depth — `options.depth` for the two Base styles; `options.walls_depth` for the two Walls Only styles (never the other field for the wrong family; a legacy design with no `walls_depth` reaches the normal bin floor, but a new AI answer should choose it deliberately);
 - Bore height;
 - Bore wall thickness;
 - X/Y quantity;
-- angle and angle direction;
+- angle and angle direction — see below;
 - footprint sizing relationship;
 - height sizing relationship.
 
 Current item-profile choices and any special fixed-profile dimensions are supplied in the generated prompt. Do not invent a profile value.
+
+### Wavy preference
+
+When a Base or Walls Only Bore is otherwise equally suitable straight or wavy, prefer the wavy variant of the *same* structural family: Base - Wavy Walls over Base - Straight Walls, or Wavy Walls Only over Straight Walls Only. Choose the correct family (Base vs. Walls Only) for the request first; never switch families merely to get "wavy".
+
+### Retrieval depth vs. object length
+
+An object's own length, its insertion depth, and the bin's height are three different numbers. Do not set the insertion depth equal to the object's full length just because that is the length supplied. For an upright hand-retrieved object, plan its final top relative to the bin rim, aiming for roughly 30 mm of it to remain grippable above the rim. In a Space with a hard object-height cap (see Space context, above), this preference is always subordinate to that cap: no part of the object may end up above it, even if that means a shorter bin or a shallower insertion depth than 30 mm of grip would otherwise call for. In an uncapped Space (or no Space), the object protruding above the bin rim is normal and expected.
+
+### Bore angle terminology
+
+The generated prompt's `options.angle` is the canonical, persisted value: degrees of lean **away from vertical**, 0 = upright, up to a current maximum around 70. The Wavefinity Designer itself shows a different, human-facing **"Bore angle"** field running 90 (upright) down to 20 (steepest lean), where `displayed_bore_angle = 90 - options.angle`. Always return the canonical `options.angle` value, not the displayed one. When leaning a Bore with no object-specific reason for a direction, prefer `options.angle_towards` "back", or the side opposite the design's one allowed rim Text's `rim_side` if the design has one.
 
 ## Post
 
@@ -257,6 +277,8 @@ Typical controls:
 The generated prompt supplies the exact legal relief values.
 
 Text is automatically centered. Internal transport/editor fields that are not user choices must not be invented.
+
+**A design may contain at most one rim Text feature in total, not one per rim side.** A returned design with more than one rim Text is a semantic-answer defect and is rejected before it can be applied, the same as any other repairable defect.
 
 ---
 
@@ -537,7 +559,8 @@ General rules:
 - harmless assumptions may be listed;
 - critical dimensions may not be guessed;
 - no fabricated Photo Nest contour;
-- preserve all Space-controlled fields.
+- preserve all Space-controlled fields;
+- `design.part_name` is a short, descriptive, non-blank name (1–80 characters) for what the bin holds — for example "Lipstick" or "Hex Drivers", never a generic "Bin" or dimensions-only text; existing Inventory names, when supplied, are advisory only, so do not invent a numbering suffix — Wavefinity enforces final uniqueness itself.
 
 Wavefinity will run canonical validation, real geometry validation, and active-Space checks before adopting the design.
 

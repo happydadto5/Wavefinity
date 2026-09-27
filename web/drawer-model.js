@@ -68,6 +68,10 @@ DL.defaultSettings = () => ({
   // Fix 061 F6: per-Space choice to refresh a bin's saved files after an edit
   // without asking. Default Ask.
   auto_update_changed_files: false,
+  // Fix 078: the object descriptions AI Design actually generated a prompt
+  // from, this Space only - newest first, at most 10, never the prompt text
+  // itself and never a bin design.
+  ai_design_recent_descriptions: [],
 });
 
 DL.newDrawerId = () => {
@@ -115,6 +119,9 @@ DL.normaliseLayout = raw => {
   // autosave:false layout normalises to the always-on runtime value.
   layout.settings.autosave = true;
   layout.settings.auto_update_changed_files = layout.settings.auto_update_changed_files === true;
+  layout.settings.ai_design_recent_descriptions = Array.isArray(layout.settings.ai_design_recent_descriptions)
+    ? layout.settings.ai_design_recent_descriptions.filter(one => typeof one === "string" && one.trim()).slice(0, 10)
+    : [];
   layout.drawers = Array.isArray(layout.drawers)
     ? layout.drawers.filter(one => one && typeof one === "object") : [];
   DL.layout = layout;

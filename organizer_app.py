@@ -1205,15 +1205,21 @@ def preview_geometry(
     for index, one in enumerate(features):
         if not is_text(one):
             continue
-        destination = ("rim", one.options.get("rim_side", "back")) if one.options.get("level") == "rim" else ("base", "")
+        destination = "rim" if one.options.get("level") == "rim" else "base"
         if destination in destinations:
-            feature_errors.append("Only one Text is allowed on each base or rim side; remove a duplicate")
+            feature_errors.append(
+                "Only one rim Text is allowed; remove a duplicate" if destination == "rim"
+                else "Only one Text is allowed on the base; remove a duplicate"
+            )
             invalid_feature_indexes.extend((destinations[destination], index))
         destinations[destination] = index
     if draft is not None and is_text(draft):
-        destination = ("rim", draft.options.get("rim_side", "back")) if draft.options.get("level") == "rim" else ("base", "")
+        destination = "rim" if draft.options.get("level") == "rim" else "base"
         if destination in destinations and destinations[destination] != selected:
-            draft_error = "Only one Text is allowed on each base or rim side; change Text Type or remove the other Text"
+            draft_error = (
+                "Only one rim Text is allowed; change the existing rim Text or use Base Text" if destination == "rim"
+                else "Only one Text is allowed on the base; change Text Type or remove the other Text"
+            )
     reserved = _customization_zones(box, tidy, location, scoop, mode)
 
     occupied = [

@@ -2196,6 +2196,7 @@ class AiHelpBackendTests(unittest.TestCase):
     def test_ai_public_contract_semantic_preflight_rejects_canonically_valid_defects(self):
         base = wavefinity_web._ai_example_base()
         base["box"].update({"x": 96.0, "y": 96.0, "z": 60.0})
+        base["part_name"] = "Test Bin"  # Fix 078: part_name is itself now required
 
         def candidate(feature):
             design = json.loads(json.dumps(base))
@@ -2254,6 +2255,52 @@ class AiHelpBackendTests(unittest.TestCase):
         })
         accepted = wavefinity_web.ai_candidate_payload({"design": good})
         self.assertEqual(accepted["problems"], [])
+
+    def test_ai_candidate_requires_a_short_nonblank_part_name(self):
+        # Fix 078: a missing/blank or over-80-character name is a repairable
+        # answer defect, not silently accepted or silently renamed.
+        base = wavefinity_web._ai_example_base()
+        for bad_name in ("", "   ", "x" * 81):
+            design = json.loads(json.dumps(base))
+            design["part_name"] = bad_name
+            with self.assertRaisesRegex(ValueError, "part_name", msg=repr(bad_name)):
+                wavefinity_web.ai_candidate_payload({"design": design})
+        good = json.loads(json.dumps(base))
+        good["part_name"] = "Lipstick"
+        self.assertEqual(wavefinity_web.ai_candidate_payload({"design": good})["problems"], [])
+
+    def test_ai_candidate_rejects_more_than_one_rim_text(self):
+        # Fix 078: at most one rim Text feature total, even on different sides.
+        base = wavefinity_web._ai_example_base()
+        base["part_name"] = "Test Bin"
+        base["layout"]["features"] = [
+            {"kind": "text", "zone": [-20, 6, 20, 15], "options": {"text": "A", "level": "rim", "rim_side": "back"}},
+            {"kind": "text", "zone": [-20, -15, 20, -6], "options": {"text": "B", "level": "rim", "rim_side": "front"}},
+        ]
+        with self.assertRaisesRegex(ValueError, "one rim Text"):
+            wavefinity_web.ai_candidate_payload({"design": base})
+
+    def test_ai_candidate_enforces_the_capped_space_object_height_ceiling(self) -> None:
+        # Fix 078: a Drawer/Storage Box Space is a hard ceiling for a Bore-held
+        # object's top; Surface/Pegboard and no Space impose none.
+        base = wavefinity_web._ai_example_base()
+        base["box"].update({"x": 64.0, "y": 64.0, "z": 77.0})
+        base["part_name"] = "Lipstick"
+        base["layout"]["features"] = [{
+            "kind": "bore", "zone": [-8, -8, 8, 8],
+            "item": {"name": "lipstick", "profile": "round", "clearance": 0.25,
+                     "segments": [{"length": 60.0, "diameter": 12.0}]},
+            "options": {"bore_style": "base_straight", "height": 70.0, "depth": 20.0, "wall": 1.6},
+        }]
+        drawer_space = {"kind": "drawer", "x": 64.0, "y": 64.0, "z": 77.0}
+        result = wavefinity_web.ai_candidate_payload({"design": base, "space": drawer_space})
+        self.assertTrue(result["problems"])
+        self.assertIn("77.0", " ".join(result["problems"]))
+        # The identical design/object is legal without a capping Space.
+        uncapped = wavefinity_web.ai_candidate_payload({"design": base, "space": {"kind": "surface", "x": 64.0, "y": 64.0, "z": 200.0}})
+        self.assertEqual(uncapped["problems"], [])
+        no_space = wavefinity_web.ai_candidate_payload({"design": base})
+        self.assertEqual(no_space["problems"], [])
 
     def test_prompt_contract_context_and_privacy(self):
         design = wavefinity_web.default_design()
@@ -2320,6 +2367,7 @@ class AiHelpBackendTests(unittest.TestCase):
 
     def test_candidate_is_proven_in_real_geometry_without_side_effects(self):
         design = wavefinity_web.default_design()
+        design["part_name"] = "Test Bin"  # Fix 078: part_name is itself now required
         before = json.dumps(design, sort_keys=True)
         registry = dict(wavefinity_web._PREVIEW_REQUESTS)
         good = wavefinity_web.ai_candidate_payload(

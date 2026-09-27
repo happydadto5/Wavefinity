@@ -45,6 +45,12 @@ const state = {
   draftKind: "divider",
   draft: null,
   draftResolvedOptions: {},
+  // The last Design 2D/3D view actually used, runtime-only (Fix 078): a mode
+  // switch through Space never overwrites it, only 2D/3D activation does.
+  lastDesignView: "3d",
+  // True while a Bore-angle/direction OK/Cancel growth confirmation is open,
+  // so the generic silent auto-grow catch does not preempt it (Fix 078).
+  boreAngleGrowthPending: false,
   // Whether the current draft should save itself into the design as it's edited,
   // rather than staying a preview-only suggestion. True for anything the user
   // deliberately started (palette pick, Additional support, re-editing a placed
@@ -718,7 +724,7 @@ async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
   bindLidMemoryForDesign();
   syncForm();
   clearDraftSelection();
-  activatePreviewView("3d");
+  activatePreviewView(preferredDesignView());
   await refreshPreview();
 }
 
@@ -940,7 +946,7 @@ async function installLoadedDesignSource(rowId, spec, {
     clearDraftSelection();
     if (!acceptTransition) {
       if (typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
-      activatePreviewView("3d");
+      activatePreviewView(preferredDesignView());
     }
     const preview = refreshPreview();
     if (rowId === null && typedSpaceOrdinaryBin()) {
@@ -974,7 +980,7 @@ async function designerInstallInventorySpec(rowId, spec, acceptTransition = null
   if (!spec) return false;
   if (acceptTransition && !acceptTransition()) return false;
   if (state.designInventoryId === rowId) {
-    if (!acceptTransition) activatePreviewView("3d");
+    if (!acceptTransition) activatePreviewView(preferredDesignView());
     return true;
   }
   if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
@@ -1044,7 +1050,74 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
 // never saved into a design, a Space or a preference.
 
 const AI_SCHEMA = "wavefinity-ai-design-v1";
-const aiHelp = { session: null, busy: false, generation: 0, failure: null, recognition: null };
+// `generatedFor`: the trimmed description the current prompt/session was
+// generated from - Generate Prompt stays disabled while the live description
+// still equals it (Fix 078).
+const aiHelp = { session: null, busy: false, generation: 0, failure: null, recognition: null, generatedFor: null };
+
+function aiTypedSpaceActive() {
+  return state.folderMode === "space" && typeof DL !== "undefined" && DL.active && Boolean(DL.layout);
+}
+
+// Per-Space history of object descriptions AI Design actually generated a
+// prompt from (Fix 078) - never the prompt text itself, never a bin design.
+function aiRecentDescriptions() {
+  if (!aiTypedSpaceActive()) return [];
+  return DL.layout.settings?.ai_design_recent_descriptions || [];
+}
+
+// Only after Generate Prompt succeeds. Moves an existing case-insensitive
+// match to the top instead of duplicating it; keeps at most 10, newest first.
+// A save failure here must never invalidate the prompt/session already
+// established - it is reported as a separate, non-blocking warning.
+function aiRecordRecentDescription(description) {
+  if (!aiTypedSpaceActive()) return;
+  try {
+    const trimmed = description.trim();
+    DL.change(() => {
+      const kept = (DL.layout.settings.ai_design_recent_descriptions || [])
+        .filter(one => one.trim().toLowerCase() !== trimmed.toLowerCase());
+      DL.layout.settings.ai_design_recent_descriptions = [trimmed, ...kept].slice(0, 10);
+    }, { history: false });
+    aiRenderRecentDescriptions();
+  } catch (_error) {
+    toast("The prompt is ready, but its description could not be saved to Recent descriptions.", true, 6000);
+  }
+}
+
+function aiRenderRecentDescriptions() {
+  const block = $("#ai-help-recent-block");
+  const list = $("#ai-help-recent-list");
+  const toggle = $("#ai-help-recent-toggle");
+  if (!block || !list || !toggle) return;
+  const entries = aiRecentDescriptions();
+  block.hidden = entries.length === 0;
+  list.hidden = true;
+  toggle.setAttribute("aria-expanded", "false");
+  list.innerHTML = entries.map((text, index) =>
+    `<button type="button" class="ai-help-recent-item" role="option" data-recent-index="${index}">${escapeHtml(text)}</button>`
+  ).join("");
+}
+
+// Wavefinity, not the outside AI, owns final bin-name uniqueness (Fix 078):
+// trimmed, case-insensitive comparison, one trailing " (N)" suffix stripped
+// before renumbering, first free `Name (N)`. Mirrors (generalizes) the
+// existing Inventory duplicate-name convention in
+// organizer_inventory.py::_duplicate_name(), so there is one suffix rule.
+function aiResolveCandidateName(candidateName, { excludeCurrent }) {
+  const requested = String(candidateName || "").trim() || "Bin";
+  const root = requested.replace(/ \(\d+\)$/, "").trim() || "Bin";
+  const rows = aiTypedSpaceActive() ? (DL.bins || []) : [];
+  const currentId = state.designInventoryId;
+  const taken = new Set(
+    rows.filter(one => !(excludeCurrent && one.id === currentId))
+      .map(one => String(one.name || "").trim().toLowerCase())
+  );
+  if (!taken.has(root.toLowerCase())) return root;
+  let number = 2;
+  while (taken.has(`${root} (${number})`.toLowerCase())) number += 1;
+  return `${root} (${number})`;
+}
 
 // `stale`: the answer belongs to an older prompt/context - needs a fresh prompt.
 // `operational`: the answer was fine but Wavefinity itself failed (service, save,
@@ -1075,6 +1148,14 @@ function aiSpaceContext() {
   return context;
 }
 
+// Existing ordinary-bin names, advisory-only context for the AI prompt so it
+// can avoid an obvious duplicate (Fix 078). Wavefinity still enforces final
+// uniqueness itself on adoption.
+function aiExistingBinNames() {
+  if (state.folderMode !== "space" || typeof DL === "undefined" || !DL.bins) return [];
+  return DL.bins.map(one => String(one.name || "").trim()).filter(Boolean).slice(0, 200);
+}
+
 // Who owns this bin: the pieces of context that never change just because a
 // form re-rendered or the bin was auto-named.
 function aiIdentityKey() {
@@ -1096,25 +1177,6 @@ function aiContextKey() {
     design,
     draft: draftNeedsSaving() ? state.draft : null,
   });
-}
-
-// True only when the bin has no meaningful user-added composition. Shell size,
-// wall/base, layout defaults, the bin name and Space-controlled mounting do not
-// count. Reads canonical design state, never the DOM.
-function aiCompositionEmpty(design = visibleDesignSnapshot()) {
-  if (draftNeedsSaving()) return false;
-  const box = design.box || {};
-  if ((design.layout?.features || []).length) return false;
-  if (String(design.label || "").trim()) return false;
-  if (design.scoop) return false;
-  const typed = value => String(value ?? "").trim() !== "";
-  const lid = box.lid || {};
-  if (lid.enabled || typed(lid.label_text) || (lid.division_labels || []).some(typed)) return false;
-  if (box.stack?.mode && box.stack.mode !== "none") return false;
-  if (box.lift_grabbers?.enabled) return false;
-  if (box.side_openings?.enabled) return false;
-  if (edgeMountActive(design) || typed(box.edge_mount?.label_text)) return false;
-  return true;
 }
 
 // Accepts exactly one JSON object, optionally inside ONE outer markdown fence.
@@ -1209,16 +1271,38 @@ function aiSetStatus(message = "", { error = false, repair = false } = {}) {
 
 function aiSetBusy(busy) {
   aiHelp.busy = busy;
-  ["#ai-help-generate", "#ai-help-process", "#ai-help-repair", "#ai-help-close"].forEach(selector => {
+  ["#ai-help-modify", "#ai-help-generate-new", "#ai-help-repair", "#ai-help-cancel"].forEach(selector => {
     const button = $(selector);
     if (button) button.disabled = busy;
   });
+  if (busy) {
+    const generate = $("#ai-help-generate");
+    if (generate) generate.disabled = true;
+  } else {
+    aiUpdateGenerateAvailability();
+  }
+}
+
+// Blank description keeps Generate Prompt disabled; a successful generation
+// disables it again while the live description still equals the one it was
+// generated from (Fix 078). A failed generation never sets that marker.
+function aiUpdateGenerateAvailability() {
+  const button = $("#ai-help-generate");
+  if (!button) return;
+  const text = $("#ai-help-description").value.trim();
+  button.disabled = !text || (aiHelp.generatedFor !== null && text === aiHelp.generatedFor);
+}
+
+function aiSetCopyState(label) {
+  const button = $("#ai-help-copy");
+  if (button) button.textContent = label;
 }
 
 function aiShowPrompt(text) {
   const area = $("#ai-help-prompt");
   area.value = text;
   $("#ai-help-prompt-block").hidden = false;
+  aiSetCopyState("Copy Prompt");
 }
 
 async function aiCopyText(text, area) {
@@ -1254,7 +1338,10 @@ async function aiGeneratePrompt() {
       const baseline = visibleDesignSnapshot();
       if (isStructuralDesign(baseline)) throw new AiHelpError("AI Design designs ordinary bins only.");
       const contextKey = aiContextKey();
-      const result = await api("/api/ai/prompt", { description, design: baseline, space: aiSpaceContext() });
+      const space = aiSpaceContext();
+      const result = await api("/api/ai/prompt", {
+        description, design: baseline, space, existing_names: aiExistingBinNames(),
+      });
       if (aiContextKey() !== contextKey) {
         throw new AiHelpError("Your design changed while the prompt was being written. Try again.");
       }
@@ -1263,8 +1350,12 @@ async function aiGeneratePrompt() {
         context_fingerprint: result.context_fingerprint,
         contextKey,
         baseline,
-        reuse: aiCompositionEmpty(baseline),
+        // The exact Space facts the prompt was written against (Fix 078) -
+        // candidate proof reuses these, never a newly switched Space.
+        space,
       };
+      aiHelp.generatedFor = description;
+      aiRecordRecentDescription(description);
       aiShowPrompt(result.prompt);
       aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
       return true;
@@ -1284,6 +1375,10 @@ async function aiProveCandidate(envelope, session) {
   try {
     result = await api("/api/ai/candidate", {
       design: envelope.design, client_id: `${previewClientId}-ai`, generation: ++aiHelp.generation,
+      // The prompt-bound Space context, never a newly switched Space
+      // (Fix 078): the Space-cap preflight must judge against what the
+      // prompt actually described.
+      space: session.space,
     });
   } catch (error) {
     // 400 means Wavefinity judged the answer invalid; anything else is Wavefinity failing.
@@ -1292,7 +1387,7 @@ async function aiProveCandidate(envelope, session) {
       { operational: true });
   }
   aiCheckSession(envelope, session);
-  if (result.superseded) throw new AiHelpError("Another check was started. Try Process AI Response again.");
+  if (result.superseded) throw new AiHelpError("Another check was started. Try again.");
   if (result.problems.length) {
     throw new AiHelpError(`Wavefinity could not build this design: ${result.problems.slice(0, 3).join(" ")}`);
   }
@@ -1303,8 +1398,10 @@ async function aiProveCandidate(envelope, session) {
 
 // Step 8: install the proven design and adopt its already-built preview through
 // the same owner refreshPreview() uses - no second identical geometry build.
-// Returns true on success, false when nothing was changed.
-async function aiInstallCandidate(candidate, session) {
+// `mode` is "modify" or "new" - the user's explicit adoption choice (Fix 078).
+// There is no "clean bin" auto-chooser any more. Returns true on success,
+// false when nothing was changed.
+async function aiInstallCandidate(candidate, session, mode) {
   // The one expected identity change: the pre-install save of a nonblank typed-Space
   // bin may legitimately give that bin a name and row ID. So the first check compares
   // everything including the bin's own ID, and the re-check after that save compares
@@ -1318,22 +1415,30 @@ async function aiInstallCandidate(candidate, session) {
   };
   return withDeferredDraftSwitch(async () => {
     identity({ inventory: true });
-    if (!session.reuse) {
+    const design = clone(candidate.design);
+    const currentName = String(session.baseline?.part_name || "").trim();
+    if (mode === "modify") {
+      // Preserve the current bin's own nonblank name even when the AI
+      // proposes another; only a blank current name may adopt the AI name,
+      // after collision-checking against every *other* surviving row.
+      design.part_name = currentName || aiResolveCandidateName(design.part_name, { excludeCurrent: true });
+    } else {
       if (state.folderMode === "space") {
         if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) {
           aiSetStatus("The current bin could not be saved first, so nothing was changed.", { error: true });
           return false;
         }
       } else if (designHasChanges() && !(await appConfirmAction({
-        title: "Use the AI design as a new bin?",
-        message: "Replace the current bin with the AI design and discard its unsaved changes?",
-        actionLabel: "Use AI Design",
+        title: "Generate as a new bin?",
+        message: "Replace the current bin with the AI design as a new bin and discard its unsaved changes?",
+        actionLabel: "Generate as New Bin",
         danger: true,
       }))) {
         aiSetStatus("Nothing was changed. Your answer is still here.");
         return false;
       }
       identity();
+      design.part_name = aiResolveCandidateName(design.part_name, { excludeCurrent: false });
     }
     if (!beginDesignMutation()) {
       aiSetStatus("Wavefinity is finishing another change. Try again in a moment.", { error: true });
@@ -1341,11 +1446,11 @@ async function aiInstallCandidate(candidate, session) {
     }
     let installed = false;
     try {
-      state.design = clone(candidate.design);
+      state.design = design;
       installed = true;
       state.lastOrdinaryDesign = clone(state.design);
       resetNestPhotoSession();
-      if (!session.reuse) {
+      if (mode === "new") {
         // The equivalent New Bin baseline (the unedited starter), never the finished
         // candidate: persisting the AI design then updates the Space's remembered
         // bin/part defaults exactly as the same edits made by hand would.
@@ -1365,10 +1470,12 @@ async function aiInstallCandidate(candidate, session) {
       if (typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
       activatePreviewView("3d");
       // Claim preview ownership (older in-flight previews become stale, exactly as a
-      // normal refresh would) and adopt the proven result instead of rebuilding it.
+      // normal refresh would) and adopt the proven result instead of rebuilding it -
+      // only its design's part_name differs from what was just proven, which does
+      // not change geometry/validity, so the candidate's proof still stands.
       invalidatePendingPreview();
       fullPreviewStarts += 1;
-      adoptPreviewResult(candidate.preview);
+      adoptPreviewResult({ ...candidate.preview, design: clone(state.design) });
       if (typedSpaceOrdinaryBin()) await persistSpaceDesignSource(null, true);
       return true;
     } catch (error) {
@@ -1384,7 +1491,10 @@ async function aiInstallCandidate(candidate, session) {
   }, false);
 }
 
-async function aiProcessResponse() {
+// `mode` is "modify" or "new" - which bottom button the user clicked. Both
+// run the identical parse/session/schema/semantic/geometry/Space-cap proof
+// before either may mutate anything (Fix 078).
+async function aiProcessResponse(mode) {
   if (aiHelp.busy) return;
   const text = $("#ai-help-response").value;
   const session = aiHelp.session;
@@ -1395,7 +1505,7 @@ async function aiProcessResponse() {
     const envelope = aiParseEnvelope(text);
     aiCheckSession(envelope, session);
     const candidate = await aiProveCandidate(envelope, session);
-    if (await aiInstallCandidate(candidate, session)) {
+    if (await aiInstallCandidate(candidate, session, mode)) {
       aiHelp.session = null;
       $("#ai-help-dialog").close();
       toast("AI design applied.");
@@ -1426,12 +1536,10 @@ async function aiMakeRepairPrompt() {
       response: failure.response,
       error: failure.message,
     });
+    // Never auto-copy behind the user's back (Fix 078): show it and let the
+    // explicit Copy Prompt button own copy state, same as the initial prompt.
     aiShowPrompt(result.prompt);
-    const copied = await aiCopyText(result.prompt, $("#ai-help-prompt"));
-    aiSetStatus(copied
-      ? "Repair prompt copied. Give it to your AI, then paste its new answer below."
-      : "Repair prompt ready above. Copy it to your AI, then paste its new answer below.",
-    { repair: true });
+    aiSetStatus("Repair prompt ready above. Copy it to your AI, then paste its new answer below.", { repair: true });
   } catch (error) {
     aiSetStatus(error.message, { error: true, repair: true });
   } finally {
@@ -1467,6 +1575,7 @@ function aiWireDictation() {
       if (!heard) return;
       const field = $("#ai-help-description");
       field.value = field.value && !/\s$/.test(field.value) ? `${field.value} ${heard}` : `${field.value}${heard}`;
+      aiUpdateGenerateAvailability();
     };
     recognition.onerror = () => { stop(); aiSetStatus("Dictation is not available right now. You can still type.", { error: true }); };
     recognition.onend = stop;
@@ -1476,21 +1585,70 @@ function aiWireDictation() {
   });
 }
 
+// Every open is a fresh transaction (Fix 078): all current-dialog working
+// state is cleared before showModal() except per-Space Recent descriptions,
+// which are never cleared here.
+function aiResetDialog() {
+  $("#ai-help-description").value = "";
+  $("#ai-help-prompt").value = "";
+  $("#ai-help-prompt-block").hidden = true;
+  $("#ai-help-response").value = "";
+  aiHelp.session = null;
+  aiHelp.failure = null;
+  aiHelp.generatedFor = null;
+  aiHelp.recognition?.stop();
+  aiSetCopyState("Copy Prompt");
+  aiSetStatus("");
+  aiUpdateGenerateAvailability();
+  aiRenderRecentDescriptions();
+}
+
 function aiWireHelp() {
   const dialog = $("#ai-help-dialog");
   if (!dialog) return;
   $("#ai-help-open").addEventListener("click", () => {
-    aiSetStatus("");
+    aiResetDialog();
     if (!dialog.open) dialog.showModal();
   });
+  $("#ai-help-description").addEventListener("input", aiUpdateGenerateAvailability);
   $("#ai-help-generate").addEventListener("click", aiGeneratePrompt);
-  $("#ai-help-process").addEventListener("click", aiProcessResponse);
+  $("#ai-help-modify").addEventListener("click", () => aiProcessResponse("modify"));
+  $("#ai-help-generate-new").addEventListener("click", () => aiProcessResponse("new"));
   $("#ai-help-repair").addEventListener("click", aiMakeRepairPrompt);
   $("#ai-help-copy").addEventListener("click", async () => {
     const copied = await aiCopyText($("#ai-help-prompt").value, $("#ai-help-prompt"));
-    aiSetStatus(copied ? "Copied." : "Select the prompt and copy it.", { error: !copied });
+    if (copied) {
+      aiSetCopyState("Copied");
+      aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
+    } else {
+      aiSetCopyState("Copy Prompt");
+      aiSetStatus("Select the prompt and copy it.", { error: true });
+    }
   });
-  $("#ai-help-close").addEventListener("click", () => {
+  const recentToggle = $("#ai-help-recent-toggle");
+  const recentList = $("#ai-help-recent-list");
+  if (recentToggle && recentList) {
+    recentToggle.addEventListener("click", () => {
+      const expanded = !recentList.hidden;
+      recentList.hidden = expanded;
+      recentToggle.setAttribute("aria-expanded", String(!expanded));
+    });
+    recentList.addEventListener("click", event => {
+      const button = event.target.closest(".ai-help-recent-item");
+      if (!button) return;
+      const text = aiRecentDescriptions()[Number(button.dataset.recentIndex)];
+      if (text === undefined) return;
+      // Selecting an entry only populates Description; it never generates a
+      // prompt or creates/rebinds a session (Fix 078).
+      const field = $("#ai-help-description");
+      field.value = text;
+      recentList.hidden = true;
+      recentToggle.setAttribute("aria-expanded", "false");
+      aiUpdateGenerateAvailability();
+      field.focus();
+    });
+  }
+  $("#ai-help-cancel").addEventListener("click", () => {
     aiHelp.recognition?.stop();
     dialog.close();
   });
@@ -1813,6 +1971,20 @@ function setError(message = "", actions = []) {
     panel.textContent = message;
   }
   panel.hidden = !message && !actions.length;
+}
+
+// Fix 078: the primary "Invalid settings" location, physically over the
+// active Design canvas (3D and 2D both carry it, kept in sync, never the
+// Space/Drawer canvas). Runtime-only projection of refreshPreview()'s own
+// latest-request error state - never a second source of truth.
+function setDesignInvalidOverlay(message = "") {
+  ["#design-invalid-overlay-3d", "#design-invalid-overlay-2d"].forEach(selector => {
+    const overlay = $(selector);
+    if (!overlay) return;
+    overlay.hidden = !message;
+    const text = $(".design-invalid-message", overlay);
+    if (text) text.textContent = message;
+  });
 }
 
 function partInfo(kind = state.draftKind) {
@@ -4005,7 +4177,9 @@ function updateNudgeUI() {
 function updatePreviewHelp(view) {
   const el = $("#preview-help");
   if (!el) return;
-  if (view !== "2d") {
+  if (view === "drawer") {
+    el.textContent = "Drag the floor to pan (or right-drag). Wheel or −/+ to zoom, Fit to reset.";
+  } else if (view !== "2d") {
     el.textContent = "Drag to spin, or click the arrows for a 15° step (shift-click for 2°). Wheel to zoom, double-click to reset.";
   } else if (isNestEditWorkspaceActive()) {
     el.textContent = "Drag a source-outline point to reshape this Photo Nest. Use Add point or Delete point for outline detail.";
@@ -4360,6 +4534,10 @@ async function openDividerSegmentEditor() {
   renderLayout2D();
 }
 
+// The Space/Drawer canvas has no matching .view-tab (there is no third tab -
+// Space is reached only programmatically), so it must not be gated on one.
+// A view-only switch never touches remembered design/Space state; it only
+// remembers the last Design 2D/3D view actually used (Fix 078).
 function activatePreviewView(view) {
   if (view === "drawer" && state.folderMode !== "space") {
     if (typeof SP !== "undefined") SP.offerSpacePlanning();
@@ -4369,23 +4547,39 @@ function activatePreviewView(view) {
     if (typeof SP !== "undefined") SP.showFolderAccessNeeded();
     return;
   }
-  const tab = $(`.view-tab[data-view="${view}"]`);
   const canvasWrap = $(`.canvas-wrap[data-canvas="${view}"]`);
-  if (!tab || !canvasWrap) return;
-  $$(".view-tab").forEach(other => {
-    const active = other === tab;
-    other.classList.toggle("active", active);
-    other.setAttribute("aria-selected", String(active));
-    other.tabIndex = active ? 0 : -1;
-  });
-  $$(".canvas-wrap").forEach(wrap => wrap.classList.toggle("active", wrap === canvasWrap));
+  if (!canvasWrap) return;
+  if (view === "drawer") {
+    $$(".canvas-wrap").forEach(wrap => wrap.classList.toggle("active", wrap === canvasWrap));
+  } else {
+    const tab = $(`.view-tab[data-view="${view}"]`);
+    if (!tab) return;
+    $$(".view-tab").forEach(other => {
+      const active = other === tab;
+      other.classList.toggle("active", active);
+      other.setAttribute("aria-selected", String(active));
+      other.tabIndex = active ? 0 : -1;
+    });
+    $$(".canvas-wrap").forEach(wrap => wrap.classList.toggle("active", wrap === canvasWrap));
+    state.lastDesignView = view;
+  }
   canvasWrap.classList.remove("view-enter");
   void canvasWrap.offsetWidth;
   canvasWrap.classList.add("view-enter");
   updatePreviewHelp(view);
   updateDividerEditBreadcrumb();
   if (view === "2d") updateNudgeUI();
-  requestAnimationFrame(() => view === "3d" ? renderPreview3D() : renderLayout2D());
+  requestAnimationFrame(() => {
+    if (view === "3d") renderPreview3D();
+    else if (view === "2d") renderLayout2D();
+    else if (typeof DV !== "undefined" && DV.render) DV.render();
+  });
+}
+
+// The Design 2D/3D view the user last actually chose, for transitions that
+// merely re-enter Design without themselves choosing a specific view.
+function preferredDesignView() {
+  return state.lastDesignView === "2d" ? "2d" : "3d";
 }
 
 function wireControls() {
@@ -5338,8 +5532,10 @@ function syncSideOpeningRange(spec) {
     fill.style.bottom = `${pair.lower}%`;
     fill.style.height = `${pair.upper - pair.lower}%`;
   }
-  const readout = $("#side-opening-range-readout");
-  if (readout) readout.textContent = `${fmt(pair.lower)}% from bottom · ${fmt(100 - pair.upper)}% from top`;
+  // Fix 078: the visible UI shows only the Top of bin / Base of bin cues and
+  // the fill span - no visible percent-from-top/bottom text. The exact
+  // percentages remain available to assistive technology via aria-valuetext
+  // above.
 }
 
 function field(label, key, value, options = {}) {
@@ -5724,6 +5920,16 @@ function boreStyleOf(one) {
   );
 }
 
+// A new lean with no explicit direction defaults to Back, or the side
+// opposite the design's one allowed rim Text (Fix 078). Never used once the
+// user has explicitly chosen a direction.
+function boreDefaultAngleDirection(design) {
+  const opposite = { back: "front", front: "back", left: "right", right: "left" };
+  const rimText = (design?.layout?.features || []).find(
+    feature => feature.kind === "text" && feature.options?.level === "rim");
+  return opposite[rimText?.options?.rim_side || ""] || "back";
+}
+
 // Width / Length sizing: Walls Only has no Base fields, so it only chooses
 // between Manually and sizing the bin to itself (its default).
 function boreXyMode(one) {
@@ -5795,9 +6001,13 @@ function renderDraftFields() {
     const textType = `${textLevel}_${one.options?.raised === true ? "raised" : "inlaid"}`;
     const textInput = `<input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">`;
     let textGroup = `<label>Text${textInput}</label>`;
+    // At most one rim Text is allowed per bin (Fix 078). Another Text's At-rim
+    // choices are disabled once one rim Text already exists elsewhere.
+    const hasOtherRimText = (state.design.layout?.features || []).some((feature, index) =>
+      index !== state.selected && feature.kind === "text" && feature.options?.level === "rim");
     textGroup += `<label>Text Type<select data-draft="option:text_type">
       ${[["base_inlaid", "On base — Inlaid"], ["base_raised", "On base — Raised"], ["rim_inlaid", "At rim — Inlaid"], ["rim_raised", "At rim — Raised"]]
-        .map(([value, label]) => `<option value="${value}" ${value === textType ? "selected" : ""}>${label}</option>`).join("")}
+        .map(([value, label]) => `<option value="${value}" ${value === textType ? "selected" : ""} ${hasOtherRimText && value.startsWith("rim_") ? "disabled" : ""}>${label}</option>`).join("")}
       </select></label>`;
     const capShown = textLevel === "rim"
       ? (state.draftResolvedOptions?.cap_height ?? one.options?.cap_height ?? 5)
@@ -5906,8 +6116,7 @@ function renderDraftFields() {
           ["bin_to_bore", "Auto size bin to bore"]]);
       const showXy = !wallsOnly && xyMode === "manual";
       const showHeight = heightMode !== "bore_to_bin";
-      html += `<div class="bore-group wide">
-        <span class="bore-group-label">Base</span>
+      html += `<div class="bore-group wide bore-group-nolabel">
         <div class="bore-group-fields">
           <div class="bore-auto-row">
             ${xySelect}
@@ -5929,14 +6138,18 @@ function renderDraftFields() {
       </div>`;
 
       // Hole: everything about the holes cut into that block.
+      const walllsOnlyDepthTip = "How far the held object can insert downward from the Bore mouth "
+        + "before it hits its stop. Blank reaches the normal bin floor.";
       html += `<div class="bore-group wide">
         <span class="bore-group-label">Hole</span>
         <div class="bore-group-fields bore-hole-fields">
           ${diameterField}
           ${shapeField}
-          ${wallsOnly ? "" : optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
+          ${wallsOnly
+            ? optionField("walls_depth", "Depth", { unit: "mm", step: "0.5", tip: walllsOnlyDepthTip })
+            : optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
           ${wallsOnly ? dividerThicknessField(boreWallShown, "option:wall") : ""}
-          ${hexBit || boreStyle !== "base_straight" ? "" : optionField("angle", "Tool angle", { unit: "°", step: "1", min: "20", max: "90", transform: value => 90 - number(value, 0), tip: "90° is upright. Smaller angles lean the tool toward the selected direction." })}
+          ${hexBit || boreStyle !== "base_straight" ? "" : optionField("angle", "Bore angle", { unit: "°", step: "1", min: "20", max: "90", transform: value => 90 - number(value, 0), tip: "90° is upright. Smaller angles lean the Bore toward the selected direction." })}
           ${hexBit || boreStyle !== "base_straight" || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Angle towards</span><select data-draft="option:angle_towards">
             ${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]].map(([value, label]) => `<option value="${value}" ${(one.options?.angle_towards || (one.along === "y" ? "front" : "left")) === value ? "selected" : ""}>${label}</option>`).join("")}
           </select></label>`}
@@ -6432,6 +6645,75 @@ function renderDraftFields() {
   if (state.draft?.kind === "nest") wireNestFieldActions();
   const duplicateTextButton = $('[data-action="duplicate-text"]', $("#draft-fields"));
   if (duplicateTextButton) duplicateTextButton.addEventListener("click", duplicateText);
+  if (state.draft?.kind === "bore") {
+    const fields = $("#draft-fields");
+    const angleField = $('[data-draft="option:angle"]', fields);
+    // A second "change" listener (blur/Enter) alongside the generic "input"
+    // one: lets updateDraftFromFields() tell a raw keystroke apart from a
+    // committed value, so the dependent Angle towards control only redraws
+    // on commit, never mid-keystroke (Fix 078).
+    if (angleField) angleField.addEventListener("change", updateDraftFromFields);
+    // A committed Bore angle or Angle towards change that would outgrow the
+    // bin asks before mutating anything (Fix 078). The container-level pair
+    // below is wired exactly once (#draft-fields survives every re-render):
+    // the capture-phase listener snapshots state before the field's own
+    // "change" handler runs; the bubble-phase one runs after it.
+    if (fields && !fields.dataset.boreGrowthWired) {
+      fields.dataset.boreGrowthWired = "1";
+      let boreGrowthSnapshot = null;
+      const isGrowthField = event => {
+        const key = event.target?.dataset?.draft;
+        return (key === "option:angle" || key === "option:angle_towards") && state.draft?.kind === "bore";
+      };
+      fields.addEventListener("change", event => {
+        if (!isGrowthField(event)) return;
+        boreGrowthSnapshot = { draft: clone(state.draft), box: clone(state.design.box) };
+      }, true);
+      fields.addEventListener("change", async event => {
+        if (!isGrowthField(event) || !boreGrowthSnapshot) return;
+        const snapshot = boreGrowthSnapshot;
+        boreGrowthSnapshot = null;
+        await confirmBoreAngleGrowth(snapshot.draft, snapshot.box);
+      });
+    }
+  }
+}
+
+// A committed Bore-angle or angle-direction change that already fits commits
+// with no dialog. One that would outgrow the bin asks first and reuses
+// autoExpandBin's own "smallest legal grid fit" (Fix 078); Cancel restores
+// the prior angle, direction, zone and bin exactly.
+async function confirmBoreAngleGrowth(previousDraft, previousBox) {
+  if (state.draft?.kind !== "bore" || !state.design) return;
+  const [insideX, insideY] = binInsideExtent(state.design.box);
+  const zone = state.draft.zone;
+  const fits = (zone[2] - zone[0]) <= insideX + 1e-6 && (zone[3] - zone[1]) <= insideY + 1e-6;
+  if (fits) return;
+  const revert = async () => {
+    state.draft = previousDraft;
+    state.design.box = previousBox;
+    renderDraftFields();
+    renderPlaced();
+    await refreshPreview();
+  };
+  state.boreAngleGrowthPending = true;
+  try {
+    const grow = await appConfirmAction({
+      title: "Angled option will require a bigger bin. OK to size bin?",
+      message: "The current angle or direction needs a larger bin footprint than it has. Wavefinity can grow the bin to the smallest size that fits.",
+      actionLabel: "OK",
+    });
+    if (!grow) { await revert(); return; }
+    const result = await autoExpandBin({
+      keepDraft: true, silent: true, fit: boreXyMode(state.draft) === "bin_to_bore",
+    });
+    if (result !== "done") {
+      toast("This angle does not fit in this Space.", true, 6000);
+      await revert();
+    }
+  } finally {
+    state.boreAngleGrowthPending = false;
+  }
 }
 
 async function duplicateText() {
@@ -7733,9 +8015,13 @@ function updateDraftFromFields(event) {
     delete one.options.floor_gap;
   }
   if (one.kind === "bore") {
-    const toward = get("option:angle_towards");
-    if (toward !== undefined) one.options.angle_towards = toward;
-    else delete one.options.angle_towards;
+    // Only the Angle towards control itself counts as an explicit choice
+    // (Fix 078) - syncing it from the DOM on every unrelated bore edit would
+    // wrongly "lock in" whatever the select happens to be showing.
+    if (changed === "option:angle_towards") {
+      const toward = get("option:angle_towards");
+      if (toward !== undefined) one.options.angle_towards = toward;
+    }
     // Style and sizing choices are words, never numbers.
     if (changed === "option:bore_style") {
       const previousStyle = boreStyleOf(one);
@@ -7752,15 +8038,23 @@ function updateDraftFromFields(event) {
       // internal default and a Walls Only style to the bin wall.
       delete one.options.wall;
       if (boreWallsOnly(chosen) && !boreWallsOnly(previousStyle)) {
-        // Switching to Walls Only sizes the bin to the Bore by default.
+        // Switching to Walls Only sizes the bin to the Bore by default, and
+        // seeds Depth from the Base hole depth just left (Fix 078).
         one.options.xy_size_mode = "bin_to_bore";
+        const previousDepth = number(one.options.depth ?? state.draftResolvedOptions?.depth, NaN);
+        if (Number.isFinite(previousDepth)) one.options.walls_depth = previousDepth;
+        delete one.options.depth;
       } else if (!boreWallsOnly(chosen) && boreWallsOnly(previousStyle)) {
-        // Walls Only -> Base keeps a cavity that reaches the normal bin floor:
-        // Hole Depth becomes the Bore's resolved Height.
-        if (Number.isFinite(resolvedHeight)) {
-          one.options.depth = roundUpHalfMm(resolvedHeight);
+        // Walls Only -> Base keeps a cavity that reaches the normal bin floor
+        // unless an explicit Depth was set, which carries over exactly.
+        const explicitWallsDepth = Object.prototype.hasOwnProperty.call(one.options, "walls_depth");
+        const carriedDepth = explicitWallsDepth
+          ? number(one.options.walls_depth, resolvedHeight) : resolvedHeight;
+        if (Number.isFinite(carriedDepth)) {
+          one.options.depth = roundUpHalfMm(carriedDepth);
           if (boreHeightMode(one) !== "bore_to_bin") one.options.height = roundUpHalfMm(resolvedHeight);
         }
+        delete one.options.walls_depth;
         if (one.options.xy_size_mode === "bin_to_bore") delete one.options.xy_size_mode;
       }
     }
@@ -7952,9 +8246,23 @@ function updateDraftFromFields(event) {
         one.options[key] ?? state.draftResolvedOptions?.[key] ?? number(option?.default),
       );
       // Bore geometry stores lean away from vertical. The user sees the more
-      // natural absolute angle: 90 is straight up and down.
+      // natural absolute "Bore angle": 90 is straight up and down. Only a
+      // committed (change/blur/Enter) out-of-range value is reported - typing
+      // itself is never interrupted (Fix 078).
       if (info.kind === "bore" && key === "angle") {
-        value = 90 - Math.min(90, Math.max(20, value));
+        const previousCanonicalAngle = number(one.options.angle, 0);
+        const displayedAngle = Math.min(90, Math.max(20, value));
+        if (event?.type === "change" && Math.abs(displayedAngle - value) > 1e-9) {
+          toast(`Bore angle must be between 20° and 90°; using ${fmt(displayedAngle)}°.`, true, 4500);
+        }
+        value = 90 - displayedAngle;
+        // A first transition from upright to angled with no explicit
+        // direction chosen yet materializes the default (Fix 078); a later
+        // manual choice always wins from then on.
+        if (previousCanonicalAngle <= 1e-9 && value > 1e-9 &&
+            !Object.prototype.hasOwnProperty.call(one.options, "angle_towards")) {
+          one.options.angle_towards = boreDefaultAngleDirection(state.design);
+        }
       }
       // A bore's grid counts are whole numbers.
       if (info.kind === "bore" && (key === "columns" || key === "rows")) {
@@ -8073,7 +8381,11 @@ function updateDraftFromFields(event) {
   if (changed === "alternate_ends") renderDraftFields();
   // Switching a bore's profile swaps which fields show (locked hex-bit size,
   // the Angle field for round/square only).
-  if ((changed === "profile" || changed === "option:angle") && one.kind === "bore") renderDraftFields();
+  if (changed === "profile" && one.kind === "bore") renderDraftFields();
+  // The dependent "Angle towards" control only re-renders once the Bore angle
+  // is committed (change/blur/Enter), never on a raw keystroke, so typing a
+  // replacement value is never interrupted mid-edit (Fix 078).
+  if (changed === "option:angle" && one.kind === "bore" && event?.type === "change") renderDraftFields();
   if ((changed === "option:lift_assist" || changed === "option:holder_style") && one.kind === "nest") renderDraftFields();
   if (changed === "option:text_type") renderDraftFields();
   if (one.kind === "divider" && (
@@ -8197,7 +8509,9 @@ async function refreshDraft() {
       "i",
     ).test(error.message || "");
     const growKinds = new Set(["bore", "post", "slot", "cradle", "pocket", "steps"]);
-    if (growKinds.has(state.draft?.kind) && outgrewBin && !state.autoGrowingBin) {
+    // A Bore-angle/direction edit owns its own OK/Cancel growth confirmation
+    // (Fix 078); this generic silent auto-grow must not preempt it.
+    if (growKinds.has(state.draft?.kind) && outgrewBin && !state.autoGrowingBin && !state.boreAngleGrowthPending) {
       state.autoGrowingBin = true;
       try {
         // A Bore that sizes the bin around itself lands on the smallest fit, so
@@ -8587,6 +8901,16 @@ async function applySupport(index) {
 async function saveCurrentPart() {
   if (state.modifierEditing) return saveEdgeMountPart();
   if (!state.draft || !beginDesignMutation()) return;
+  // An incomplete Photo Nest (no traced cavity outline yet) has nothing legal
+  // to commit. Save must not silently discard it - stay in the editor with
+  // the same actionable status refreshDraft() already shows; Delete remains
+  // the explicit way to abandon it.
+  if (state.draft.kind === "nest" && !state.draft.contour) {
+    finishDesignMutation();
+    $("#draft-status").textContent = "Upload one part photo to create the cavity outline before saving.";
+    $("#draft-status").classList.add("error");
+    return;
+  }
   let committed = false;
   try {
     committed = await commitVisibleDraft({ previewAfterCommit: false });
@@ -8869,12 +9193,14 @@ function placedRowsMarkup(rows, { actions = false } = {}) {
       ? `data-index="${row.index}"`
       : row.type === "modifier" ? `data-kind="${row.kind}"` : 'data-draft="true"';
     const title = escapeHtml(row.title);
-    const editIdentity = row.type === "feature"
-      ? `data-index="${row.index}"`
-      : row.type === "modifier" ? `data-kind="${row.kind}"` : 'data-draft="true"';
+    // The row currently being edited shows Save, never Edit; every other row
+    // shows Edit, never Save (Fix 078).
+    const editAction = row.editing
+      ? `<button type="button" class="placed-item-save button secondary" ${identity} aria-label="Save ${title}">Save</button>`
+      : `<button type="button" class="placed-item-edit button secondary" ${identity} aria-label="Edit ${title}">Edit</button>`;
     const rowActions = actions
       ? `<div class="placed-item-actions">
-        <button type="button" class="placed-item-edit button secondary" ${editIdentity} aria-label="Edit ${title}">Edit</button>
+        ${editAction}
         <button type="button" class="placed-item-remove button danger" ${identity} title="Delete ${title}" aria-label="Delete ${title}">Delete</button>
       </div>` : "";
     return `<div class="placed-item ${row.selected ? "selected" : ""} ${statusClass}" data-support-kind="${escapeHtml(row.kind)}">
@@ -8900,6 +9226,7 @@ function wirePlacedRows(container) {
   $$(".placed-item-edit[data-draft]", container).forEach(button => button.addEventListener("click", () => {
     if (state.draft) selectKind(state.draft.kind);
   }));
+  $$(".placed-item-save", container).forEach(button => button.addEventListener("click", saveCurrentPart));
   $$(".placed-item-remove[data-index]", container).forEach(button => button.addEventListener("click", async () => {
     await deleteSupportAt(Number(button.dataset.index));
   }));
@@ -8912,14 +9239,6 @@ function wirePlacedRows(container) {
 function renderPlaced() {
   if (!state.design) return;
   const rows = placedRowData();
-  const previewRows = rows.filter(row => !row.editing);
-  const preview = $("#placed-supports");
-  if (preview) {
-    preview.innerHTML = placedRowsMarkup(previewRows) || (rows.length
-      ? '<div class="placed-empty">No other options.</div>'
-      : '<div class="placed-empty">No options yet. Pick one above.</div>');
-    wirePlacedRows(preview);
-  }
   const added = $("#added-parts-list");
   if (added) {
     added.innerHTML = placedRowsMarkup(rows, { actions: true }) || '<div class="placed-empty">Nothing added yet.</div>';
@@ -9034,6 +9353,13 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   if (grownY) flashField($("#y-size"));
   if (grownZ) flashField($("#z"));
   const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
+  // Fix 078: the overlay's primary message follows a deterministic priority -
+  // result.message, then the first feature error, then the draft error, then
+  // a generic fallback. Only the latest preview request may set it.
+  setDesignInvalidOverlay(previewHasErrors
+    ? (result.message || result.feature_errors[0] || result.draft_error
+      || "The current settings cannot build a valid design.")
+    : "");
   $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
   $("#preview-state").classList.toggle("status-error", Boolean(previewHasErrors));
   $("#preview-state").classList.toggle("status-ok", !previewHasErrors);
@@ -9133,6 +9459,7 @@ async function refreshPreview({ persistResume = true } = {}) {
   $("#preview-state").textContent = "Building preview…";
   $("#preview-state").classList.remove("status-ok", "status-error");
   setError();
+  setDesignInvalidOverlay();
   try {
     const payload = { design: state.design, client_id: previewClientId, generation: request };
     if (state.draft && !(state.draft.kind === "nest" && !state.draft.contour)) {
@@ -9156,6 +9483,7 @@ async function refreshPreview({ persistResume = true } = {}) {
     $("#preview-state").classList.remove("status-ok");
     $("#preview-state").classList.add("status-error");
     setError(error.message);
+    setDesignInvalidOverlay(error.message);
     state.canGenerate = false;
     updateGenerateAvailability();
     // A hard preview failure with supports present is usually a footprint that

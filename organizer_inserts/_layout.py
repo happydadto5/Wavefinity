@@ -402,10 +402,12 @@ def check_layout(
     for one in features:
         if not is_text(one):
             continue
-        destination = ("rim", str(one.options.get("rim_side") or "back")) if one.options.get("level") == "rim" else ("base", "")
+        destination = "rim" if one.options.get("level") == "rim" else "base"
         if destination in text_destinations:
-            place = destination[1].capitalize() + " rim" if destination[0] == "rim" else "base"
-            raise ValueError(f"Only one Text is allowed on the {place}; change its Text Type or remove a duplicate")
+            message = ("Only one rim Text is allowed; change the existing rim Text or use Base Text"
+                       if destination == "rim" else
+                       "Only one Text is allowed on the base; change its Text Type or remove a duplicate")
+            raise ValueError(message)
         text_destinations.add(destination)
     for one in features:
         if one.kind not in FEATURE_BUILDERS:
