@@ -870,29 +870,39 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
   return pending;
 }
 
-async function flushSpaceDesignAutosave({ visible = true, materialize = false } = {}) {
+async function flushSpaceDesignAutosave({ visible = true, materialize = false,
+    deferDraftPreview = false } = {}) {
   if (!typedSpaceOrdinaryBin()) return true;
-  clearTimeout(spaceAutosaveTimer);
-  spaceAutosaveTimer = null;
-  if (visible && !(await flushVisibleDesignEditsBeforeModeSwitch())) return false;
-  if (visible && !(await maybePromptSurfaceObjectHeight())) return false;
-  if (!beginDesignMutation()) return false;
-  let saved = false;
+  const originalDesign = state.design;
+  const ownerAtStart = fullPreviewStarts;
   try {
-    await refreshPreview();
-    if (!state.preview?.fits || state.preview.feature_errors?.length || state.preview.draft_error ||
-        state.previewDesignKey !== JSON.stringify(state.design))
-      throw new Error("Resolve the design issue before leaving this bin.");
-    await persistSpaceDesignSource(null, materialize);
-    await SP.flushDefaults();
-    saved = true;
-  } catch (error) {
-    toast(`Could not autosave this bin: ${error.message}`, true, 6000);
-    return false;
+    clearTimeout(spaceAutosaveTimer);
+    spaceAutosaveTimer = null;
+    if (visible && !(await flushVisibleDesignEditsBeforeModeSwitch({
+      previewAfterCommit: !deferDraftPreview,
+    }))) return false;
+    if (visible && !(await maybePromptSurfaceObjectHeight())) return false;
+    if (!beginDesignMutation()) return false;
+    let saved = false;
+    try {
+      await refreshPreview();
+      if (!state.preview?.fits || state.preview.feature_errors?.length || state.preview.draft_error ||
+          state.previewDesignKey !== JSON.stringify(state.design))
+        throw new Error("Resolve the design issue before leaving this bin.");
+      await persistSpaceDesignSource(null, materialize);
+      await SP.flushDefaults();
+      saved = true;
+    } catch (error) {
+      toast(`Could not autosave this bin: ${error.message}`, true, 6000);
+      return false;
+    } finally {
+      finishDesignMutation();
+    }
+    return saved && await settleStaleFileRefresh({ materialize });
   } finally {
-    finishDesignMutation();
+    if (visible && deferDraftPreview && state.design !== originalDesign &&
+        fullPreviewStarts === ownerAtStart) refreshPreview();
   }
-  return saved && await settleStaleFileRefresh({ materialize });
 }
 
 // Install a canonical design (from Inventory Edit or Duplicate) as the working Designer
@@ -962,7 +972,7 @@ async function designerInstallInventorySpec(rowId, spec, acceptTransition = null
     if (!acceptTransition) activatePreviewView("3d");
     return true;
   }
-  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return false;
+  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
   if (acceptTransition && !acceptTransition()) return false;
   return installLoadedDesignSource(rowId, spec, { acceptTransition });
 }
@@ -1025,10 +1035,10 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
 // discarded; on flush failure New Bin is cancelled rather than losing work.
 async function designerNewBin(acceptTransition = null) {
   if (acceptTransition && !acceptTransition()) return false;
-  if (!(await guardDraftSwitch())) return false;
+  return withDeferredDraftSwitch(async () => {
   if (acceptTransition && !acceptTransition()) return false;
   if (state.folderMode === "space") {
-    if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return false;
+    if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
     if (acceptTransition && !acceptTransition()) return false;
   } else if (designHasChanges() && !(await appConfirmAction({
     title: "Start a new bin?",
@@ -1049,6 +1059,7 @@ async function designerNewBin(acceptTransition = null) {
   } finally {
     finishDesignMutation();
   }
+  }, false);
 }
 
 // Fix 064: the largest whole base-unit X/Y footprint that fits inside a
@@ -1083,8 +1094,8 @@ function insideBinFitForStorageBox(space, candidateDesign) {
 // await between building it and installing it, so it stays the same
 // candidate the user sees land.
 async function designerMakeInsideBin() {
-  if (!(await guardDraftSwitch())) return;
-  if (!(await flushSpaceDesignAutosave())) return;
+  return withDeferredDraftSwitch(async () => {
+  if (!(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   const candidate = freshDesignForCurrentFolder();
   const fit = insideBinFitForStorageBox(state.activeSpace, candidate);
   if (fit.error) {
@@ -1100,15 +1111,16 @@ async function designerMakeInsideBin() {
   } finally {
     finishDesignMutation();
   }
+  });
 }
 
 // Duplicate (B2): a deep copy of the exact current design with name/label
 // text cleared and source-row identity cleared, so a later Save/Generate/
 // Print creates a distinct source rather than mutating the original's row.
 async function designerDuplicate() {
-  if (!(await guardDraftSwitch())) return;
+  return withDeferredDraftSwitch(async () => {
   if (typedSpaceOrdinaryBin()) {
-    if (!(await flushSpaceDesignAutosave())) return;
+    if (!(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
     if (!state.designInventoryId) {
       toast("Edit this bin before duplicating it.", true);
       return;
@@ -1170,6 +1182,7 @@ async function designerDuplicate() {
   } finally {
     finishDesignMutation();
   }
+  });
 }
 
 function pinDraftAxis(axis) {
@@ -4431,6 +4444,7 @@ async function addModifier(kind) {
     toast(INSIDE_HANDLES_REMOVABLE_MESSAGE, true, 6500);
     return;
   }
+  return withDeferredDraftSwitch(async () => {
   if (kind === "edge_mount") {
     const previous = clone(state.design);
     const rules = state.catalog?.edge_mount || {};
@@ -4512,6 +4526,7 @@ async function addModifier(kind) {
   syncForm();
   await openModifier(kind);
   refreshPreview();
+  });
 }
 
 async function removeModifier(kind) {
@@ -4519,7 +4534,7 @@ async function removeModifier(kind) {
     clearDraftSelection();
     return;
   }
-  if (state.draft && !(await guardDraftSwitch())) return;
+  return withDeferredDraftSwitch(async () => {
   if (!beginDesignMutation()) return;
   try {
     const previous = clone(state.design);
@@ -4550,6 +4565,7 @@ async function removeModifier(kind) {
   } finally {
     finishDesignMutation();
   }
+  });
 }
 
 function commitEdgeMountFormBeforeSwitch() {
@@ -4569,9 +4585,9 @@ function commitEdgeMountFormBeforeSwitch() {
   return true;
 }
 
-async function flushVisibleDesignEditsBeforeModeSwitch() {
+async function flushVisibleDesignEditsBeforeModeSwitch({ previewAfterCommit = true } = {}) {
   if (state.designMutationBusy) return false;
-  if (state.draft && !(await guardDraftSwitch())) return false;
+  if (state.draft && !(await guardDraftSwitch({ previewAfterCommit }))) return false;
   if (state.modifierEditing) return commitEdgeMountFormBeforeSwitch();
 
   const previousDesign = pendingDesignHistory || clone(state.design);
@@ -4617,7 +4633,9 @@ async function selectKind(kind, reset = false) {
   // to lose - skip the guard in that case. Anything else replaces the draft, so
   // give the user the chance to keep unsaved work first.
   const keepsSameDraft = !reset && state.draft?.kind === kind;
-  if (!keepsSameDraft && !(await guardDraftSwitch())) return;
+  const switchGuard = keepsSameDraft ? null : await deferredDraftSwitch();
+  try {
+  if (switchGuard && !switchGuard.proceed) return;
   if (!keepsSameDraft && state.draft?.kind === "nest") resetNestPhotoSession();
   if (!commitEdgeMountFormBeforeSwitch()) return;
   state.edgeMountEditing = false;
@@ -4642,7 +4660,8 @@ async function selectKind(kind, reset = false) {
   updateSelectionButtons();
   if (!reset && state.draft?.kind === kind) {
     renderDraftFields();
-    refreshDraft();
+    const preview = refreshDraft();
+    if (switchGuard) switchGuard.claimDraft(preview);
     return;
   }
   $("#draft-status").textContent = "Loading shape…";
@@ -4697,11 +4716,15 @@ async function selectKind(kind, reset = false) {
         $("#draft-status").classList.add("error");
       }
     }
-    refreshDraft();
+    const preview = refreshDraft();
+    if (switchGuard) switchGuard.claimDraft(preview);
   } catch (error) {
     if (request !== state.kindRequest) return;
     $("#draft-status").textContent = error.message;
     toast(error.message, true);
+  }
+  } finally {
+    switchGuard?.finish();
   }
 }
 
@@ -4711,10 +4734,13 @@ async function selectedFeature(index, force = false, acceptPreviewPick = null) {
   const request = state.selectionRequest = (state.selectionRequest || 0) + 1;
   const design = state.design, source = state.designInventoryId, space = state.activeSpace;
   // Don't drop unsaved work on the part currently open without asking first.
-  if (!force && !(await guardDraftSwitch())) return false;
-  if (request !== state.selectionRequest || design !== state.design ||
+  const switchGuard = force ? null : await deferredDraftSwitch();
+  try {
+  if (switchGuard && !switchGuard.proceed) return false;
+  const expectedDesign = switchGuard?.committed ? state.design : design;
+  if (request !== state.selectionRequest || expectedDesign !== state.design ||
       source !== state.designInventoryId || space !== state.activeSpace) return false;
-  if (acceptPreviewPick && !acceptPreviewPick()) return false;
+  if (acceptPreviewPick && !acceptPreviewPick(expectedDesign)) return false;
   const selected = state.design.layout.features[index];
   if (state.draft?.kind === "nest" || selected?.kind === "nest") resetNestPhotoSession();
   if (!commitEdgeMountFormBeforeSwitch()) return false;
@@ -4755,9 +4781,13 @@ async function selectedFeature(index, force = false, acceptPreviewPick = null) {
   renderDraftFields();
   renderPlaced();
   updateSelectionButtons();
-  refreshDraft();
+  const preview = refreshDraft();
+  if (switchGuard) switchGuard.claimDraft(preview);
   renderLayout2D();
   return true;
+  } finally {
+    switchGuard?.finish();
+  }
 }
 const roundUpHalfMm = value => Math.ceil((number(value, 0) - 1e-9) * 2) / 2;
 const roundNearestHalfMm = value => Math.round(number(value, 0) * 2) / 2;
@@ -7861,14 +7891,54 @@ function draftNeedsSaving() {
 // caller may go ahead and replace the draft, false if the user chose to stay
 // and keep editing. Edits are auto-saved cleanly when valid; only an edit
 // that cannot be saved prompts the user to discard or keep editing.
-async function guardDraftSwitch() {
+async function guardDraftSwitch({ previewAfterCommit = true } = {}) {
   if (!draftNeedsSaving()) return true;
   try {
     state.draftAutoCommit = true;
-    await commitVisibleDraft();
+    await commitVisibleDraft({ previewAfterCommit });
     return true;
   } catch (error) {
     return promptDraftConflict(error.message);
+  }
+}
+
+// A transition owns the preview after saving the old draft. If it exits before
+// starting that owner, restore the committed state's preview exactly once.
+let fullPreviewStarts = 0;
+async function deferredDraftSwitch() {
+  const priorDesign = state.design;
+  const proceed = await guardDraftSwitch({ previewAfterCommit: false });
+  const committed = state.design !== priorDesign;
+  const ownerAtReturn = fullPreviewStarts;
+  let finished = false;
+  let claimedDraft = false;
+  return {
+    proceed, committed,
+    claimDraft(promise) {
+      if (committed) {
+        claimedDraft = true;
+        Promise.resolve(promise).then(
+          () => { if (fullPreviewStarts === ownerAtReturn) refreshPreview(); },
+          () => { if (fullPreviewStarts === ownerAtReturn) refreshPreview(); },
+        );
+      }
+      return promise;
+    },
+    finish() {
+      if (finished) return;
+      finished = true;
+      if (committed && !claimedDraft && fullPreviewStarts === ownerAtReturn) refreshPreview();
+    },
+  };
+}
+
+async function withDeferredDraftSwitch(action, refused = undefined) {
+  const guard = await deferredDraftSwitch();
+  try {
+    if (!guard.proceed) return refused;
+    return await action(guard);
+  } finally {
+    guard.finish();
   }
 }
 
@@ -8110,7 +8180,10 @@ async function deleteSupportAt(index) {
   // Deleting a part other than the one open in the editor can throw away an
   // unsaved edit underneath it - route through the same guard used to switch
   // parts so that edit is saved (or the user confirms losing it) first.
-  if (state.draft && draftCommitIndex() !== index && !(await guardDraftSwitch())) return;
+  const switchGuard = state.draft && draftCommitIndex() !== index
+    ? await deferredDraftSwitch() : null;
+  try {
+  if (switchGuard && !switchGuard.proceed) return;
   if (!beginDesignMutation()) return;
   const deletingNest = state.design.layout.features[index]?.kind === "nest";
   let deleted = false;
@@ -8130,6 +8203,9 @@ async function deleteSupportAt(index) {
     toast(error.message, true);
   } finally {
     finishDesignMutation();
+  }
+  } finally {
+    switchGuard?.finish();
   }
 }
 
@@ -8445,6 +8521,7 @@ function endPreviewWait(requestId) {
 // left alone for possible recovery. Every ordinary call (the ordinary
 // default) persists exactly as before.
 async function refreshPreview({ persistResume = true } = {}) {
+  fullPreviewStarts += 1;
   const request = ++state.previewRequest;
   const lidEpochAtRequest = state.lidThicknessEpoch;
   beginPreviewWait(request);
@@ -10058,7 +10135,7 @@ function wireSupportLayoutDialog() {
 
 async function selectFromPreview(pick, context) {
   if (!pick) return;
-  const current = () => state.design === context.design &&
+  const current = (expectedDesign = context.design) => state.design === expectedDesign &&
     state.designInventoryId === context.source && state.activeSpace === context.space &&
     state.previewRequest === context.preview && DP.mode === "design";
   if (!current()) return;
@@ -12139,7 +12216,7 @@ function designHasChanges() {
 async function openDesign(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) {
+  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) {
     event.target.value = "";
     return;
   }

@@ -449,7 +449,8 @@ DP.openInventoryRow = async id => {
 // row is In Design and unplaced, so it appears in the staging rail; the user
 // stays in Space.
 DP.duplicateRow = async one => {
-  if (typeof flushSpaceDesignAutosave === "function" && !(await flushSpaceDesignAutosave())) return;
+  if (typeof flushSpaceDesignAutosave === "function" &&
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   const context = DL.spaceContext();
   try {
     const data = await DL.inventoryCall("/api/drawer/design-source/duplicate", { row_id: one.id }, { context });
@@ -475,7 +476,8 @@ DP.deleteRow = async one => {
     danger: true,
   });
   if (!ok || !DL.spaceContextCurrent(context)) return;
-  if (one.id === state.designInventoryId && !(await flushSpaceDesignAutosave())) return;
+  if (one.id === state.designInventoryId &&
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   if (!DL.spaceContextCurrent(context)) return;
   const wasDesign = one.id === state.designInventoryId;
   DP.open.delete(one.id);
@@ -503,7 +505,8 @@ DP.deleteSelected = async () => {
     actionLabel: `Delete ${ids.length} bins`, danger: true,
   });
   if (!ok || !DL.spaceContextCurrent(context)) return;
-  if (ids.includes(state.designInventoryId) && !(await flushSpaceDesignAutosave())) return;
+  if (ids.includes(state.designInventoryId) &&
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   if (!DL.spaceContextCurrent(context)) return;
   const removed = await DL.editBins({ delete_ids: ids }, { context });
   if (!removed) return;
@@ -1012,10 +1015,11 @@ DP.selectMode = async mode => {
   DP.showPendingMode(mode);
   try {
     if (DP.mode === "design" && mode === "space") {
-      if (typeof flushVisibleDesignEditsBeforeModeSwitch === "function" &&
+      if (!(typeof typedSpaceOrdinaryBin === "function" && typedSpaceOrdinaryBin()) &&
+          typeof flushVisibleDesignEditsBeforeModeSwitch === "function" &&
           !(await flushVisibleDesignEditsBeforeModeSwitch())) return false;
       if (typeof flushSpaceDesignAutosave === "function" &&
-          !(await flushSpaceDesignAutosave())) return false;
+          !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
     }
     if (request !== DP.modeRequest) return false;
     if (mode === "space") {

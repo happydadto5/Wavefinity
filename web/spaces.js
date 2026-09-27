@@ -247,7 +247,7 @@ SP.inventoryFilenameFor = _folder => INVENTORY_FILENAME;
 // including DL.layout/DL.dirty - left exactly as it was.
 SP.leaveDrawerLayoutSafely = async () => {
   if (typeof flushSpaceDesignAutosave === "function" &&
-      !(await flushSpaceDesignAutosave())) return false;
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
   if (SP._inventoryWriteChain) await SP._inventoryWriteChain;
   if (typeof DL === "undefined") return true;
   if (DL.savePromise) {

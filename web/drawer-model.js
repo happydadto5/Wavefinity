@@ -902,7 +902,8 @@ DL.planSurfaceFill = () => DL.busyWith("fill", async context => {
   if (!DL.isSurface()) return;
   // The Designer's autosave is the boundary: settle it before Fill reads the
   // authoritative Inventory and layout.
-  if (typeof flushSpaceDesignAutosave === "function" && !(await flushSpaceDesignAutosave())) return;
+  if (typeof flushSpaceDesignAutosave === "function" &&
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   DL.requireSpaceContext(context);
   if (!(await DL.save())) return;
   DL.requireSpaceContext(context);
@@ -922,7 +923,8 @@ DL.toggleFillCandidate = id => {
 
 DL.createSelectedFillBins = () => DL.busyWith("fill", async context => {
   if (!DL.isSurface() || !DL.fillPlan || !DL.fillSelected.size) return;
-  if (typeof flushSpaceDesignAutosave === "function" && !(await flushSpaceDesignAutosave())) return;
+  if (typeof flushSpaceDesignAutosave === "function" &&
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   DL.requireSpaceContext(context);
   const before = DL.snapshot();
   const result = await DL.inventoryCall("/api/drawer/surface-fill/create", {
