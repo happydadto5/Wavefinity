@@ -713,17 +713,17 @@
     </div>
     <div class="button-row ai-help-row">
       <button id="ai-help-dictate" type="button" class="button secondary" hidden>Dictate</button>
-      <button id="ai-help-generate" type="button" class="button primary" disabled>Generate Prompt</button>
+      <button id="ai-help-generate" type="button" class="button primary" disabled>2. Generate Prompt</button>
     </div>
     <div id="ai-help-prompt-block" class="ai-help-field" hidden>
-      <label class="ai-help-field">2. Copy this prompt into your AI
+      <label class="ai-help-field">3. Give this prompt to your AI
         <textarea id="ai-help-prompt" rows="4" readonly></textarea>
       </label>
       <div class="button-row ai-help-row">
         <button id="ai-help-copy" type="button" class="button secondary">Copy Prompt</button>
       </div>
     </div>
-    <label class="ai-help-field">3. Paste the AI's answer
+    <label class="ai-help-field">5. Paste the AI's answer (4. copy it from your AI first)
       <textarea id="ai-help-response" rows="5" placeholder="Paste the JSON answer here"></textarea>
     </label>
     <p id="ai-help-status" class="ai-help-status" role="status" hidden></p>
@@ -731,7 +731,7 @@
       <button id="ai-help-repair" type="button" class="button secondary" hidden>Make AI Fix Its Answer</button>
       <button id="ai-help-cancel" type="button" class="button secondary">Cancel</button>
       <button id="ai-help-modify" type="button" class="button secondary">Modify Current Bin</button>
-      <button id="ai-help-generate-new" type="button" class="button primary">Generate as New Bin</button>
+      <button id="ai-help-generate-new" type="button" class="button primary">6. Generate as New Bin</button>
     </div>
   </dialog>
   <dialog id="bin-name-dialog" class="support-layout-dialog" aria-labelledby="bin-name-dialog-title">
@@ -1111,6 +1111,7 @@
           </div>
           <div id="portable-readout" class="derived-readout" hidden>
              <dt>Resolved Size</dt><dd id="portable-size-readout"></dd>
+             <dt id="portable-outside-label" hidden>Finished outside</dt><dd id="portable-outside-readout" hidden></dd>
           </div>
           <div id="portable-case" class="storage-box-case">
             <h4 class="storage-box-title">Case settings</h4>
@@ -1146,7 +1147,7 @@
                   <select id="portable-label-location"><option value="none" selected>No label</option><option value="top">Top</option><option value="front">Front</option></select>
                 </label>
                 <label id="portable-label-text-row" class="space-field" hidden><span>Label text</span>
-                  <input id="portable-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE">
+                  <input id="portable-label-text" type="text" maxlength="80" placeholder="e.g. M3 HARDWARE">
                 </label>
                 <label id="portable-front-label-style-row" class="space-field" hidden><span>Front label style</span>
                   <select id="portable-front-label-style"><option value="flat" selected>Flat</option><option value="wavy">Wavy</option></select>

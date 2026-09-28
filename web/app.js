@@ -903,7 +903,7 @@ function settleStaleFileRefresh({ materialize = false } = {}) {
         title: "Update saved files?",
         message: `${DL.label(row)} ${entry.wasPrinted ? "was saved and printed" : "has saved files"}. Update the saved files to match your changes?`,
         primaryLabel: "Update saved files", cancelLabel: "Not now",
-        checkboxLabel: "Automatically update saved files after future edits",
+        checkboxLabel: "Automatically update saved files after future edits in this Space. Once enabled, future eligible edits update those files automatically.",
       });
       if (!DL.spaceContextCurrent(context)) return false;
       if (choice !== "primary") { staleFileRefreshQueue.delete(key); return !materialize; }
@@ -3318,12 +3318,15 @@ function syncConnectorSectionVisibility() {
     $("#connector-bin-heights").hidden = true;
     $("#connector-settings").hidden = true;
     renderConnectorReadout();
+    $("#generate-all").hidden = true;
+    $("#generate-connector").hidden = true;
+    syncPrintChoiceAvailability();
     return;
   }
   if (heightWrap) heightWrap.hidden = false;
   syncConnectorHeightControls();
   renderConnectorReadout();
-  const connectorLocked = Boolean(state.design?.box?.lid?.enabled);
+  const connectorLocked = connectorsUnavailable();
   $("#generate-all").hidden = connectorLocked;
   syncPrintChoiceAvailability();
   $("#generate-bin").hidden = false;
@@ -3584,6 +3587,59 @@ function storedPreference(key, fallback) {
   } catch (_error) {
     return fallback;
   }
+}
+
+// R76: connector settings are system-wide (desktop preferences file, or
+// browser localStorage when hosted). Only these six fields are remembered.
+const CONNECTOR_SETTINGS_KEY = "wavefinity-connector-settings-v1";
+
+function readConnectorSettingsFields() {
+  const positive = selector => {
+    const value = Number($(selector)?.value);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+  const found = {
+    tolerance: positive("#connector-tolerance"),
+    length: positive("#connector-length"),
+    arm_thickness: positive("#connector-arm-thickness"),
+    bin_a_height: positive("#connector-bin-a-height"),
+    bin_b_height: positive("#connector-bin-b-height"),
+  };
+  if (Object.values(found).some(value => value === null)) return null;
+  found.different_heights = $("#connector-height-mode")?.value === "different";
+  return found;
+}
+
+function restoreConnectorSettings() {
+  let raw = null;
+  try {
+    raw = state.runtime.hosted
+      ? JSON.parse(localStorage.getItem(CONNECTOR_SETTINGS_KEY) || "null")
+      : state.catalog?.preferences?.connector_settings;
+  } catch (_error) { raw = null; }
+  if (!raw || typeof raw !== "object") return;
+  for (const key of ["tolerance", "length", "arm_thickness", "bin_a_height", "bin_b_height"]) {
+    const value = raw[key];
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) state.connector[key] = value;
+  }
+  if (typeof raw.different_heights === "boolean") state.connector.different_heights = raw.different_heights;
+}
+
+let lastSavedConnectorSettings = "";
+function persistConnectorSettings() {
+  const settings = readConnectorSettingsFields();
+  if (!settings) return;
+  const text = JSON.stringify(settings);
+  if (text === lastSavedConnectorSettings) return;
+  lastSavedConnectorSettings = text;
+  if (state.runtime.hosted) {
+    try { localStorage.setItem(CONNECTOR_SETTINGS_KEY, text); }
+    catch (_error) { toast("Connector settings could not be remembered in this browser.", true); }
+    return;
+  }
+  api("/api/preferences", { connector_settings: settings })
+    .then(() => { if (state.catalog?.preferences) state.catalog.preferences.connector_settings = settings; })
+    .catch(() => toast("Connector settings could not be remembered.", true));
 }
 
 function saveSimplePreference(key, value) {
@@ -4972,6 +5028,9 @@ function wireControls() {
       applyPendingLiveFormWithModifierConflictGuard();
     });
   });
+  ["#connector-tolerance", "#connector-length", "#connector-arm-thickness",
+    "#connector-bin-a-height", "#connector-bin-b-height", "#connector-height-mode"]
+    .forEach(selector => $(selector)?.addEventListener("change", () => setTimeout(persistConnectorSettings, 0)));
   $("#connector-height-mode").addEventListener("change", () => {
     if ($("#connector-height-mode").value === "different") {
       $("#connector-bin-a-height").value = fmt(state.design.box.z);
@@ -13600,12 +13659,42 @@ function showBinNameRequiredDialog(title, message) {
   }
 }
 
-function showFilenameConflictDialog(names) {
+function showFilenameConflictDialog(names, renameHint = "Please label the bin with a different name, then save again.") {
   const list = names.join(", ");
   showBinNameRequiredDialog(
     "This name is already used",
-    `A file named "${list}" already exists in your chosen folder. Please label the bin with a different name, then save again.`
+    `A file named "${list}" already exists in your chosen folder. ${renameHint}`
   );
+}
+
+// Connector files cannot be fixed by renaming a bin, so a differing same-name
+// connector file gets an explicit Replace / Cancel choice.
+function confirmReplaceConnectorFiles(names) {
+  return new Promise(resolve => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "wf-confirm-dialog";
+    const title = document.createElement("h3");
+    title.textContent = "Replace existing connector file(s)?";
+    const body = document.createElement("p");
+    body.textContent = "These connector files already exist in your folder with different contents:";
+    const list = document.createElement("ul");
+    for (const name of names) { const li = document.createElement("li"); li.textContent = name; list.append(li); }
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+    const replace = document.createElement("button");
+    replace.type = "button"; replace.textContent = "Replace";
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.textContent = "Cancel";
+    let answer = false;
+    replace.addEventListener("click", () => { answer = true; dialog.close(); });
+    cancel.addEventListener("click", () => dialog.close());
+    actions.append(replace, cancel);
+    dialog.append(title, body, list, actions);
+    dialog.addEventListener("close", () => { dialog.remove(); resolve(answer); }, { once: true });
+    document.body.append(dialog);
+    dialog.showModal();
+    cancel.focus();
+  });
 }
 
 function checkPartNamePresent(target = "bin") {
@@ -13781,7 +13870,7 @@ async function generateParts(target) {
         connectorPlan = connResult.connector_plan;
         renderConnectorReadout(connResult.connector_plan);
       }
-      const connFiles = await saveGeneratedFiles(connResult);
+      const connFiles = await saveGeneratedFiles(connResult, { kind: "connector" });
       allFiles.push(...connFiles);
       if (connResult.partial) {
         // Some connectors were really written before a later one failed.
@@ -13888,7 +13977,7 @@ async function printModel(target = "bin", initiatingButton = null) {
   if (state.runtime.hosted) return generateParts(target === "all" ? "all" : "bin");
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
-    toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
+    toast("A slicer was not found. Use Change slicer below the print buttons to locate Bambu Studio or OrcaSlicer.", true, 8000);
     return;
   }
   if (typedSpaceOrdinaryBin() &&
@@ -13914,6 +14003,12 @@ async function printModel(target = "bin", initiatingButton = null) {
       keep_log: designRowId ? false : state.keepLog,
       design_row_id: designRowId || undefined,
     };
+    // R67: only a request. The server reuses the existing Printed file(s)
+    // when it can prove the design is unchanged, else it generates as usual.
+    if (designRowId) {
+      const boundRow = DL.bin(designRowId);
+      if (boundRow?.status === "printed" && String(boundRow.file || "").trim()) payload.reuse_printed_file = true;
+    }
     // Fix 032 Correction 1: same exact resume checkpoint contract as
     // generateParts() - flush the pre-operation state before sending. If it
     // cannot be durably saved, stop before /api/print rather than proceed
@@ -13931,7 +14026,8 @@ async function printModel(target = "bin", initiatingButton = null) {
       // the slicer step failed after them: never mark this row Printed, and
       // never bury the truth of what was actually saved.
       let savedStatusFailed = null;
-      if (designSpaceContext) {
+      // A reused Printed file was not newly saved; its row stays as it was.
+      if (designSpaceContext && !result.design_reused) {
         try {
           DL.requireSpaceContext(designSpaceContext);
           if (state.designInventoryId !== designRowId ||
@@ -14061,6 +14157,14 @@ async function browseSlicer() {
     const result = await api("/api/browse-slicer-path", { current: state.slicer?.path });
     if (result.slicer_path) {
       const name = result.slicer_path.split(/[\\/]/).pop().replace(/\.exe$/i, "");
+      if (!/bambu|orca/i.test(name)) {
+        const use = await appConfirmAction({
+          title: "Use this program as your slicer?",
+          message: `"${name}" does not look like Bambu Studio or OrcaSlicer. Use it anyway?`,
+          actionLabel: "Use It",
+        });
+        if (!use) return;
+      }
       state.slicer = {
         available: true,
         path: result.slicer_path,
@@ -14083,26 +14187,57 @@ function collectOutputs(value, found = []) {
   return [...new Set(found)];
 }
 
-async function saveGeneratedFiles(result) {
+// policy.kind: "bin" (default), "connector" or "structural". Ownership is
+// decided by the caller, never by the file name.
+async function saveGeneratedFiles(result, policy = {}) {
   if (!state.runtime.hosted) return collectOutputs(result.result);
   const files = result.files || [];
   if (!files.length) throw new Error("The server did not return any files to save.");
   const folder = state.browserFolder;
+  const connector = policy.kind === "connector";
+  const blobs = new Map();
+  let skip = new Set();
   if (folder?.handle) {
-    const conflicts = [];
+    const existing = [];
     for (const file of files) {
-      if (await WFFileSystem.fileExists(folder.handle, file.name)) conflicts.push(file.name);
+      if (await WFFileSystem.fileExists(folder.handle, file.name)) existing.push(file);
     }
-    if (conflicts.length) {
-      showFilenameConflictDialog(conflicts);
-      throw new Error("Give the bin a different name to avoid overwriting an existing file.");
+    if (existing.length && connector) {
+      const different = [];
+      for (const file of existing) {
+        const response = await fetch(file.url);
+        if (!response.ok) throw new Error(`Could not download ${file.name}.`);
+        const blob = await response.blob();
+        blobs.set(file.name, blob);
+        const [oldHash, newHash] = await Promise.all([
+          WFFileSystem.sha256(folder.handle, file.name), WFFileSystem.sha256Blob(blob),
+        ]);
+        if (oldHash === newHash) skip.add(file.name); else different.push(file.name);
+      }
+      if (different.length && !(await confirmReplaceConnectorFiles(different))) {
+        throw new Error("Connector save cancelled. Nothing was replaced.");
+      }
+    } else if (existing.length) {
+      const hint = policy.kind === "structural"
+        ? "Give the Space a different name, then save again."
+        : undefined;
+      showFilenameConflictDialog(existing.map(file => file.name), hint);
+      throw new Error(policy.kind === "structural"
+        ? "Give the Space a different name to avoid overwriting an existing file."
+        : "Give the bin a different name to avoid overwriting an existing file.");
     }
   }
   const saved = [];
   for (const file of files) {
-    const response = await fetch(file.url);
-    if (!response.ok) throw new Error(`Could not download ${file.name}.`);
-    await WFFileSystem.writeBlob(folder?.handle, file.name, await response.blob());
+    if (!skip.has(file.name)) {
+      let blob = blobs.get(file.name);
+      if (!blob) {
+        const response = await fetch(file.url);
+        if (!response.ok) throw new Error(`Could not download ${file.name}.`);
+        blob = await response.blob();
+      }
+      await WFFileSystem.writeBlob(folder?.handle, file.name, blob);
+    }
     saved.push(file.name);
   }
   return saved;
@@ -14269,6 +14404,7 @@ async function init() {
     state.output = state.runtime.hosted ? "" : (catalog.preferences?.output || catalog.defaults.output);
     setFolderState("design");
     state.connector = clone(catalog.defaults.connector);
+    restoreConnectorSettings();
     state.slicer = catalog.slicer || { available: false, path: null, name: "Bambu Studio" };
     updateSlicerUI();
     renderCatalog();

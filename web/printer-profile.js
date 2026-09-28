@@ -10,12 +10,13 @@
   let malformed = "";
   const listeners = new Set();
   const stateListeners = new Set();
+  const AXIS_NAMES = Object.freeze({ x: "Width (X)", y: "Depth (Y)", z: "Height (Z)" });
   const normalise = raw => {
     if (!raw || typeof raw !== "object") throw new Error("Enter printer build volume");
     const result = {};
     for (const key of ["x_mm", "y_mm", "z_mm"]) {
       const value = raw[key];
-      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) throw new Error(`Enter a positive printer ${key}`);
+      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) throw new Error(`Enter a positive printer ${AXIS_NAMES[key[0]]}`);
       result[key] = value;
     }
     return result;
@@ -99,7 +100,7 @@
       edit.className = "sd-printer-edit"; edit.hidden = true;
       const inputs = {};
       for (const axis of ["x", "y", "z"]) {
-        const label = document.createElement("label"); label.textContent = `${axis.toUpperCase()} mm`;
+        const label = document.createElement("label"); label.textContent = `${AXIS_NAMES[axis]} mm`;
         const input = document.createElement("input");
         input.type = "number"; input.min = "0.01"; input.step = "any"; input.required = true;
         label.append(input); edit.append(label); inputs[axis] = input;

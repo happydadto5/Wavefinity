@@ -40,6 +40,14 @@ DP.syncFilterSpace = () => {
   DP.signatures.inventory = null;
 };
 
+// Legal Drawer minima come from the catalog, the same authority the backend
+// uses: one Wavefinity unit plus hard-wall clearance across, ordinary-bin
+// minimum height up.
+DP.drawerMinima = () => {
+  const xy = Number(state.catalog?.base_unit || 8) + drawerHardClearance();
+  return { x: xy, y: xy, z: ordinaryBinMinimumHeight() };
+};
+
 const dlNum = (value, fallback = null) => {
   const parsed = Number(String(value ?? "").trim());
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -83,9 +91,9 @@ DP.build = () => {
         <button type="button" id="dl-drawer-add" class="button secondary dl-small" title="Add another drawer; it shares this inventory">+ Drawer</button>
       </div>
       <div id="dl-drawer-size-card" class="field-grid three dl-drawer-size">
-        <label>Width <span class="unit">mm</span><input id="dl-width" type="number" min="16" step="1" title="Inside, left to right"></label>
-        <label>Depth <span class="unit">mm</span><input id="dl-depth" type="number" min="16" step="1" title="Inside, front to back"></label>
-        <label>Max height <span class="unit">mm</span><input id="dl-height" type="number" min="6" step="1" title="The tallest bin or stack that fits: the inside height, less whatever the drawer above needs to close"></label>
+        <label>Width <span class="unit">mm</span><input id="dl-width" type="number" step="any" title="Inside, left to right"></label>
+        <label>Depth <span class="unit">mm</span><input id="dl-depth" type="number" step="any" title="Inside, front to back"></label>
+        <label>Max height <span class="unit">mm</span><input id="dl-height" type="number" min="6" step="any" title="The tallest bin or stack that fits: the inside height, less whatever the drawer above needs to close"></label>
       </div>
       <p id="dl-grid-note" class="dl-note"></p>
       <details class="dl-details" id="dl-fit-details" hidden>
@@ -127,6 +135,7 @@ DP.build = () => {
             <button type="button" id="dl-batch-clear" class="button secondary dl-small">Clear selection</button>
             <button type="button" id="dl-batch-delete" class="button danger dl-small" disabled>Delete</button>
             <span id="dl-batch-summary" class="dl-batch-summary" role="status"></span>
+            <span id="dl-batch-filter-note" class="dl-batch-summary" hidden>Some bins are hidden by the current search/filter. Clear it to include all bins.</span>
           </div>
           <div class="dl-batch-actions">
             <button type="button" id="dl-batch-save" class="button secondary">Save Selected</button>
@@ -197,13 +206,19 @@ DP.HOSTED_UNSUPPORTED_TOOLTIP = "Hosted Wavefinity uses the normal Design save-t
 DP.wire = () => {
   const drawerField = (selector, key, parse) => $(selector).addEventListener("change", event => {
     const value = parse(event.target.value);
-    if (value === null) { event.target.value = DL.drawer()[key]; toast("Enter a positive number.", true); return; }
+    if (value === null) { event.target.value = DL.drawer()[key]; if (key === "name") toast("Enter a name.", true); return; }
     DL.change(() => { DL.drawer()[key] = value; });
   });
-  const positive = min => raw => { const n = dlNum(raw); return n !== null && n >= min ? n : null; };
-  drawerField("#dl-width", "width", positive(8));
-  drawerField("#dl-depth", "depth", positive(8));
-  drawerField("#dl-height", "height", positive(1));
+  const positive = (axis, label) => raw => {
+    const n = dlNum(raw);
+    const min = DP.drawerMinima()[axis];
+    if (n !== null && n >= min) return n;
+    toast(`${label} must be at least ${fmt(min)} mm.`, true);
+    return null;
+  };
+  drawerField("#dl-width", "width", positive("x", "Width"));
+  drawerField("#dl-depth", "depth", positive("y", "Depth"));
+  drawerField("#dl-height", "height", positive("z", "Max height"));
   drawerField("#dl-name", "name", raw => raw.trim() || null);
   $("#dl-drawer").addEventListener("change", event => {
     DL.change(() => { DL.layout.active = event.target.value; }, { history: false });
@@ -241,7 +256,13 @@ DP.wire = () => {
     }, { history: false });
   });
   setting("#dl-sp-type", "spacers", "flexible", node => node.value === "flexible");
-  setting("#dl-sp-height", "spacers", "height", node => Math.max(6, dlNum(node.value, 15)));
+  $("#dl-sp-height").addEventListener("change", event => {
+    const value = dlNum(event.target.value);
+    const restore = () => { event.target.value = DL.layout.settings.spacers.height; };
+    if (value === null || String(event.target.value).trim() === "") { restore(); toast("Enter the spacer height as a number.", true); return; }
+    if (value < 6) { restore(); toast("Spacer height must be at least 6 mm.", true); return; }
+    DL.change(() => { DL.layout.settings.spacers.height = value; }, { history: false });
+  });
   $("#dl-surface-ask-height").addEventListener("change", async event => {
     DL.change(() => { DL.layout.settings.surface.ask_object_height = event.target.checked; }, { history: false });
     await DL.save();
@@ -325,13 +346,13 @@ DP.prunePrintSelection = () => {
 
 DP.selectAllNotPrinted = () => {
   DP.printSelected = new Set(
-    DL.bins.filter(one => DL.isOrdinary(one) && one.status !== "printed").map(one => one.id));
+    DP.filteredBins().filter(one => DL.isOrdinary(one) && one.status !== "printed").map(one => one.id));
   DP.renderInventory(true);
 };
 
 DP.selectAllPrintable = () => {
   DP.printSelected = new Set(
-    DL.bins.filter(DL.isOrdinary).map(one => one.id));
+    DP.filteredBins().filter(DL.isOrdinary).map(one => one.id));
   DP.renderInventory(true);
 };
 
@@ -378,6 +399,8 @@ DP.renderBatch = () => {
   const summaryNode = $("#dl-batch-summary");
   summaryNode.textContent = summary;
   summaryNode.hidden = !summary;
+  const hiddenBins = DL.bins.filter(DL.isOrdinary).length > DP.filteredBins().filter(DL.isOrdinary).length;
+  $("#dl-batch-filter-note").hidden = !hiddenBins;
   $("#dl-batch-clear").disabled = !DP.printSelected.size;
   $("#dl-batch-delete").disabled = !DP.printSelected.size || Boolean(DL.busy);
   if (hosted) return;
@@ -570,7 +593,7 @@ DP.openSpacerPrintDialog = () => {
         <tr data-group="${index}">
           <td><input type="checkbox" data-sp-check ${g.toPrint > 0 ? "checked" : ""}></td>
           <td>${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm</td>
-          <td>${g.bin.name.includes("Rigid") ? "Rigid" : "Flexible"}</td>
+          <td>${/^Spacer Flex /.test(String(g.bin.file || "")) ? "Flexible" : "Rigid"}</td>
           <td>${g.qty}</td>
           <td>${g.printed}</td>
           <td><input type="number" data-sp-qty min="1" max="${g.qty}" value="${Math.max(1, g.toPrint || g.qty)}" ${g.toPrint > 0 ? "" : "disabled"}></td>
@@ -586,14 +609,18 @@ DP.openSpacerPrintDialog = () => {
 DP.confirmSpacerPrint = () => {
   const dialog = $("#spacer-print-dialog");
   const selection = {};
+  let badRow = false;
   $$("tr[data-group]", $("#spacer-print-table-container")).forEach(row => {
     const group = DP.spacerPrintGroups[Number(row.dataset.group)];
     const checked = row.querySelector("[data-sp-check]").checked;
     const qty = dlNum(row.querySelector("[data-sp-qty]").value, 0);
     if (checked && qty > 0) selection[group.bin.id] = qty;
+    else if (checked) badRow = true;
   });
+  if (badRow) { toast("Enter a quantity of at least 1 for each checked spacer.", true); return; }
+  if (!Object.keys(selection).length) { toast("Select at least one spacer to print.", true); return; }
   dialog.close();
-  if (Object.keys(selection).length) DL.printSelectedSpacers(selection);
+  DL.printSelectedSpacers(selection);
 };
 
 // ------------------------------------------------------------------ rendering
@@ -639,6 +666,11 @@ DP.syncHistory = () => {
 
 DP.renderDrawer = () => {
   const drawer = DL.drawer();
+  const minima = DP.drawerMinima();
+  DV.syncControls();
+  $("#dl-width").min = minima.x;
+  $("#dl-depth").min = minima.y;
+  $("#dl-height").min = minima.z;
   const pegboard = DL.isPegboard(drawer);
   const surface = DL.isSurface();
   const spacerSection = $("#dl-spacers");

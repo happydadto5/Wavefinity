@@ -221,6 +221,7 @@ SP.resolvePegboard = () => {
     holesX = Math.floor(width / standard.pitch_x_mm + 1e-9);
     holesY = Math.floor(height / standard.pitch_y_mm + 1e-9);
     if (holesX < 1 || holesY < 1) return { ok: false, error: "The board must contain at least one mount position." };
+    if (holesX > 500 || holesY > 500) return { ok: false, error: "That board is too large. The limit is 500 mount positions per side." };
     residualX = width - holesX * standard.pitch_x_mm;
     residualY = height - holesY * standard.pitch_y_mm;
   }
@@ -2671,6 +2672,9 @@ SP.wire = () => {
     const input = document.getElementById(id);
     if (input) input.addEventListener("input", SP.updateReadouts);
   });
+  ["portable-lid-type", "portable-latch-count", "portable-handle", "portable-stacking", "portable-wall", "portable-base", "portable-lid-snugness", "portable-label-location", "portable-front-label-style"].forEach(id =>
+    document.getElementById(id)?.addEventListener("change", SP.updateReadouts));
+  ["portable-label-text"].forEach(id => document.getElementById(id)?.addEventListener("input", SP.updateReadouts));
   ["portable-lid-type", "portable-label-location"].forEach(id =>
     document.getElementById(id)?.addEventListener("change", SP.syncStorageBoxForm));
   // Surface: on blur show the actual resolved outside size in the inputs.
@@ -2716,15 +2720,11 @@ SP.updateReadouts = () => {
         const interior = document.getElementById("surface-size-readout");
         const trim = document.getElementById("surface-trim-readout");
         const outside = document.getElementById("surface-outside-readout");
-        readout.hidden = false;
+        readout.hidden = !resolved.ok;
         if (resolved.ok) {
             interior.textContent = SP.fieldText(resolved.fieldX, resolved.fieldY);
             trim.textContent = `${SP.surfaceTrimLabel(trimKey)} — ${fmt(resolved.trimWidth)} mm`;
             outside.textContent = `${fmt(resolved.outerX)} × ${fmt(resolved.outerY)} mm`;
-        } else {
-            interior.textContent = resolved.error;
-            trim.textContent = "—";
-            outside.textContent = "—";
         }
     } else if (kind === "portable") {
         const x = Number(document.getElementById("portable-x").value);
@@ -2738,6 +2738,7 @@ SP.updateReadouts = () => {
         } else {
             document.getElementById("portable-readout").hidden = true;
         }
+        SP.refreshSetupOutside();
     } else if (kind === "pegboard") {
         const mode = document.getElementById("pegboard-size-mode")?.value || "physical";
         const isPhysical = mode === "physical";
@@ -2817,6 +2818,38 @@ SP.syncStorageBoxForm = () => {
   hide("portable-front-label-style-row", location !== "front");
 };
 
+// R66: "Finished outside" for the Storage Box setup draft. The number comes
+// from the server's read-only summary (assembled_envelope_mm); there is no
+// second formula here. A newer draft always wins over an older response.
+SP.setupOutsideToken = 0;
+SP.refreshSetupOutside = () => {
+  const label = document.getElementById("portable-outside-label");
+  const value = document.getElementById("portable-outside-readout");
+  if (!label || !value) return;
+  const hideOutside = () => { label.hidden = true; value.hidden = true; value.textContent = ""; };
+  const token = ++SP.setupOutsideToken;
+  clearTimeout(SP.setupOutsideTimer);
+  const num = id => Number(document.getElementById(id)?.value);
+  const x = SP.snap(num("portable-x")), y = SP.snap(num("portable-y")), z = num("portable-z");
+  const minField = Number(state.catalog?.b4b_rules?.min_field_mm);
+  const minHeight = Number(state.catalog?.b4b_rules?.min_secure_height_mm);
+  const valid = [x, y, z].every(n => Number.isFinite(n) && n > 0) && x >= minField && y >= minField && z >= minHeight;
+  if (!valid || SP.setupKind !== "portable") { hideOutside(); return; }
+  const space = { kind: "portable", name: "Storage Box", x, y, z, storage_box: SP.readStorageBoxForm() };
+  SP.setupOutsideTimer = setTimeout(async () => {
+    try {
+      const result = await api("/api/space/structural-design", { space });
+      if (token !== SP.setupOutsideToken) return;
+      const size = result.summary?.assembled_envelope_mm;
+      if (!Array.isArray(size) || size.length < 3) { hideOutside(); return; }
+      value.textContent = `${size.map(n => fmt(Number(n))).join(" × ")} mm`;
+      label.hidden = false; value.hidden = false;
+    } catch (_error) {
+      if (token === SP.setupOutsideToken) hideOutside();
+    }
+  }, 250);
+};
+
 SP.readStorageBoxForm = () => {
   const value = id => document.getElementById(id)?.value;
   const latched = value("portable-lid-type") !== "lid_only";
@@ -2889,7 +2922,7 @@ SP.runStructural = async (mode, event) => {
   }
   const printing = mode === "print";
   if (printing && !state.slicer?.available) {
-    toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
+    toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
     return;
   }
   // Fix 056 D: hidden maintainer shortcut restored at its new owner - local
@@ -2923,7 +2956,7 @@ SP.runStructural = async (mode, event) => {
     } else {
       const result = await api("/api/space/structural-generate", payload);
       DL.requireSpaceContext(context);
-      const saved = await saveGeneratedFiles(result);
+      const saved = await saveGeneratedFiles(result, { kind: "structural" });
       DL.requireSpaceContext(context);
       toast(`Saved ${label} to ${result.output || state.output}${saved.length ? `\n${[...new Set(saved.map(file => String(file).split(/[\\/]/).pop()))].join("\n")}` : ""}`, false, 7000);
     }
@@ -3658,7 +3691,7 @@ SP.runCabinetStructural = async mode => {
   if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
   if (mode === "print" && hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
   if (mode === "print" && !state.slicer?.available) {
-    toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
+    toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
     return;
   }
   const context = DL.spaceContext();

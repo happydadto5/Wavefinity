@@ -47,6 +47,14 @@ const V3 = {
 DV.syncControls = () => {
   const tilt = $("#dl-tilt");
   const turn = $("#dl-turn");
+  // A Pegboard has one fixed camera, so the angle sliders and the Look in /
+  // Overhead / Low presets do nothing there; Fit and zoom still work.
+  const fixedCamera = Boolean(DL.layout && DL.isPegboard());
+  const sliderRow = tilt?.closest(".camera-controls-row");
+  if (sliderRow) sliderRow.hidden = fixedCamera;
+  $$("[data-dl-view]").forEach(button => {
+    if (button.dataset.dlView !== "fit") button.hidden = fixedCamera;
+  });
   if (tilt) tilt.value = String(Math.round(DV.view.tilt));
   if (turn) turn.value = String(Math.round(DV.view.turn));
   $$("[data-dl-view]").forEach(button => {

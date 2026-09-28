@@ -207,6 +207,7 @@ from organizer_app import (
     corner_connector_filename,
     default_feature,
     design_from_dict,
+    design_source_payload,
     design_to_dict,
     generate_organizer_files,
     generate_corner_file,
@@ -1546,6 +1547,18 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
             if not math.isfinite(value) or value <= 2.0 * BASE_TRIM_BED_EDGE_MARGIN:
                 raise ValueError(f"{label} must leave a positive printable area after edge clearance.")
             update[key] = value
+    if "connector_settings" in payload:
+        raw = payload["connector_settings"]
+        if not isinstance(raw, dict):
+            raise ValueError("Connector settings must be an object.")
+        settings: dict[str, Any] = {}
+        for key in ("tolerance", "length", "arm_thickness", "bin_a_height", "bin_b_height"):
+            value = float(raw[key])
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError("Connector settings must be positive numbers.")
+            settings[key] = value
+        settings["different_heights"] = bool(raw.get("different_heights"))
+        update["connector_settings"] = settings
     return {"preferences": save_preferences(update)}
 
 
@@ -3386,6 +3399,40 @@ def _extract_generated_files(result_data: Any) -> list[Path]:
     return deduped
 
 
+def _printed_reuse_files(payload: dict[str, Any]) -> tuple[Path, list[Path]] | None:
+    """Existing Wavefinity-owned bin file(s) of an unchanged Printed row, else None.
+
+    The browser only asks; this proves it under Inventory authority. Any failed
+    proof returns None so the normal timestamped generation runs instead.
+    """
+    if payload.get("reuse_printed_file") is not True:
+        return None
+    row_id = str(payload.get("design_row_id") or "")
+    if not row_id or not isinstance(payload.get("design"), dict):
+        return None
+    try:
+        from organizer_drawer import inventory_row_files
+        from organizer_inventory import INVENTORY_LOCK, design_specs, load_inventory
+
+        canonical, _record = design_source_payload(payload["design"])
+        folder = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
+        with INVENTORY_LOCK:
+            current = load_inventory(folder)
+            row = next((one for one in current["bins"] if one.get("id") == row_id), None)
+            if row is None or row.get("kind") == "spacer" or row.get("status") != "printed":
+                return None
+            if not str(row.get("file") or "").strip():
+                return None
+            if design_specs(current["layout"]).get(row_id) != canonical:
+                return None
+            files = inventory_row_files(folder, row)
+        if not files or not all(path.suffix.lower() == ".3mf" and path.is_file() for path in files):
+            return None
+        return folder, files
+    except Exception:
+        return None
+
+
 def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if HOSTED:
         raise ValueError("Hosted Wavefinity saves generated files to your selected folder instead.")
@@ -3401,6 +3448,8 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "Bambu Studio was not found. Please locate your Bambu Studio executable in settings or install Bambu Studio."
         )
 
+    design_reused = False
+    files: list[Path] = []
     if target == "connector":
         gen_result = connector_payload(payload)
     elif target == "sampler":
@@ -3408,13 +3457,21 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     elif target == "base_trim_joint_test":
         gen_result = base_trim_joint_test_payload(payload)
     else:
-        # For Bambu printing, always auto-save with timestamp if file exists or unnamed
-        gen_result = generate_payload(
-            dict(payload, auto_timestamp=True),
-            suppress_local_inventory=True,
-        )
+        reused = _printed_reuse_files(payload) if target in {"bin", "all"} else None
+        if reused is not None:
+            # Unchanged Printed bin: hand the existing file(s) to the slicer.
+            design_reused = True
+            gen_result = {"output": str(reused[0]), "result": None}
+            files = list(reused[1])
+        else:
+            # For Bambu printing, always auto-save with timestamp if file exists or unnamed
+            gen_result = generate_payload(
+                dict(payload, auto_timestamp=True),
+                suppress_local_inventory=True,
+            )
 
-    files = _extract_generated_files(gen_result)
+    if not design_reused:
+        files = _extract_generated_files(gen_result)
     design_files = list(files)
     if target not in {"connector", "sampler", "base_trim_joint_test"} and not design_files:
         raise RuntimeError("No bin files were generated to send to Bambu Studio.")
@@ -3456,16 +3513,18 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
             completed_files = _extract_generated_files(error.completed)
             return {
                 "partial": True,
-                "error": f"Bin files were saved, but connectors could not be generated: {error.error}",
+                "error": f"{'The bin file was reused, but' if design_reused else 'Bin files were saved, but'} connectors could not be generated: {error.error}",
                 "partial_stage": "connectors",
+                "design_reused": design_reused,
                 "design_files": [str(f) for f in design_files],
                 "files": [str(f) for f in files + completed_files],
             }
         except Exception as error:
             return {
                 "partial": True,
-                "error": f"Bin files were saved, but connectors could not be generated: {error}",
+                "error": f"{'The bin file was reused, but' if design_reused else 'Bin files were saved, but'} connectors could not be generated: {error}",
                 "partial_stage": "connectors",
+                "design_reused": design_reused,
                 "design_files": [str(f) for f in design_files],
                 "files": [str(f) for f in files],
             }
@@ -3479,8 +3538,10 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception as error:
         return {
             "partial": True,
-            "error": f"Files were saved, but Bambu Studio did not open: {error}",
+            "error": (f"Bambu Studio did not open: {error}" if design_reused and not (len(files) > len(design_files))
+                      else f"Files were saved, but Bambu Studio did not open: {error}"),
             "partial_stage": "slicer",
+            "design_reused": design_reused,
             "design_files": [str(f) for f in design_files],
             "files": [str(f) for f in files],
         }
@@ -3509,6 +3570,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "output": gen_result.get("output"),
         "files": [str(f) for f in files],
         "design_files": [str(f) for f in design_files],
+        "design_reused": design_reused,
         "slicer": str(slicer_path),
         "project": str(project_path) if project_path else None,
     }
