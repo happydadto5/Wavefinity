@@ -424,6 +424,12 @@ DP.onInventoryClick = async event => {
 
 // Commit the row/canvas selection only after Designer accepted the switch.
 // Mouse and keyboard activation share this single success boundary.
+DP.editableSourceFor = one => {
+  const spec = DL.layout?.design_specs?.[one?.id];
+  return ["bin", "b4b"].includes(one?.kind) && Boolean(spec) &&
+    !(typeof isStructuralDesign === "function" && isStructuralDesign(spec));
+};
+
 DP.openInventoryRow = async id => {
   const request = ++DP.modeRequest;
   const spaceContext = DL.spaceContext();
@@ -868,10 +874,9 @@ DP.renderInventory = (force = false) => {
     const classes = [one.id === selectedRow ? "selected" : "", tooTall ? "too-tall" : "",
       spacer ? "spacer-row" : "", one.status === "printed" ? "printed" : ""].filter(Boolean).join(" ");
     const eligible = DL.printEligible(one);
-    const spec = DL.layout?.design_specs?.[one.id];
-    const designSource = ["bin", "b4b"].includes(one.kind) && Boolean(spec);
+    const designSource = ["bin", "b4b"].includes(one.kind) && Boolean(DL.layout?.design_specs?.[one.id]);
     // A Storage Box case saved by an older version is not a Designer object.
-    const editable = designSource && !(typeof isStructuralDesign === "function" && isStructuralDesign(spec));
+    const editable = DP.editableSourceFor(one);
     const printable = eligible && !state.runtime.hosted && Boolean(state.slicer?.available);
     const statusTracked = !spacer && ["bin", "b4b", "manual"].includes(one.kind);
     const printed = one.status === "printed";

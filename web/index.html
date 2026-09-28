@@ -11,7 +11,7 @@
 <body>
   <div id="startup-cover" class="startup-cover" role="status" aria-live="polite">
     <div class="startup-cover-card">
-      <h2>Welcome to Wavefinity</h2>
+      <img class="startup-logo" src="/images/wavefinity.png" alt="Wavefinity">
       <p>Opening Wavefinity…</p>
     </div>
   </div>
@@ -805,25 +805,29 @@
         </div>
         <p class="welcome-lead">Use a Space when you want Wavefinity to plan a drawer, storage box, surface, or pegboard. Or design bins on their own without a Space.</p>
         <p id="welcome-startup-error" class="field-error" hidden></p>
+        <div class="welcome-actions">
+          <button id="welcome-create" class="button primary" type="button">Create New Space</button>
+          <button id="welcome-open" class="button secondary" type="button">Open Existing Space…</button>
+          <button id="welcome-design" class="button secondary" type="button">Design without a Space</button>
+        </div>
+        <div class="welcome-other-container" data-other-spaces-container hidden>
+          <h3 class="welcome-section-title">Other Spaces</h3>
+          <ul class="welcome-recent" data-other-spaces-list></ul>
+        </div>
+        <div id="welcome-recent-container">
+          <h3 class="welcome-section-title">Recent folders</h3>
+          <ul id="welcome-recent" class="welcome-recent"></ul>
+        </div>
         <div class="welcome-storage" data-storage-card hidden>
           <div data-storage-folder-details>
             <p class="welcome-storage-lead"></p>
             <div class="welcome-storage-row">
               <code class="welcome-storage-path"></code>
-              <button class="button secondary welcome-storage-change" type="button">Change Location&#8230;</button>
+              <button class="link-button welcome-storage-change" type="button">Change Wavefinity Folder…</button>
             </div>
             <p class="welcome-storage-lead welcome-storage-leftover" hidden></p>
           </div>
           <div class="welcome-printer-profile" data-printer-profile-host></div>
-        </div>
-        <div class="welcome-actions">
-          <button id="welcome-create" class="button primary" type="button">Create New Space</button>
-          <button id="welcome-open" class="button secondary" type="button">Open Existing Space</button>
-          <button id="welcome-design" class="button secondary" type="button">Design without a Space</button>
-        </div>
-        <div id="welcome-recent-container">
-          <h3 class="welcome-section-title">Recent folders</h3>
-          <ul id="welcome-recent" class="welcome-recent"></ul>
         </div>
       </div>
       
@@ -840,20 +844,25 @@
             <small id="welcome-resume-folder"></small>
           </span>
         </div>
+        <div class="welcome-actions">
+          <button id="welcome-resume-continue" class="button primary" type="button">Open Last Space</button>
+          <button id="welcome-resume-create" class="button secondary" type="button">Create New Space</button>
+          <button id="welcome-resume-switch" class="button secondary" type="button">Open Existing Space…</button>
+        </div>
+        <div class="welcome-other-container" data-other-spaces-container hidden>
+          <h3 class="welcome-section-title">Other Spaces</h3>
+          <ul class="welcome-recent" data-other-spaces-list></ul>
+        </div>
         <div class="welcome-storage" data-storage-card hidden>
           <div data-storage-folder-details>
             <p class="welcome-storage-lead"></p>
             <div class="welcome-storage-row">
               <code class="welcome-storage-path"></code>
-              <button class="button secondary welcome-storage-change" type="button">Change Location&#8230;</button>
+              <button class="link-button welcome-storage-change" type="button">Change Wavefinity Folder…</button>
             </div>
             <p class="welcome-storage-lead welcome-storage-leftover" hidden></p>
           </div>
           <div class="welcome-printer-profile" data-printer-profile-host></div>
-        </div>
-        <div class="welcome-actions">
-          <button id="welcome-resume-continue" class="button primary" type="button">Open Space</button>
-          <button id="welcome-resume-switch" class="button secondary" type="button">Choose another folder&#8230;</button>
         </div>
       </div>
 

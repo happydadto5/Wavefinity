@@ -790,6 +790,40 @@ def _recent_entry(info: dict[str, Any]) -> dict[str, Any]:
     return entry
 
 
+def other_spaces(
+    prefs: dict[str, Any], exclude_space_id: str | None = None,
+    exclude_folder: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Discover healthy direct-child Spaces without changing folder or profile state."""
+    root = effective_space_root(prefs)
+    if not root.is_dir():
+        return []
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    try:
+        children = root.iterdir()
+        for child in children:
+            if child.is_symlink() or not child.is_dir():
+                continue
+            try:
+                info = describe(child.resolve(), prefs)
+            except (OSError, ValueError):
+                continue
+            sid = info.get("space_id")
+            if (info["folder_mode"] != "space" or not sid or not info.get("space")
+                    or info["needs_setup"] or info["needs_identity_migration"]):
+                continue
+            by_id.setdefault(sid, []).append(_recent_entry(info))
+    except OSError:
+        return []
+    unique = [entries[0] for entries in by_id.values() if len(entries) == 1]
+    excluded_id = _space_id(exclude_space_id)
+    unique = [entry for entry in unique if not (
+        (excluded_id and entry["space_id"] == excluded_id)
+        or (not excluded_id and exclude_folder and _same(entry["folder"], exclude_folder))
+    )]
+    return sorted(unique, key=lambda entry: (entry["name"].casefold(), entry["folder"].casefold()))
+
+
 # ------------------------------------------------- Space registry (profile)
 
 
@@ -1129,6 +1163,11 @@ def space_routes(
         # to reproduce filesystem heuristics - it only needs to know whether
         # to show the first-run storage card and what path it should read.
         storage = storage_startup_state(prefs)
+        def welcome_spaces(current: dict[str, Any], active_folder: Path | None = None) -> list[dict[str, Any]]:
+            return other_spaces(
+                current, _space_id(current.get("active_space_id")),
+                active_folder or current.get("output"),
+            )
         target: Path | None = None
         space_id = _space_id(prefs.get("active_space_id"))
         if space_id:
@@ -1148,16 +1187,28 @@ def space_routes(
         elif prefs.get("output"):
             target = Path(str(prefs["output"])).expanduser()
         if target is None or not target.is_dir():
-            return {"folder": None, "space": None, "recent": recent(load_preferences()), "storage": storage}
+            current = load_preferences()
+            return {"folder": None, "space": None, "recent": recent(current), "storage": storage,
+                    "other_spaces": welcome_spaces(current)}
         target = target.resolve()
         if not space_id and _output_is_forgotten_typed_space(target, prefs):
-            return {"folder": None, "space": None, "recent": recent(load_preferences()), "storage": storage}
+            current = load_preferences()
+            return {"folder": None, "space": None, "recent": recent(current), "storage": storage,
+                    "other_spaces": welcome_spaces(current)}
         info = describe(target, prefs)
         if not info["needs_setup"]:
             info = prepare_folder_for_open(target, prefs)
             if not info["needs_setup"]:
                 remember_prepared(target, info)
-        return {"folder": info, "space": info, "recent": recent(load_preferences()), "storage": storage}
+        current = load_preferences()
+        return {"folder": info, "space": info, "recent": recent(current), "storage": storage,
+                "other_spaces": welcome_spaces(current, target)}
+
+    def other_spaces_route(_payload):
+        prefs = load_preferences()
+        return {"other_spaces": other_spaces(
+            prefs, _space_id(prefs.get("active_space_id")), prefs.get("output"),
+        )}
 
     def inspect(payload):
         return reply(folder(payload))
@@ -1665,6 +1716,7 @@ def space_routes(
         "/api/space/inspect": inspect,
         # Local startup: resolves the active Space by ID, not just a path.
         "/api/space/startup": startup,
+        "/api/space/other-spaces": other_spaces_route,
         # Open/remember only - never changes mode or rewrites metadata
         # beyond the technical identity/inventory upgrades in remember().
         "/api/folder/use": open_folder,

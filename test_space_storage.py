@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import copy
+import json
+import shutil
 from pathlib import Path
 from unittest import mock
 
@@ -32,6 +35,64 @@ class SpaceStorageStartupTests(unittest.TestCase):
     def tearDown(self):
         self._patch.stop()
         self._tmp.cleanup()
+
+    def test_other_spaces_discovers_only_healthy_direct_siblings_without_writes(self):
+        first = self.routes["/api/space/create"]({
+            "name": "Kitchen", "kind": "drawer", "x": 320, "y": 240, "z": 55,
+        })
+        second = self.routes["/api/space/create"]({
+            "name": "Garage", "kind": "drawer", "x": 320, "y": 240, "z": 55,
+        })
+        root = self.docs / "Wavefinity"
+        kitchen = Path(first["folder"]["folder"])
+        garage = Path(second["folder"]["folder"])
+        self.prefs["recent_folders"] = []
+        self.prefs["space_registry"] = {}
+        nested = root / "Nested" / "Deep"
+        shutil.copytree(kitchen, nested)
+        (root / "Arbitrary").mkdir()
+        design = root / "Design"
+        design.mkdir()
+        (design / ".wavefinity.json").write_text(json.dumps({
+            "version": 9, "setup_version": 1, "folder_mode": "design", "inventory": True,
+        }), encoding="utf-8")
+        newer = root / "Newer"
+        newer.mkdir()
+        (newer / ".wavefinity.json").write_text(json.dumps({"version": 999}), encoding="utf-8")
+        setup = root / "Setup"
+        shutil.copytree(kitchen, setup)
+        setup_meta = json.loads((setup / ".wavefinity.json").read_text(encoding="utf-8"))
+        setup_meta["setup_version"] = 0
+        setup_meta["space_id"] = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        (setup / ".wavefinity.json").write_text(json.dumps(setup_meta), encoding="utf-8")
+        before_prefs = copy.deepcopy(self.prefs)
+        before_files = {p: p.read_bytes() for p in root.rglob(".wavefinity.json")}
+        result = self.routes["/api/space/other-spaces"]({})["other_spaces"]
+        self.assertEqual([one["name"] for one in result], ["Kitchen"])
+        self.assertEqual(self.prefs, before_prefs)
+        self.assertEqual({p: p.read_bytes() for p in root.rglob(".wavefinity.json")}, before_files)
+        self.assertEqual(result, self.routes["/api/space/startup"]({})["other_spaces"])
+        duplicate = root / "Kitchen copy"
+        shutil.copytree(kitchen, duplicate)
+        self.assertEqual(self.routes["/api/space/other-spaces"]({})["other_spaces"], [])
+        self.assertEqual(Path(self.prefs["output"]), garage)
+
+    def test_other_spaces_re_resolves_changed_root_without_creating_it(self):
+        missing = self.docs / "Wavefinity"
+        self.assertEqual(self.routes["/api/space/other-spaces"]({})["other_spaces"], [])
+        self.assertFalse(missing.exists())
+        first = self.routes["/api/space/create"]({
+            "name": "Kitchen", "kind": "drawer", "x": 320, "y": 240, "z": 55,
+        })
+        self.prefs["active_space_id"] = None
+        self.prefs["output"] = None
+        custom = self.home / "custom-discovery"
+        (custom / "Wavefinity").mkdir(parents=True)
+        shutil.copytree(Path(first["folder"]["folder"]), custom / "Wavefinity" / "Kitchen")
+        self.prefs["space_parent"] = str(custom)
+        result = self.routes["/api/space/startup"]({})["other_spaces"]
+        self.assertEqual([one["name"] for one in result], ["Kitchen"])
+        self.assertEqual(Path(result[0]["folder"]).parent, custom / "Wavefinity")
 
     # 1. no saved parent + missing Documents/Wavefinity => first-run choice,
     #    Documents/default effective root, and the root is never created.

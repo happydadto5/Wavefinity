@@ -1288,6 +1288,9 @@ dialog:not([open]) { display: none; }
 .about-dialog::backdrop { background: rgba(14, 28, 34, .55); backdrop-filter: blur(2px); }
 .about-dialog-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .about-dialog-header h2 { margin: 0; font-size: 20px; color: #14303a; }
+.about-runtime { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.about-runtime h3 { margin: 0 0 6px; font-size: 13px; color: var(--ink); }
+.about-runtime p { margin: 3px 0; }
 
 /* Startup cover: visible from the first rendered HTML, dismissed only once
    Space startup has decided what the person should see. */
@@ -1313,7 +1316,10 @@ dialog:not([open]) { display: none; }
   color: var(--ink);
   background: #fff;
   box-shadow: 0 24px 60px rgba(15, 30, 36, .35);
+  text-align: center;
 }
+
+.startup-logo { display: block; width: 100%; max-height: min(42vh, 250px); object-fit: contain; margin: 0 auto 12px; border-radius: 8px; }
 
 .startup-cover-card h2 {
   margin: 0 0 8px;
@@ -1346,13 +1352,13 @@ dialog:not([open]) { display: none; }
 }
 .welcome-steps strong { display: block; margin-bottom: 3px; color: var(--ink); font-size: 13px; }
 .welcome-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.welcome-other-container { margin-bottom: 20px; }
+.welcome-other-container .welcome-recent { max-height: 240px; overflow-y: auto; }
 /* Fix 058 K: the compact, non-blocking first-run Space storage card. */
 .welcome-storage {
-  margin: 0 0 14px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--paper);
+  margin: 18px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
 }
 .welcome-storage-lead { margin: 0 0 8px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
 .welcome-storage-row {
@@ -1365,9 +1371,8 @@ dialog:not([open]) { display: none; }
   flex: 1 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: rgba(127, 169, 182, 0.12);
+  padding: 0;
+  background: none;
   font-size: 12px;
 }
 .welcome-storage-row .button { margin: 0; flex: 0 0 auto; }
@@ -1405,7 +1410,6 @@ body.relocating > :not(dialog) { pointer-events: none; }
   border: 1px solid var(--line); border-radius: 8px; background: var(--paper);
 }
 .welcome-resume-card .welcome-recent-text > span { font-weight: 650; color: var(--ink); font-size: 13px; }
-.welcome-countdown { margin: 0; min-height: 1.2em; font-size: 12px; color: var(--muted); }
 .space-folder { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 0 14px; font-size: 12px; color: var(--muted); }
 .space-folder > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .link-button { border: 0; background: none; padding: 0; color: var(--teal); font: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; }

@@ -6237,7 +6237,7 @@ function renderDraftFields() {
     const textLevel = one.options?.level === "rim" ? "rim" : "base";
     const textType = `${textLevel}_${one.options?.raised === true ? "raised" : "inlaid"}`;
     const textInput = `<input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">`;
-    let textGroup = `<label>Words${textInput}</label>`;
+    let textGroup = `<label>Text${textInput}</label>`;
     // At most one rim Text is allowed per bin (Fix 078). Another Text's At-rim
     // choices are disabled once one rim Text already exists elsewhere.
     const hasOtherRimText = (state.design.layout?.features || []).some((feature, index) =>
@@ -6268,7 +6268,7 @@ function renderDraftFields() {
         ${[0, 1, 2, 3].map(turn => `<option value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "selected" : ""}>${turn * 90}°</option>`).join("")}
       </select></label>`;
     }
-    html += editorGroup("Text", textGroup);
+    html += `<div class="editor-group">${textGroup}</div>`;
   }
   if (info.flags.size && one.kind !== "cradle" && !(one.kind === "text" && one.options?.level === "rim")) {
     const isPocket = one.kind === "pocket";
@@ -14150,6 +14150,29 @@ async function showAboutDialog() {
   } catch (err) {
     content.textContent = "Could not load brochure: " + err.message;
   }
+  const runtime = document.createElement("section");
+  runtime.className = "about-runtime";
+  try {
+    const response = await fetch("/api/health", { cache: "no-store" });
+    if (!response.ok) throw new Error("Health unavailable");
+    const health = await response.json();
+    if (!health.source_fingerprint) throw new Error("Runtime identity unavailable");
+    const heading = document.createElement("h3");
+    heading.textContent = "Runtime";
+    runtime.append(heading);
+    for (const [label, value] of [
+      ["Build", health.build], ["Source", health.source_root],
+      ["Fingerprint", health.source_fingerprint],
+    ]) {
+      if (value == null) continue;
+      const line = document.createElement("p");
+      line.textContent = `${label}: ${value}`;
+      runtime.append(line);
+    }
+  } catch (_error) {
+    runtime.textContent = "Runtime details unavailable";
+  }
+  content.append(runtime);
 }
 
 function renderSimpleMarkdown(md) {

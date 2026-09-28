@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import hashlib
 import json
 import math
 import os
@@ -42,6 +43,101 @@ from wavefinity_web import (
     preview_payload,
 )
 from photo_nest import PhotoOutline
+
+
+class RuntimeIdentityTests(unittest.TestCase):
+    def test_fingerprint_missing_marker_and_health_address_boundary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "web").mkdir()
+            (root / "web" / "app.js").write_bytes(b"first source")
+            first = wavefinity_web.source_fingerprint(root)
+            self.assertEqual(first, wavefinity_web.source_fingerprint(root))
+            digest = hashlib.sha256()
+            for relative in wavefinity_web.SOURCE_FILES:
+                path = root / relative
+                digest.update(relative.encode("utf-8") + b"\0")
+                digest.update(b"<present>" + path.read_bytes() if path.is_file() else b"<missing>")
+                digest.update(b"\0")
+            self.assertEqual(first, digest.hexdigest()[:12])
+            (root / "web" / "app.js").unlink()
+            self.assertNotEqual(first, wavefinity_web.source_fingerprint(root))
+        local = wavefinity_web.health_payload("127.0.0.1", hosted=False)
+        self.assertEqual(local["source_root"], str(wavefinity_web.APP_DIR.resolve()))
+        self.assertEqual(local["source_fingerprint"], wavefinity_web.SOURCE_FINGERPRINT)
+        self.assertIn("source_root", wavefinity_web.health_payload("::1", hosted=False))
+        self.assertNotIn("source_root", wavefinity_web.health_payload("192.0.2.1", hosted=False))
+        self.assertNotIn("source_root", wavefinity_web.health_payload("127.0.0.1", hosted=True))
+
+
+class FirstBinCapabilityTests(unittest.TestCase):
+    def test_edit_capability_depends_on_source_not_row_position(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js unavailable")
+        script = r"""
+          const fs = require('fs');
+          const vm = require('vm');
+          const source = fs.readFileSync('web/drawer-panel.js', 'utf8');
+          const fn = source.match(/DP\.editableSourceFor = one => \{[\s\S]*?\n\};/)[0];
+          const context = { DP: {}, DL: { layout: { design_specs: {
+            first: { part_name: 'First' }, later: { part_name: 'Later' },
+            structural: { structural: true }
+          } } }, isStructuralDesign: spec => Boolean(spec.structural) };
+          vm.runInNewContext(fn, context);
+          const rows = ['first', 'later', 'missing', 'structural'].map(id =>
+            context.DP.editableSourceFor({ id, kind: 'bin' }));
+          rows.push(context.DP.editableSourceFor({ id: 'first', kind: 'manual' }));
+          process.stdout.write(JSON.stringify(rows));
+        """
+        result = subprocess.run(
+            [node, "-e", script], cwd=Path(__file__).resolve().parent,
+            capture_output=True, text=True, check=True,
+        )
+        self.assertEqual(json.loads(result.stdout), [True, True, False, False, False])
+
+
+class PreferredSpaceLandingTests(unittest.TestCase):
+    def test_zero_one_two_rows_and_failed_optional_edit(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js unavailable")
+        script = r"""
+          const fs = require('fs');
+          const vm = require('vm');
+          const source = fs.readFileSync('web/spaces.js', 'utf8');
+          const fn = source.match(/SP\.openTypedSpacePreferredView = async \(\) => \{[\s\S]*?\n\};/)[0];
+          const calls = [];
+          const DL = { bins: [], layout: { design_specs: {} },
+            isOrdinary: row => row.kind !== 'spacer', ensureLoaded: async () => true };
+          const DP = { enter: async mode => { calls.push(mode); return true; },
+            editableSourceFor: row => Boolean(DL.layout.design_specs[row.id]),
+            openInventoryRow: async id => { calls.push(id); return true; } };
+          const context = { SP: {}, DL, DP, toast: () => {} };
+          vm.runInNewContext(fn, context);
+          (async () => {
+            const results = [];
+            for (const bins of [[], [{id:'one',kind:'bin'}],
+              [{id:'one',kind:'bin'},{id:'two',kind:'bin'}]]) {
+              DL.bins = bins; DL.layout.design_specs = { one: {} }; calls.length = 0;
+              results.push([await context.SP.openTypedSpacePreferredView(), [...calls]]);
+            }
+            DL.bins = [{id:'one',kind:'bin'}]; DL.layout.design_specs = {}; calls.length = 0;
+            results.push([await context.SP.openTypedSpacePreferredView(), [...calls]]);
+            DL.layout.design_specs = { one: {} }; calls.length = 0;
+            DP.openInventoryRow = async () => false;
+            results.push([await context.SP.openTypedSpacePreferredView(), [...calls]]);
+            process.stdout.write(JSON.stringify(results));
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+        """
+        result = subprocess.run(
+            [node, "-e", script], cwd=Path(__file__).resolve().parent,
+            capture_output=True, text=True, check=True,
+        )
+        self.assertEqual(json.loads(result.stdout), [
+            [True, ["space"]], [True, ["space", "one"]],
+            [True, ["space"]], [True, ["space"]], [True, ["space"]],
+        ])
 
 
 def _text_feature(said, auto=False, zone=(-20.0, -6.0, 20.0, 6.0), **options):

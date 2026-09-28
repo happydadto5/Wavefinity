@@ -388,6 +388,16 @@ class DesignSourceTests(unittest.TestCase):
         reloaded = load_inventory(self.folder)
         self.assertEqual(design_specs(reloaded["layout"]).get(row_id), design)
 
+        edited = self._design("Fasteners updated")
+        updated = save_design_source(
+            self.folder, design=edited, record=self._record("Fasteners updated"), row_id=row_id,
+        )
+        self.assertEqual(updated["row_id"], row_id)
+        self.assertEqual(len(updated["bins"]), 1)
+        reloaded = load_inventory(self.folder)
+        self.assertEqual(reloaded["bins"][0]["id"], row_id)
+        self.assertEqual(design_specs(reloaded["layout"]), {row_id: edited})
+
     def test_reference_only_source_edit_keeps_generated_file_local_and_browser_text(self):
         from organizer_inventory import (save_design_source, save_design_source_text,
                                          change_design_status, load_inventory, render_inventory)

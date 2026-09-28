@@ -30,7 +30,7 @@ if errorlevel 1 (
 )
 
 if /i "%~1"=="--check" (
-    "%ORGANIZER_PY%" -c "import organizer_app, wavefinity_web; print('Organizer launcher ready')"
+    "%ORGANIZER_PY%" -c "import organizer_app, wavefinity_web as w; print('Organizer launcher ready'); print('Source:', w.SOURCE_ROOT); print('Fingerprint:', w.SOURCE_FINGERPRINT); print('Build:', w.SERVER_BUILD)"
     if errorlevel 1 exit /b 1
     exit /b 0
 )

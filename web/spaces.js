@@ -6,10 +6,11 @@
 // an untyped folder just keeps ordinary designs.
 const SP = {
   recent: [],
+  otherSpaces: [],
+  otherSpacesFresh: false,
   setup: null,
   busy: false,
   resume: null,
-  resumeTimer: null,
   isUpdate: false,
   collisionOrigin: null,
   // A read-only setup candidate offered only to its matching type card.
@@ -26,7 +27,6 @@ const SP = {
   // unavailable} or null before startup has run / in hosted mode.
   storage: null,
 };
-const RESUME_AUTOCONTINUE_SECONDS = 10;
 const SP_KINDS = {
   // The internal kind stays "portable"; users only ever see "Storage Box".
   portable: { icon: "🧰", label: "Storage Box" },
@@ -62,7 +62,6 @@ SP.close = () => {
 };
 SP.showOnly = id => {
   SP.cancelInlineEdit();
-  SP.cancelResumeAutoContinue();
   ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-tutorial", "space-form", "space-configure-prompt", "space-collision-prompt", "space-existing-inventory-prompt", "space-storage-change"]
     .forEach(one => { $("#" + one).hidden = one !== id; });
 };
@@ -1368,6 +1367,38 @@ SP.renderRecent = () => {
   }).join("");
 };
 
+SP.renderOtherSpaces = () => {
+  document.querySelectorAll("[data-other-spaces-container]").forEach(container => {
+    container.hidden = state.runtime.hosted || SP.otherSpaces.length === 0;
+    const list = container.querySelector("[data-other-spaces-list]");
+    list.innerHTML = SP.otherSpaces.map((one, index) => {
+      const kind = SP_KINDS[one.kind];
+      const meta = [kind?.label || "Space", one.summary_text || SP.sizeText(one.size)].filter(Boolean).join(" · ");
+      return `<li class="welcome-recent-item"><button type="button" class="welcome-recent-open" data-other-index="${index}" title="${escapeHtml(one.folder)}">
+        <span class="welcome-recent-icon" aria-hidden="true">${kind?.icon || "📦"}</span>
+        <span class="welcome-recent-text"><strong>${escapeHtml(one.name)}</strong><small>${escapeHtml(meta)}</small></span>
+      </button></li>`;
+    }).join("");
+  });
+};
+
+SP.refreshOtherSpaces = async () => {
+  if (state.runtime.hosted) return;
+  try {
+    SP.otherSpaces = (await api("/api/space/other-spaces", {})).other_spaces || [];
+    SP.renderOtherSpaces();
+  } catch (_error) {
+    SP.otherSpaces = [];
+    SP.renderOtherSpaces();
+  }
+};
+
+SP.welcomeOtherSpaces = () => {
+  SP.renderOtherSpaces();
+  if (!SP.otherSpacesFresh) void SP.refreshOtherSpaces();
+  SP.otherSpacesFresh = false;
+};
+
 SP.showResume = info => {
   SP.resume = info;
   SP.showOnly("welcome-resume");
@@ -1380,49 +1411,35 @@ SP.showResume = info => {
   $("#welcome-resume-folder").title = info.folder;
   SP.renderStorageCard();
   SP.refreshStorage();
+  SP.welcomeOtherSpaces();
   SP.showDialog();
-  SP.armResumeAutoContinue();
-};
-
-// Left alone, the resume prompt continues on its own after ~10 seconds - the
-// same thing Continue does, landing in Design. Anything that dismisses or
-// replaces this screen (the buttons below, the dialog's own close - Escape,
-// backdrop, the X - or showing a different screen) cancels it first, so a
-// stale timer can never fire after the user has moved on.
-SP.cancelResumeAutoContinue = () => {
-  clearInterval(SP.resumeTimer);
-  SP.resumeTimer = null;
-  const button = $("#welcome-resume-continue");
-  if (button) button.textContent = "Open Space";
-};
-
-SP.armResumeAutoContinue = () => {
-  SP.cancelResumeAutoContinue();
-  let remaining = RESUME_AUTOCONTINUE_SECONDS;
-  const button = $("#welcome-resume-continue");
-  SP.resumeTimer = setInterval(() => {
-    remaining -= 1;
-    if (remaining <= 0) { SP.run(SP.confirmResume); return; }
-    if (button) button.textContent = `Open Space (${remaining})`;
-  }, 1000);
 };
 
 // An existing Space lands by its loaded Inventory, without changing its
 // restored design or making a second inventory parser.
 SP.openTypedSpacePreferredView = async () => {
   try {
-    await DL.ensureLoaded();
+    if (!(await DL.ensureLoaded())) return false;
   } catch (error) {
     toast(`Could not read this Space's inventory: ${error.message}`, true, 7000);
     return false;
   }
-  // An empty Inventory is not a reason to land in Design (Fix 078): opening
-  // or resuming an existing typed Space always shows its Space layout.
-  return DP.enter("space", true);
+  if (!(await DP.enter("space", true))) return false;
+  const ordinary = DL.bins.filter(DL.isOrdinary);
+  if (ordinary.length !== 1) return true;
+  const row = ordinary[0];
+  if (!DP.editableSourceFor(row)) return true;
+  try {
+    if (!(await DP.openInventoryRow(row.id))) {
+      toast("Could not open this bin in Design. The Space is still open.", true, 7000);
+    }
+  } catch (error) {
+    toast(`Could not open this bin in Design: ${error.message}`, true, 7000);
+  }
+  return true;
 };
 
 SP.confirmResume = async () => {
-  SP.cancelResumeAutoContinue();
   if (await SP.openTypedSpacePreferredView()) SP.close();
 };
 
@@ -1494,15 +1511,14 @@ SP.showHome = (message = null) => {
   }
   SP.renderRecent();
   const hasRecent = SP.recent.length > 0;
-  document.getElementById("welcome-recent-container").hidden = !hasRecent;
+  document.getElementById("welcome-recent-container").hidden = !state.runtime.hosted || !hasRecent;
   SP.renderStorageCard();
   SP.refreshStorage();
+  SP.welcomeOtherSpaces();
   SP.showDialog();
 };
 
-// Fix 083: the persistent Wavefinity Folder card (Welcome and Welcome back).
-// Local mode only. It always shows the current resolved root; first-run and
-// missing-location guidance is the same card, not a second settings surface.
+// The Wavefinity Folder control stays below the main Welcome actions.
 SP.renderStorageCard = () => {
   const info = SP.storage;
   document.querySelectorAll("[data-storage-card]").forEach(el => {
@@ -1517,12 +1533,14 @@ SP.renderStorageCard = () => {
     const lead = el.querySelector(".welcome-storage-lead");
     if (info.unavailable) {
       lead.textContent = "Your saved Space storage location could not be found. Choose a folder to continue.";
-    } else if (info.first_run) {
-      lead.textContent = "By default, Wavefinity creates its Wavefinity folder inside Documents.";
+    } else if (!info.explicit) {
+      lead.textContent = "Wavefinity folder: Documents (default)";
     } else {
-      lead.textContent = "Wavefinity Folder";
+      lead.textContent = "Wavefinity folder";
     }
-    el.querySelector(".welcome-storage-path").textContent = info.root;
+    const path = el.querySelector(".welcome-storage-path");
+    path.textContent = !info.unavailable && info.explicit ? info.root : "";
+    path.hidden = !path.textContent;
     const leftover = el.querySelector(".welcome-storage-leftover");
     leftover.hidden = !info.leftover;
     leftover.textContent = info.leftover
@@ -1555,7 +1573,6 @@ SP.storageReturn = "welcome-home";
 SP.changeStorageParent = () => SP.run(SP.startStorageChange);
 
 SP.startStorageChange = async () => {
-  SP.cancelResumeAutoContinue();
   SP.storageReturn = $("#welcome-resume").hidden ? "welcome-home" : "welcome-resume";
   await SP.pickStorageParent();
 };
@@ -1596,6 +1613,7 @@ SP.cancelStorageChange = () => {
   SP.storagePlan = null;
   SP.showOnly(SP.storageReturn);
   SP.renderStorageCard();
+  SP.welcomeOtherSpaces();
   SP.showDialog();
 };
 
@@ -2420,6 +2438,8 @@ SP.launch = async () => {
     // folder in the same parent) before falling back to the saved path.
     const resp = await api("/api/space/startup", {});
     SP.recent = resp.recent || [];
+    SP.otherSpaces = resp.other_spaces || [];
+    SP.otherSpacesFresh = Array.isArray(resp.other_spaces);
     SP.storage = resp.storage || null;
     const data = resp.folder;
     if (!data || data.missing) { SP.showHome(); return; }
@@ -2443,7 +2463,6 @@ SP.wire = () => {
   document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-form-close, #space-type-cards-close, #space-tutorial-close")
     .forEach(el => el?.addEventListener("click", SP.close));
   SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
-  SP.dialog().addEventListener("close", SP.cancelResumeAutoContinue);
   const welcomeCreate = document.getElementById("welcome-create");
   if (welcomeCreate) welcomeCreate.addEventListener("click", SP.beginCreateNew);
   const welcomeOpen = document.getElementById("welcome-open");
@@ -2471,9 +2490,9 @@ SP.wire = () => {
   if (tutorialBack) tutorialBack.addEventListener("click", SP.showTypeCards);
   const welcomeResumeContinue = document.getElementById("welcome-resume-continue");
   if (welcomeResumeContinue) welcomeResumeContinue.addEventListener("click", () => SP.run(SP.confirmResume));
+  document.getElementById("welcome-resume-create")?.addEventListener("click", SP.beginCreateNew);
   const welcomeResumeSwitch = document.getElementById("welcome-resume-switch");
   if (welcomeResumeSwitch) welcomeResumeSwitch.addEventListener("click", () => {
-    SP.cancelResumeAutoContinue();
     // SP.run() calls the task immediately, so showDirectoryPicker() is still
     // reached from the trusted click.
     SP.run(SP.openExisting);
@@ -2577,6 +2596,12 @@ SP.wire = () => {
     });
     else SP.run(() => SP.afterPick(one.folder));
   });
+  document.querySelectorAll("[data-other-spaces-list]").forEach(list =>
+    list.addEventListener("click", event => {
+      const button = event.target.closest("[data-other-index]");
+      const one = SP.otherSpaces[Number(button?.dataset.otherIndex)];
+      if (one) SP.run(() => SP.afterPick(one.folder));
+    }));
 
   // Live Drawer/Portable readouts while the user types, not only when the
   // setup screen first opens - see Fix 004 Correction 6.G.

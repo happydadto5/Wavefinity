@@ -304,6 +304,48 @@ SERVER_VERSION = "1"
 API_COMPAT_VERSION = 2
 SERVER_INSTANCE = uuid.uuid4().hex
 SERVER_BUILD = os.environ.get("RENDER_GIT_COMMIT", SERVER_VERSION)[:12]
+SOURCE_FILES = (
+    "wavefinity_web.py", "web/index.html", "web/app.js", "web/spaces.js",
+    "web/styles.css", "web/drawer-panel.js", "web/drawer-model.js",
+    "web/storage-drawers.js", "web/storage-drawers-form.js",
+    "web/storage-drawers-workspace.js", "images/Drawer.png",
+    "images/StorageDrawers.png",
+)
+
+
+def source_fingerprint(root: Path = APP_DIR) -> str:
+    digest = hashlib.sha256()
+    for relative in SOURCE_FILES:
+        path = root / relative
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        if path.is_file():
+            digest.update(b"<present>")
+            digest.update(path.read_bytes())
+        else:
+            digest.update(b"<missing>")
+        digest.update(b"\0")
+    return digest.hexdigest()[:12]
+
+
+SOURCE_ROOT = str(APP_DIR.resolve())
+SOURCE_FINGERPRINT = source_fingerprint()
+
+
+def health_payload(client_address: str, *, hosted: bool = HOSTED) -> dict[str, Any]:
+    result = {
+        "ok": True, "version": SERVER_VERSION, "instance": SERVER_INSTANCE,
+        "api_compat": API_COMPAT_VERSION, "build": SERVER_BUILD,
+        "source_fingerprint": SOURCE_FINGERPRINT,
+    }
+    try:
+        loopback = ipaddress.ip_address(client_address).is_loopback
+    except ValueError:
+        loopback = False
+    if not hosted and loopback:
+        result["source_root"] = SOURCE_ROOT
+    return result
+
 GEOMETRY_LOCK = threading.RLock()
 _PREVIEW_REQUEST_LOCK = threading.Lock()
 _PREVIEW_REQUESTS: OrderedDict[tuple[str, str], tuple[int, float]] = OrderedDict()
@@ -4505,11 +4547,7 @@ class WavefinityHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/health":
-            self._send_json({
-                "ok": True, "version": SERVER_VERSION,
-                "instance": SERVER_INSTANCE, "api_compat": API_COMPAT_VERSION,
-                "build": SERVER_BUILD,
-            })
+            self._send_json(health_payload(self.client_address[0]))
             return
         if path == "/api/catalog":
             self._send_json(catalog_payload())
