@@ -59,7 +59,7 @@ SP.close = () => { if (SP.dialog().open) SP.dialog().close(); };
 SP.showOnly = id => {
   SP.cancelInlineEdit();
   SP.cancelResumeAutoContinue();
-  ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-tutorial", "space-form", "space-configure-prompt", "space-collision-prompt", "space-existing-inventory-prompt"]
+  ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-tutorial", "space-form", "space-configure-prompt", "space-collision-prompt", "space-existing-inventory-prompt", "space-storage-change"]
     .forEach(one => { $("#" + one).hidden = one !== id; });
 };
 SP.showDialog = () => { if (!SP.dialog().open) SP.dialog().showModal(); };
@@ -1350,6 +1350,8 @@ SP.showResume = info => {
   $("#welcome-resume-meta").textContent = [kind.label, SP.sizeText([space.x, space.y, space.z])].filter(Boolean).join(" · ");
   $("#welcome-resume-folder").textContent = info.folder;
   $("#welcome-resume-folder").title = info.folder;
+  SP.renderStorageCard();
+  SP.refreshStorage();
   SP.showDialog();
   SP.armResumeAutoContinue();
 };
@@ -1466,38 +1468,136 @@ SP.showHome = (message = null) => {
   const hasRecent = SP.recent.length > 0;
   document.getElementById("welcome-recent-container").hidden = !hasRecent;
   SP.renderStorageCard();
+  SP.refreshStorage();
   SP.showDialog();
 };
 
-// Fix 058 K: the compact, non-blocking first-run Space storage card. Local
-// mode only, and only in the true first-run/default-location case (or when a
-// saved custom parent has gone missing) - an existing established default or
-// an explicit saved parent shows nothing here.
+// Fix 083: the persistent Wavefinity Folder card (Welcome and Welcome back).
+// Local mode only. It always shows the current resolved root; first-run and
+// missing-location guidance is the same card, not a second settings surface.
 SP.renderStorageCard = () => {
-  const el = document.getElementById("welcome-storage");
-  if (!el) return;
   const info = SP.storage;
-  if (state.runtime.hosted || !info || (!info.first_run && !info.unavailable)) {
-    el.hidden = true;
-    return;
-  }
-  const lead = document.getElementById("welcome-storage-lead");
-  const path = document.getElementById("welcome-storage-path");
-  if (info.unavailable) {
-    lead.textContent = "Your saved Space storage location could not be found. Choose a folder to continue.";
-  } else {
-    lead.textContent = "By default, Wavefinity creates its Wavefinity folder inside Documents.";
-  }
-  if (path) path.textContent = info.root;
-  el.hidden = false;
+  document.querySelectorAll("[data-storage-card]").forEach(el => {
+    if (state.runtime.hosted || !info) {
+      el.hidden = true;
+      return;
+    }
+    const lead = el.querySelector(".welcome-storage-lead");
+    if (info.unavailable) {
+      lead.textContent = "Your saved Space storage location could not be found. Choose a folder to continue.";
+    } else if (info.first_run) {
+      lead.textContent = "By default, Wavefinity creates its Wavefinity folder inside Documents.";
+    } else {
+      lead.textContent = "Wavefinity Folder";
+    }
+    el.querySelector(".welcome-storage-path").textContent = info.root;
+    const leftover = el.querySelector(".welcome-storage-leftover");
+    leftover.hidden = !info.leftover;
+    leftover.textContent = info.leftover
+      ? `Your old Wavefinity data was copied, but the old copy is still at ${info.leftover}. You can delete it yourself once you are happy with the new folder.`
+      : "";
+    el.hidden = false;
+  });
 };
 
-SP.changeStorageParent = () => SP.run(async () => {
-  const data = await api("/api/space/browse-storage-parent", {});
-  if (!data.folder) return; // a cancel is silent
-  SP.storage = data.storage || null;
+// Quietly re-reads the storage state so the card never shows a stale root
+// (for example right after the first Space creates the folder).
+SP.refreshStorage = async () => {
+  if (state.runtime.hosted) return;
+  try {
+    SP.storage = (await api("/api/space/storage-state", {})).storage || null;
+  } catch (_error) {
+    return;
+  }
   SP.renderStorageCard();
-  toast(`Wavefinity Space storage set to ${data.folder}.`);
+};
+
+// Change Location. With no Wavefinity folder yet (first run, or a missing saved
+// location) there is nothing to move, so the chosen parent is simply saved.
+// Otherwise the user picks a parent, sees the resulting folder, and chooses
+// Move existing data or Use new location; a folder that already exists there
+// is never merged or replaced (see SP.renderStoragePlan).
+SP.storagePlan = null;
+SP.storageReturn = "welcome-home";
+
+SP.changeStorageParent = () => SP.run(SP.startStorageChange);
+
+SP.startStorageChange = async () => {
+  SP.cancelResumeAutoContinue();
+  SP.storageReturn = $("#welcome-resume").hidden ? "welcome-home" : "welcome-resume";
+  SP.storage = (await api("/api/space/storage-state", {})).storage || SP.storage;
+  if (!SP.storage?.root_exists) {
+    const data = await api("/api/space/browse-storage-parent", {});
+    if (!data.folder) return; // a cancel is silent
+    SP.storage = data.storage || null;
+    SP.renderStorageCard();
+    toast(`Wavefinity Space storage set to ${data.folder}.`);
+    return;
+  }
+  await SP.pickStorageParent();
+};
+
+SP.pickStorageParent = async () => {
+  const picked = await api("/api/space/browse-storage-parent", { pick_only: true });
+  if (!picked.folder) return; // a cancel is a no-op
+  const data = await api("/api/space/storage-plan", { parent: picked.folder });
+  if (data.plan.same) {
+    toast("That is already your Wavefinity folder.");
+    return;
+  }
+  SP.storagePlan = data.plan;
+  SP.renderStoragePlan();
+};
+
+SP.renderStoragePlan = () => {
+  const plan = SP.storagePlan;
+  if (!plan) return;
+  SP.showOnly("space-storage-change");
+  $("#space-storage-choose").hidden = plan.conflict;
+  $("#space-storage-conflict").hidden = !plan.conflict;
+  $("#space-storage-new-root").textContent = plan.root;
+  $("#space-storage-conflict-root").textContent = plan.root;
+  const move = document.querySelector('input[name="space-storage-mode"][value="move"]');
+  const other = document.querySelector('input[name="space-storage-mode"][value="switch"]');
+  move.checked = true;
+  other.checked = false;
+  SP.showDialog();
+};
+
+SP.cancelStorageChange = () => {
+  SP.storagePlan = null;
+  SP.showOnly(SP.storageReturn);
+  SP.renderStorageCard();
+  SP.showDialog();
+};
+
+SP.applyStorageChange = mode => SP.run(async () => {
+  const plan = SP.storagePlan;
+  if (!plan) return;
+  // Let any pending autosave finish first, so the Space is settled on disk
+  // before its folder is moved.
+  await SP.flushOutgoingResumeCheckpoint();
+  await SP.flushDefaults();
+  const data = await api("/api/space/storage-change", { parent: plan.parent, mode });
+  if (data.status === "conflict") {
+    SP.storagePlan = { ...plan, conflict: true };
+    SP.renderStoragePlan();
+    return;
+  }
+  SP.storagePlan = null;
+  SP.storage = data.storage || null;
+  if (data.status === "unchanged") {
+    toast("That is already your Wavefinity folder.");
+    SP.cancelStorageChange();
+    return;
+  }
+  if (data.leftover) {
+    toast(`Wavefinity is now at ${SP.storage?.root}. The old copy could not be fully removed and is still at ${data.leftover}.`, false, 9000);
+  } else {
+    toast(`Wavefinity Folder is now ${SP.storage?.root}.`);
+  }
+  // A clean restart of the page guarantees nothing keeps the old path.
+  setTimeout(() => location.reload(), 1200);
 });
 
 SP.showTypeCards = () => {
@@ -2278,8 +2378,18 @@ SP.wire = () => {
   if (welcomeCreate) welcomeCreate.addEventListener("click", SP.beginCreateNew);
   const welcomeOpen = document.getElementById("welcome-open");
   if (welcomeOpen) welcomeOpen.addEventListener("click", () => SP.run(SP.openExisting));
-  const welcomeStorageChange = document.getElementById("welcome-storage-change");
-  if (welcomeStorageChange) welcomeStorageChange.addEventListener("click", SP.changeStorageParent);
+  document.querySelectorAll(".welcome-storage-change")
+    .forEach(el => el.addEventListener("click", SP.changeStorageParent));
+  document.getElementById("space-storage-close")?.addEventListener("click", SP.cancelStorageChange);
+  document.getElementById("space-storage-cancel")?.addEventListener("click", SP.cancelStorageChange);
+  document.getElementById("space-storage-conflict-cancel")?.addEventListener("click", SP.cancelStorageChange);
+  document.getElementById("space-storage-repick")?.addEventListener("click", () => SP.run(SP.pickStorageParent));
+  document.getElementById("space-storage-conflict-repick")?.addEventListener("click", () => SP.run(SP.pickStorageParent));
+  document.getElementById("space-storage-apply")?.addEventListener("click", () => {
+    const chosen = document.querySelector('input[name="space-storage-mode"]:checked');
+    SP.applyStorageChange(chosen?.value === "switch" ? "switch" : "move");
+  });
+  document.getElementById("space-storage-use-existing")?.addEventListener("click", () => SP.applyStorageChange("use_existing"));
   const welcomeDesign = document.getElementById("welcome-design");
   if (welcomeDesign) welcomeDesign.addEventListener("click", () => {
     SP.clearSetupContext();

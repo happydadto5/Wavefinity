@@ -39,6 +39,7 @@ from organizer_inventory import (
     resolve_inventory_path,
 )
 from organizer_product_rules import SURFACE_TRIM_HEIGHTS
+import organizer_storage
 
 MAX_RECENT = 8
 METADATA_FILE = ".wavefinity.json"
@@ -87,10 +88,29 @@ _METADATA_WRITE_LOCK = threading.RLock()
 # the default parent; ``space_parent`` is the one explicit preference key that
 # overrides just the parent, never the ``Wavefinity`` child folder name.
 SPACE_PARENT_PREFERENCE_KEY = "space_parent"
+# Fix 083: a relocation in progress (so a restart can resolve it to exactly one
+# root) and an old root left behind after a verified copy (reported, never
+# deleted on a guess).
+STORAGE_RELOCATION_KEY = "storage_relocation"
+STORAGE_LEFTOVER_KEY = "storage_leftover_root"
 
 
 def default_space_parent() -> Path:
-    return (Path.home() / "Documents").resolve()
+    """Where the Wavefinity folder goes when the user never chose a parent.
+
+    The real OS Documents folder (OneDrive-redirected on some Windows setups).
+    A Wavefinity folder already established under the old ``~/Documents``
+    guess keeps winning until the user moves it, so nothing silently vanishes.
+    """
+    documents = organizer_storage.documents_folder()
+    legacy = (Path.home() / "Documents").resolve()
+    if (
+        not organizer_storage.same_path(documents, legacy)
+        and not (documents / "Wavefinity").is_dir()
+        and (legacy / "Wavefinity").is_dir()
+    ):
+        return legacy
+    return documents
 
 
 def _usable_directory(raw: Any) -> Path | None:
@@ -143,13 +163,70 @@ def storage_startup_state(prefs: dict[str, Any]) -> dict[str, Any]:
     first_run = False
     if not explicit and not unavailable:
         first_run = not root.is_dir()
+    leftover = str(prefs.get(STORAGE_LEFTOVER_KEY) or "")
     return {
         "parent": str(parent),
         "root": str(root),
         "explicit": explicit,
         "first_run": first_run,
         "unavailable": unavailable,
+        "root_exists": not unavailable and root.is_dir(),
+        "leftover": leftover if leftover and Path(leftover).is_dir() else None,
     }
+
+
+def _storage_plan(prefs: dict[str, Any], raw_parent: Any, current_root: Path) -> dict[str, Any]:
+    """Validate a proposed new parent before anything is changed."""
+    if not raw_parent:
+        raise ValueError("Choose a folder for Wavefinity's Space storage.")
+    parent = _usable_directory(raw_parent)
+    if parent is None:
+        raise ValueError("That folder could not be found. Choose an existing folder.")
+    root = parent / "Wavefinity"
+    same = organizer_storage.same_path(current_root, root)
+    source_exists = not saved_parent_unavailable(prefs) and current_root.is_dir()
+    if (
+        source_exists and not same
+        and (organizer_storage.is_within(root, current_root)
+             or organizer_storage.is_within(current_root, root))
+    ):
+        raise ValueError(
+            "Choose a location outside your current Wavefinity folder "
+            "(not inside it, and not a folder that contains it)."
+        )
+    return {
+        "parent": str(parent),
+        "root": str(root),
+        "current_root": str(current_root),
+        "source_exists": source_exists,
+        "same": same,
+        "conflict": not same and organizer_storage.destination_conflict(root),
+    }
+
+
+def _forget_root_pointers(prefs: dict[str, Any], old_root: Path) -> None:
+    """Drop every profile pointer into ``old_root`` (shortcuts only - no data is touched).
+
+    Used when the user keeps old data where it is: nothing under the old root
+    may be resumed or listed as if it were current.
+    """
+    within = organizer_storage.is_within
+    registry = _space_registry(prefs)
+    dropped = {sid for sid, entry in registry.items() if within(entry.get("folder"), old_root)}
+    if "space_registry" in prefs:
+        prefs["space_registry"] = {sid: e for sid, e in registry.items() if sid not in dropped}
+    if _space_id(prefs.get("active_space_id")) in dropped:
+        prefs["active_space_id"] = None
+    if within(prefs.get("output"), old_root):
+        prefs.pop("output", None)
+        prefs["active_space_id"] = None
+    for key in ("recent_folders", "recent_spaces"):
+        saved = prefs.get(key)
+        if isinstance(saved, list):
+            prefs[key] = [
+                one for one in saved
+                if not (isinstance(one, dict) and within(one.get("folder"), old_root))
+            ]
 
 def _space_folder_name(raw: Any) -> str:
     name = str(raw or "").strip()
@@ -988,6 +1065,7 @@ def space_routes(
         return info
 
     def startup(_payload):
+        recover_relocation()
         prefs = load_preferences()
         # Fix 058 K: resolved once per startup call so the frontend never has
         # to reproduce filesystem heuristics - it only needs to know whether
@@ -1333,7 +1411,142 @@ def space_routes(
         return {"storage": storage_startup_state(prefs)}
 
     def storage_state(_payload):
+        recover_relocation()
         return {"storage": storage_startup_state(load_preferences())}
+
+    def storage_plan(payload):
+        prefs = load_preferences()
+        plan = _storage_plan(prefs, payload.get("parent"), current_space_root(prefs))
+        return {"plan": plan, "storage": storage_startup_state(prefs)}
+
+    def journal_relocation(record):
+        def apply(prefs: dict[str, Any]) -> None:
+            if record is None:
+                prefs.pop(STORAGE_RELOCATION_KEY, None)
+            else:
+                prefs[STORAGE_RELOCATION_KEY] = record
+        mutate_preferences(apply)
+
+    def commit_storage(
+        old_root: Path, new_root: Path, *, moved: bool, leftover: Path | None = None,
+    ) -> None:
+        """The one atomic preference write that makes a new root official."""
+        def apply(prefs: dict[str, Any]) -> None:
+            # The journal holds the old path, so it goes before the path rewrite.
+            prefs.pop(STORAGE_RELOCATION_KEY, None)
+            if moved:
+                organizer_storage.rebase_value(prefs, old_root, new_root)
+            else:
+                _forget_root_pointers(prefs, old_root)
+            prefs[SPACE_PARENT_PREFERENCE_KEY] = str(new_root.parent)
+            if leftover is not None:
+                prefs[STORAGE_LEFTOVER_KEY] = str(leftover)
+        mutate_preferences(apply)
+
+    def clear_leftover() -> None:
+        def apply(prefs: dict[str, Any]) -> None:
+            prefs.pop(STORAGE_LEFTOVER_KEY, None)
+        mutate_preferences(apply)
+
+    def recover_relocation() -> None:
+        """Resolve a relocation a crash or restart interrupted to exactly one root.
+
+        Waits out any move still running in this process (same locks), so it
+        can never mistake a live copy for a dead one.
+        """
+        with _SPACE_CREATE_LOCK, _METADATA_WRITE_LOCK:
+            prefs = load_preferences()
+            leftover = prefs.get(STORAGE_LEFTOVER_KEY)
+            if leftover and not Path(str(leftover)).is_dir():
+                clear_leftover()
+            record = prefs.get(STORAGE_RELOCATION_KEY)
+            if record is None:
+                return
+            src_raw = record.get("src") if isinstance(record, dict) else None
+            dst_raw = record.get("dst") if isinstance(record, dict) else None
+            if not src_raw or not dst_raw:
+                journal_relocation(None)
+                return
+            src, dst = Path(str(src_raw)), Path(str(dst_raw))
+            if src.is_dir():
+                # The old root is intact, so it stays authoritative; only our
+                # own partial copy is discarded. A finished copy at ``dst`` is
+                # left alone and reported as a conflict if it is ever chosen.
+                organizer_storage.remove_stale_staging(record.get("staging"), dst.parent)
+                journal_relocation(None)
+            elif dst.is_dir():
+                commit_storage(src, dst, moved=True)  # the rename finished; finish the switch
+            else:
+                journal_relocation(None)
+
+    def change_storage(payload):
+        """Change Location: Move existing data / Use new location / Use existing.
+
+        Order is fixed: validate everything, bring the data across, then one
+        atomic preference write. Nothing durable points at the new root until
+        it is complete, and the old root is never removed before that write.
+        """
+        if fixed_space_root is not None:
+            raise ValueError("This session's Wavefinity folder is fixed.")
+        mode = payload.get("mode")
+        if mode not in {"move", "switch", "use_existing"}:
+            raise ValueError("Choose how to change the Wavefinity folder.")
+
+        def done(leftover: str | None = None) -> dict[str, Any]:
+            return {
+                "status": "ok", "leftover": leftover,
+                "storage": storage_startup_state(load_preferences()),
+            }
+
+        with _SPACE_CREATE_LOCK, _METADATA_WRITE_LOCK:
+            prefs = load_preferences()
+            old_root = current_space_root(prefs)
+            plan = _storage_plan(prefs, payload.get("parent"), old_root)
+            new_root = Path(plan["root"])
+            if plan["same"]:
+                return {"status": "unchanged", "storage": storage_startup_state(prefs)}
+
+            if mode == "use_existing":
+                if not new_root.is_dir():
+                    raise ValueError("There is no Wavefinity folder in that location to use.")
+                commit_storage(old_root, new_root, moved=False)
+                return done()
+
+            if plan["conflict"]:
+                return {"status": "conflict", "root": plan["root"], "storage": storage_startup_state(prefs)}
+
+            if mode == "move" and plan["source_exists"]:
+                kind, expected = organizer_storage.transfer_tree(old_root, new_root, journal_relocation)
+                try:
+                    commit_storage(
+                        old_root, new_root, moved=True,
+                        leftover=old_root if kind == "copied" else None,
+                    )
+                except Exception as error:
+                    organizer_storage.undo_transfer(old_root, new_root, kind)
+                    try:
+                        journal_relocation(None)
+                    except Exception:
+                        pass
+                    raise ValueError(
+                        "Wavefinity could not save the new location. "
+                        "Nothing was changed and your current folder is still in use."
+                    ) from error
+                if kind == "copied":
+                    if organizer_storage.discard_old_tree(old_root, expected):
+                        clear_leftover()
+                    else:
+                        return done(str(old_root))
+                return done()
+
+            try:
+                new_root.mkdir(exist_ok=True)
+            except OSError as error:
+                raise ValueError(
+                    "Wavefinity could not create its folder there. Choose another location."
+                ) from error
+            commit_storage(old_root, new_root, moved=False)
+            return done()
 
     return {
         "/api/space/inspect": inspect,
@@ -1355,4 +1568,6 @@ def space_routes(
         "/api/space/forget": forget,
         "/api/space/storage-parent": set_storage_parent,
         "/api/space/storage-state": storage_state,
+        "/api/space/storage-plan": storage_plan,
+        "/api/space/storage-change": change_storage,
     }

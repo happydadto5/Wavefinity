@@ -1561,10 +1561,17 @@ def browse_space_parent_payload(payload: dict[str, Any]) -> dict[str, Any]:
     directory that will contain the Wavefinity folder. Opening or cancelling
     this chooser creates nothing; a real selection saves the absolute chosen
     parent in preferences immediately (the effective root becomes
-    ``<selected parent>/Wavefinity``).
+    ``<selected parent>/Wavefinity``) - but only while there is no established
+    Wavefinity folder to move. With ``pick_only`` (Fix 083 Change Location) it
+    just returns the chosen parent and saves nothing.
     """
     if HOSTED:
         raise ValueError("Space storage location is available in the local Wavefinity app only.")
+    pick_only = bool(payload.get("pick_only"))
+    if not pick_only and storage_startup_state(load_preferences())["root_exists"]:
+        # An established Wavefinity folder is only ever changed through
+        # Change Location (move / switch), never by silently saving a parent.
+        raise ValueError("Use Change Location to move or switch your existing Wavefinity folder.")
     try:
         prefs = load_preferences()
         saved_raw = prefs.get("space_parent")
@@ -1595,6 +1602,9 @@ print(filedialog.askdirectory(parent=root, initialdir={repr(str(initial))}))
     if not candidate.is_dir():
         raise ValueError("That folder could not be found. Choose an existing folder.")
     absolute = candidate.resolve()
+    if pick_only:
+        # Change Location validates and applies the choice itself.
+        return {"folder": str(absolute)}
     save_preferences({"space_parent": str(absolute)})
     return {"folder": str(absolute), "storage": storage_startup_state(load_preferences())}
 

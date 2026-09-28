@@ -808,12 +808,13 @@
         </div>
         <p class="welcome-lead">Use a Space when you want Wavefinity to plan a drawer, storage box, surface, or pegboard. Or design bins on their own without a Space.</p>
         <p id="welcome-startup-error" class="field-error" hidden></p>
-        <div id="welcome-storage" class="welcome-storage" hidden>
-          <p id="welcome-storage-lead" class="welcome-storage-lead"></p>
+        <div class="welcome-storage" data-storage-card hidden>
+          <p class="welcome-storage-lead"></p>
           <div class="welcome-storage-row">
-            <code id="welcome-storage-path"></code>
-            <button id="welcome-storage-change" class="button secondary" type="button">Change&#8230;</button>
+            <code class="welcome-storage-path"></code>
+            <button class="button secondary welcome-storage-change" type="button">Change Location&#8230;</button>
           </div>
+          <p class="welcome-storage-lead welcome-storage-leftover" hidden></p>
         </div>
         <div class="welcome-actions">
           <button id="welcome-create" class="button primary" type="button">Create New Space</button>
@@ -839,9 +840,53 @@
             <small id="welcome-resume-folder"></small>
           </span>
         </div>
+        <div class="welcome-storage" data-storage-card hidden>
+          <p class="welcome-storage-lead"></p>
+          <div class="welcome-storage-row">
+            <code class="welcome-storage-path"></code>
+            <button class="button secondary welcome-storage-change" type="button">Change Location&#8230;</button>
+          </div>
+          <p class="welcome-storage-lead welcome-storage-leftover" hidden></p>
+        </div>
         <div class="welcome-actions">
           <button id="welcome-resume-continue" class="button primary" type="button">Open Space</button>
           <button id="welcome-resume-switch" class="button secondary" type="button">Choose another folder&#8230;</button>
+        </div>
+      </div>
+
+      <div id="space-storage-change" hidden>
+        <div class="welcome-header">
+          <h2>Change Wavefinity Folder</h2>
+          <button id="space-storage-close" class="button secondary" type="button" aria-label="Close">&#10005;</button>
+        </div>
+        <div id="space-storage-choose">
+          <p class="welcome-lead">Your new Wavefinity folder will be:</p>
+          <div class="welcome-storage-row"><code id="space-storage-new-root"></code></div>
+          <label class="storage-choice">
+            <input type="radio" name="space-storage-mode" value="move" checked>
+            <span><strong>Move existing Wavefinity data</strong>
+              <small>Everything in your current Wavefinity folder is moved to the new place. Your Spaces stay just as they are.</small></span>
+          </label>
+          <label class="storage-choice">
+            <input type="radio" name="space-storage-mode" value="switch">
+            <span><strong>Use new location without moving existing data</strong>
+              <small>Your old data stays where it is and stops showing in Recent. New Spaces go to the new folder.</small></span>
+          </label>
+          <div class="welcome-actions">
+            <button id="space-storage-apply" class="button primary" type="button">Change Location</button>
+            <button id="space-storage-repick" class="button secondary" type="button">Choose a different folder&#8230;</button>
+            <button id="space-storage-cancel" class="button secondary" type="button">Cancel</button>
+          </div>
+        </div>
+        <div id="space-storage-conflict" hidden>
+          <p class="welcome-lead">A Wavefinity folder already exists here:</p>
+          <div class="welcome-storage-row"><code id="space-storage-conflict-root"></code></div>
+          <p class="welcome-lead">Wavefinity will not merge it with your data or replace it. You can pick another location, or start using that existing folder as it is (your current data is left untouched).</p>
+          <div class="welcome-actions">
+            <button id="space-storage-conflict-repick" class="button primary" type="button">Choose another location&#8230;</button>
+            <button id="space-storage-use-existing" class="button secondary" type="button">Use existing Wavefinity folder</button>
+            <button id="space-storage-conflict-cancel" class="button secondary" type="button">Cancel</button>
+          </div>
         </div>
       </div>
 

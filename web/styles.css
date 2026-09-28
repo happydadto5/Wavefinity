@@ -1371,6 +1371,11 @@ dialog:not([open]) { display: none; }
   font-size: 12px;
 }
 .welcome-storage-row .button { margin: 0; flex: 0 0 auto; }
+.welcome-storage-leftover { margin: 8px 0 0; }
+.storage-choice { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 0; cursor: pointer; }
+.storage-choice input { margin-top: 4px; }
+.storage-choice small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+#space-storage-change .welcome-actions { margin-top: 16px; }
 .welcome-secondary { margin: 6px 0 20px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
 .welcome-secondary h3 { margin: 0 0 5px; font-size: 14px; }
 .welcome-secondary p { margin: 0 0 10px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
