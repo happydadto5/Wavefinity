@@ -3593,21 +3593,40 @@ function storedPreference(key, fallback) {
 // browser localStorage when hosted). Only these six fields are remembered.
 const CONNECTOR_SETTINGS_KEY = "wavefinity-connector-settings-v1";
 
+// One shared step for restoring and saving: each field must be legal (the same
+// ranges as the connector form) or it falls back to `fallback`.
+const CONNECTOR_SETTING_LIMITS = {
+  tolerance: [0, 1], length: [2, Infinity], arm_thickness: [0.5, 10],
+  bin_a_height: [2, Infinity], bin_b_height: [2, Infinity],
+};
+function normalizeConnectorSettings(raw, fallback = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const result = {};
+  for (const [key, [low, high]] of Object.entries(CONNECTOR_SETTING_LIMITS)) {
+    const value = source[key];
+    const legal = typeof value === "number" && Number.isFinite(value) && value >= low && value <= high;
+    result[key] = legal ? value : fallback[key];
+  }
+  result.different_heights = typeof source.different_heights === "boolean"
+    ? source.different_heights : fallback.different_heights === true;
+  return result;
+}
+
 function readConnectorSettingsFields() {
-  const positive = selector => {
-    const value = Number($(selector)?.value);
-    return Number.isFinite(value) && value > 0 ? value : null;
+  const field = selector => {
+    const text = String($(selector)?.value ?? "").trim();
+    return text === "" ? NaN : Number(text);
   };
-  const found = {
-    tolerance: positive("#connector-tolerance"),
-    length: positive("#connector-length"),
-    arm_thickness: positive("#connector-arm-thickness"),
-    bin_a_height: positive("#connector-bin-a-height"),
-    bin_b_height: positive("#connector-bin-b-height"),
+  const raw = {
+    tolerance: field("#connector-tolerance"),
+    length: field("#connector-length"),
+    arm_thickness: field("#connector-arm-thickness"),
+    bin_a_height: field("#connector-bin-a-height"),
+    bin_b_height: field("#connector-bin-b-height"),
+    different_heights: $("#connector-height-mode")?.value === "different",
   };
-  if (Object.values(found).some(value => value === null)) return null;
-  found.different_heights = $("#connector-height-mode")?.value === "different";
-  return found;
+  const clean = normalizeConnectorSettings(raw);
+  return Object.values(clean).some(value => value === undefined) ? null : clean;
 }
 
 function restoreConnectorSettings() {
@@ -3618,11 +3637,7 @@ function restoreConnectorSettings() {
       : state.catalog?.preferences?.connector_settings;
   } catch (_error) { raw = null; }
   if (!raw || typeof raw !== "object") return;
-  for (const key of ["tolerance", "length", "arm_thickness", "bin_a_height", "bin_b_height"]) {
-    const value = raw[key];
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) state.connector[key] = value;
-  }
-  if (typeof raw.different_heights === "boolean") state.connector.different_heights = raw.different_heights;
+  Object.assign(state.connector, normalizeConnectorSettings(raw, state.connector));
 }
 
 let lastSavedConnectorSettings = "";
@@ -3631,14 +3646,16 @@ function persistConnectorSettings() {
   if (!settings) return;
   const text = JSON.stringify(settings);
   if (text === lastSavedConnectorSettings) return;
-  lastSavedConnectorSettings = text;
   if (state.runtime.hosted) {
-    try { localStorage.setItem(CONNECTOR_SETTINGS_KEY, text); }
+    try { localStorage.setItem(CONNECTOR_SETTINGS_KEY, text); lastSavedConnectorSettings = text; }
     catch (_error) { toast("Connector settings could not be remembered in this browser.", true); }
     return;
   }
   api("/api/preferences", { connector_settings: settings })
-    .then(() => { if (state.catalog?.preferences) state.catalog.preferences.connector_settings = settings; })
+    .then(() => {
+      lastSavedConnectorSettings = text;
+      if (state.catalog?.preferences) state.catalog.preferences.connector_settings = settings;
+    })
     .catch(() => toast("Connector settings could not be remembered.", true));
 }
 
@@ -14165,6 +14182,8 @@ async function browseSlicer() {
         });
         if (!use) return;
       }
+      // Persist first; only a successful save changes the live slicer.
+      await api("/api/preferences", { slicer_path: result.slicer_path });
       state.slicer = {
         available: true,
         path: result.slicer_path,
@@ -14196,7 +14215,16 @@ async function saveGeneratedFiles(result, policy = {}) {
   const folder = state.browserFolder;
   const connector = policy.kind === "connector";
   const blobs = new Map();
-  let skip = new Set();
+  const skip = new Set();
+  if (connector) {
+    // Fetch every candidate before anything is written: a failed download
+    // must leave the folder exactly as it was.
+    for (const file of files) {
+      const response = await fetch(file.url);
+      if (!response.ok) throw new Error(`Could not download ${file.name}.`);
+      blobs.set(file.name, await response.blob());
+    }
+  }
   if (folder?.handle) {
     const existing = [];
     for (const file of files) {
@@ -14205,12 +14233,8 @@ async function saveGeneratedFiles(result, policy = {}) {
     if (existing.length && connector) {
       const different = [];
       for (const file of existing) {
-        const response = await fetch(file.url);
-        if (!response.ok) throw new Error(`Could not download ${file.name}.`);
-        const blob = await response.blob();
-        blobs.set(file.name, blob);
         const [oldHash, newHash] = await Promise.all([
-          WFFileSystem.sha256(folder.handle, file.name), WFFileSystem.sha256Blob(blob),
+          WFFileSystem.sha256(folder.handle, file.name), WFFileSystem.sha256Blob(blobs.get(file.name)),
         ]);
         if (oldHash === newHash) skip.add(file.name); else different.push(file.name);
       }

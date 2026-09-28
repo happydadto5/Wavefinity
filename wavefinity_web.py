@@ -1552,12 +1552,22 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(raw, dict):
             raise ValueError("Connector settings must be an object.")
         settings: dict[str, Any] = {}
-        for key in ("tolerance", "length", "arm_thickness", "bin_a_height", "bin_b_height"):
-            value = float(raw[key])
-            if not math.isfinite(value) or value <= 0:
-                raise ValueError("Connector settings must be positive numbers.")
+        # Same legal ranges as the connector form fields.
+        limits = {
+            "tolerance": (0.0, 1.0), "length": (2.0, None), "arm_thickness": (0.5, 10.0),
+            "bin_a_height": (2.0, None), "bin_b_height": (2.0, None),
+        }
+        for key, (low, high) in limits.items():
+            value = raw.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("Connector settings must be numbers.")
+            value = float(value)
+            if not math.isfinite(value) or value < low or (high is not None and value > high):
+                raise ValueError("Connector settings are outside the allowed range.")
             settings[key] = value
-        settings["different_heights"] = bool(raw.get("different_heights"))
+        if not isinstance(raw.get("different_heights"), bool):
+            raise ValueError("Connector settings are incomplete.")
+        settings["different_heights"] = raw["different_heights"]
         update["connector_settings"] = settings
     return {"preferences": save_preferences(update)}
 
@@ -1591,8 +1601,7 @@ print(filedialog.askopenfilename(parent=root, title="Select Slicer Executable (e
         selected = result.stdout.strip()
     except Exception as error:
         raise RuntimeError("could not open the file chooser") from error
-    if selected:
-        save_preferences({"slicer_path": selected})
+    # The chooser has no side effect; the browser saves through /api/preferences.
     return {"slicer_path": selected or None}
 
 
@@ -3419,7 +3428,7 @@ def _printed_reuse_files(payload: dict[str, Any]) -> tuple[Path, list[Path]] | N
         with INVENTORY_LOCK:
             current = load_inventory(folder)
             row = next((one for one in current["bins"] if one.get("id") == row_id), None)
-            if row is None or row.get("kind") == "spacer" or row.get("status") != "printed":
+            if row is None or row.get("kind") not in ("bin", "b4b") or row.get("status") != "printed":
                 return None
             if not str(row.get("file") or "").strip():
                 return None
