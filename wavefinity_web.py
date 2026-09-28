@@ -1360,7 +1360,6 @@ def catalog_payload() -> dict[str, Any]:
             },
             "sampler_boxes": DEFAULT_SAMPLE_BOXES,
         },
-        "connector_rules": {"arm_thickness_floor_mm": connector_arm_thickness_floor()},
         # The differing-clip rules, so the UI can show the self-adjusting
         # length / web thickness / printed height live without a round-trip.
         "connector_rules": {
@@ -1377,6 +1376,7 @@ def catalog_payload() -> dict[str, Any]:
             "mating_gap_mm": WAVE_MATING_GAP,
             "web_run_clearance_mm": DIFFERING_WEB_RUN_CLEARANCE,
             "wall_depth_factor": math.sqrt(1.0 + max_wave_slope() ** 2),
+            "arm_thickness_floor_mm": connector_arm_thickness_floor(),
         },
         "preferences": {} if HOSTED else load_preferences(),
         "slicer": {
