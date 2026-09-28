@@ -3632,6 +3632,7 @@ SP.refreshCabinetStructural = async () => {
 SP.hostedCabinetStatus = async (signature, orientations = null) => {
   const handle = state.browserFolder?.handle;
   if (!handle) return { status: "need_save" };
+  if (SP._hostedCabinetSaving) return SP.cabinetInfo.status || { status: "need_save" };
   // A journal left by an interrupted save is settled first: committed leftovers
   // are cleaned, anything else is rolled back, before ownership is compared.
   await SP.recoverHostedCabinetJournal(handle, state.activeSpaceId);
@@ -3738,7 +3739,12 @@ SP.sweepHostedCabinetDebris = async handle => {
   }
 };
 
-SP.recoverHostedCabinetJournal = async (handle, spaceId) => {
+// A journal this tab is writing right now is a live transaction, not an
+// interrupted one: only the save itself (`own`) may settle it.
+SP._hostedCabinetSaving = false;
+
+SP.recoverHostedCabinetJournal = async (handle, spaceId, { own = false } = {}) => {
+  if (SP._hostedCabinetSaving && !own) return "busy";
   const text = await WFFileSystem.readText(handle, SP.CABINET_JOURNAL);
   if (text === null) {
     await SP.sweepHostedCabinetDebris(handle);
@@ -3847,6 +3853,7 @@ SP.hostedCabinetSave = async (payload, context) => {
       entries.push({ name: component.filename, created: true });
     }
   }
+  SP._hostedCabinetSaving = true;
   try {
     // Durable backups first, then the journal that names them, then the installs.
     for (const [name, blob] of backups) await WFFileSystem.writeBlob(handle, name, blob);
@@ -3861,8 +3868,9 @@ SP.hostedCabinetSave = async (payload, context) => {
     }, { preserveSpace: true, expectedSpaceId: spaceId });
   } catch (error) {
     // Roll back from the same durable record a lost tab would have used.
-    try { await SP.recoverHostedCabinetJournal(handle, spaceId); }
+    try { await SP.recoverHostedCabinetJournal(handle, spaceId, { own: true }); }
     catch (_recovery) { /* the journal stays; the next status or save settles it */ }
+    SP._hostedCabinetSaving = false;
     throw error;
   }
   // Committed: only now are the backups, then the journal, cleaned.
@@ -3870,6 +3878,7 @@ SP.hostedCabinetSave = async (payload, context) => {
     for (const [name] of backups) await SP.removeIfPresent(handle, name);
     await SP.removeIfPresent(handle, SP.CABINET_JOURNAL);
   } catch (_cleanup) { /* committed leftovers are cleaned by the next status or save */ }
+  SP._hostedCabinetSaving = false;
   const warnings = [...(exported.warnings || [])];
   const desired = new Set(candidate.components.map(one => one.filename));
   for (const [name, old] of owned) {
