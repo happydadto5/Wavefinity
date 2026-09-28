@@ -1494,7 +1494,7 @@ SP.renderStorageCard = () => {
     const leftover = el.querySelector(".welcome-storage-leftover");
     leftover.hidden = !info.leftover;
     leftover.textContent = info.leftover
-      ? `Your old Wavefinity data was copied, but the old copy is still at ${info.leftover}. You can delete it yourself once you are happy with the new folder.`
+      ? `An extra copy of Wavefinity data is still at ${info.leftover}. Wavefinity did not delete it. You can delete it yourself once you are sure you don't need it.`
       : "";
     el.hidden = false;
   });
@@ -1525,15 +1525,6 @@ SP.changeStorageParent = () => SP.run(SP.startStorageChange);
 SP.startStorageChange = async () => {
   SP.cancelResumeAutoContinue();
   SP.storageReturn = $("#welcome-resume").hidden ? "welcome-home" : "welcome-resume";
-  SP.storage = (await api("/api/space/storage-state", {})).storage || SP.storage;
-  if (!SP.storage?.root_exists) {
-    const data = await api("/api/space/browse-storage-parent", {});
-    if (!data.folder) return; // a cancel is silent
-    SP.storage = data.storage || null;
-    SP.renderStorageCard();
-    toast(`Wavefinity Space storage set to ${data.folder}.`);
-    return;
-  }
   await SP.pickStorageParent();
 };
 
@@ -1546,6 +1537,11 @@ SP.pickStorageParent = async () => {
     return;
   }
   SP.storagePlan = data.plan;
+  // Nothing to move and nothing at the destination: just use the new location.
+  if (!data.plan.source_exists && !data.plan.conflict) {
+    await SP.doStorageChange("switch");
+    return;
+  }
   SP.renderStoragePlan();
 };
 
@@ -1571,11 +1567,14 @@ SP.cancelStorageChange = () => {
   SP.showDialog();
 };
 
-SP.applyStorageChange = mode => SP.run(async () => {
+SP.applyStorageChange = mode => SP.run(() => SP.doStorageChange(mode));
+
+SP.doStorageChange = async mode => {
   const plan = SP.storagePlan;
   if (!plan) return;
-  // Let any pending autosave finish first, so the Space is settled on disk
-  // before its folder is moved.
+  // Settle every write owner (design autosave, inventory, layout) first; a
+  // failed save aborts before anything is changed.
+  if (!(await SP.leaveDrawerLayoutSafely())) return;
   await SP.flushOutgoingResumeCheckpoint();
   await SP.flushDefaults();
   const data = await api("/api/space/storage-change", { parent: plan.parent, mode });
@@ -1591,14 +1590,10 @@ SP.applyStorageChange = mode => SP.run(async () => {
     SP.cancelStorageChange();
     return;
   }
-  if (data.leftover) {
-    toast(`Wavefinity is now at ${SP.storage?.root}. The old copy could not be fully removed and is still at ${data.leftover}.`, false, 9000);
-  } else {
-    toast(`Wavefinity Folder is now ${SP.storage?.root}.`);
-  }
-  // A clean restart of the page guarantees nothing keeps the old path.
-  setTimeout(() => location.reload(), 1200);
-});
+  // Reload at once so no owner can write to the old path; the card shows any
+  // leftover old copy after the reload.
+  location.reload();
+};
 
 SP.showTypeCards = () => {
   SP.showOnly("space-type-cards");

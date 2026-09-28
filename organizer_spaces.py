@@ -1473,7 +1473,16 @@ def space_routes(
                 # own partial copy is discarded. A finished copy at ``dst`` is
                 # left alone and reported as a conflict if it is ever chosen.
                 organizer_storage.remove_stale_staging(record.get("staging"), dst.parent)
-                journal_relocation(None)
+                if dst.is_dir():
+                    # A copy reached its final place before the switch was
+                    # committed. Ownership/completeness can't be proven, so
+                    # neither tree is touched; the extra one is reported.
+                    def keep_and_report(prefs: dict[str, Any]) -> None:
+                        prefs.pop(STORAGE_RELOCATION_KEY, None)
+                        prefs[STORAGE_LEFTOVER_KEY] = str(dst)
+                    mutate_preferences(keep_and_report)
+                else:
+                    journal_relocation(None)
             elif dst.is_dir():
                 commit_storage(src, dst, moved=True)  # the rename finished; finish the switch
             else:
