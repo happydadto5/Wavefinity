@@ -65,7 +65,9 @@ DL.emit = () => DL.listeners.forEach(fn => fn());
 
 DL.defaultSettings = () => ({
   autosave: true,
-  spacers: { flexible: true, height: 15 },
+  // Fix 088: per-wall spacer toggles (no front wall by product decision) and
+  // Auto height (half the tallest bin) - both default on.
+  spacers: { flexible: true, height: 15, height_auto: true, walls: { left: true, back: true, right: true } },
   surface: { ask_object_height: true },
   // Fix 061 F6: per-Space choice to refresh a bin's saved files after an edit
   // without asking. Default Ask.
@@ -130,6 +132,7 @@ DL.normaliseLayout = raw => {
   delete layout.settings.auto;             // retired: there is no Auto layout
   delete layout.settings.show_empty;      // the empty-cell grid is always visible
   layout.settings.spacers = { ...defaults.spacers, ...(layout.settings.spacers || {}) };
+  layout.settings.spacers.walls = { ...defaults.spacers.walls, ...(layout.settings.spacers.walls || {}) };
   layout.settings.surface = { ...defaults.surface, ...(layout.settings.surface || {}) };
   // Fix 034 K1: autosave has no user-off path any more; a legacy
   // autosave:false layout normalises to the always-on runtime value.
@@ -1066,7 +1069,20 @@ DL.toggleSpacerCandidate = id => {
   DL.emit();
 };
 
-DL.generateSelectedSpacers = () => DL.busyWith("spacers", async context => {
+// Fix 088 S88-3: the x badge on a planned candidate removes just that
+// candidate from the plan - no confirmation, no toast. A selected candidate
+// is dropped from the selection too, so Save/Refresh never sees it again.
+DL.removeSpacerCandidate = id => {
+  if (!DL.spacerPlan) return;
+  DL.spacerPlan = DL.spacerPlan.filter(c => c.id !== id);
+  DL.spacerSelected.delete(id);
+  DL.emit();
+};
+
+// The save-and-place half of spacer generation: persists every currently
+// selected planned candidate and places the resulting spacers. Assumes
+// DL.spacerPlan / DL.spacerSelected are current; callers plan first.
+DL.savePlannedSpacers = async context => {
   if (!DL.spacerPlan) return;
   const before = DL.snapshot();
   const result = await api("/api/drawer/spacers/generate", {
@@ -1105,6 +1121,39 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async context => {
   }
   toast([bits.join(", ") || "Nothing to fill", ...(result.notes || []), ...connectorLines].join("\n"), false, 9000);
   DL.requestReport();
+};
+
+DL.generateSelectedSpacers = () => DL.busyWith("spacers", context => DL.savePlannedSpacers(context));
+
+// Fix 088 S88-4: one click deletes the placed spacers, re-plans with the
+// current wall/height settings, then saves and places the replacements.
+// No confirmation. Aborts - leaving everything as it was - when the
+// inventory deletion fails (the existing deletion already reported why,
+// under the Fix 087 printed-file policy).
+DL.refreshSpacers = () => DL.busyWith("spacers", async context => {
+  const spacerIds = DL.bins.filter(DL.isSpacer).map(one => one.id);
+  if (spacerIds.length) {
+    const ok = await DL.editBins({ delete_ids: spacerIds }, { context });
+    if (!ok) return;
+    if (!DL.spaceContextCurrent(context)) {
+      toast("Spacer deletion finished in the Space you left. The current Space was not changed.");
+      return;
+    }
+  }
+  const result = await api("/api/drawer/spacers", {
+    output: DL.output ?? DL.folder(), layout: DL.layout,
+    drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
+  });
+  DL.requireSpaceContext(context);
+  DL.spacerPlan = result.candidates || [];
+  DL.spacerSelected = new Set((result.selected || []).map(c => c.id));
+  DL.spacerPlanSignature = DL.spacerSignature();
+  DL.emit();
+  if (!DL.spacerSelected.size) {
+    toast("No gaps need spacers right now.");
+    return;
+  }
+  await DL.savePlannedSpacers(context);
 });
 
 // Spacers are free, edge-facing placements (no gx) - DL.items()/DL.chains()

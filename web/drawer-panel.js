@@ -160,15 +160,22 @@ DP.build = () => {
     </section>
 
     <details id="dl-spacers" class="dl-section dl-spacers" aria-label="Spacers">
-      <summary>Spacers</summary>
+      <summary>Spacers <span id="dl-sp-hint" class="dl-sp-hint" hidden></span></summary>
       <div class="section-body">
         <div class="field-grid two">
           <label>Spacer type<select id="dl-sp-type"><option value="rigid">Rigid</option><option value="flexible">Flexible</option></select></label>
           <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
         </div>
+        <label class="checkbox-row"><span>Auto height (half the tallest bin)</span><input id="dl-sp-auto-height" type="checkbox" checked></label>
+        <fieldset class="dl-sp-walls">
+          <legend>Walls</legend>
+          <label class="checkbox-row"><span>Left</span><input id="dl-sp-wall-left" type="checkbox" checked></label>
+          <label class="checkbox-row"><span>Back</span><input id="dl-sp-wall-back" type="checkbox" checked></label>
+          <label class="checkbox-row"><span>Right</span><input id="dl-sp-wall-right" type="checkbox" checked></label>
+        </fieldset>
         <div class="dl-action-grid">
-          <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the back and right walls">Create Spacers</button>
-          <button type="button" id="dl-sp-generate" class="button secondary" title="Save the selected spacer candidates">Save Selected Spacers</button>
+          <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the chosen walls">Create Spacers</button>
+          <button type="button" id="dl-sp-generate" class="button secondary" title="Delete placed spacers, re-plan, and place replacements">Refresh Spacers</button>
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
         </div>
       </div>
@@ -291,8 +298,16 @@ DP.wire = () => {
   $("#dl-new-bin").addEventListener("click", () => DP.newBinFromSpace());
   $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", emptyAction);
 
+  $("#dl-sp-auto-height").addEventListener("change", event => {
+    DL.change(() => { DL.layout.settings.spacers.height_auto = event.target.checked; }, { history: false });
+  });
+  for (const side of ["left", "back", "right"]) {
+    $(`#dl-sp-wall-${side}`).addEventListener("change", event => {
+      DL.change(() => { DL.layout.settings.spacers.walls[side] = event.target.checked; }, { history: false });
+    });
+  }
   $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
-  $("#dl-sp-generate").addEventListener("click", () => DL.generateSelectedSpacers());
+  $("#dl-sp-generate").addEventListener("click", () => DL.refreshSpacers());
   $("#dl-sp-print").addEventListener("click", () => DP.openSpacerPrintDialog());
   $("#spacer-print-cancel").addEventListener("click", () => $("#spacer-print-dialog").close());
   $("#spacer-print-dialog").addEventListener("click", event => {
@@ -760,6 +775,11 @@ DP.renderStats = () => {
   const spacers = DL.layout.settings.spacers;
   dlSet("#dl-sp-type", spacers.flexible ? "flexible" : "rigid");
   dlSet("#dl-sp-height", fmt(spacers.height));
+  // Fix 088: wall toggles + auto height reflect the Space's spacer settings.
+  dlSet("#dl-sp-auto-height", spacers.height_auto !== false, "checked");
+  for (const side of ["left", "back", "right"]) {
+    dlSet(`#dl-sp-wall-${side}`, Boolean(spacers.walls?.[side]), "checked");
+  }
 
   const busy = Boolean(DL.busy);
   const hosted = Boolean(state.runtime.hosted);
@@ -775,25 +795,20 @@ DP.renderStats = () => {
     node.disabled = true;
     node.title = "Place a bin in the Space first.";
   });
-  // Fix 019 Item 4: Save Selected Spacers must never be an enabled
-  // silent no-op. DL.generateSelectedSpacers() already returns immediately
-  // with nothing selected/no plan, but the button must not invite that -
-  // it needs a current plan (DL.clearSpacerPlan() proactively nulls
-  // DL.spacerPlan the moment anything invalidates it, so its mere presence
-  // already means "current") AND at least one selected candidate.
-  const genNode = $("#dl-sp-generate");
-  if (genNode && !hosted && !nothingPlaced) {
-    const hasPlan = Boolean(DL.spacerPlan);
-    const hasSelection = hasPlan && DL.spacerSelected && DL.spacerSelected.size > 0;
-    if (!hasPlan) {
-      genNode.disabled = true;
-      genNode.title = "Plan spacers first.";
-    } else if (!hasSelection) {
-      genNode.disabled = true;
-      genNode.title = "Select at least one planned spacer.";
+  // Fix 088 S88-4: Refresh Spacers deletes placed spacers and re-adds
+  // them, so it needs something to refresh - placed spacers - or a fresh
+  // selection waiting to be saved. Otherwise it stays disabled with the
+  // reason (Fix 019 Item 4: never an enabled silent no-op).
+  const refreshNode = $("#dl-sp-generate");
+  if (refreshNode && !hosted && !nothingPlaced) {
+    const hasPlacedSpacers = DL.bins.some(DL.isSpacer);
+    const hasSelection = Boolean(DL.spacerPlan) && DL.spacerSelected && DL.spacerSelected.size > 0;
+    if (!hasPlacedSpacers && !hasSelection) {
+      refreshNode.disabled = true;
+      refreshNode.title = "No spacers placed yet - plan spacers first.";
     } else {
-      genNode.disabled = busy;
-      genNode.title = "Save the selected spacer candidates";
+      refreshNode.disabled = busy;
+      refreshNode.title = "Delete placed spacers, re-plan, and place replacements";
     }
   }
   const hasPlacedSpacers = DL.drawer().placements.some(
@@ -825,6 +840,56 @@ DP.renderStats = () => {
   box.innerHTML = `
     ${problems.length ? `<ul class="dl-problems">${problems.slice(0, 8).map(p => `<li class="${p.type === "height" ? "height" : ""}">${escapeHtml(p.message)}</li>`).join("")}${problems.length > 8 ? `<li>…and ${problems.length - 8} more</li>` : ""}</ul>` : ""}
     ${warnings}`;
+  DP.updateSpacerHint();
+};
+
+// Fix 088 S88-5: a quiet "N gaps could use spacers" hint inside the
+// collapsed Spacers section summary. Computed from a debounced (~800 ms)
+// backend spacer plan that respects the wall toggles; shown only while the
+// section is collapsed, bins are placed, and no current plan exists. Never
+// writes plan state - the result is only counted, never stored.
+DP.spacerHintTimer = null;
+DP.spacerHintCache = null; // { signature, count } - avoids repeat backend calls
+DP.updateSpacerHint = () => {
+  const hint = $("#dl-sp-hint");
+  const section = $("#dl-spacers");
+  if (!hint || !section) return;
+  const usable = !state.runtime.hosted && !section.open && !DL.spacerPlan &&
+    DL.loaded && DL.drawer().placements.length > 0;
+  if (!usable) {
+    if (DP.spacerHintTimer) { clearTimeout(DP.spacerHintTimer); DP.spacerHintTimer = null; }
+    hint.hidden = true;
+    hint.textContent = "";
+    return;
+  }
+  // The wall toggles join the fingerprint so changing them recomputes.
+  const signature = JSON.stringify([DL.spacerSignature(), DL.layout.settings.spacers]);
+  if (DP.spacerHintCache?.signature === signature) {
+    const count = DP.spacerHintCache.count;
+    hint.textContent = count > 0 ? `${count} gap${count === 1 ? "" : "s"} could use spacers` : "";
+    hint.hidden = count === 0;
+    return;
+  }
+  if (DP.spacerHintTimer) clearTimeout(DP.spacerHintTimer);
+  DP.spacerHintTimer = setTimeout(async () => {
+    DP.spacerHintTimer = null;
+    let count = 0;
+    try {
+      const result = await api("/api/drawer/spacers", {
+        output: DL.output ?? DL.folder(), layout: DL.layout,
+        drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
+      });
+      count = (result.selected || []).length;
+    } catch (error) { count = 0; /* a hint must never fail visibly */ }
+    // Publish only if the world hasn't moved on while planning.
+    const now = JSON.stringify([DL.spacerSignature(), DL.layout.settings.spacers]);
+    const stillUsable = !state.runtime.hosted && !$("#dl-spacers")?.open && !DL.spacerPlan &&
+      DL.loaded && DL.drawer().placements.length > 0;
+    if (now !== signature || !stillUsable) return;
+    DP.spacerHintCache = { signature, count };
+    hint.textContent = count > 0 ? `${count} gap${count === 1 ? "" : "s"} could use spacers` : "";
+    hint.hidden = count === 0;
+  }, 800);
 };
 
 DP.filteredBins = () => {
