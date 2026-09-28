@@ -648,6 +648,28 @@ DV.paintScene = (ctx, drawer, cam) => {
         const p1 = [x, y, 0], p2 = [x + w, y, 0], p3 = [x + w, y + d, 0], p4 = [x, y + d, 0];
         const screenPoly = face([p1, p2, p3, p4], tone, stroke, 2);
         hits.push({ key: c.id, polys: [screenPoly], candidate: true, z: 0 });
+        // Fix 088 S88-3: a small x badge at the candidate's screen
+        // top-right corner. Clicking it removes just this candidate (no
+        // confirmation, no toast); clicking the box itself still toggles
+        // selection. The badge hit is pushed after the box hit so it wins.
+        const bx = Math.max(...screenPoly.map(pt => pt[0])) - 3;
+        const by = Math.min(...screenPoly.map(pt => pt[1])) + 3;
+        ctx.save();
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(bx, by, 9, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,.92)"; ctx.fill();
+        ctx.strokeStyle = "rgba(120,60,50,.9)"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.strokeStyle = "rgba(140,50,40,.95)"; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx - 4, by - 4); ctx.lineTo(bx + 4, by + 4);
+        ctx.moveTo(bx + 4, by - 4); ctx.lineTo(bx - 4, by + 4);
+        ctx.stroke();
+        ctx.restore();
+        hits.push({
+          key: c.id,
+          polys: [[[bx - 11, by - 11], [bx + 11, by - 11], [bx + 11, by + 11], [bx - 11, by + 11]]],
+          candidate: true, removeCandidate: true, z: 0,
+        });
       });
       ctx.setLineDash([]);
     });
@@ -788,7 +810,8 @@ DV.wire = () => {
     canvas.setPointerCapture(event.pointerId);
     const hit = event.button === 0 ? DV.hitAt(sx, sy) : null;
     if (hit && hit.candidate) {
-      DL.toggleSpacerCandidate(hit.key);
+      if (hit.removeCandidate) DL.removeSpacerCandidate(hit.key);
+      else DL.toggleSpacerCandidate(hit.key);
       DV.paint();
       return;
     }

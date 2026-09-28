@@ -114,6 +114,7 @@ MIN_EDGE_SPACER = 1.2           # thinnest edge spacer worth printing, at a wave
 MIN_SPACER_HEIGHT = 6.0         # a spacer frame still needs room for its lock bumps
 DEFAULT_SPACER_HEIGHT = 15.0
 SPACER_CONTACT_TARGET = 28.0    # target contact width of a back/right spacer, mm
+SPACER_DISTRIBUTE_EVERY = 100.0  # Fix 088 S88-3: one planned spacer per ~100 mm of exposed run
 RIB_WIDTH = 1.6                 # the X brace inside a spacer: four 0.4 mm lines
 MIN_RIB_SPAN = 10.0             # narrower than this inside, a frame needs no brace
 MIN_CONNECTOR_SEAM = 16.0       # mm of shared wall a connector needs
@@ -792,6 +793,13 @@ def _exposed_segments(comp: list[dict[str, Any]], side: str) -> list[tuple[int, 
             edge = item["gx"] + item["w"]
             for row in range(item["gy"], item["gy"] + item["d"]):
                 span[row] = max(span.get(row, edge), edge)
+    elif side == "left":
+        # Fix 088 S88-1: mirror of "right" - the component's own minimum x
+        # edge per row.
+        for item in comp:
+            edge = item["gx"]
+            for row in range(item["gy"], item["gy"] + item["d"]):
+                span[row] = min(span.get(row, edge), edge)
     else:
         for item in comp:
             edge = item["gy"] + item["d"]
@@ -820,7 +828,23 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
     grid = drawer_grid(drawer)
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
     flexible = options.get("flexible", True)
-    height = min(drawer["height"], max(MIN_SPACER_HEIGHT, float(options.get("height") or DEFAULT_SPACER_HEIGHT)))
+    # Fix 088 S88-2: Auto height is the default - half the tallest bin's
+    # height, clamped like a manual height. A manual height is honoured only
+    # when Auto is off.
+    if options.get("height_auto", True):
+        tallest = max((float(b.get("z", 0) or 0) for b in bins), default=0)
+        auto_height = round(tallest / 2) if tallest > 0 else DEFAULT_SPACER_HEIGHT
+        height = min(drawer["height"], max(MIN_SPACER_HEIGHT, auto_height))
+    else:
+        height = min(drawer["height"], max(MIN_SPACER_HEIGHT, float(options.get("height") or DEFAULT_SPACER_HEIGHT)))
+    # Fix 088 S88-1: per-wall toggles, persisted under the layout's spacer
+    # settings. There is deliberately no front-wall option.
+    raw_walls = options.get("walls") or {}
+    walls = {
+        "left": bool(raw_walls.get("left", True)),
+        "back": bool(raw_walls.get("back", True)),
+        "right": bool(raw_walls.get("right", True)),
+    }
     by_id = {one["id"]: one for one in bins}
     notes: list[str] = []
 
@@ -828,6 +852,10 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
     selected = []
 
     if rows and cols:
+        if not any(walls.values()):
+            notes.append("All spacer walls are off.")
+            return {"drawer": drawer, "height": height, "resolved_height": height,
+                    "candidates": [], "selected": [], "notes": notes}
         wall = drawer["clearance"] / 2.0
         
         items = [i for i in _grid_items(drawer, by_id) if i["kind"] not in SPACER_KINDS]
@@ -862,37 +890,57 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
             comp_area = sum(i["w"] * i["d"] for i in comp)
 
             def _make_candidate(side, edge, start, end):
-                # A short, deterministic, strategically placed contact
-                # piece - not the whole exposed run - per Fix 004: target
-                # ~28 mm of contact width, clipped to the segment itself
-                # when it is shorter, centred within it.
-                seg_lo = (grid["oy"] if side == "right" else grid["ox"]) + start * step
-                seg_hi = (grid["oy"] if side == "right" else grid["ox"]) + end * step
+                # Fix 088 S88-3: distribute along long runs - one candidate
+                # per ~100 mm of exposed run. Each is still a short,
+                # deterministic, strategically placed contact piece - not the
+                # whole exposed run - per Fix 004: target ~28 mm of contact
+                # width, clipped to its sub-segment when shorter, centred
+                # within it. Returns a list (possibly empty).
+                # A left/right run is vertical (spans rows, measured from the
+                # y origin); a back run is horizontal (spans columns).
+                vertical = side in ("right", "left")
+                seg_lo = (grid["oy"] if vertical else grid["ox"]) + start * step
+                seg_hi = (grid["oy"] if vertical else grid["ox"]) + end * step
                 seg_len = seg_hi - seg_lo
-                contact = min(seg_len, SPACER_CONTACT_TARGET)
-                contact_start = seg_lo + (seg_len - contact) / 2.0
-                if side == "right":
-                    gap = (drawer["width"] - grid["ox"] - (edge * step)) - wall
-                    if gap < MIN_EDGE_SPACER or contact < MIN_EDGE_SPACER:
-                        return None
-                    px, py, w, d = grid["ox"] + edge * step, contact_start, gap, contact
-                    cid = f"right-{edge}-{start}-{end}"
-                else:
-                    gap = (drawer["depth"] - grid["oy"] - (edge * step)) - wall
-                    if gap < MIN_EDGE_SPACER or contact < MIN_EDGE_SPACER:
-                        return None
-                    px, py, w, d = contact_start, grid["oy"] + edge * step, contact, gap
-                    cid = f"back-{edge}-{start}-{end}"
-                placement = {"bin": "spacer", "x": px, "y": py, "w": w, "d": d, "side": side}
-                area = w * d
-                score = comp_area / area if area > 0 else 0
-                return {"id": cid, "placements": [placement], "score": score, "axis": "x" if side == "right" else "y", "comp": comp_idx}
+                count = max(1, round(seg_len / SPACER_DISTRIBUTE_EVERY))
+                made = []
+                for k in range(count):
+                    sub_lo = seg_lo + seg_len * k / count
+                    sub_hi = seg_lo + seg_len * (k + 1) / count
+                    sub_len = sub_hi - sub_lo
+                    contact = min(sub_len, SPACER_CONTACT_TARGET)
+                    contact_start = sub_lo + (sub_len - contact) / 2.0
+                    if side == "right":
+                        gap = (drawer["width"] - grid["ox"] - (edge * step)) - wall
+                        if gap < MIN_EDGE_SPACER or contact < MIN_EDGE_SPACER:
+                            continue
+                        px, py, w, d = grid["ox"] + edge * step, contact_start, gap, contact
+                        cid = f"right-{edge}-{start}-{end}-{k}"
+                    elif side == "left":
+                        # Fix 088 S88-1: mirror of "right" against the left wall.
+                        gap = (grid["ox"] + edge * step) - wall
+                        if gap < MIN_EDGE_SPACER or contact < MIN_EDGE_SPACER:
+                            continue
+                        px, py, w, d = wall, contact_start, gap, contact
+                        cid = f"left-{edge}-{start}-{end}-{k}"
+                    else:
+                        gap = (drawer["depth"] - grid["oy"] - (edge * step)) - wall
+                        if gap < MIN_EDGE_SPACER or contact < MIN_EDGE_SPACER:
+                            continue
+                        px, py, w, d = contact_start, grid["oy"] + edge * step, contact, gap
+                        cid = f"back-{edge}-{start}-{end}-{k}"
+                    placement = {"bin": "spacer", "x": px, "y": py, "w": w, "d": d, "side": side}
+                    area = w * d
+                    score = comp_area / area if area > 0 else 0
+                    made.append({"id": cid, "placements": [placement], "score": score,
+                                 "axis": "x" if vertical else "y", "comp": comp_idx, "edge": edge})
+                return made
 
-            for side in ("right", "back"):
+            for side in ("left", "back", "right"):
+                if not walls[side]:
+                    continue
                 for edge, start, end in _exposed_segments(comp, side):
-                    candidate = _make_candidate(side, edge, start, end)
-                    if candidate is not None:
-                        candidates.append(candidate)
+                    candidates.extend(_make_candidate(side, edge, start, end))
 
         # Reject a candidate that overlaps another bin/component along its
         # own physical path to the wall (never bridge through something real
@@ -911,29 +959,27 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
         candidates = valid_cands
         
         candidates.sort(key=lambda c: c["score"], reverse=True)
-        restrained_x = set()
-        restrained_y = set()
+        # Fix 088 S88-3: keep the per-(component, axis) best-edge rule, but
+        # select every candidate on the winning edge - the sub-segments of one
+        # logical run - not just the best one. Cap 8 total, best scores first.
+        winning_edge = {}
         for cand in candidates:
-            c_id = cand["comp"]
-            if cand["axis"] == "x":
-                if c_id not in restrained_x:
-                    selected.append({"id": cand["id"]})
-                    restrained_x.add(c_id)
-            else:
-                if c_id not in restrained_y:
-                    selected.append({"id": cand["id"]})
-                    restrained_y.add(c_id)
-            if len(restrained_x) == len(components) and len(restrained_y) == len(components) and len(selected) >= 2:
-                break
-            if len(selected) >= 4:
-                break
-                
+            key = (cand["comp"], cand["axis"])
+            if key not in winning_edge:
+                winning_edge[key] = cand["edge"]
+        selected = [
+            {"id": cand["id"]} for cand in candidates
+            if winning_edge.get((cand["comp"], cand["axis"])) == cand["edge"]
+        ][:8]
+
         for cand in candidates:
             cand.pop("score", None)
             cand.pop("axis", None)
             cand.pop("comp", None)
+            cand.pop("edge", None)
 
-    return {"drawer": drawer, "height": height, "candidates": candidates, "selected": selected, "notes": notes}
+    return {"drawer": drawer, "height": height, "resolved_height": height,
+            "candidates": candidates, "selected": selected, "notes": notes}
 
 def _serpentine_flexure(w, d, side, flexible=True):
     web = 1.5
