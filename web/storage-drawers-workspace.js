@@ -1,7 +1,16 @@
 /* Cabinet navigator and structural actions; mounted by the Space host in 084B. */
 (() => {
   "use strict";
+  const GUIDE_URL = "/storage-drawers-guide.html";
   const el = (tag, className, text) => { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; };
+  const drawerText = (row, index, bins) => {
+    const parts = [`Drawer ${index + 1}`];
+    const label = (row.label_text || "").trim();
+    if (label) parts.push(label);
+    parts.push(`${row.height_mm} mm`);
+    if (bins > 0) parts.push(`${bins} ${bins === 1 ? "bin" : "bins"}`);
+    return parts.join(" · ");
+  };
   const mount = ({ host, state, callbacks = {} }) => {
     let current = state, editing = !!state?.editing;
     host.replaceChildren();
@@ -9,24 +18,51 @@
     const title = el("h3", "", "Storage Drawers"); const list = el("div", "sd-navigator-list", "");
     panel.append(title, list);
     const add = el("button", "button", "Add Drawer"); add.type = "button";
-    add.addEventListener("click", () => { if (!editing) callbacks.addDrawer?.(); }); panel.append(add);
+    add.addEventListener("click", () => { if (!editing) callbacks.addDrawer?.(); });
+    const addNote = el("small", "sd-help", ""); addNote.id = "sd-add-note"; addNote.hidden = true;
+    add.setAttribute("aria-describedby", addNote.id);
+    panel.append(add, addNote);
     const structural = el("section", "sd-structural", "");
     const status = el("p", "sd-structural-status", "Cabinet files need save");
     const fit = el("p", "sd-printer-fit", "");
-    const save = el("button", "button", "Save Cabinet"), print = el("button", "button", "Print Cabinet");
+    const printerRow = el("p", "sd-printer-row-note", "");
+    const printerButton = el("button", "link-button", "Printer Settings…"); printerButton.type = "button";
+    printerButton.addEventListener("click", () => callbacks.openPrinterSettings?.());
+    const save = el("button", "button sd-save", "Save Cabinet"), print = el("button", "button sd-print", "Print Cabinet");
     save.type = print.type = "button";
     save.addEventListener("click", () => callbacks.saveCabinet?.());
-    print.addEventListener("click", () => callbacks.printCabinet?.());
-    structural.append(status, fit, save, print); host.append(panel, structural);
+    print.addEventListener("click", event => callbacks.printCabinet?.(event));
+    const guide = el("a", "sd-guide-link", "Assembly & print guide"); guide.href = GUIDE_URL; guide.target = "_blank"; guide.rel = "noopener";
+    structural.append(status, fit, printerRow, save, print, guide);
+    // Damaged known cabinet settings: Inventory and designs stay usable, cabinet
+    // output stays off, and one button repairs only the cabinet definition.
+    const recovery = el("section", "sd-recovery", ""); recovery.hidden = true;
+    const recoveryTitle = el("h3", "", "Cabinet settings need repair");
+    const recoveryMessage = el("p", "sd-recovery-message", "");
+    const recoveryNote = el("p", "sd-help", "Your Inventory and bin designs are untouched. Resetting keeps every drawer that is still valid and replaces only what is damaged with current defaults.");
+    const reset = el("button", "button primary", "Reset cabinet settings"); reset.type = "button";
+    reset.addEventListener("click", () => callbacks.resetCabinet?.());
+    recovery.append(recoveryTitle, recoveryMessage, recoveryNote, reset);
+    host.append(panel, structural, recovery);
     const selectors = () => Array.from(list.querySelectorAll(".sd-drawer-select"));
     const render = () => {
+      const damaged = Boolean(current.recovery);
+      recovery.hidden = !damaged; panel.hidden = damaged; structural.hidden = damaged;
+      printerRow.replaceChildren(`Printer: ${current.printer ? `${current.printer.x_mm} × ${current.printer.y_mm} × ${current.printer.z_mm} mm` : "—"} `, printerButton);
+      if (damaged) {
+        recoveryMessage.textContent = current.recovery.message || "A cabinet setting is not valid.";
+        list.replaceChildren();
+        return;
+      }
       const space = current.space, layout = current.layout;
+      const maxDrawers = window.StorageDrawers.rules().maxDrawers;
       const rows = window.StorageDrawers.drawerDescriptors(space);
       const maxHeight = Math.max(...rows.map(row => row.height_mm));
       list.replaceChildren();
       rows.forEach((row, index) => {
         const item = el("div", "sd-drawer-item", "");
-        const selector = el("button", "sd-drawer-select", `Drawer ${index + 1} · ${row.height_mm} mm`);
+        const placed = layout.drawers?.find(one => one.id === row.id)?.placements?.length || 0;
+        const selector = el("button", "sd-drawer-select", drawerText(row, index, placed));
         selector.type = "button"; selector.disabled = editing;
         selector.setAttribute("aria-pressed", String(layout.active === row.id));
         selector.setAttribute("aria-label", `Select Drawer ${index + 1}`);
@@ -51,9 +87,16 @@
         remove.addEventListener("click", () => { if (!editing) callbacks.deleteDrawer?.(row.id); });
         item.append(selector, remove); list.append(item);
       });
-      add.disabled = editing || rows.length >= 32;
-      status.textContent = ({ saved: "Cabinet files saved", need_update: "Cabinet files need update", need_save: "Cabinet files need save" })[current.structuralStatus?.status || current.structuralStatus] || "Cabinet files need save";
+      const atMax = rows.length >= maxDrawers;
+      add.disabled = editing || atMax;
+      add.title = atMax ? `Maximum ${maxDrawers} drawers` : "";
+      addNote.hidden = !atMax; addNote.textContent = atMax ? `Maximum ${maxDrawers} drawers` : "";
+      const code = current.structuralStatus?.status || current.structuralStatus;
+      status.textContent = code === "recovery_error" && current.structuralStatus.message
+        ? current.structuralStatus.message
+        : ({ saved: "Cabinet files saved", need_update: "Cabinet files need update", need_save: "Cabinet files need save" })[code] || "Cabinet files need save";
       fit.textContent = current.summary?.fits_printer ? "Fits printer" : current.summary?.first_fit_error || "";
+      fit.classList.toggle("bad", Boolean(current.summary) && !current.summary.fits_printer);
     };
     render();
     return {

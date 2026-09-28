@@ -187,6 +187,9 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 - Inventory rows show where they are placed as `Placed · Drawer N`; choosing a row placed in another drawer switches to that drawer and keeps the row selected.
 - New bins are sized to the active drawer's usable X/Y/height.
 - Save/Print Cabinet writes every cabinet component together; Wavefinity only replaces cabinet files it wrote (verified by content), never unrelated files.
+- Setup shows a labelled Summary (finished outside size, effective base/top, fit verdict naming any part that does not fit) and blocks Create when the cabinet cannot print on the current printer. Printer Settings opens from setup and from the cabinet panel. Drawer fit (Tight/Standard/Loose) changes only drawer-to-cabinet clearance.
+- Save Cabinet exports each part in the orientation chosen by the printer fit check, and a one-page assembly & print guide is linked from setup and the cabinet panel. A saved cabinet is a transaction: a failed or interrupted save is rolled back, and Saved status checks file contents.
+- Damaged cabinet settings keep Inventory and designs available and offer **Reset cabinet settings**. An existing folder cannot be converted into a Storage Drawers Space.
 - Add/Delete/Edit go through one serialized cabinet change, so an older queued layout save can never bring back a removed drawer.
 - One global printer build volume (X/Y/Z) sits beside the Wavefinity Folder on Welcome and is also used by Base Trim (which keeps its 10 mm printable-edge margin).
 - Recents show `N drawers · X × Y units each`, never the compatibility height total.

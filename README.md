@@ -1743,6 +1743,12 @@ layered implementation:
 | `organizer_inventory.py` | The drawer inventory file (`Wavefinity bins.md`): parsing, legacy upgrade, merge-saves, bin logging. | No. |
 | `organizer_drawer.py` | Drawer layout: grid fit, drawer report, spacer planning and export, and its `/api/drawer/*` routes. | No. |
 | `organizer_pegboard.py` | Pegboard standards, size derivation, receiver layout/geometry, standard-specific adapters, and mount footprints. | No. |
+| `organizer_storage_drawers.py` | Storage Drawers cabinet schema: drawer descriptors with stable IDs, the canonical normalizer, the damaged-settings reset, and placement-preserving add/delete/reconfigure plans. | No. |
+| `organizer_storage_drawer_geometry.py` | The physical cabinet from one datum: base, top, sides/frames, rear, drawers and stacking pegs, plus the fit summary. | No. |
+| `organizer_storage_drawer_outputs.py` | Cabinet output planning and the rollback-safe save transaction: oriented 3MF export, manifest and SHA-256 status, app-owned debris sweep. | No. |
+| `organizer_printer_profile.py` | The one printer build-volume owner: normalisation, print orientations (fit bounds and the matching real rotation), and reset. | No. |
+| `web/storage-drawers.js`, `web/storage-drawers-form.js`, `web/storage-drawers-workspace.js` | Cabinet rules from the published catalog, the Create/Edit form and live summary, and the drawer navigator with Save/Print Cabinet and recovery. `web/storage-drawers-guide.html` is the one app-level assembly and print guide. | No. |
+| `web/printer-profile.js` | The browser's printer build-volume owner and the Printer Settings control. | No. |
 | `web/spaces.js` | Typed Space setup and opening, folder and Space activation, resume and startup handoff, and Space setup lifecycle. | No. |
 | `web/browser-files.js` | Hosted-browser writable-folder permission and handle persistence, plus browser-owned file operations; Python receives no fake client path. | No. |
 | `web/preview3d-webgl.js` | Shared depth-buffered WebGL renderer for solid 3D preview geometry; `app.js` owns 2D overlay annotations. | No. |

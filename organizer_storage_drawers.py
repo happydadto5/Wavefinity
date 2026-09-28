@@ -22,6 +22,15 @@ STORAGE_DRAWER_MATERIAL_MIN_MM = 0.4
 STORAGE_DRAWER_MATERIAL_MAX_MM = 4.0
 STORAGE_DRAWER_MATERIAL_DEFAULT_MM = 1.6
 _MATERIAL_KEYS = ("cabinet_wall_mm", "cabinet_base_mm", "cabinet_top_mm", "drawer_wall_mm", "drawer_base_mm")
+_MATERIAL_TITLES = {
+    "cabinet_wall_mm": "Cabinet wall thickness", "cabinet_base_mm": "Cabinet base thickness",
+    "cabinet_top_mm": "Cabinet top thickness", "drawer_wall_mm": "Drawer wall thickness",
+    "drawer_base_mm": "Drawer base thickness",
+}
+_TOGGLE_TITLES = {
+    "drawer_handles": "Handles", "stacking": "Stacking",
+    "unit_label_enabled": "Unit label", "drawer_labels_enabled": "Drawer labels",
+}
 
 
 def _number(value, title, minimum=None, maximum=None):
@@ -67,7 +76,7 @@ def new_drawer_descriptor(height_mm: float | None = None) -> dict:
 
 def storage_drawers_defaults(drawer_count: int = 3) -> dict:
     if isinstance(drawer_count, bool) or not isinstance(drawer_count, int) or not 1 <= drawer_count <= STORAGE_DRAWERS_MAX_DRAWERS:
-        raise ValueError("Number of drawers must be 1–32")
+        raise ValueError(f"Number of drawers must be {STORAGE_DRAWERS_MIN_DRAWERS}–{STORAGE_DRAWERS_MAX_DRAWERS}")
     return {
         "drawers": [new_drawer_descriptor() for _ in range(drawer_count)],
         "cabinet_style": "full", "rear_support": "cross", "open_frame_width_mm": 14.0,
@@ -105,7 +114,7 @@ def normalise_storage_drawers_block(raw: object) -> dict:
     for key in ("drawer_handles", "stacking", "unit_label_enabled", "drawer_labels_enabled"):
         value = raw.get(key, defaults[key])
         if not isinstance(value, bool):
-            raise ValueError(f"{key} must be on or off")
+            raise ValueError(f"{_TOGGLE_TITLES[key]} must be on or off")
         result[key] = value
     result["drawer_handle_size"] = _choice(raw.get("drawer_handle_size", defaults["drawer_handle_size"]), ("auto", "small", "medium", "large"), "handle size")
     result["unit_label_text"] = _label(raw.get("unit_label_text", ""), "Unit label")
@@ -113,7 +122,7 @@ def normalise_storage_drawers_block(raw: object) -> dict:
         raise ValueError("Enter unit label text")
     result["drawer_label_style"] = _choice(raw.get("drawer_label_style", "inlaid"), ("inlaid", "raised"), "drawer label style")
     for key in _MATERIAL_KEYS:
-        result[key] = _number(raw.get(key, defaults[key]), key, STORAGE_DRAWER_MATERIAL_MIN_MM, STORAGE_DRAWER_MATERIAL_MAX_MM)
+        result[key] = _number(raw.get(key, defaults[key]), _MATERIAL_TITLES[key], STORAGE_DRAWER_MATERIAL_MIN_MM, STORAGE_DRAWER_MATERIAL_MAX_MM)
     return result
 
 
@@ -146,6 +155,82 @@ def normalise_storage_drawers_definition(raw: dict) -> dict:
     result["storage_drawers"] = normalise_storage_drawers_block(raw.get("storage_drawers"))
     result["z"] = storage_drawers_compatibility_z(result["storage_drawers"])
     return result
+
+
+def storage_drawers_definition_problem(raw: object) -> str | None:
+    """Why a raw Storage Drawers Space fails the canonical normalizer, or None."""
+    try:
+        normalise_storage_drawers_definition(raw)
+    except (TypeError, ValueError) as error:
+        return str(error) or "Cabinet settings are invalid"
+    return None
+
+
+def _attempt(check, *args):
+    """A validated value, or None when this one setting is unusable."""
+    try:
+        return check(*args)
+    except (TypeError, ValueError):
+        return None
+
+
+def reset_storage_drawers_definition(raw: object) -> dict:
+    """A valid current Storage Drawers Space rebuilt from what can still be trusted.
+
+    Only the cabinet definition is repaired. A drawer descriptor that is valid
+    (unique UUID, legal height, label) is kept exactly; an invalid one is replaced
+    by a fresh current default. Every other invalid setting takes its default.
+    """
+    source = raw if isinstance(raw, dict) else {}
+    base = {key: copy.deepcopy(value) for key, value in source.items() if key != "storage_drawers"}
+    base["kind"] = STORAGE_DRAWERS_KIND
+    name = _attempt(_label, source.get("name", ""), "Space name")
+    base["name"] = name or "Storage Drawers"
+    for axis in ("x", "y"):
+        mm = _attempt(_number, source.get(axis), f"Space {axis}")
+        units = None if mm is None else mm / BASE_UNIT
+        valid = units is not None and math.isclose(units, round(units), abs_tol=1e-8)             and STORAGE_DRAWERS_MIN_UNITS <= round(units) <= STORAGE_DRAWERS_MAX_UNITS
+        base[axis] = (round(units) if valid else STORAGE_DRAWERS_MIN_UNITS) * BASE_UNIT
+    block_in = source.get("storage_drawers")
+    block_in = block_in if isinstance(block_in, dict) else {}
+    defaults = storage_drawers_defaults(1)
+    block = {}
+    for key, choices in (("cabinet_style", ("full", "open")), ("rear_support", ("cross", "solid")),
+                         ("open_frame_width_mm", STORAGE_DRAWER_FRAME_WIDTH_CHOICES),
+                         ("drawer_fit_mm", STORAGE_DRAWER_FIT_CHOICES),
+                         ("drawer_handle_size", ("auto", "small", "medium", "large")),
+                         ("drawer_label_style", ("inlaid", "raised"))):
+        value = block_in.get(key, defaults.get(key, "inlaid"))
+        block[key] = value if _attempt(_choice, value, choices, key) is not None else defaults.get(key, "inlaid")
+    for key in _TOGGLE_TITLES:
+        value = block_in.get(key, defaults[key])
+        block[key] = value if isinstance(value, bool) else defaults[key]
+    text = _attempt(_label, block_in.get("unit_label_text", ""), "Unit label")
+    block["unit_label_text"] = text or ""
+    if block["unit_label_enabled"] and not block["unit_label_text"]:
+        block["unit_label_enabled"] = False
+    for key in _MATERIAL_KEYS:
+        value = _attempt(_number, block_in.get(key, defaults[key]), key,
+                         STORAGE_DRAWER_MATERIAL_MIN_MM, STORAGE_DRAWER_MATERIAL_MAX_MM)
+        block[key] = defaults[key] if value is None else value
+    rows = block_in.get("drawers")
+    kept, seen = [], set()
+    for row in (rows if isinstance(rows, list) else [])[:STORAGE_DRAWERS_MAX_DRAWERS]:
+        good = None
+        if isinstance(row, dict):
+            drawer_id = _attempt(_uuid, row.get("id"))
+            height = _attempt(_number, row.get("height_mm"), "Drawer height", ORDINARY_BIN_MIN_HEIGHT_MM)
+            label = _attempt(_label, row.get("label_text", ""), "Drawer label")
+            if drawer_id and drawer_id not in seen and height is not None and label is not None:
+                seen.add(drawer_id)
+                good = {"id": drawer_id, "height_mm": height, "label_text": label}
+        if good is None:
+            good = new_drawer_descriptor()
+            seen.add(good["id"])
+        kept.append(good)
+    block["drawers"] = kept or storage_drawers_defaults(3)["drawers"]
+    base["storage_drawers"] = block
+    return normalise_storage_drawers_definition(base)
 
 
 def storage_drawers_compatibility_z(block: dict) -> float:
@@ -223,7 +308,7 @@ def plan_add_drawer(space: dict, layout: dict) -> tuple[dict, dict, str]:
     current = reconcile_storage_drawers_layout(layout, canonical)
     rows = canonical["storage_drawers"]["drawers"]
     if len(rows) >= STORAGE_DRAWERS_MAX_DRAWERS:
-        raise ValueError("Storage Drawers supports at most 32 drawers")
+        raise ValueError(f"Maximum {STORAGE_DRAWERS_MAX_DRAWERS} drawers")
     added = new_drawer_descriptor(rows[-1]["height_mm"] if rows else None)
     rows.append(added)
     canonical["z"] = storage_drawers_compatibility_z(canonical["storage_drawers"])

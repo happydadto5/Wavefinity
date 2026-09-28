@@ -797,13 +797,24 @@
       </div>
     </div>
   </dialog>
+  <dialog id="printer-settings-dialog" class="welcome-dialog printer-settings-dialog" aria-labelledby="printer-settings-title">
+    <div class="welcome-header">
+      <h2 id="printer-settings-title">Printer Settings</h2>
+      <button id="printer-settings-close-x" class="button secondary" type="button" aria-label="Close">✕</button>
+    </div>
+    <p class="welcome-lead">Your printer's build volume decides whether a cabinet part fits and how it is turned for printing.</p>
+    <div class="welcome-printer-profile" data-printer-profile-host></div>
+    <div class="button-row">
+      <button id="printer-settings-close" class="button primary" type="button">Done</button>
+    </div>
+  </dialog>
   <dialog id="welcome-dialog" class="welcome-dialog" aria-labelledby="welcome-title">
       <div id="welcome-home" hidden>
         <div class="welcome-header">
           <h2 id="welcome-title">Welcome to Wavefinity</h2>
           <button id="welcome-close" class="button secondary" type="button" aria-label="Close">✕</button>
         </div>
-        <p class="welcome-lead">Use a Space when you want Wavefinity to plan a drawer, storage box, surface, or pegboard. Or design bins on their own without a Space.</p>
+        <p class="welcome-lead">Use a Space to organize an existing drawer, storage box, surface, or pegboard — or choose Storage Drawers to print a cabinet. Or design bins on their own without a Space.</p>
         <p id="welcome-startup-error" class="field-error" hidden></p>
         <div class="welcome-actions">
           <button id="welcome-create" class="button primary" type="button">Create New Space</button>
@@ -919,6 +930,7 @@
           <button id="space-type-cards-close" class="button secondary" type="button" aria-label="Close">✕</button>
         </div>
         <p class="welcome-lead">What are you physically organizing?</p>
+        <p class="space-type-frame">Choose an existing space to organize, or Storage Drawers to print a new organizer.</p>
         <div class="space-tutorial-launch">
           <button id="space-tutorial-open" class="button secondary" type="button">Take a quick tutorial</button>
         </div>
@@ -932,7 +944,7 @@
               height="360"
               decoding="async">
             <h3>Drawer</h3>
-            <p>An existing drawer you want to fill with bins.</p>
+            <p>Organize bins inside an existing drawer.</p>
           </button>
           <button class="type-card" data-kind="storage_drawers" type="button">
             <img
@@ -943,7 +955,7 @@
               height="360"
               decoding="async">
             <h3>Storage Drawers</h3>
-            <p>A printable mini cabinet with drawers sized for Wavefinity bins.</p>
+            <p>Print a new cabinet with drawers.</p>
           </button>
           <button class="type-card" data-kind="surface" type="button">
             <img
@@ -994,8 +1006,8 @@
         <div class="space-tutorial-content">
           <section class="space-tutorial-section">
             <h3>1. Start with a Space</h3>
-            <p>A <strong>Space</strong> is the real area you want to organize. Choose <strong>Drawer</strong>, <strong>Storage Box</strong>, <strong>Surface</strong>, or <strong>Pegboard</strong>.</p>
-            <p>The Space keeps its physical size, layout, and inventory together. A Storage Box Space makes its own case, and a Surface Space makes its own Base Trim; save or print them from the Space header.</p>
+            <p>A <strong>Space</strong> is the real area you want to organize. Choose <strong>Drawer</strong>, <strong>Storage Box</strong>, <strong>Surface</strong>, or <strong>Pegboard</strong> for something you already have — or <strong>Storage Drawers</strong> to print a new cabinet with drawers.</p>
+            <p>The Space keeps its physical size, layout, and inventory together. A Storage Box Space makes its own case, a Surface Space makes its own Base Trim, and a Storage Drawers Space makes its own printable cabinet. Save or print a case or Base Trim from the Space header; a cabinet has <strong>Save Cabinet</strong> and <strong>Print Cabinet</strong> beside its drawer list.</p>
           </section>
 
           <section class="space-tutorial-section">
@@ -1032,13 +1044,14 @@
             <h3>7. Save or print</h3>
             <p>Give the design a useful name, then save files to your folder or send them to your slicer when that option is available. Wavefinity can produce the bin plus any related printable parts that belong to the design.</p>
             <p>To save or print in bulk, open Space Inventory. With nothing selected, <strong>Save All Needed</strong> makes missing files and <strong>Print All Not Printed</strong> sends bins to Bambu Studio. Select rows to limit the action to eligible bins. Required Space connectors are included automatically. After Bambu Studio opens, those bins become <strong>Printed</strong>. If you print elsewhere, use <strong>Mark Printed</strong> on the row. When you leave a changed bin that had saved files, choose whether to update those files; its editable Space design is already saved.</p>
+            <p>A Storage Drawers cabinet saves its own files too: <strong>Save Cabinet</strong> writes the base, top, sides, rear, every drawer and any stacking pegs, oriented for your printer. The <strong>assembly &amp; print guide</strong> linked beside it explains which part is which and how they fit together by hand.</p>
             <p>Then keep going: design another bin and build out the Space until the physical area is organized the way you want.</p>
           </section>
 
           <section class="space-tutorial-section space-tutorial-flow">
             <h3>A good first workflow</h3>
             <ol>
-              <li>Create the Space and enter its real measurements.</li>
+              <li>Create the Space and enter its real measurements. For a printable cabinet, choose Storage Drawers, check that it fits your printer, then use <strong>Save Cabinet</strong>.</li>
               <li>Design one bin that fits something you actually want to store.</li>
               <li>Add Options, then arrange interior parts in 2D.</li>
               <li>Check the result in 3D and save or print it.</li>

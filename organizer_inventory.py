@@ -62,6 +62,7 @@ from organizer_storage_drawers import (
     plan_reconfigure,
     prepare_new_storage_drawers_definition,
     reconcile_storage_drawers_layout,
+    reset_storage_drawers_definition,
 )
 
 INVENTORY_LOCK = threading.RLock()
@@ -1595,6 +1596,12 @@ def _plan_cabinet_mutation(
     base = space if isinstance(space, dict) else layout.get("space")
     if not isinstance(base, dict) or base.get("kind") != "storage_drawers":
         raise ValueError("This folder does not hold a Storage Drawers Space.")
+    if operation == "reset":
+        # Damaged cabinet settings: rebuild only the cabinet definition, then
+        # reconcile the layout by stable drawer ID. A repaired-away drawer that
+        # still holds bins is refused by the reconcile - bins are never dropped.
+        canonical = reset_storage_drawers_definition(proposed if isinstance(proposed, dict) else base)
+        return canonical, reconcile_storage_drawers_layout(layout, canonical)
     if operation == "add":
         canonical, updated, _added = plan_add_drawer(base, layout)
     elif operation == "delete":

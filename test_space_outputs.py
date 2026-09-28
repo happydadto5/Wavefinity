@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import trimesh
+
 import wavefinity_web
 from organizer_inventory import (
     configure_space,
@@ -26,6 +28,10 @@ from organizer_space_outputs import (
     structural_kind,
 )
 from organizer_spaces import describe
+import organizer_storage_drawer_outputs as cabinet_outputs
+from organizer_engine import BASE_UNIT
+from organizer_storage_drawer_geometry import _make_datum, resolve_storage_drawers_plan
+from organizer_storage_drawers import prepare_new_storage_drawers_definition
 
 CASE = {"name": "Screw case", "kind": "portable", "x": 96, "y": 96, "z": 40}
 SURFACE = {"name": "Bench", "kind": "surface", "x": 200, "y": 160, "z": 7.5, "trim_size": "medium"}
@@ -180,6 +186,119 @@ class StructuralOutputTests(unittest.TestCase):
                 self.assertTrue(result["design_files"])
                 self.assertEqual(load_inventory(folder)["bins"], before["bins"])
 
+
+
+def _cabinet(style="full", frame=14.0, **extra):
+    block = {"drawers": [{"id": "00000000-0000-4000-8000-000000000001", "height_mm": 20}], "cabinet_style": style, "open_frame_width_mm": frame,
+             "drawer_handles": False, **extra}
+    return prepare_new_storage_drawers_definition({
+        "kind": "storage_drawers", "name": "Hardening", "x": 6 * BASE_UNIT, "y": 6 * BASE_UNIT,
+        "storage_drawers": block})
+
+
+class StorageDrawersHardeningTests(unittest.TestCase):
+    """Fix 086: the hard-to-prove Storage Drawers behaviours, in one selection."""
+
+    # Base and Top only fit rotated on this bed, so the export must apply it.
+    PROFILE = {"x_mm": 62.0, "y_mm": 75.0, "z_mm": 30.0}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.space = _cabinet(unit_label_enabled=True, unit_label_text="Hi")
+        cls.real = resolve_storage_drawers_plan(cls.space, build_meshes=True)
+        cls.nominal = resolve_storage_drawers_plan(cls.space, build_meshes=False)
+
+    def _install_plan(self):
+        real = self.real
+        original = cabinet_outputs.resolve_storage_drawers_plan
+
+        def cached(space, *, build_meshes=True):
+            return real if build_meshes else original(space, build_meshes=False)
+        patcher = patch.object(cabinet_outputs, "resolve_storage_drawers_plan", cached)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_default_full_and_open_core_components_are_printable_solids(self):
+        for style in ("full", "open"):
+            plan = self.real if style == "full" else resolve_storage_drawers_plan(_cabinet("open"), build_meshes=True)
+            core = [c for c in plan.components if not c.key.startswith(("drawer:", "stack_peg"))]
+            self.assertEqual(len(core), 5, style)
+            for component in core:
+                mesh = component.mesh
+                with self.subTest(style=style, part=component.key):
+                    self.assertTrue(mesh.is_watertight)
+                    self.assertTrue(mesh.is_winding_consistent)
+                    self.assertGreater(mesh.volume, 0)
+                    self.assertEqual(len(mesh.split(only_watertight=False)), 1)
+        # The summary's nominal bounds may never promise less than the real build.
+        for nominal, real in zip(self.nominal.components, self.real.components):
+            self.assertEqual(nominal.key, real.key)
+            for want, got in zip(nominal.bounds_xyz, real.bounds_xyz):
+                self.assertGreaterEqual(want + 1e-3, got, real.key)
+
+    def test_export_applies_the_orientation_the_fit_check_chose(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = cabinet_outputs.materialize_storage_drawers(self.space, Path(tmp), self.PROFILE, None)
+            by_key = {item["key"]: item for item in result["manifest"]["components"]}
+            self.assertEqual(by_key["cabinet_base"]["orientation"], "bed_90")
+            self.assertEqual(by_key["cabinet_top"]["orientation"], "bed_90")
+            bed = (self.PROFILE["x_mm"], self.PROFILE["y_mm"], self.PROFILE["z_mm"])
+            for path, item in zip(result["files"], result["manifest"]["components"]):
+                scene = trimesh.load(path, force="scene")
+                self.assertTrue(all(size <= limit + 1e-6 for size, limit in zip(scene.extents, bed)), item["key"])
+                self.assertTrue(all(abs(v) < 1e-3 for v in scene.bounds[0]), item["key"])
+            top = next(c for c in self.real.components if c.key == "cabinet_top")
+            self.assertTrue(top.object_groups)  # the unit label rotates with its body
+            self.assertGreater(top.bounds_xyz[0], self.PROFILE["x_mm"])  # unrotated it would not fit
+
+    def test_local_commit_failure_restores_pre_attempt_files_and_is_not_poisoned(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+
+            def fail(_manifest):
+                raise RuntimeError("metadata write failed")
+            with self.assertRaises(RuntimeError):
+                cabinet_outputs.materialize_storage_drawers(self.space, folder, self.PROFILE, None, commit=fail)
+            self.assertEqual(list(folder.iterdir()), [])
+            saved = {}
+            first = cabinet_outputs.materialize_storage_drawers(
+                self.space, folder, self.PROFILE, None, commit=lambda manifest: saved.update(manifest))
+            before = {path.name: path.read_bytes() for path in folder.glob("*.3mf")}
+            self.assertEqual(len(before), len(first["files"]))
+            with self.assertRaises(RuntimeError):
+                cabinet_outputs.materialize_storage_drawers(self.space, folder, self.PROFILE, saved, commit=fail)
+            self.assertEqual({p.name: p.read_bytes() for p in folder.glob("*.3mf")}, before)
+            self.assertEqual({p.name for p in folder.iterdir()}, set(before))
+            # Not a false "changed outside Wavefinity" conflict: the next save succeeds.
+            cabinet_outputs.materialize_storage_drawers(self.space, folder, self.PROFILE, saved, commit=lambda m: None)
+
+    def test_saved_status_checks_manifest_shape_and_file_hashes(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            manifest = cabinet_outputs.materialize_storage_drawers(self.space, folder, self.PROFILE, None)["manifest"]
+
+            def status(stored):
+                return cabinet_outputs.structural_status(self.space, stored, folder, self.PROFILE)["status"]
+            self.assertEqual(status(manifest), "saved")
+            target = folder / manifest["components"][0]["filename"]
+            target.write_bytes(target.read_bytes() + b"x")
+            self.assertEqual(status(manifest), "need_save")
+            self.assertEqual(status({**manifest, "components": None}), "need_save")
+            with self.assertRaises(ValueError) as caught:
+                cabinet_outputs.materialize_storage_drawers(self.space, folder, self.PROFILE, {"components": None})
+            self.assertIn("Previous cabinet manifest is invalid", str(caught.exception))
+
+    def test_full_ignores_the_hidden_open_frame_width_and_open_uses_it(self):
+        narrow, wide = _cabinet("full", 10.0), _cabinet("full", 18.0)
+        self.assertEqual(_make_datum(narrow).frame, _make_datum(wide).frame)
+        self.assertEqual(cabinet_outputs.structural_signature(narrow), cabinet_outputs.structural_signature(wide))
+        self.assertEqual(cabinet_outputs.effective_structural_state(narrow), cabinet_outputs.effective_structural_state(wide))
+        open_narrow, open_wide = _cabinet("open", 10.0), _cabinet("open", 18.0)
+        self.assertLess(_make_datum(open_narrow).frame, _make_datum(open_wide).frame)
+        self.assertNotEqual(cabinet_outputs.structural_signature(open_narrow), cabinet_outputs.structural_signature(open_wide))
 
 
 if __name__ == "__main__":
