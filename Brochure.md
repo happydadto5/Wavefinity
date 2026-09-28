@@ -37,7 +37,10 @@ Engineered geometry optimizes strength where you need it and sheds unnecessary w
 ### 🛠️ 4. Custom Inset & Layout Generator
 Need a bin split into 3 slots? Need custom angled holders, bit trays, or dedicated tool slots? Generate the exact bin you need in seconds.
 
-### 🌐 5. Instant Browser-Based Tool
+### 🗃️ 5. Printable Storage Drawers Cabinets
+Not just bins: design a whole mini cabinet with drawers sized for your bins. Pick the size and drawer heights, check it fits your printer, and save print-ready parts plus a one-page assembly guide. The cabinet slides together by hand.
+
+### 🌐 6. Instant Browser-Based Tool
 No complicated CAD software needed. Hop onto our web app, dial in your exact drawer dimensions, customize your bins, and export clean, ready-to-slice 3D models immediately.
 
 ---

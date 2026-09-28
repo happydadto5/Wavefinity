@@ -2,16 +2,19 @@
 (() => {
   "use strict";
   let mountSerial = 0;
+  const GUIDE_URL = "/storage-drawers-guide.html";
   const copy = value => structuredClone(value);
-  const defaults = () => ({ drawers: Array.from({ length: 3 }, () => ({ temp_key: `temporary:${crypto.randomUUID()}`, height_mm: 40, label_text: "" })),
-    cabinet_style: "full", rear_support: "cross", open_frame_width_mm: 14, drawer_fit_mm: 0.4,
-    drawer_handles: true, drawer_handle_size: "auto", stacking: false,
-    unit_label_enabled: false, unit_label_text: "", drawer_labels_enabled: false, drawer_label_style: "inlaid",
-    cabinet_wall_mm: 1.6, cabinet_base_mm: 1.6, cabinet_top_mm: 1.6, drawer_wall_mm: 1.6, drawer_base_mm: 1.6 });
   const el = (tag, className = "", text = "") => {
     const node = document.createElement(tag); node.className = className; node.textContent = text; return node;
   };
-  const labeled = (title, input) => { const label = el("label", "sd-field", title); label.append(input); return label; };
+  const help = text => el("small", "sd-help", text);
+  const labeled = (title, input, helper = null, unit = "") => {
+    const label = el("label", "sd-field", title);
+    if (unit) label.append(" ", el("span", "unit", unit));
+    label.append(input);
+    if (helper) label.append(help(helper));
+    return label;
+  };
   const input = (value, type = "text") => { const node = document.createElement("input"); node.type = type; node.value = value ?? ""; return node; };
   const select = (value, choices) => {
     const node = document.createElement("select");
@@ -25,18 +28,23 @@
     if (!options.some(row => Number(row[0]) === Number(current))) options.push([String(current), `${current} mm (custom)`]);
     return options;
   };
+  const NAMED = (list, names, unit = "mm") => list.map((mm, index) => [String(mm),
+    list.length === names.length ? `${names[index]} · ${mm.toFixed(2).replace(/\.?0+$/, "")} ${unit}` : `${mm} ${unit}`]);
   const mount = ({ host, initialSpace, catalog, printerProfile, mode, callbacks = {} }) => {
     const epoch = ++mountSerial;
-    const baseUnit = catalog?.base_unit;
-    const minDrawerHeight = catalog?.drawer_rules?.ordinary_bin_min_height_mm;
-    if (typeof baseUnit !== "number" || !Number.isFinite(baseUnit) || baseUnit <= 0 ||
-        typeof minDrawerHeight !== "number" || !Number.isFinite(minDrawerHeight) || minDrawerHeight <= 0) {
-      throw new Error("Storage Drawers catalog rules are unavailable");
-    }
+    const rules = window.StorageDrawers.catalogRules(catalog);
+    const { baseUnit, minDrawerHeight, minUnits, maxUnits, minDrawers, maxDrawers, labelLimit } = rules;
+    const defaults = () => ({
+      drawers: Array.from({ length: 3 }, () => ({ temp_key: `temporary:${crypto.randomUUID()}`, height_mm: rules.defaultHeight, label_text: "" })),
+      cabinet_style: "full", rear_support: "cross", open_frame_width_mm: rules.defaultFrame, drawer_fit_mm: rules.defaultFit,
+      drawer_handles: true, drawer_handle_size: "auto", stacking: false,
+      unit_label_enabled: false, unit_label_text: "", drawer_labels_enabled: false, drawer_label_style: "inlaid",
+      cabinet_wall_mm: 1.6, cabinet_base_mm: 1.6, cabinet_top_mm: 1.6, drawer_wall_mm: 1.6, drawer_base_mm: 1.6,
+    });
     let live = true, timer = null, requestNumber = 0, profileEpoch = 0;
     const events = new AbortController();
-    let summaryState = "pending", summaryError = "", summaryKey = null, summaryIdentity = null, disabled = false;
-    const space = copy(initialSpace || { kind: "storage_drawers", name: "", x: 6 * baseUnit, y: 6 * baseUnit });
+    let summaryState = "pending", summaryError = "", summaryKey = null, summaryIdentity = null, disabled = false, lastSummary = null;
+    const space = copy(initialSpace || { kind: "storage_drawers", name: "", x: minUnits * baseUnit, y: minUnits * baseUnit });
     space.storage_drawers = { ...defaults(), ...copy(space.storage_drawers || {}) };
     const block = space.storage_drawers;
     const tail = [];
@@ -49,40 +57,51 @@
     const sizeGroup = group(form, "Size"); const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
     const x = input(space.x / baseUnit, "number"), y = input(space.y / baseUnit, "number");
     x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
-    for (const field of [x, y]) { field.min = "6"; field.max = "250"; field.step = "1"; field.required = true; }
-    sizeGrid.append(labeled("X units", x), labeled("Y units", y));
+    for (const field of [x, y]) { field.min = String(minUnits); field.max = String(maxUnits); field.step = "1"; field.required = true; }
+    sizeGrid.append(labeled("X units", x, "X = left ↔ right."), labeled("Y units", y, "Y = front ↔ back."));
+    sizeGroup.append(help(`1 unit = ${baseUnit} mm. Measure the space you want inside each drawer, then divide by ${baseUnit}.`));
     const drawersGroup = group(form, "Drawers");
-    const count = input(block.drawers.length, "number"); count.min = "1"; count.max = "32"; count.step = "1";
+    const count = input(block.drawers.length, "number"); count.min = String(minDrawers); count.max = String(maxDrawers); count.step = "1";
     count.id = `sd-count-${epoch}`;
     count.disabled = mode === "edit";
-    drawersGroup.append(labeled("Number drawers", count));
+    const countNote = el("small", "sd-field-error"); countNote.hidden = true; countNote.id = `sd-count-note-${epoch}`;
+    count.setAttribute("aria-describedby", countNote.id);
+    const countField = labeled("Number of drawers", count, mode === "edit" ? "Add or remove drawers from the cabinet panel." : null);
+    countField.append(countNote);
+    const fit = select(block.drawer_fit_mm, NAMED(rules.fitChoices, ["Tight", "Standard", "Loose"]));
+    const handles = select(String(block.drawer_handles), [["true", "Pull handles"], ["false", "No handles"]]);
+    const handleSize = select(block.drawer_handle_size, [["auto", "Auto"], ["small", "Small"], ["medium", "Medium"], ["large", "Large"]]);
+    const handleField = labeled("Pull size", handleSize);
+    drawersGroup.append(countField,
+      labeled("Drawer fit", fit, "Changes drawer-to-cabinet clearance only. Cabinet joints keep their own fixed engineering clearance."),
+      labeled("Handles", handles), handleField);
     const drawerRows = el("div", "sd-drawer-rows"); drawersGroup.append(drawerRows);
     const cabinet = group(form, "Cabinet");
-    const style = select(block.cabinet_style, [["full","Full"],["open","Open"]]);
-    const rear = select(block.rear_support, [["cross","Cross"],["solid","Solid"]]);
-    const stack = select(String(block.stacking), [["false","Not stackable"],["true","Stackable"]]);
-    const frame = select(block.open_frame_width_mm, [["10","Compact · 10 mm"],["14","Standard · 14 mm"],["18","Strong · 18 mm"]]);
-    const handles = select(String(block.drawer_handles), [["true","Pull handles"],["false","No handles"]]);
-    const handleSize = select(block.drawer_handle_size, [["auto","Auto"],["small","Small"],["medium","Medium"],["large","Large"]]);
-    const fit = select(block.drawer_fit_mm, [["0.3","Tight · 0.30 mm"],["0.4","Standard · 0.40 mm"],["0.6","Loose · 0.60 mm"]]);
-    const frameField = labeled("Open frame width", frame), handleField = labeled("Pull size", handleSize);
-    cabinet.append(labeled("Cabinet style", style), labeled("Rear support", rear), labeled("Stacking", stack), frameField,
-      labeled("Drawer fit", fit), labeled("Handles", handles), handleField);
+    const style = select(block.cabinet_style, [["full", "Full"], ["open", "Open"]]);
+    const rear = select(block.rear_support, [["cross", "Rear Cross"], ["solid", "Rear Solid"]]);
+    const stack = select(String(block.stacking), [["false", "Not stackable"], ["true", "Stackable"]]);
+    const frame = select(block.open_frame_width_mm, NAMED(rules.frameChoices, ["Compact", "Standard", "Strong"]));
+    const frameField = labeled("Open frame width", frame);
+    cabinet.append(labeled("Cabinet style", style,
+        "Full: enclosed side-panel cabinet around the drawer stack. Open: open-frame sides/rails with less panel material."),
+      labeled("Rear support", rear, "Rear Cross: lighter cross-brace rear support. Rear Solid: full rear panel."),
+      labeled("Stacking", stack, "Stackable adds top/bottom stacking interfaces and four separate stacking pegs."),
+      frameField);
     const labels = group(form, "Labels");
-    const unitEnabled = select(String(block.unit_label_enabled), [["false","Unit label Off"],["true","Unit label On"]]);
-    const unitText = input(block.unit_label_text); unitText.maxLength = 80;
+    const unitEnabled = select(String(block.unit_label_enabled), [["false", "Unit label Off"], ["true", "Unit label On"]]);
+    const unitText = input(block.unit_label_text); unitText.maxLength = labelLimit;
     unitText.id = `sd-unit-label-${epoch}`;
-    const drawerEnabled = select(String(block.drawer_labels_enabled), [["false","Drawer labels Off"],["true","Drawer labels On"]]);
-    const labelStyle = select(block.drawer_label_style, [["inlaid","Inlaid"],["raised","Raised"]]);
+    const drawerEnabled = select(String(block.drawer_labels_enabled), [["false", "Drawer labels Off"], ["true", "Drawer labels On"]]);
+    const labelStyle = select(block.drawer_label_style, [["inlaid", "Inlaid"], ["raised", "Raised"]]);
     const unitTextField = labeled("Unit label text", unitText), styleField = labeled("Drawer label style", labelStyle);
     labels.append(labeled("Unit label", unitEnabled), unitTextField, labeled("Drawer labels", drawerEnabled), styleField);
     const material = group(form, "Material"); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
     material.append(matA, matB);
     const materialFields = {};
     for (const [key, title, row, kind] of [
-      ["cabinet_wall_mm","Cabinet wall",matA,"wall_choices"], ["cabinet_base_mm","Cabinet base",matA,"base_choices"],
-      ["cabinet_top_mm","Cabinet top",matA,"base_choices"], ["drawer_wall_mm","Drawer wall",matB,"wall_choices"],
-      ["drawer_base_mm","Drawer base",matB,"base_choices"]]) {
+      ["cabinet_wall_mm", "Cabinet wall thickness", matA, "wall_choices"], ["cabinet_base_mm", "Cabinet base thickness", matA, "base_choices"],
+      ["cabinet_top_mm", "Cabinet top thickness", matA, "base_choices"], ["drawer_wall_mm", "Drawer wall thickness", matB, "wall_choices"],
+      ["drawer_base_mm", "Drawer base thickness", matB, "base_choices"]]) {
       const control = select(block[key], materialChoices(catalog, kind, block[key])); materialFields[key] = control; row.append(labeled(title, control));
     }
     const summaryGroup = group(form, "Summary"); const summary = el("div", "sd-summary", "Checking cabinet…"); summaryGroup.append(summary);
@@ -98,10 +117,12 @@
         height.disabled = disabled;
         height.id = `sd-height-${epoch}-${index}`;
         height.addEventListener("input", () => { row.height_mm = Number(height.value); }, { signal: events.signal });
-        const label = input(row.label_text); label.maxLength = 80; label.disabled = disabled;
+        const label = input(row.label_text); label.maxLength = labelLimit; label.disabled = disabled;
+        label.id = `sd-label-${epoch}-${index}`;
         label.addEventListener("input", () => { row.label_text = label.value; }, { signal: events.signal });
         const labelField = labeled("Label text", label); labelField.hidden = drawerEnabled.value !== "true";
-        line.append(labeled("Usable height mm", height), labelField); drawerRows.append(line);
+        line.append(labeled("Usable height", height, "Usable height = clear inside height available for bins.", "mm"), labelField);
+        drawerRows.append(line);
       });
     };
     const draft = () => {
@@ -115,19 +136,30 @@
       for (const [key, control] of Object.entries(materialFields)) b[key] = Number(control.value);
       next.z = b.drawers.reduce((sum, row) => sum + row.height_mm, 0); return next;
     };
+    const countProblem = () => {
+      const wanted = Number(count.value);
+      return count.value.trim() === "" || !Number.isInteger(wanted) || wanted < minDrawers || wanted > maxDrawers
+        ? `Enter ${minDrawers}–${maxDrawers}` : "";
+    };
     const readFields = () => {
       const fail = (message, focusId) => ({ ok: false, message, focusId });
       if (!name.value.trim()) return fail("Enter a Space name", name.id);
       for (const [field, axis] of [[x, "X"], [y, "Y"]]) {
         const units = Number(field.value);
-        if (!Number.isInteger(units) || units < 6 || units > 250) return fail(`${axis} must be 6–250 whole units`, field.id);
+        if (field.value.trim() === "" || !Number.isInteger(units) || units < minUnits || units > maxUnits) return fail(`${axis} must be ${minUnits}–${maxUnits} whole units`, field.id);
       }
-      if (!Number.isInteger(Number(count.value)) || Number(count.value) < 1 || Number(count.value) > 32) return fail("Number of drawers must be 1–32", count.id);
+      if (countProblem()) return fail(`Number of drawers: ${countProblem().toLowerCase()}`, count.id);
       for (let i = 0; i < block.drawers.length; i++) {
         const height = block.drawers[i].height_mm;
         if (!Number.isFinite(height) || height < minDrawerHeight) return fail(`Drawer ${i + 1} needs at least ${minDrawerHeight} mm usable height`, `sd-height-${epoch}-${i}`);
       }
       if (unitEnabled.value === "true" && !unitText.value.trim()) return fail("Enter unit label text", unitText.id);
+      if (unitText.value.length > labelLimit) return fail("Shorten the unit label", unitText.id);
+      if (drawerEnabled.value === "true") {
+        for (let i = 0; i < block.drawers.length; i++) {
+          if ((block.drawers[i].label_text || "").length > labelLimit) return fail(`Shorten Drawer ${i + 1}'s label`, `sd-label-${epoch}-${i}`);
+        }
+      }
       return { ok: true, spaceDraft: draft() };
     };
     const read = () => {
@@ -139,22 +171,54 @@
           summaryKey !== window.StorageDrawers.structuralDraftKey(fields.spaceDraft, printerProfile)) {
         return { ok: false, message: "Checking cabinet…", focusId: null };
       }
+      // The live summary is the printer-fit authority: a cabinet that cannot
+      // print on the current printer is stopped here, not at Save Cabinet.
+      if (lastSummary && !lastSummary.fits_printer) {
+        return { ok: false, message: lastSummary.first_fit_error || "This cabinet does not fit the printer.", focusId: null };
+      }
       return fields;
     };
-    const showSummary = response => {
-      const outside = response.outside_xyz || [];
-      const units = response.field_units || [];
-      const field = response.field_mm || [];
-      const heights = (response.drawers || []).map(row => row.height_mm).join(", ");
-      const fitText = response.fits_printer ? "Fits printer" : (response.first_fit_error || "Does not fit printer");
-      summary.textContent = `${units.join(" × ")} units (${field.join(" × ")} mm) · ${response.drawer_count} drawers (${heights} mm) · Outside ${outside.join(" × ")} mm · Printer ${printerProfile.x_mm} × ${printerProfile.y_mm} × ${printerProfile.z_mm} mm · ${fitText}`;
-      if (response.warnings?.length) summary.textContent += ` · ${response.warnings.join("; ")}`;
+    const line = (label, value, className = "") => {
+      const row = el("p", `sd-summary-line ${className}`.trim());
+      row.append(el("span", "sd-summary-label", label), " ", el("span", "sd-summary-value", value)); return row;
     };
+    const showSummary = response => {
+      lastSummary = response;
+      const outside = (response.outside_xyz || []).map(v => Number(v.toFixed(1)));
+      const [ux, uy] = response.field_units || [];
+      const [fx, fy] = response.field_mm || [];
+      const heights = (response.drawers || []).map(row => row.height_mm).join(", ");
+      const material = response.effective_material || {};
+      const printer = `${printerProfile.x_mm} × ${printerProfile.y_mm} × ${printerProfile.z_mm} mm`;
+      const fitRow = el("p", `sd-fit-verdict ${response.fits_printer ? "ok" : "bad"}`,
+        response.fits_printer ? "✓ Fits your printer" : `✗ ${response.first_fit_error || "Does not fit your printer"}`);
+      const lines = [
+        fitRow,
+        line("Finished outside:", `${outside.join(" × ")} mm`, "sd-summary-outside"),
+        line("Field size:", `${ux} × ${uy} units (${fx} × ${fy} mm) in each drawer`),
+        line("Drawers:", `${response.drawer_count} · usable heights ${heights} mm`),
+        line("Cabinet base / top:", `${material.base_mm} / ${material.top_mm} mm`),
+      ];
+      if (response.cabinet_style === "open" && material.frame_width_mm) lines.push(line("Open frame width:", `${material.frame_width_mm} mm`));
+      const printerRow = line("Printer build volume:", printer);
+      if (callbacks.openPrinterSettings) {
+        const change = el("button", "link-button", "Printer Settings…"); change.type = "button";
+        change.addEventListener("click", () => callbacks.openPrinterSettings(), { signal: events.signal });
+        printerRow.append(" ", change);
+      }
+      lines.push(printerRow);
+      for (const warning of response.warnings || []) lines.push(el("p", "sd-summary-warning", `Note: ${warning}`));
+      const guide = el("p", "sd-summary-line");
+      const link = el("a", "", "Assembly & print guide"); link.href = GUIDE_URL; link.target = "_blank"; link.rel = "noopener";
+      guide.append(link); lines.push(guide);
+      summary.replaceChildren(...lines);
+    };
+    const showSummaryText = (text, bad = false) => { summary.replaceChildren(el("p", bad ? "sd-fit-verdict bad" : "sd-summary-line", text)); };
     const schedule = () => {
-      summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; summary.textContent = "Checking cabinet…";
+      summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…");
       clearTimeout(timer); const n = ++requestNumber; const identity = callbacks.identity?.() ?? space.id ?? space.name;
       const pEpoch = profileEpoch; const checked = readFields();
-      if (!checked.ok) { summaryState = "error"; summaryError = checked.message; summary.textContent = checked.message; return; }
+      if (!checked.ok) { summaryState = "error"; summaryError = checked.message; showSummaryText(checked.message, true); return; }
       const next = checked.spaceDraft;
       const key = window.StorageDrawers.structuralDraftKey(next, printerProfile);
       timer = setTimeout(async () => {
@@ -168,25 +232,39 @@
           showSummary(response); summaryKey = key; summaryIdentity = identity; summaryState = "ok";
         } catch (error) {
           if (live && epoch === mountSerial && n === requestNumber && pEpoch === profileEpoch && identity === (callbacks.identity?.() ?? space.id ?? space.name) && key === window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) {
-            summaryError = error.message || "Cabinet is invalid"; summary.textContent = summaryError; summaryState = "error";
+            summaryError = error.message || "Cabinet is invalid"; showSummaryText(summaryError, true); summaryState = "error";
           }
         }
       }, 250);
     };
-    count.addEventListener("change", () => {
+    // The entered count stays visible while it is wrong; a range note explains it.
+    const applyCount = () => {
+      const problem = countProblem();
+      countNote.hidden = !problem; countNote.textContent = problem;
+      count.toggleAttribute("aria-invalid", Boolean(problem));
+      if (problem) { schedule(); return; }
       const wanted = Number(count.value);
-      if (!Number.isInteger(wanted) || wanted < 1 || wanted > 32) { count.value = block.drawers.length; return; }
       while (block.drawers.length > wanted) tail.unshift(block.drawers.pop());
-      while (block.drawers.length < wanted) block.drawers.push(tail.shift() || { temp_key: `temporary:${crypto.randomUUID()}`, height_mm: block.drawers.at(-1)?.height_mm || 40, label_text: "" });
+      while (block.drawers.length < wanted) block.drawers.push(tail.shift() || { temp_key: `temporary:${crypto.randomUUID()}`, height_mm: block.drawers.at(-1)?.height_mm || rules.defaultHeight, label_text: "" });
       renderRows(); schedule();
-    }, { signal: events.signal });
+    };
+    count.addEventListener("input", applyCount, { signal: events.signal });
     form.addEventListener("input", event => { if (event.target !== count) schedule(); }, { signal: events.signal });
     form.addEventListener("change", event => {
       if (event.target !== count) { syncVisibility(); renderRows(); schedule(); }
     }, { signal: events.signal });
+    const snapshot = () => JSON.stringify([
+      name.value.trim(), x.value, y.value, count.value,
+      block.drawers.map(row => [row.id || "", row.height_mm, row.label_text]),
+      style.value, rear.value, stack.value, frame.value, fit.value, handles.value, handleSize.value,
+      unitEnabled.value, unitText.value, drawerEnabled.value, labelStyle.value,
+      Object.values(materialFields).map(control => control.value)]);
     syncVisibility(); renderRows(); schedule();
+    let baseline = snapshot();
     return {
       read,
+      isDirty: () => snapshot() !== baseline,
+      markPristine() { baseline = snapshot(); },
       setPrinterProfile(next) { printerProfile = copy(next); profileEpoch += 1; schedule(); },
       refreshSummary() { schedule(); },
       setDisabled(value) {

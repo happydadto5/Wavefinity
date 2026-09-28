@@ -14256,10 +14256,9 @@ async function init() {
     const catalog = await api("/api/catalog");
     state.catalog = catalog;
     if (typeof StorageDrawers !== "undefined") {
-      StorageDrawers.configureRules({
-        baseUnit: state.catalog.base_unit,
-        minDrawerHeight: state.catalog.drawer_rules.ordinary_bin_min_height_mm,
-      });
+      // Missing catalog rules must not stop startup; Storage Drawers setup then
+      // fails closed with its own "catalog rules are unavailable" message.
+      try { StorageDrawers.configureRules(state.catalog); } catch (_error) { /* reported when a cabinet is used */ }
     }
     state.runtime = catalog.runtime || { hosted: false, filesystem: "server" };
     state.serverInstance = catalog.instance;

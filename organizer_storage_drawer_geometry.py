@@ -49,6 +49,10 @@ SD_DETENT_LIP_GAP_MM = 0.2
 SD_DETENT_CHANNEL_CLEAR_MM = 0.3
 SD_DETENT_RIB_WALL_MM = 1.2
 SD_REAR_PANEL_INSET_MM = 0.1
+# The plate ribs stop short of the side panel's top/bottom face: the panel bar
+# stands 0.25 mm past the dovetail root, plus 0.3 mm of clearance.
+SD_RIB_SEAT_GAP_MM = 0.55
+SD_LOW_RAIL_CLEAR_MM = 0.3
 
 
 @dataclass(frozen=True)
@@ -219,7 +223,11 @@ def _make_datum(space):
     pitches = tuple(row["height_mm"] + block["drawer_base_mm"] + fit for row in block["drawers"])
     # Descriptor order is top to bottom; physical floor positions ascend upward.
     floors = []
-    cursor = base
+    # The lowest rail's underside must clear the base plate and its ribs; a thin
+    # drawer base would otherwise let the rail dip into them.
+    rib_top = 0.55*joint_land - SD_RIB_SEAT_GAP_MM
+    lift = max(0.0, rib_top + SD_LOW_RAIL_CLEAR_MM + SD_RAIL_LEDGE_MM + fit - block["drawer_base_mm"])
+    cursor = base + lift
     for pitch in reversed(pitches):
         floors.append(cursor + block["drawer_base_mm"])
         cursor += pitch
@@ -241,7 +249,7 @@ def _make_datum(space):
                   SD_RAIL_LEDGE_MM, front, projection, rear, body_depth, outer_x, outer_y,
                   base, top, pitches, floors, fascia_bottoms, fascia_tops, fronts,
                   side_bottom_z, lowest_z,
-                  base + sum(pitches) + top, frame)
+                  base + lift + sum(pitches) + top, frame)
 
 
 def _front_plan(block, width, row, ordinal):
@@ -376,9 +384,9 @@ def _datum_components(space, datum):
             panel_x0 = 0.0 if left else datum.outer_x-datum.panel
             center = x0+datum.track_reach/2
             ribs.append(_box(x0, datum.front,
-                             z0-length-0.8 if top else z0+thickness-0.1,
+                             z0-length+SD_RIB_SEAT_GAP_MM if top else z0+thickness-0.1,
                              x0+datum.track_reach, datum.rear,
-                             z0+0.1 if top else z0+thickness+length+0.8))
+                             z0+0.1 if top else z0+thickness+length-SD_RIB_SEAT_GAP_MM))
             y0, y1 = ((datum.front-0.2, datum.rear-SD_FRONT_SHOULDER_MM)
                       if top else (datum.front+SD_FRONT_SHOULDER_MM, datum.rear+0.2))
             cutters.append(_sliding_dovetail(center, y0, y1, root_z,
@@ -434,9 +442,11 @@ def _datum_components(space, datum):
         if lips:
             body = union([body, *lips])
         return body, label_group
-    rib_height = 0.55 * datum.joint_land + 0.8
+    rib_height = 0.55 * datum.joint_land - SD_RIB_SEAT_GAP_MM
     add("cabinet_base", "Cabinet Base", (datum.outer_x, datum.body_depth, datum.base+rib_height), lambda: plate(0, datum.base))
-    add("cabinet_top", "Cabinet Top", (datum.outer_x, datum.body_depth, datum.top+rib_height), lambda: plate(datum.outer_z-datum.top, datum.top, True), flip_up=True)
+    # The Top's arm-channel reinforcing rib hangs 0.6 mm lower than its track ribs.
+    top_depth = datum.top + 0.55 * datum.joint_land + 0.6
+    add("cabinet_top", "Cabinet Top", (datum.outer_x, datum.body_depth, top_depth), lambda: plate(datum.outer_z-datum.top, datum.top, True), flip_up=True)
 
     # Sides contain rail ledges, capture lips, rear keyways and two front detents.
     for left in (True, False):

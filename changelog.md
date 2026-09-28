@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-28 — Storage Drawers hardening (Fix 086)
+
+- Storage Drawers cabinets now build as real printable solids (the Rear Cross Brace no longer fails), and every part is exported in the print orientation Wavefinity checked against your printer, with its lettering turned with it. A cabinet that cannot print on your printer is stopped at setup, naming the part and what to change.
+- Assembly fixes: the rear panel drops straight in, drawers push and pull straight with a light catch, and the Top is held by a sturdy spring arm you can press by hand to slide it off. Full cabinets no longer change when a hidden Open frame width changes.
+- Saving is safer: local Save Cabinet rolls back every file and the saved record together if anything fails, and Saved status checks the actual file contents. Browser-folder saves keep a recovery record and backups in the folder, so a closed tab or crash is repaired on the next open or save.
+- Damaged cabinet settings no longer lock a Space: Inventory and designs stay open and one button, **Reset cabinet settings**, repairs only the cabinet. A damaged Printer Settings entry offers **Reset Printer Settings**.
+- Setup is clearer: labelled Summary with the finished outside size and fit verdict, help for units and axes, Drawer fit moved to Drawers, a navigator showing each drawer's label and bin count, Printer Settings reachable from setup and the cabinet panel, and a prompt before discarding changed settings.
+- New one-page **Assembly & print guide**, linked from setup and the cabinet panel. Welcome, the Space picker, the Quick Tutorial and About now mention printable cabinets. An existing folder can no longer be turned into a Storage Drawers Space.
+
 ## 2026-09-27 — Manual-acceptance UX, AI Design and Bore retrieval (Fix 078)
 
 - Space and Design now always show the matching left/right pair: opening or resuming an existing Space always shows its layout (even with an empty Inventory), and Design remembers whether you were last in 2D or 3D instead of forcing 3D every time.

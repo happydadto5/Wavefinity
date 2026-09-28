@@ -33,3 +33,31 @@
 @media (max-width: 700px) {
   .sd-workspace-host { top: auto; right: 10px; bottom: 56px; width: 156px; max-height: 42%; }
 }
+
+/* Fix 086: help text, structured summary, recovery, printer dialog and guide */
+.sd-help { display: block; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.sd-field-error { display: block; color: var(--danger, #b3261e); font-size: 12px; font-weight: 600; }
+.sd-field input[aria-invalid] { border-color: var(--danger, #b3261e); }
+.sd-summary-line { margin: 2px 0; }
+.sd-summary-label { font-weight: 600; }
+.sd-summary-outside .sd-summary-value { font-weight: 700; color: var(--text, inherit); }
+.sd-summary-warning { margin: 2px 0; color: var(--warn, #8a5a00); }
+.sd-fit-verdict { margin: 0 0 4px; font-weight: 700; }
+.sd-fit-verdict.ok { color: var(--teal, #168a89); }
+.sd-fit-verdict.bad, .sd-printer-fit.bad { color: var(--danger, #b3261e); }
+.sd-recovery { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--danger, #b3261e); border-radius: 10px; background: var(--panel, white); box-shadow: 0 4px 16px #0002; }
+.sd-recovery h3, .sd-recovery p { margin: 0; }
+.sd-recovery-message { font-weight: 600; }
+.sd-printer-row-note { margin: 0; color: var(--muted); font-size: 12px; }
+.sd-guide-link { font-size: 12px; }
+.printer-settings-dialog { max-width: min(420px, calc(100vw - 24px)); }
+.printer-settings-dialog .welcome-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.printer-profile-warning { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--danger, #b3261e); border-radius: 8px; font-size: 12px; }
+.sd-guide { max-width: 760px; margin: 0 auto; padding: 16px; line-height: 1.5; }
+.sd-guide h1 { font-size: 22px; }
+.sd-guide h2 { font-size: 17px; margin-top: 20px; }
+.sd-guide ol, .sd-guide ul { padding-left: 20px; }
+.sd-guide table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.sd-guide th, .sd-guide td { border: 1px solid var(--line, #ccc); padding: 4px 8px; text-align: left; vertical-align: top; }
+.space-type-frame { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.type-card[hidden] { display: none; }

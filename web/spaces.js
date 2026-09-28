@@ -349,6 +349,7 @@ SP.applyFolder = async (info, options = {}) => {
   if (Object.hasOwn(options, "browserFolder")) state.browserFolder = options.browserFolder;
   state.output = info.folder;
   state.activeSpaceId = info.space_id || null;
+  state.cabinetRecovery = info.cabinet_recovery || null;
   state.folderSelected = true;
   // A manually-built `info` that omits these fields (e.g. hosted
   // SP.create()'s constructed object) must not let the outgoing Space's
@@ -381,7 +382,39 @@ SP.readMetadata = async handle => {
     try { return { exists: true, data: JSON.parse(raw) }; }
     catch (_error) { return { exists: true, error: "invalid-json" }; }
   };
-  return { current: await read(FOLDER_METADATA), legacy: await read(LEGACY_METADATA) };
+  const current = await read(FOLDER_METADATA);
+  await SP.validateHostedCabinet(current);
+  return { current, legacy: await read(LEGACY_METADATA) };
+};
+
+// Hosted cabinet metadata is judged by the server's one canonical normalizer,
+// exactly as the desktop app judges it. A valid definition is adopted in its
+// normalized form; a known-setting failure enters the cabinet recovery state
+// (Inventory and designs stay reachable). A network failure never guesses.
+SP._cabinetValidation = new Map();
+SP.validateHostedCabinet = async record => {
+  const raw = record?.data?.space;
+  if (!record?.exists || record.error || record.data?.folder_mode !== "space" || raw?.kind !== "storage_drawers") return;
+  const key = JSON.stringify(raw);
+  let outcome = SP._cabinetValidation.get(key);
+  if (!outcome) {
+    outcome = (async () => {
+      try {
+        const reply = await api("/api/space/storage-drawers-validate", { space: raw });
+        return { space: reply.space };
+      } catch (error) {
+        if (!error.status) throw error;
+        const reset = await api("/api/space/storage-drawers-reset", { space: raw });
+        return { recovery: { message: reset.message || error.message, resetSpace: reset.space } };
+      }
+    })();
+    SP._cabinetValidation.set(key, outcome);
+    if (SP._cabinetValidation.size > 8) SP._cabinetValidation.delete(SP._cabinetValidation.keys().next().value);
+    outcome.catch(() => SP._cabinetValidation.delete(key));
+  }
+  const result = await outcome;
+  if (result.space) record.data = { ...record.data, space: result.space };
+  else record.cabinetRecovery = result.recovery;
 };
 
 SP.validSpace = raw => {
@@ -456,7 +489,8 @@ SP.classifyMetadata = record => {
     return { status: "design", inventory: explicitInventory, needsMigration, metadataVersion: current.version };
   }
   if (current.folder_mode === "space") {
-    const space = SP.validSpace(current.space);
+    const recovering = record.cabinetRecovery || null;
+    const space = SP.validSpace(recovering ? recovering.resetSpace : current.space);
     if (!space) return { status: "invalid-space" };
     if (current.version === 2) {
       // v2 predates keep_bin_defaults/bin_defaults entirely.
@@ -508,6 +542,7 @@ SP.classifyMetadata = record => {
       resume_design: resumeDesign, resume_pending: resumePending,
       structural_outputs: current.structural_outputs && typeof current.structural_outputs === "object"
         && !Array.isArray(current.structural_outputs) ? current.structural_outputs : {},
+      cabinet_recovery: recovering ? { message: recovering.message } : null,
     };
   }
   return { status: "invalid" };
@@ -1130,6 +1165,7 @@ SP.inspectHosted = async folder => {
     keep_bin_defaults: mode === "space" ? keepBinDefaults : false,
     bin_defaults: mode === "space" ? binDefaults : null,
     part_defaults: mode === "space" ? partDefaults : {},
+    cabinet_recovery: mode === "space" ? (currentState.cabinet_recovery || null) : null,
     missing: false,
     needs_setup: needsSetup,
     inventory_text: inventoryText,
@@ -1675,6 +1711,10 @@ SP.doStorageChange = async mode => {
 
 SP.showTypeCards = () => {
   SP.destroyStorageDrawersForm?.();
+  // An arbitrary existing folder can never be converted into a Storage Drawers
+  // Space: the card is not offered while a folder is being given a type.
+  const arbitrary = Boolean(SP.configureData);
+  document.querySelectorAll('.type-card[data-kind="storage_drawers"]').forEach(card => { card.hidden = arbitrary; });
   SP.showOnly("space-type-cards");
   SP.showDialog();
   SP.dialog().scrollTop = 0;
@@ -1701,6 +1741,7 @@ SP.clearSetupContext = () => {
   SP.cancelInlineEdit();
   SP.isUpdate = false;
   SP.setupPrefillSpace = null;
+  SP.setupPreserveIds = false;
 };
 
 // Only a committed type - current or explicit legacy metadata - may resume or
@@ -2149,6 +2190,7 @@ SP.create = async () => {
   // state.browserFolder must not be set from it there.
   if (state.runtime.hosted) applyOptions.browserFolder = folder;
   await SP.applyFolder(info, applyOptions);
+  SP.storageDrawersForm?.markPristine?.();
   SP.close();
 
   // The Designer always means an ordinary Bin. A Storage Box or Base Trim is
@@ -2287,7 +2329,15 @@ SP.enterSetupFor = (folder, data) => {
     // - see Fix 004 Correction 7.I.
     const candidate = data?.space || data?.setup_prefill_space;
     const recognized = candidate &&
-      ["drawer", "surface", "box", "portable", "pegboard"].includes(candidate.kind);
+      ["drawer", "surface", "box", "portable", "pegboard", "storage_drawers"].includes(candidate.kind);
+
+    // A recoverable Storage Drawers definition re-enters its own form, prefilled,
+    // keeping its drawer identities - never a blank generic picker.
+    if (recognized && candidate.kind === "storage_drawers") {
+        SP.setupPreserveIds = true;
+        SP.showSetup("storage_drawers", candidate);
+        return;
+    }
 
     // Only a committed type goes straight to its own setup form.
     if (data?.space && recognized && SP.authoritativeTypedSource(data)) {
@@ -2459,10 +2509,19 @@ SP.launch = async () => {
 
 SP.wire = () => {
   wireInfoButtons();
-  $("#space-cancel-edit")?.addEventListener("click", SP.cancelInlineEdit);
-  document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-form-close, #space-type-cards-close, #space-tutorial-close")
+  $("#space-cancel-edit")?.addEventListener("click", async () => {
+    if (await SP.confirmDiscardSetup()) SP.cancelInlineEdit();
+  });
+  document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-type-cards-close, #space-tutorial-close")
     .forEach(el => el?.addEventListener("click", SP.close));
-  SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
+  // A changed cabinet setup asks before it is discarded: X, backdrop, Escape and Back.
+  document.getElementById("space-form-close")?.addEventListener("click", SP.requestClose);
+  SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.requestClose(); });
+  SP.dialog().addEventListener("cancel", event => {
+    if (SP.setupIsDirty()) { event.preventDefault(); SP.requestClose(); }
+  });
+  document.getElementById("printer-settings-close")?.addEventListener("click", SP.closePrinterSettings);
+  document.getElementById("printer-settings-close-x")?.addEventListener("click", SP.closePrinterSettings);
   const welcomeCreate = document.getElementById("welcome-create");
   if (welcomeCreate) welcomeCreate.addEventListener("click", SP.beginCreateNew);
   const welcomeOpen = document.getElementById("welcome-open");
@@ -2502,6 +2561,7 @@ SP.wire = () => {
           // A stale inventory candidate may prefill only its own card type;
           // choosing a different type never inherits its dimensions.
           const kind = el.dataset.kind;
+          if (kind === "storage_drawers" && SP.configureData) return;
           const candidate = SP.setupPrefillSpace;
           const candidateKind =
             candidate?.kind === "box" ? "portable" : candidate?.kind;
@@ -2511,7 +2571,9 @@ SP.wire = () => {
   const untypedStart = document.getElementById("space-untyped-start");
   if (untypedStart) untypedStart.addEventListener("click", () => SP.run(SP.startUntyped));
   const spaceBack = document.getElementById("space-back");
-  if (spaceBack) spaceBack.addEventListener("click", SP.showTypeCards);
+  if (spaceBack) spaceBack.addEventListener("click", async () => {
+    if (await SP.confirmDiscardSetup()) SP.showTypeCards();
+  });
   const spaceForm = document.getElementById("space-form");
   if (spaceForm) {
     // Defensive only: typing/Enter in a field is never permission to create.
@@ -3081,9 +3143,12 @@ SP.updateSpace = async () => {
     if (kind === "storage_drawers") {
         // Edit goes through the serialized cabinet mutation, which checks every
         // current placement before Inventory or metadata is committed.
-        await SP.mutateCabinet("reconfigure", {
+        const updated = await SP.mutateCabinet("reconfigure", {
           space: { kind, name, x, y, z, storage_drawers: extra.storage_drawers },
         });
+        // Only an adopted result closes the form and reports success.
+        if (!updated) return;
+        SP.storageDrawersForm?.markPristine?.();
         SP.cancelInlineEdit();
         toast("Space updated.");
         return;
@@ -3161,10 +3226,7 @@ SP.updateSpace = async () => {
 SP.ensureStorageDrawersRules = () => {
   const catalog = state.catalog;
   if (SP._sdRulesCatalog === catalog) return;
-  StorageDrawers.configureRules({
-    baseUnit: catalog?.base_unit,
-    minDrawerHeight: catalog?.drawer_rules?.ordinary_bin_min_height_mm,
-  });
+  StorageDrawers.configureRules(catalog);
   SP._sdRulesCatalog = catalog;
 };
 
@@ -3187,10 +3249,15 @@ SP.mountPrinterProfiles = () => {
   document.querySelectorAll("[data-printer-profile-host]").forEach(host => {
     if (SP._printerHosts.has(host)) return;
     const callbacks = state.runtime.hosted
-      ? { hosted: true, onError: error => toast(error.message, true, 6000) }
+      ? { hosted: true, reset: () => PrinterProfile.resetHosted(), onError: error => toast(error.message, true, 6000) }
       : {
         write: async (_key, value) => {
           const saved = await api("/api/space/printer-profile", { profile: value.profile });
+          PrinterProfile.loadLocal(saved);
+        },
+        // Only the printer keys return to defaults, and the reset is persisted.
+        reset: async () => {
+          const saved = await api("/api/space/printer-profile", { reset: true });
           PrinterProfile.loadLocal(saved);
         },
         onError: error => toast(error.message, true, 6000),
@@ -3203,14 +3270,14 @@ SP.initPrinterProfile = async () => {
   try {
     if (state.runtime.hosted) {
       const loaded = await PrinterProfile.loadHosted();
-      if (!loaded.explicit) {
+      if (!loaded.explicit && !loaded.malformed) {
         PrinterProfile.persistHosted(PrinterProfile.readLegacyBaseTrimSeed() || PrinterProfile.DEFAULT);
       }
       PrinterProfile.retireLegacyBaseTrim();
     } else {
       const local = await api("/api/space/printer-profile", {});
       PrinterProfile.loadLocal(local);
-      if (!local.explicit) {
+      if (!local.explicit && !local.malformed) {
         const seed = PrinterProfile.readLegacyBaseTrimSeed() || PrinterProfile.DEFAULT;
         // The old Base Trim key is retired only after the new authority holds it.
         const saved = await api("/api/space/printer-profile", { profile: { ...seed } });
@@ -3236,13 +3303,55 @@ SP.destroyStorageDrawersForm = () => {
   SP.storageDrawersForm = null;
 };
 
+// ---- Printer Settings dialog: the one PrinterProfile authority, reachable from
+// the setup Summary and from the cabinet panel. Closing it changes nothing else.
+
+SP.openPrinterSettings = () => {
+  const dialog = document.getElementById("printer-settings-dialog");
+  if (dialog && !dialog.open) dialog.showModal();
+};
+
+SP.closePrinterSettings = () => {
+  const dialog = document.getElementById("printer-settings-dialog");
+  if (dialog?.open) dialog.close();
+};
+
+// ---- dirty setup guard
+
+SP.setupIsDirty = () => Boolean(SP.storageDrawersForm?.isDirty?.());
+
+SP.confirmDiscardSetup = async () => {
+  if (!SP.setupIsDirty()) return true;
+  return appConfirmAction({
+    title: "Discard cabinet changes?",
+    message: "You changed this cabinet's settings and have not saved them. Discard the changes?",
+    actionLabel: "Discard",
+    cancelLabel: "Keep editing",
+    danger: true,
+  });
+};
+
+SP.requestClose = async () => {
+  if (!(await SP.confirmDiscardSetup())) return;
+  SP.close();
+};
+
 SP.mountStorageDrawersForm = (prefill, update) => {
   SP.destroyStorageDrawersForm();
-  SP.ensureStorageDrawersRules();
+  const host = document.getElementById("space-fields-storage_drawers");
+  try {
+    SP.ensureStorageDrawersRules();
+  } catch (error) {
+    // Fail closed: no form is built from rules that are not published.
+    const note = document.createElement("p");
+    note.className = "sd-field-error"; note.textContent = error.message;
+    host.replaceChildren(note);
+    return;
+  }
   let initial = null;
   if (prefill?.kind === "storage_drawers") {
     initial = clone(prefill);
-    if (!update) {
+    if (!update && !SP.setupPreserveIds) {
       // A repeat-size template never inherits the old cabinet's drawer identities.
       initial.storage_drawers.drawers = initial.storage_drawers.drawers.map(row => ({
         temp_key: `temporary:${crypto.randomUUID()}`, height_mm: row.height_mm, label_text: row.label_text || "",
@@ -3251,13 +3360,14 @@ SP.mountStorageDrawersForm = (prefill, update) => {
   }
   const createToken = crypto.randomUUID();
   SP.storageDrawersForm = StorageDrawersForm.mount({
-    host: document.getElementById("space-fields-storage_drawers"),
+    host,
     initialSpace: initial,
     catalog: state.catalog,
     printerProfile: PrinterProfile.current(),
     mode: update ? "edit" : "create",
     callbacks: {
       identity: () => update ? (state.activeSpaceId || state.activeSpace?.name) : createToken,
+      openPrinterSettings: () => SP.openPrinterSettings(),
       requestSummary: ({ space, printer_profile }) => api("/api/space/storage-drawers-summary", {
         space, ...(state.runtime.hosted ? { printer_profile } : {}),
       }),
@@ -3336,8 +3446,13 @@ SP.cabinetMutate = async (operation, { drawer_id = null, space = null } = {}) =>
   if (meta.status !== "space" || meta.space_id !== spaceId) {
     throw new Error("This folder is not the Space that was open before. Nothing was changed.");
   }
+  if (meta.cabinet_recovery && operation !== "reset") {
+    throw new Error(`Reset cabinet settings before changing the cabinet. ${meta.cabinet_recovery.message}`);
+  }
   const result = await api("/api/space/storage-drawers-mutate-text", {
-    inventory_text: inventoryText, inventory_title: meta.space.name, operation, drawer_id, space,
+    inventory_text: inventoryText, inventory_title: meta.space.name, operation, drawer_id,
+    // Reset rebuilds from the folder's stored (damaged) definition.
+    space: operation === "reset" ? current.data?.space : space,
   });
   await WFFileSystem.writeText(folder.handle, filename, result.inventory_text);
   try {
@@ -3354,6 +3469,7 @@ SP.adoptCabinetResult = result => {
   state.activeSpace = result.space;
   DL.adopt(result);
   DL.normaliseLayout(result.layout);
+  state.cabinetRecovery = null;
   DL.reconcileCabinet();
   DL.history = [];
   DL.future = [];
@@ -3372,8 +3488,9 @@ SP.adoptCabinetResult = result => {
 
 SP.cabinetAdd = async () => {
   try {
-    await SP.mutateCabinet("add");
-    toast("Drawer added.");
+    // The controller resolves null for a stale or superseded result, so success
+    // is announced only when it was adopted into the same current Space.
+    if (await SP.mutateCabinet("add")) toast("Drawer added.");
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) toast(error.message, true, 6000);
   }
@@ -3401,6 +3518,21 @@ SP.cabinetDelete = async drawerId => {
   }
 };
 
+SP.resetCabinetSettings = async () => {
+  const problem = state.cabinetRecovery?.message || "A cabinet setting is not valid.";
+  const ok = await appConfirmAction({
+    title: "Reset cabinet settings?",
+    message: `${problem}\n\nWavefinity keeps every drawer that is still valid and replaces only what is damaged with current defaults. Your Inventory and bin designs are not changed.`,
+    actionLabel: "Reset cabinet settings",
+  });
+  if (!ok) return;
+  try {
+    if (await SP.mutateCabinet("reset")) toast("Cabinet settings were reset.");
+  } catch (error) {
+    if (!DL.isStaleSpaceError(error)) toast(error.message, true, 8000);
+  }
+};
+
 // ---- workspace navigator (mounted into the Space canvas host)
 
 SP.cabinetInfo = { key: "", summary: null, status: null, commitSerial: 0 };
@@ -3414,6 +3546,8 @@ SP.cabinetJumpToRow = async rowId => {
 SP.cabinetCallbacks = () => ({
   addDrawer: () => SP.cabinetAdd(),
   deleteDrawer: drawerId => SP.cabinetDelete(drawerId),
+  resetCabinet: () => SP.resetCabinetSettings(),
+  openPrinterSettings: () => SP.openPrinterSettings(),
   saveCabinet: () => SP.runStructural("save"),
   printCabinet: event => SP.runStructural("print", event),
   setActiveDrawer: async id => {
@@ -3444,6 +3578,7 @@ SP.updateCabinetWorkspace = () => {
     const data = {
       space: state.activeSpace, layout: DL.layout, editing: Boolean(SP.editing),
       structuralStatus: SP.cabinetInfo.status, summary: SP.cabinetInfo.summary,
+      printer: PrinterProfile.current(), recovery: state.cabinetRecovery || null,
     };
     if (!SP.cabinetWorkspace) {
       SP.cabinetWorkspace = StorageDrawersWorkspace.mount({ host, state: data, callbacks: SP.cabinetCallbacks() });
@@ -3451,12 +3586,12 @@ SP.updateCabinetWorkspace = () => {
       SP.cabinetWorkspace.update(data);
     }
     // Hosted Wavefinity has no local slicer: Print stays disabled, never a Save.
-    const buttons = host.querySelectorAll(".sd-structural button");
-    if (state.runtime.hosted && buttons[1]) {
-      buttons[1].disabled = true;
-      buttons[1].title = SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP;
+    const printButton = host.querySelector(".sd-print");
+    if (state.runtime.hosted && printButton) {
+      printButton.disabled = true;
+      printButton.title = SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP;
     }
-    SP.refreshCabinetStructural();
+    if (!state.cabinetRecovery) SP.refreshCabinetStructural();
   } catch (error) {
     console.error("Storage Drawers workspace", error);
   }
@@ -3466,7 +3601,7 @@ SP.updateCabinetWorkspace = () => {
 // real files on disk; hosted status is recomputed from the committed browser
 // manifest and the actual files in the chosen folder - never from a server temp.
 SP.refreshCabinetStructural = async () => {
-  if (!DL.isStorageDrawers() || !state.activeSpace) return;
+  if (!DL.isStorageDrawers() || !state.activeSpace || state.cabinetRecovery) return;
   const hosted = Boolean(state.runtime.hosted);
   const profile = PrinterProfile.current();
   const key = JSON.stringify([state.activeSpace, profile, state.activeSpaceId, SP.cabinetInfo.commitSerial]);
@@ -3479,25 +3614,38 @@ SP.refreshCabinetStructural = async () => {
     });
     if (SP.cabinetInfo.key !== key) return;
     SP.cabinetInfo.summary = result.summary;
-    SP.cabinetInfo.status = hosted ? await SP.hostedCabinetStatus(result.signature) : result.status;
+    SP.cabinetInfo.status = hosted ? await SP.hostedCabinetStatus(result.signature, result.orientations) : result.status;
   } catch (error) {
     if (SP.cabinetInfo.key !== key) return;
-    SP.cabinetInfo.summary = { fits_printer: false, first_fit_error: error.message };
-    SP.cabinetInfo.status = { status: "need_save" };
+    if (error.code === "CABINET_RECOVERY") {
+      // An interrupted save that cannot be settled is a cabinet-recovery
+      // problem, never "changed outside Wavefinity".
+      SP.cabinetInfo.status = { status: "recovery_error", message: error.message };
+    } else {
+      SP.cabinetInfo.summary = { fits_printer: false, first_fit_error: error.message };
+      SP.cabinetInfo.status = { status: "need_save" };
+    }
   }
   if (SP.cabinetInfo.key === key) SP.updateCabinetWorkspace();
 };
 
-SP.hostedCabinetStatus = async signature => {
+SP.hostedCabinetStatus = async (signature, orientations = null) => {
   const handle = state.browserFolder?.handle;
   if (!handle) return { status: "need_save" };
+  // A journal left by an interrupted save is settled first: committed leftovers
+  // are cleaned, anything else is rolled back, before ownership is compared.
+  await SP.recoverHostedCabinetJournal(handle, state.activeSpaceId);
   const { current } = await SP.readMetadata(handle);
   const manifest = SP.classifyMetadata(current).structural_outputs?.storage_drawers;
-  if (!manifest?.components?.length) return { status: "need_save" };
+  const rows = manifest?.components;
+  if (!Array.isArray(rows) || !rows.length || rows.some(one => typeof one?.filename !== "string" || typeof one?.sha256 !== "string")) {
+    return { status: "need_save" };
+  }
   if (manifest.signature !== signature) return { status: "need_update" };
-  for (const component of manifest.components) {
+  for (const component of rows) {
     if ((await WFFileSystem.sha256(handle, component.filename)) !== component.sha256) return { status: "need_save" };
   }
+  if (orientations && rows.some(one => one.orientation !== orientations[one.key])) return { status: "need_update" };
   return { status: "saved" };
 };
 
@@ -3517,6 +3665,10 @@ SP.runCabinetStructural = async mode => {
     space: clone(state.activeSpace),
     ...(hosted ? { printer_profile: PrinterProfile.current() } : { output: state.output, space_id: state.activeSpaceId }),
   };
+  // Remembered now, so a late completion can say exactly what it did and to whom.
+  const savedName = state.activeSpace?.name || "the cabinet";
+  const savedWhere = hosted ? (state.browserFolder?.name || "your chosen folder") : state.output;
+  let wroteFiles = false;
   const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\/]/).pop()))].join("\n");
   SP.structuralBusy = true;
   SP.renderSpaceInfo();
@@ -3524,6 +3676,7 @@ SP.runCabinetStructural = async mode => {
     let saved;
     if (mode === "print") {
       const result = await api("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
+      wroteFiles = true;
       DL.requireSpaceContext(context);
       if (result.partial) {
         toast(result.error || "Cabinet files were saved, but the slicer did not open.", true, 8000);
@@ -3533,16 +3686,20 @@ SP.runCabinetStructural = async mode => {
       saved = result;
     } else if (hosted) {
       saved = await SP.hostedCabinetSave(payload, context);
+      wroteFiles = true;
       DL.requireSpaceContext(context);
       toast(`Saved cabinet files\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false, 8000);
     } else {
       saved = await api("/api/space/structural-generate", payload);
+      wroteFiles = true;
       DL.requireSpaceContext(context);
       toast(`Saved cabinet to ${saved.output || state.output}\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false, 8000);
     }
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
-      toast("Cabinet files finished for the Space you left. Nothing was changed in the current Space.");
+      toast(wroteFiles
+        ? `Cabinet files for "${savedName}" were saved to ${savedWhere}. The Space you switched to was not changed.`
+        : `You switched Spaces before "${savedName}" was saved, so nothing was written.`, false, 8000);
     } else {
       toast(error.message, true, 8000);
     }
@@ -3553,14 +3710,95 @@ SP.runCabinetStructural = async mode => {
   }
 };
 
-// Hosted Save Cabinet: the browser folder owns the file transaction. Every
-// candidate file is downloaded and verified first, only files this cabinet
-// already owns (same bytes as its committed manifest) are replaced, and the
-// manifest is committed only after every write succeeded; any earlier failure
-// restores the prior bytes and removes newly created files.
+// ---- hosted durable save journal (Fix 086)
+//
+// The browser folder owns the hosted file transaction, and a closed tab or a
+// crash must never leave it half done. Before any owned final is replaced, an
+// app-owned journal (Space ID, prior and candidate manifests, filenames, backup
+// filenames, newly-created filenames) and durable backups are written into the
+// folder itself. The next hosted status or save settles the journal first.
+SP.CABINET_JOURNAL = ".wavefinity-cabinet-journal.json";
+SP.CABINET_BACKUP_PREFIX = ".wavefinity-cabinet-backup-";
+SP.CABINET_BACKUP_NAME = /^\.wavefinity-cabinet-backup-[0-9a-f-]+-\d+\.3mf$/;
+
+SP.cabinetRecoveryError = message =>
+  Object.assign(new Error(`Cabinet recovery is needed: ${message}`), { code: "CABINET_RECOVERY" });
+
+SP.removeIfPresent = async (handle, name) => {
+  try { await WFFileSystem.removeFile(handle, name); }
+  catch (error) { if (error?.name !== "NotFoundError") throw error; }
+};
+
+// Orphan app-owned backups only, and only when no journal is active.
+SP.sweepHostedCabinetDebris = async handle => {
+  for (const name of await WFFileSystem.listFilenames(handle)) {
+    if (SP.CABINET_BACKUP_NAME.test(name)) {
+      try { await WFFileSystem.removeFile(handle, name); } catch (_error) { /* left for the next sweep */ }
+    }
+  }
+};
+
+SP.recoverHostedCabinetJournal = async (handle, spaceId) => {
+  const text = await WFFileSystem.readText(handle, SP.CABINET_JOURNAL);
+  if (text === null) {
+    await SP.sweepHostedCabinetDebris(handle);
+    return "none";
+  }
+  let journal;
+  try {
+    journal = JSON.parse(text);
+    const valid = journal && journal.version === 1 && typeof journal.tx === "string" &&
+      typeof journal.space_id === "string" && Array.isArray(journal.files) &&
+      journal.candidate_manifest && typeof journal.candidate_manifest === "object" &&
+      journal.files.every(file => file && typeof file.name === "string" && typeof file.created === "boolean" &&
+        (file.created || (typeof file.backup === "string" && typeof file.original_sha256 === "string")));
+    if (!valid) throw new Error("invalid journal");
+  } catch (_error) {
+    throw SP.cabinetRecoveryError(`the interrupted-save record in this folder (${SP.CABINET_JOURNAL}) is damaged. Check the cabinet files, then delete that file to continue.`);
+  }
+  if (journal.space_id !== spaceId) {
+    throw SP.cabinetRecoveryError("an unfinished cabinet save in this folder belongs to a different Space.");
+  }
+  const { current } = await SP.readMetadata(handle);
+  const meta = SP.classifyMetadata(current);
+  if (meta.status !== "space" || meta.space_id !== spaceId) {
+    throw SP.cabinetRecoveryError("this folder's Space could not be confirmed.");
+  }
+  const stored = meta.structural_outputs?.storage_drawers || null;
+  const committed = Boolean(stored) && JSON.stringify(stored) === JSON.stringify(journal.candidate_manifest);
+  if (!committed) {
+    for (const file of journal.files) {
+      if (file.created) {
+        await SP.removeIfPresent(handle, file.name);
+        continue;
+      }
+      const backup = await WFFileSystem.readBlob(handle, file.backup);
+      if (backup) {
+        if ((await WFFileSystem.sha256Blob(backup)) !== file.original_sha256) {
+          throw SP.cabinetRecoveryError(`the backup of ${file.name} is damaged, so the original could not be restored.`);
+        }
+        await WFFileSystem.writeBlob(handle, file.name, new Blob([await backup.arrayBuffer()]));
+      } else if ((await WFFileSystem.sha256(handle, file.name)) !== file.original_sha256) {
+        throw SP.cabinetRecoveryError(`the original ${file.name} could not be restored.`);
+      }
+    }
+  }
+  for (const file of journal.files) {
+    if (file.backup) await SP.removeIfPresent(handle, file.backup);
+  }
+  await SP.removeIfPresent(handle, SP.CABINET_JOURNAL);
+  return committed ? "committed" : "rolled_back";
+};
+
+// Hosted Save Cabinet. Every candidate file is downloaded and verified first,
+// only files this cabinet already owns (same bytes as its committed manifest)
+// are replaced, and the manifest is committed only after every write succeeded.
+// Any failure - or a lost tab - is settled from the durable journal.
 SP.hostedCabinetSave = async (payload, context) => {
   const handle = state.browserFolder.handle;
   const spaceId = state.activeSpaceId;
+  // Settle any earlier interrupted save before ownership is compared.
+  await SP.recoverHostedCabinetJournal(handle, spaceId);
   const exported = await api("/api/space/structural-generate", payload);
   DL.requireSpaceContext(context);
   const candidate = exported.manifest;
@@ -3570,8 +3808,11 @@ SP.hostedCabinetSave = async (payload, context) => {
   if (meta.status !== "space" || meta.space_id !== spaceId) {
     throw new Error("This folder is not the Space that was open before. Nothing was changed.");
   }
+  if (meta.cabinet_recovery) {
+    throw new Error(`Reset cabinet settings before saving the cabinet. ${meta.cabinet_recovery.message}`);
+  }
   const prior = meta.structural_outputs?.storage_drawers || null;
-  const owned = new Map((prior?.components || []).map(one => [one.filename, one]));
+  const owned = new Map((Array.isArray(prior?.components) ? prior.components : []).map(one => [one.filename, one]));
 
   const blobs = new Map();
   for (const item of exported.files || []) {
@@ -3592,14 +3833,26 @@ SP.hostedCabinetSave = async (payload, context) => {
       throw new Error(`${component.filename} changed outside Wavefinity; rename or move it before updating the cabinet.`);
     }
   }
-  const backups = new Map();
-  const created = [];
-  for (const component of candidate.components) {
+  const txid = crypto.randomUUID();
+  const entries = [];
+  const backups = [];
+  for (const [index, component] of candidate.components.entries()) {
     const old = await WFFileSystem.readBlob(handle, component.filename);
-    if (old) backups.set(component.filename, new Blob([await old.arrayBuffer()]));
-    else created.push(component.filename);
+    if (old) {
+      const bytes = new Blob([await old.arrayBuffer()]);
+      const backup = `${SP.CABINET_BACKUP_PREFIX}${txid}-${index}.3mf`;
+      entries.push({ name: component.filename, created: false, backup, original_sha256: await WFFileSystem.sha256Blob(bytes) });
+      backups.push([backup, bytes]);
+    } else {
+      entries.push({ name: component.filename, created: true });
+    }
   }
   try {
+    // Durable backups first, then the journal that names them, then the installs.
+    for (const [name, blob] of backups) await WFFileSystem.writeBlob(handle, name, blob);
+    await WFFileSystem.writeText(handle, SP.CABINET_JOURNAL, JSON.stringify({
+      version: 1, tx: txid, space_id: spaceId, prior_manifest: prior, candidate_manifest: candidate, files: entries,
+    }));
     for (const component of candidate.components) {
       await WFFileSystem.writeBlob(handle, component.filename, blobs.get(component.filename));
     }
@@ -3607,14 +3860,16 @@ SP.hostedCabinetSave = async (payload, context) => {
       structural_output_updates: { storage_drawers: candidate },
     }, { preserveSpace: true, expectedSpaceId: spaceId });
   } catch (error) {
-    for (const [name, blob] of backups) {
-      try { await WFFileSystem.writeBlob(handle, name, blob); } catch (_restore) { /* best effort */ }
-    }
-    for (const name of created) {
-      try { await WFFileSystem.removeFile(handle, name); } catch (_remove) { /* best effort */ }
-    }
+    // Roll back from the same durable record a lost tab would have used.
+    try { await SP.recoverHostedCabinetJournal(handle, spaceId); }
+    catch (_recovery) { /* the journal stays; the next status or save settles it */ }
     throw error;
   }
+  // Committed: only now are the backups, then the journal, cleaned.
+  try {
+    for (const [name] of backups) await SP.removeIfPresent(handle, name);
+    await SP.removeIfPresent(handle, SP.CABINET_JOURNAL);
+  } catch (_cleanup) { /* committed leftovers are cleaned by the next status or save */ }
   const warnings = [...(exported.warnings || [])];
   const desired = new Set(candidate.components.map(one => one.filename));
   for (const [name, old] of owned) {
