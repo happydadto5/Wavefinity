@@ -615,6 +615,9 @@ DL.requireSpaceContext = context => {
 
 DL.inventoryCall = async (path, payload = {}, options = {}) => {
   const { context = DL.spaceContext(), ...requestOptions } = options;
+  if (state.relocating && !/(load|read|list|get|inspect)/.test(path)) {
+    throw new Error("Wavefinity is changing its folder. Try again in a moment.");
+  }
   DL.requireSpaceContext(context);
   const data = state.runtime.hosted
     ? await SP.inventoryRequest(path, payload, { ...requestOptions, context })
@@ -729,6 +732,7 @@ DL.ensureLoaded = () => {
 // (success or failure) is what every waiting caller receives. This is a
 // small internal loop driven by DL.savePromise/DL.saveAgain, not polling.
 DL.save = () => {
+  if (state.relocating) return Promise.resolve(false);
   DL.saveSoon.cancel();
   if (!DL.layout) return Promise.resolve(true);
   if (DL.savePromise) {

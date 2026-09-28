@@ -1589,6 +1589,7 @@ SP.doStorageChange = async mode => {
   if (!(await SP.leaveDrawerLayoutSafely({ noDeferredPreview: true }))) return;
   state.relocating = true; // blocks every new write entry point
   document.body.classList.add("relocating");
+  if (typeof DL !== "undefined") DL.saveSoon.cancel();
   let reloading = false;
   try {
     if (typeof settleDesignerWritesForRelocation === "function") await settleDesignerWritesForRelocation();
@@ -1619,6 +1620,7 @@ SP.doStorageChange = async mode => {
     if (!reloading) {
       state.relocating = false;
       document.body.classList.remove("relocating");
+      if (typeof DL !== "undefined" && DL.dirty) DL.saveSoon();
     }
   }
 };
