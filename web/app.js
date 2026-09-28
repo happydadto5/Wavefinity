@@ -2026,25 +2026,38 @@ function debounce(fn, delay) {
   return wrapped;
 }
 
-async function api(path, payload = null) {
-  const options = payload === null ? {} : {
+async function api(path, payload = null, { timeoutMs = 60000 } = {}) {
+  // Every backend call is bounded: a stalled request must surface as an
+  // error, never wedge the UI forever (e.g. the drawers configure form's
+  // live validation, which blocks Create while its summary is pending).
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  const options = payload === null ? { signal: controller.signal } : {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal: controller.signal,
   };
-  const response = await fetch(path, options);
-  let data;
   try {
-    data = await response.json();
-  } catch (_error) {
-    throw new Error(`The local Wavefinity service returned ${response.status}.`);
-  }
-  if (!response.ok) {
-    const error = new Error(data.error || `Request failed (${response.status}).`);
-    error.status = response.status;
+    const response = await fetch(path, options);
+    let data;
+    try {
+      data = await response.json();
+    } catch (_error) {
+      throw new Error(`The local Wavefinity service returned ${response.status}.`);
+    }
+    if (!response.ok) {
+      const error = new Error(data.error || `Request failed (${response.status}).`);
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("The request took too long. Please try again.");
     throw error;
+  } finally {
+    clearTimeout(abortTimer);
   }
-  return data;
 }
 
 let toastTimer;

@@ -44,6 +44,14 @@
     let live = true, timer = null, requestNumber = 0, profileEpoch = 0;
     const events = new AbortController();
     let summaryState = "pending", summaryError = "", summaryKey = null, summaryIdentity = null, disabled = false, lastSummary = null;
+    // Waiters for the in-flight live validation (Create/Save clicked while
+    // the cabinet check is pending): resolved when the check settles.
+    let settleWaiters = [];
+    const markSettled = () => {
+      if (!settleWaiters.length) return;
+      const waiters = settleWaiters; settleWaiters = [];
+      for (const done of waiters) { try { done(); } catch { /* a waiter must never break validation */ } }
+    };
     const space = copy(initialSpace || { kind: "storage_drawers", name: "", x: minUnits * baseUnit, y: minUnits * baseUnit });
     space.storage_drawers = { ...defaults(), ...copy(space.storage_drawers || {}) };
     const block = space.storage_drawers;
@@ -165,11 +173,11 @@
     const read = () => {
       const fields = readFields();
       if (!fields.ok) return fields;
-      if (summaryState === "pending") return { ok: false, message: "Checking cabinet…", focusId: null };
+      if (summaryState === "pending") return { ok: false, message: "Checking cabinet…", focusId: null, pending: true };
       if (summaryState === "error") return { ok: false, message: summaryError, focusId: null };
       if (summaryIdentity !== (callbacks.identity?.() ?? space.id ?? space.name) ||
           summaryKey !== window.StorageDrawers.structuralDraftKey(fields.spaceDraft, printerProfile)) {
-        return { ok: false, message: "Checking cabinet…", focusId: null };
+        return { ok: false, message: "Checking cabinet…", focusId: null, pending: true };
       }
       // The live summary is the printer-fit authority: a cabinet that cannot
       // print on the current printer is stopped here, not at Save Cabinet.
@@ -218,7 +226,7 @@
       summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…");
       clearTimeout(timer); const n = ++requestNumber; const identity = callbacks.identity?.() ?? space.id ?? space.name;
       const pEpoch = profileEpoch; const checked = readFields();
-      if (!checked.ok) { summaryState = "error"; summaryError = checked.message; showSummaryText(checked.message, true); return; }
+      if (!checked.ok) { summaryState = "error"; summaryError = checked.message; showSummaryText(checked.message, true); markSettled(); return; }
       const next = checked.spaceDraft;
       const key = window.StorageDrawers.structuralDraftKey(next, printerProfile);
       timer = setTimeout(async () => {
@@ -229,10 +237,10 @@
           }
           const response = await callbacks.requestSummary({ space: preview, printer_profile: printerProfile });
           if (!live || epoch !== mountSerial || n !== requestNumber || pEpoch !== profileEpoch || identity !== (callbacks.identity?.() ?? space.id ?? space.name) || key !== window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) return;
-          showSummary(response); summaryKey = key; summaryIdentity = identity; summaryState = "ok";
+          showSummary(response); summaryKey = key; summaryIdentity = identity; summaryState = "ok"; markSettled();
         } catch (error) {
           if (live && epoch === mountSerial && n === requestNumber && pEpoch === profileEpoch && identity === (callbacks.identity?.() ?? space.id ?? space.name) && key === window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) {
-            summaryError = error.message || "Cabinet is invalid"; showSummaryText(summaryError, true); summaryState = "error";
+            summaryError = error.message || "Cabinet is invalid"; showSummaryText(summaryError, true); summaryState = "error"; markSettled();
           }
         }
       }, 250);
@@ -263,6 +271,20 @@
     let baseline = snapshot();
     return {
       read,
+      // Resolves when the in-flight live validation settles (ok or error),
+      // or after timeoutMs with validation still pending. Lets Create/Save
+      // wait for a check that was mid-flight instead of failing on it.
+      whenValidationSettled(timeoutMs = 30000) {
+        return new Promise(resolve => {
+          if (summaryState !== "pending") return resolve();
+          const done = () => { clearTimeout(waitTimer); resolve(); };
+          const waitTimer = setTimeout(() => {
+            settleWaiters = settleWaiters.filter(fn => fn !== done);
+            resolve();
+          }, timeoutMs);
+          settleWaiters.push(done);
+        });
+      },
       isDirty: () => snapshot() !== baseline,
       markPristine() { baseline = snapshot(); },
       setPrinterProfile(next) { printerProfile = copy(next); profileEpoch += 1; schedule(); },

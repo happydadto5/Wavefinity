@@ -1261,7 +1261,7 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
 // Returns a real folder or null - never a pretend one. With stayOnSetup the
 // caller is mid-setup, so a refusal explains itself inline instead of
 // throwing the person's entered Space details away.
-SP.pickFolder = async ({ stayOnSetup = false, spaceRoot = false } = {}) => {
+SP.pickFolder = async ({ stayOnSetup = false, spaceRoot = false, accessContext = null } = {}) => {
   if (state.runtime.hosted) {
     if (!window.WFFileSystem?.supportsDirectoryPicker()) {
       if (stayOnSetup) {
@@ -1270,7 +1270,7 @@ SP.pickFolder = async ({ stayOnSetup = false, spaceRoot = false } = {}) => {
           "#space-create",
         );
       } else {
-        SP.showFolderAccessNeeded("unsupported");
+        SP.showFolderAccessNeeded("unsupported", accessContext);
       }
       return null;
     }
@@ -1288,6 +1288,7 @@ SP.pickFolder = async ({ stayOnSetup = false, spaceRoot = false } = {}) => {
       } else {
         SP.showFolderAccessNeeded(
           picked.status === "denied" ? "denied" : "unsupported",
+          accessContext,
         );
       }
       return null;
@@ -1501,19 +1502,31 @@ SP.offerSpacePlanning = async () => {
 
 // Capability-driven, never an OS or browser name: either this browser cannot
 // give writable folder access at all, or access was not granted.
-SP.showFolderAccessNeeded = (reason = "unsupported") => {
+SP.showFolderAccessNeeded = (reason = "unsupported", context = null) => {
+  const title = document.querySelector("#space-unsupported .welcome-header h2");
   const lead = document.getElementById("space-unsupported-lead");
   const detail = document.getElementById("space-unsupported-detail");
-  if (lead && detail) {
+  // The "Design without a Space" flow must never lecture about Inventory
+  // and Spaces: the user explicitly declined a Space. Tell them plainly
+  // their work won't be saved to a folder, then let them design.
+  if (context === "untyped") {
+    if (title) title.textContent = "Designing without a saved folder";
+    if (lead) lead.textContent = reason === "denied"
+      ? "Wavefinity was not given read/write access to that folder."
+      : "This browser cannot give Wavefinity ongoing read/write access to a chosen folder.";
+    if (detail) detail.textContent =
+      "You can still design and download parts normally — your work just won't be saved into a folder.";
+  } else {
+    if (title) title.textContent = "Inventory and Spaces need folder access";
     if (reason === "denied") {
-      lead.textContent =
+      if (lead) lead.textContent =
         "Wavefinity was not given read/write access to that folder.";
-      detail.textContent =
+      if (detail) detail.textContent =
         "You can still design and download parts normally. Choose the folder again and allow access to use Inventory and Spaces.";
     } else {
-      lead.textContent =
+      if (lead) lead.textContent =
         "This browser cannot give Wavefinity ongoing read/write access to a chosen folder.";
-      detail.textContent =
+      if (detail) detail.textContent =
         "You can still design and download parts normally. Inventory and Spaces require a browser that supports writable folder access.";
     }
   }
@@ -1547,6 +1560,13 @@ SP.showHome = (message = null) => {
     errorEl.hidden = !message;
   }
   SP.renderRecent();
+  // Proactive, not just reactive: on a browser that cannot give writable
+  // folder access, the Spaces screen itself says so up front — Spaces and
+  // Inventory are unavailable here, but designing still works.
+  const folderNotice = document.getElementById("welcome-folder-notice");
+  if (folderNotice) {
+    folderNotice.hidden = !(state.runtime.hosted && !window.WFFileSystem?.supportsDirectoryPicker());
+  }
   const hasRecent = SP.recent.length > 0;
   document.getElementById("welcome-recent-container").hidden = !state.runtime.hosted || !hasRecent;
   SP.renderStorageCard();
@@ -1918,7 +1938,10 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
 SP.startUntyped = async () => {
   // Reuse the folder onboarding already chose rather than asking a second
   // time: "I don't know yet" on the type cards is about this folder.
-  const folder = SP.configureData || await SP.pickFolder();
+  // accessContext "untyped" keeps the folder-access message honest: this
+  // user chose to design without a Space, so it must not lecture about
+  // Inventory and Spaces.
+  const folder = SP.configureData || await SP.pickFolder({ accessContext: "untyped" });
   if (!folder) return;
   // Inspect first in both modes and never call Use Untyped on a folder that
   // holds an *authoritative* typed Space - committed and ready, or still
@@ -1948,7 +1971,7 @@ SP.startUntyped = async () => {
 // (drawer grid capacity/height floor, B4B field/height floor, whole-unit
 // Surface presets) are enforced identically in one place - Fix 004
 // Correction 11.A6.
-SP.readSetupValues = () => {
+SP.readSetupValues = async () => {
   const fail = (message, selector) => {
     SP.fail(message, selector);
     return null;
@@ -2055,7 +2078,7 @@ SP.readSetupValues = () => {
 
 SP.create = async () => {
   if (SP.isUpdate) return SP.updateSpace();
-  const values = SP.readSetupValues();
+  const values = await SP.readSetupValues();
   if (!values) return;
   let { kind, name, x, y, z, trimSize, extra = {} } = values;
   if (kind === "storage_drawers" && state.runtime.hosted) {
@@ -3170,7 +3193,7 @@ const wireInfoButtons = (prefix = "space-head") => {
 };
 
 SP.updateSpace = async () => {
-    const values = SP.readSetupValues();
+    const values = await SP.readSetupValues();
     if (!values) return;
     const { kind, name, x, y, z, trimSize, extra = {} } = values;
     if (kind === "storage_drawers") {
@@ -3403,16 +3426,34 @@ SP.mountStorageDrawersForm = (prefill, update) => {
       openPrinterSettings: () => SP.openPrinterSettings(),
       requestSummary: ({ space, printer_profile }) => api("/api/space/storage-drawers-summary", {
         space, ...(state.runtime.hosted ? { printer_profile } : {}),
-      }),
+      }, { timeoutMs: 15000 }),
     },
   });
 };
 
-SP.readStorageDrawersSetup = () => {
-  const result = SP.storageDrawersForm?.read();
+SP.readStorageDrawersSetup = async () => {
+  const form = SP.storageDrawersForm;
+  let result = form?.read();
   if (!result) {
     SP.fail("Storage Drawers settings are not ready.", "#space-create");
     return null;
+  }
+  if (!result.ok && result.pending && typeof form.whenValidationSettled === "function") {
+    // The live cabinet check was still in flight when Create/Save was
+    // clicked: wait for it to settle, then read once more, instead of
+    // failing with a confusing "Checking cabinet…" message.
+    SP.fail("Checking the cabinet — one moment…", "#space-create");
+    await form.whenValidationSettled(30000);
+    document.getElementById("space-error").hidden = true;
+    result = form.read();
+    if (!result) {
+      SP.fail("Storage Drawers settings are not ready.", "#space-create");
+      return null;
+    }
+    if (!result.ok && result.pending) {
+      SP.fail("The cabinet check is taking too long. Check your connection and try again.", "#space-create");
+      return null;
+    }
   }
   if (!result.ok) {
     SP.fail(result.message, result.focusId ? `#${result.focusId}` : "#space-create");
