@@ -293,6 +293,7 @@ def _datum_components(space, datum):
         direction = 1 if top else -1
         for left in (True, False):
             x0 = 0 if left else datum.outer_x-datum.track_reach
+            panel_x0 = 0.0 if left else datum.outer_x-datum.panel
             center = x0+datum.track_reach/2
             ribs.append(_box(x0, datum.front,
                              z0-length-0.8 if top else z0+thickness-0.1,
