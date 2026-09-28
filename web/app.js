@@ -895,8 +895,20 @@ function settleStaleFileRefresh({ materialize = false } = {}) {
   return staleFileRefreshGate;
 }
 
+// Change Location quiescence: true while a Designer file refresh or a queued
+// autosave could still write to the current Space root.
+function designerWriteActive({ includeTimer = true } = {}) {
+  return Boolean(staleFileRefreshGate || (includeTimer && spaceAutosaveTimer));
+}
+
+async function settleDesignerWritesForRelocation() {
+  clearTimeout(spaceAutosaveTimer);
+  spaceAutosaveTimer = null;
+  await spaceAutosaveChain;
+}
+
 function queueSpaceDesignAutosave() {
-  if (!typedSpaceOrdinaryBin()) return;
+  if (state.relocating || !typedSpaceOrdinaryBin()) return;
   const context = DL.spaceContext();
   clearTimeout(spaceAutosaveTimer);
   spaceAutosaveTimer = setTimeout(() => {
@@ -960,7 +972,7 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
 }
 
 async function flushSpaceDesignAutosave({ visible = true, materialize = false,
-    deferDraftPreview = false } = {}) {
+    deferDraftPreview = false, noDeferredPreview = false } = {}) {
   if (!typedSpaceOrdinaryBin()) return true;
   const originalDesign = state.design;
   const ownerAtStart = fullPreviewStarts;
@@ -989,7 +1001,7 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false,
     }
     return saved && await settleStaleFileRefresh({ materialize });
   } finally {
-    if (visible && deferDraftPreview && state.design !== originalDesign &&
+    if (visible && deferDraftPreview && !noDeferredPreview && state.design !== originalDesign &&
         fullPreviewStarts === ownerAtStart) refreshPreview();
   }
 }

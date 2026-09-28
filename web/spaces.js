@@ -245,9 +245,9 @@ SP.inventoryFilenameFor = _folder => INVENTORY_FILENAME;
 // Resolves true when it is safe to proceed (nothing dirty, or a successful
 // flush) and false when the switch must be aborted with everything -
 // including DL.layout/DL.dirty - left exactly as it was.
-SP.leaveDrawerLayoutSafely = async () => {
+SP.leaveDrawerLayoutSafely = async ({ noDeferredPreview = false } = {}) => {
   if (typeof flushSpaceDesignAutosave === "function" &&
-      !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true, noDeferredPreview }))) return false;
   if (SP._inventoryWriteChain) await SP._inventoryWriteChain;
   if (typeof DL === "undefined") return true;
   if (DL.savePromise) {
@@ -739,6 +739,7 @@ SP._pumpResumeQueue = () => {
 // actually saved for it. Fire-and-forget: never blocks the caller, and a
 // failure is reported as its own toast, not thrown.
 SP.queueResumeCheckpoint = (design, pending) => {
+  if (state.relocating) return;
   const target = SP._captureResumeTarget();
   if (!target) return;
   const key = `${pending ? 1 : 0}:${JSON.stringify(design)}`;
@@ -804,6 +805,7 @@ SP._writeDefaultsNow = async (target, changes) => {
 };
 
 SP.queueDefaults = changes => {
+  if (state.relocating) return;
   const target = SP._captureResumeTarget();
   if (!target) return;
   const queue = SP._defaults;
@@ -1572,27 +1574,49 @@ SP.applyStorageChange = mode => SP.run(() => SP.doStorageChange(mode));
 SP.doStorageChange = async mode => {
   const plan = SP.storagePlan;
   if (!plan) return;
-  // Settle every write owner (design autosave, inventory, layout) first; a
-  // failed save aborts before anything is changed.
-  if (!(await SP.leaveDrawerLayoutSafely())) return;
-  await SP.flushOutgoingResumeCheckpoint();
-  await SP.flushDefaults();
-  const data = await api("/api/space/storage-change", { parent: plan.parent, mode });
-  if (data.status === "conflict") {
-    SP.storagePlan = { ...plan, conflict: true };
-    SP.renderStoragePlan();
+  const busyMessage = "Finish the current Space action, then try Change Location again.";
+  const writeBusy = includeTimer =>
+    (typeof DL !== "undefined" && Boolean(DL.busy || DL.savePromise)) ||
+    (typeof designerWriteActive === "function" && designerWriteActive({ includeTimer }));
+  // Never relocate underneath a running save/generate/print/refresh.
+  if ((typeof DL !== "undefined" && DL.busy) ||
+      (typeof designerWriteActive === "function" && designerWriteActive({ includeTimer: false }))) {
+    toast(busyMessage, true, 6000);
     return;
   }
-  SP.storagePlan = null;
-  SP.storage = data.storage || null;
-  if (data.status === "unchanged") {
-    toast("That is already your Wavefinity folder.");
-    SP.cancelStorageChange();
-    return;
+  // Settle every write owner (design autosave, inventory, layout); a failed
+  // save aborts before anything is changed. No deferred preview may survive.
+  if (!(await SP.leaveDrawerLayoutSafely({ noDeferredPreview: true }))) return;
+  state.relocating = true; // blocks any new autosave/resume/defaults queueing
+  let reloading = false;
+  try {
+    if (typeof settleDesignerWritesForRelocation === "function") await settleDesignerWritesForRelocation();
+    await SP.flushOutgoingResumeCheckpoint();
+    await SP.flushDefaults();
+    if (writeBusy(true) || (typeof DL !== "undefined" && DL.dirty)) {
+      toast(busyMessage, true, 6000);
+      return;
+    }
+    const data = await api("/api/space/storage-change", { parent: plan.parent, mode });
+    if (data.status === "conflict") {
+      SP.storagePlan = { ...plan, conflict: true };
+      SP.renderStoragePlan();
+      return;
+    }
+    SP.storagePlan = null;
+    SP.storage = data.storage || null;
+    if (data.status === "unchanged") {
+      toast("That is already your Wavefinity folder.");
+      SP.cancelStorageChange();
+      return;
+    }
+    // Reload at once so no owner can write to the old path; the card shows any
+    // leftover old copy after the reload.
+    reloading = true;
+    location.reload();
+  } finally {
+    if (!reloading) state.relocating = false;
   }
-  // Reload at once so no owner can write to the old path; the card shows any
-  // leftover old copy after the reload.
-  location.reload();
 };
 
 SP.showTypeCards = () => {
