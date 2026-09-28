@@ -47,6 +47,7 @@
         });
         const remove = el("button", "sd-drawer-delete", "Delete"); remove.type = "button";
         remove.disabled = editing || rows.length <= 1; remove.setAttribute("aria-label", `Delete Drawer ${index + 1}`);
+        if (rows.length <= 1) remove.title = "Keep at least one drawer";
         remove.addEventListener("click", () => { if (!editing) callbacks.deleteDrawer?.(row.id); });
         item.append(selector, remove); list.append(item);
       });

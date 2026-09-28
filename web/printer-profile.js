@@ -1,4 +1,4 @@
-/* Shared printer build volume. Integration supplies persistence callbacks in 084B. */
+/* Shared printer build volume. Local server writes are supplied by 084B. */
 (() => {
   "use strict";
   const KEY = "wavefinity-printer-profile";
@@ -6,8 +6,6 @@
   const DEFAULT = Object.freeze({ x_mm: 256, y_mm: 256, z_mm: 256 });
   let profile = { ...DEFAULT };
   let explicit = false;
-  let durable = false;
-  let persistence = null;
   const listeners = new Set();
   const normalise = raw => {
     if (!raw || typeof raw !== "object") throw new Error("Enter printer build volume");
@@ -38,22 +36,27 @@
   };
   const api = {
     DEFAULT, normalise, current: () => ({ ...profile }),
-    set(raw) { durable = false; return adopt(raw, true); },
-    loadLocal({ profile: raw, explicit: setExplicit }) { durable = !!setExplicit; return adopt(raw || DEFAULT, setExplicit); },
+    set(raw) { return adopt(raw, true); },
+    loadLocal({ profile: raw, explicit: setExplicit }) { return adopt(raw || DEFAULT, setExplicit); },
     async loadHosted() {
-      const saved = persistence?.read ? await persistence.read(KEY) : null;
-      if (!saved) return { profile: { ...profile }, explicit };
-      const parsed = typeof saved === "string" ? JSON.parse(saved) : saved;
-      adopt(parsed.profile || parsed, parsed.explicit !== false);
-      durable = explicit;
+      const saved = localStorage.getItem(KEY);
+      if (!saved) adopt(DEFAULT, false);
+      else {
+        const parsed = JSON.parse(saved);
+        adopt(parsed.profile || parsed, parsed.explicit !== false);
+      }
       return { profile: { ...profile }, explicit };
     },
+    persistHosted(raw) {
+      const next = normalise(raw);
+      localStorage.setItem(KEY, JSON.stringify({ profile: next, explicit: true }));
+      return adopt(next, true);
+    },
     readLegacyBaseTrimSeed,
-    retireLegacyBaseTrim() { if (durable) localStorage.removeItem(LEGACY); },
+    retireLegacyBaseTrim() { localStorage.removeItem(LEGACY); },
     summaryText() { return `Printer build volume — ${profile.x_mm} × ${profile.y_mm} × ${profile.z_mm} mm`; },
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     mount(host, callbacks = {}) {
-      persistence = callbacks;
       host.replaceChildren();
       const row = document.createElement("div");
       row.className = "sd-printer-row";
@@ -84,9 +87,9 @@
         event.preventDefault();
         try {
           const next = normalise(Object.fromEntries(["x", "y", "z"].map(axis => [`${axis}_mm`, Number(inputs[axis].value)])));
-          if (callbacks.write) await callbacks.write(KEY, { profile: next, explicit: true });
-          durable = !!callbacks.write;
-          adopt(next, true); edit.hidden = true; row.hidden = false;
+          if (callbacks.hosted || callbacks.mode === "hosted" || !callbacks.write) api.persistHosted(next);
+          else { await callbacks.write(KEY, { profile: next, explicit: true }); adopt(next, true); }
+          edit.hidden = true; row.hidden = false;
         } catch (error) { callbacks.onError?.(error); }
       });
       return () => { unsubscribe(); host.replaceChildren(); };

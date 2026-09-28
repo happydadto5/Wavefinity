@@ -27,19 +27,27 @@
   };
   const mount = ({ host, initialSpace, catalog, printerProfile, mode, callbacks = {} }) => {
     const epoch = ++mountSerial;
-    let live = true, timer = null, requestNumber = 0, valid = false, profileEpoch = 0;
-    const space = copy(initialSpace || { kind: "storage_drawers", name: "", x: 48, y: 48 });
+    const baseUnit = catalog?.base_unit;
+    const minDrawerHeight = catalog?.drawer_rules?.ordinary_bin_min_height_mm;
+    if (typeof baseUnit !== "number" || !Number.isFinite(baseUnit) || baseUnit <= 0 ||
+        typeof minDrawerHeight !== "number" || !Number.isFinite(minDrawerHeight) || minDrawerHeight <= 0) {
+      throw new Error("Storage Drawers catalog rules are unavailable");
+    }
+    let live = true, timer = null, requestNumber = 0, profileEpoch = 0;
+    const events = new AbortController();
+    let summaryState = "pending", summaryError = "", summaryKey = null, summaryIdentity = null, disabled = false;
+    const space = copy(initialSpace || { kind: "storage_drawers", name: "", x: 6 * baseUnit, y: 6 * baseUnit });
     space.storage_drawers = { ...defaults(), ...copy(space.storage_drawers || {}) };
     const block = space.storage_drawers;
     const tail = [];
     host.replaceChildren();
-    const form = el("form", "sd-form"); host.append(form);
+    const form = el("div", "sd-form"); host.append(form);
     const nameGroup = group(form, "Name");
     const name = input(space.name); name.maxLength = 80; name.required = true;
     name.id = `sd-name-${epoch}`;
     nameGroup.append(labeled("Space name", name));
     const sizeGroup = group(form, "Size"); const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
-    const x = input(space.x / 8, "number"), y = input(space.y / 8, "number");
+    const x = input(space.x / baseUnit, "number"), y = input(space.y / baseUnit, "number");
     x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
     for (const field of [x, y]) { field.min = "6"; field.max = "250"; field.step = "1"; field.required = true; }
     sizeGrid.append(labeled("X units", x), labeled("Y units", y));
@@ -78,9 +86,6 @@
       const control = select(block[key], materialChoices(catalog, kind, block[key])); materialFields[key] = control; row.append(labeled(title, control));
     }
     const summaryGroup = group(form, "Summary"); const summary = el("div", "sd-summary", "Checking cabinet…"); summaryGroup.append(summary);
-    const actions = el("div", "sd-form-actions"); const save = el("button", "button", mode === "edit" ? "Save Changes" : "Create Space");
-    save.type = "submit"; save.disabled = true;
-    const cancel = el("button", "button", "Cancel"); cancel.type = "button"; actions.append(save, cancel); form.append(actions);
     const syncVisibility = () => {
       frameField.hidden = style.value !== "open"; handleField.hidden = handles.value !== "true";
       unitTextField.hidden = unitEnabled.value !== "true"; styleField.hidden = drawerEnabled.value !== "true";
@@ -89,18 +94,19 @@
       drawerRows.replaceChildren();
       block.drawers.forEach((row, index) => {
         const line = el("div", "sd-drawer-row"); line.append(el("strong", "", `Drawer ${index + 1}`));
-        const height = input(row.height_mm, "number"); height.min = String(catalog?.drawer_rules?.ordinary_bin_min_height_mm ?? 6); height.step = "any"; height.required = true;
+        const height = input(row.height_mm, "number"); height.min = String(minDrawerHeight); height.step = "any"; height.required = true;
+        height.disabled = disabled;
         height.id = `sd-height-${epoch}-${index}`;
-        height.addEventListener("input", () => { row.height_mm = Number(height.value); schedule(); });
-        const label = input(row.label_text); label.maxLength = 80;
-        label.addEventListener("input", () => { row.label_text = label.value; schedule(); });
+        height.addEventListener("input", () => { row.height_mm = Number(height.value); }, { signal: events.signal });
+        const label = input(row.label_text); label.maxLength = 80; label.disabled = disabled;
+        label.addEventListener("input", () => { row.label_text = label.value; }, { signal: events.signal });
         const labelField = labeled("Label text", label); labelField.hidden = drawerEnabled.value !== "true";
         line.append(labeled("Usable height mm", height), labelField); drawerRows.append(line);
       });
     };
     const draft = () => {
       const next = copy(space), b = next.storage_drawers;
-      next.name = name.value.trim(); next.x = Number(x.value) * 8; next.y = Number(y.value) * 8;
+      next.name = name.value.trim(); next.x = Number(x.value) * baseUnit; next.y = Number(y.value) * baseUnit;
       b.drawers = copy(block.drawers); b.cabinet_style = style.value; b.rear_support = rear.value;
       b.open_frame_width_mm = Number(frame.value); b.drawer_fit_mm = Number(fit.value);
       b.stacking = stack.value === "true"; b.drawer_handles = handles.value === "true"; b.drawer_handle_size = handleSize.value;
@@ -109,7 +115,7 @@
       for (const [key, control] of Object.entries(materialFields)) b[key] = Number(control.value);
       next.z = b.drawers.reduce((sum, row) => sum + row.height_mm, 0); return next;
     };
-    const read = () => {
+    const readFields = () => {
       const fail = (message, focusId) => ({ ok: false, message, focusId });
       if (!name.value.trim()) return fail("Enter a Space name", name.id);
       for (const [field, axis] of [[x, "X"], [y, "Y"]]) {
@@ -117,13 +123,23 @@
         if (!Number.isInteger(units) || units < 6 || units > 250) return fail(`${axis} must be 6–250 whole units`, field.id);
       }
       if (!Number.isInteger(Number(count.value)) || Number(count.value) < 1 || Number(count.value) > 32) return fail("Number of drawers must be 1–32", count.id);
-      const minimum = Number(catalog?.drawer_rules?.ordinary_bin_min_height_mm ?? 6);
       for (let i = 0; i < block.drawers.length; i++) {
         const height = block.drawers[i].height_mm;
-        if (!Number.isFinite(height) || height < minimum) return fail(`Drawer ${i + 1} needs at least ${minimum} mm usable height`, `sd-height-${epoch}-${i}`);
+        if (!Number.isFinite(height) || height < minDrawerHeight) return fail(`Drawer ${i + 1} needs at least ${minDrawerHeight} mm usable height`, `sd-height-${epoch}-${i}`);
       }
       if (unitEnabled.value === "true" && !unitText.value.trim()) return fail("Enter unit label text", unitText.id);
       return { ok: true, spaceDraft: draft() };
+    };
+    const read = () => {
+      const fields = readFields();
+      if (!fields.ok) return fields;
+      if (summaryState === "pending") return { ok: false, message: "Checking cabinet…", focusId: null };
+      if (summaryState === "error") return { ok: false, message: summaryError, focusId: null };
+      if (summaryIdentity !== (callbacks.identity?.() ?? space.id ?? space.name) ||
+          summaryKey !== window.StorageDrawers.structuralDraftKey(fields.spaceDraft, printerProfile)) {
+        return { ok: false, message: "Checking cabinet…", focusId: null };
+      }
+      return fields;
     };
     const showSummary = response => {
       const outside = response.outside_xyz || [];
@@ -135,10 +151,10 @@
       if (response.warnings?.length) summary.textContent += ` · ${response.warnings.join("; ")}`;
     };
     const schedule = () => {
-      valid = false; save.disabled = true; summary.textContent = "Checking cabinet…";
+      summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; summary.textContent = "Checking cabinet…";
       clearTimeout(timer); const n = ++requestNumber; const identity = callbacks.identity?.() ?? space.id ?? space.name;
-      const pEpoch = profileEpoch; const checked = read();
-      if (!checked.ok) { summary.textContent = checked.message; return; }
+      const pEpoch = profileEpoch; const checked = readFields();
+      if (!checked.ok) { summaryState = "error"; summaryError = checked.message; summary.textContent = checked.message; return; }
       const next = checked.spaceDraft;
       const key = window.StorageDrawers.structuralDraftKey(next, printerProfile);
       timer = setTimeout(async () => {
@@ -149,9 +165,11 @@
           }
           const response = await callbacks.requestSummary({ space: preview, printer_profile: printerProfile });
           if (!live || epoch !== mountSerial || n !== requestNumber || pEpoch !== profileEpoch || identity !== (callbacks.identity?.() ?? space.id ?? space.name) || key !== window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) return;
-          showSummary(response); valid = true; save.disabled = form.dataset.disabled === "true";
+          showSummary(response); summaryKey = key; summaryIdentity = identity; summaryState = "ok";
         } catch (error) {
-          if (live && n === requestNumber) { summary.textContent = error.message || "Cabinet is invalid"; valid = false; save.disabled = true; }
+          if (live && epoch === mountSerial && n === requestNumber && pEpoch === profileEpoch && identity === (callbacks.identity?.() ?? space.id ?? space.name) && key === window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) {
+            summaryError = error.message || "Cabinet is invalid"; summary.textContent = summaryError; summaryState = "error";
+          }
         }
       }, 250);
     };
@@ -161,27 +179,22 @@
       while (block.drawers.length > wanted) tail.unshift(block.drawers.pop());
       while (block.drawers.length < wanted) block.drawers.push(tail.shift() || { temp_key: `temporary:${crypto.randomUUID()}`, height_mm: block.drawers.at(-1)?.height_mm || 40, label_text: "" });
       renderRows(); schedule();
-    });
-    form.addEventListener("input", event => { if (event.target !== count) schedule(); });
-    form.addEventListener("change", () => { syncVisibility(); renderRows(); schedule(); });
-    form.addEventListener("submit", async event => {
-      event.preventDefault(); if (!valid) return;
-      try { const checked = read(); if (!checked.ok) throw new Error(checked.message);
-        await callbacks.onSave(mode === "create" ? window.StorageDrawers.prepareCreateDraft(checked.spaceDraft) : checked.spaceDraft); }
-      catch (error) { summary.textContent = error.message || "Could not save"; }
-    });
-    cancel.addEventListener("click", () => callbacks.onCancel?.());
+    }, { signal: events.signal });
+    form.addEventListener("input", event => { if (event.target !== count) schedule(); }, { signal: events.signal });
+    form.addEventListener("change", event => {
+      if (event.target !== count) { syncVisibility(); renderRows(); schedule(); }
+    }, { signal: events.signal });
     syncVisibility(); renderRows(); schedule();
     return {
       read,
       setPrinterProfile(next) { printerProfile = copy(next); profileEpoch += 1; schedule(); },
       refreshSummary() { schedule(); },
-      setDisabled(disabled) {
-        form.dataset.disabled = String(!!disabled);
-        for (const control of form.querySelectorAll("input, select, button")) control.disabled = !!disabled;
-        if (!disabled) { count.disabled = mode === "edit"; save.disabled = !valid; }
+      setDisabled(value) {
+        disabled = !!value;
+        for (const control of form.querySelectorAll("input, select")) control.disabled = disabled;
+        if (!disabled) count.disabled = mode === "edit";
       },
-      destroy() { live = false; mountSerial += 1; clearTimeout(timer); host.replaceChildren(); }
+      destroy() { live = false; mountSerial += 1; clearTimeout(timer); events.abort(); host.replaceChildren(); }
     };
   };
   window.StorageDrawersForm = { mount };

@@ -3,10 +3,16 @@
   "use strict";
   const KIND = "storage_drawers";
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  let rules = null;
+  const requireRules = () => {
+    if (!rules) throw new Error("Storage Drawers rules are not configured");
+    return rules;
+  };
   const clone = value => structuredClone(value);
   const isSpace = space => space?.kind === KIND;
   const descriptors = space => space?.storage_drawers?.drawers || [];
   const validate = space => {
+    const { baseUnit, minDrawerHeight } = requireRules();
     if (!isSpace(space)) throw new Error("Expected Storage Drawers Space");
     const rows = descriptors(space);
     if (!Array.isArray(rows) || rows.length < 1 || rows.length > 32) throw new Error("Number of drawers must be 1–32");
@@ -14,10 +20,10 @@
     for (const row of rows) {
       if (!UUID.test(row?.id || "") || seen.has(row.id)) throw new Error("Drawer ID is missing, malformed, or duplicated");
       seen.add(row.id);
-      if (typeof row.height_mm !== "number" || !Number.isFinite(row.height_mm) || row.height_mm <= 0) throw new Error("Invalid drawer height");
+      if (typeof row.height_mm !== "number" || !Number.isFinite(row.height_mm) || row.height_mm < minDrawerHeight) throw new Error("Invalid drawer height");
     }
     for (const axis of ["x", "y"]) {
-      const units = space[axis] / 8;
+      const units = space[axis] / baseUnit;
       if (!Number.isInteger(units) || units < 6 || units > 250) throw new Error(`Space ${axis} must be 6–250 whole units`);
     }
     return rows;
@@ -50,7 +56,14 @@
   const key = (draft, printer) => JSON.stringify([draft?.name, draft?.x, draft?.y, draft?.storage_drawers, printer]);
   const api = {
     KIND, isSpace,
-    unitCounts(space) { validate(space); return [space.x / 8, space.y / 8]; },
+    configureRules({ baseUnit, minDrawerHeight }) {
+      if (typeof baseUnit !== "number" || !Number.isFinite(baseUnit) || baseUnit <= 0 ||
+          typeof minDrawerHeight !== "number" || !Number.isFinite(minDrawerHeight) || minDrawerHeight <= 0) {
+        throw new Error("Storage Drawers rules need positive base unit and minimum drawer height");
+      }
+      rules = { baseUnit, minDrawerHeight };
+    },
+    unitCounts(space) { validate(space); const { baseUnit } = requireRules(); return [space.x / baseUnit, space.y / baseUnit]; },
     drawerDescriptors(space) { return clone(validate(space)); },
     drawerName(space, id) { const index = validate(space).findIndex(row => row.id === id); return index < 0 ? null : `Drawer ${index + 1}`; },
     activeDrawerLimits(space, layout) {

@@ -26,9 +26,7 @@ def normalise_printer_profile(raw: object) -> dict:
 def printer_profile_state(prefs: dict) -> dict:
     if not isinstance(prefs, dict):
         prefs = {}
-    explicit = any(key in prefs for key in _PREF_KEYS)
-    if explicit and not all(key in prefs for key in _PREF_KEYS):
-        raise ValueError("Printer build volume is incomplete")
+    explicit = all(key in prefs for key in _PREF_KEYS)
     raw = dict(zip(_AXES, (prefs[key] for key in _PREF_KEYS))) if explicit else dict(zip(_AXES, DEFAULT_PRINTER_BUILD_MM))
     return {"profile": normalise_printer_profile(raw), "explicit": explicit}
 
@@ -49,7 +47,11 @@ def component_fit(bounds_xyz: tuple[float, float, float], allowed_orientations: 
     if len(bounds_xyz) != 3 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0 for v in bounds_xyz):
         raise ValueError("Component bounds must be three positive dimensions")
     bed = (profile["x_mm"], profile["y_mm"], profile["z_mm"])
-    transforms = {"flat": (0, 1, 2), "bed_90": (1, 0, 2), "side_x": (2, 1, 0), "side_y": (0, 2, 1)}
+    transforms = {
+        "flat": (0, 1, 2), "bed_90": (1, 0, 2),
+        "broad_yz": (2, 1, 0), "broad_yz_90": (1, 2, 0),
+        "broad_xz": (0, 2, 1), "broad_xz_90": (2, 0, 1),
+    }
     for name in allowed_orientations:
         axes = transforms.get(name)
         if axes is None:
