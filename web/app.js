@@ -898,7 +898,16 @@ function settleStaleFileRefresh({ materialize = false } = {}) {
 // Change Location quiescence: true while a Designer file refresh or a queued
 // autosave could still write to the current Space root.
 function designerWriteActive({ includeTimer = true } = {}) {
-  return Boolean(staleFileRefreshGate || (includeTimer && spaceAutosaveTimer));
+  return Boolean(
+    isGenerating || state.designMutationBusy || staleFileRefreshGate ||
+    (includeTimer && spaceAutosaveTimer),
+  );
+}
+
+function relocationBlocksWrites() {
+  if (!state.relocating) return false;
+  toast("Wavefinity is changing its folder. Try again in a moment.", true);
+  return true;
 }
 
 async function settleDesignerWritesForRelocation() {
@@ -1084,6 +1093,7 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
   if (state.folderMode !== "space" || typeof DL === "undefined") return;
   const bound = () => !expected || DL.spaceContextCurrent(expected);
   if (!bound()) return;
+  if (relocationBlocksWrites()) return;
   if (!skipFlush && (DL.busy || isGenerating || state.designMutationBusy)) {
     toast("Finish the current action before saving files.", true);
     return;
@@ -9358,6 +9368,7 @@ function setMutationSurfacesInert(inert) {
 }
 
 function beginDesignMutation() {
+  if (relocationBlocksWrites()) return false;
   if (state.designMutationBusy) {
     toast("Finish the current design change first.", true);
     return false;
@@ -13325,6 +13336,7 @@ function handleLayoutArrowKeys(event) {
 }
 
 async function saveDesign() {
+  if (relocationBlocksWrites()) return;
   if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
   if (!beginDesignMutation()) return;
   try {
@@ -13572,6 +13584,7 @@ function checkPartNamePresent(target = "bin") {
 }
 
 async function generateParts(target) {
+  if (relocationBlocksWrites()) return;
   if (state.designMutationBusy || isGenerating) {
     toast("Finish the current action before saving files.", true);
     return;
@@ -13836,6 +13849,7 @@ async function generate(path, selector) {
 }
 
 async function printModel(target = "bin", initiatingButton = null) {
+  if (relocationBlocksWrites()) return;
   if (state.runtime.hosted) return generateParts(target === "all" ? "all" : "bin");
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {

@@ -1587,7 +1587,8 @@ SP.doStorageChange = async mode => {
   // Settle every write owner (design autosave, inventory, layout); a failed
   // save aborts before anything is changed. No deferred preview may survive.
   if (!(await SP.leaveDrawerLayoutSafely({ noDeferredPreview: true }))) return;
-  state.relocating = true; // blocks any new autosave/resume/defaults queueing
+  state.relocating = true; // blocks every new write entry point
+  document.body.classList.add("relocating");
   let reloading = false;
   try {
     if (typeof settleDesignerWritesForRelocation === "function") await settleDesignerWritesForRelocation();
@@ -1615,7 +1616,10 @@ SP.doStorageChange = async mode => {
     reloading = true;
     location.reload();
   } finally {
-    if (!reloading) state.relocating = false;
+    if (!reloading) {
+      state.relocating = false;
+      document.body.classList.remove("relocating");
+    }
   }
 };
 

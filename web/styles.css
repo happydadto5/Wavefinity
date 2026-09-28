@@ -1372,6 +1372,7 @@ dialog:not([open]) { display: none; }
 }
 .welcome-storage-row .button { margin: 0; flex: 0 0 auto; }
 .welcome-storage-leftover { margin: 8px 0 0; }
+body.relocating > :not(dialog) { pointer-events: none; }
 .storage-choice { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 0; cursor: pointer; }
 .storage-choice input { margin-top: 4px; }
 .storage-choice small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.4; }

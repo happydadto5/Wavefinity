@@ -893,6 +893,10 @@ DL.requestReport = debounce(async () => {
 }, 120);
 
 DL.busyWith = async (what, work) => {
+  if (state.relocating) {
+    toast("Wavefinity is changing its folder. Try again in a moment.", true);
+    return null;
+  }
   const context = DL.spaceContext();
   const ticket = ++DL.busyTicket;
   DL.busy = what;
