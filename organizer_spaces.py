@@ -35,6 +35,7 @@ from organizer_printer_profile import (
 )
 from organizer_inventory import (
     INVENTORY_FILENAME,
+    INVENTORY_LOCK,
     configure_space,
     legacy_layout_space,
     load_inventory,
@@ -1638,21 +1639,25 @@ def space_routes(
         expected = _space_id(payload.get("space_id"))
         if expected is None or info["space_id"] != expected:
             raise ValueError("This folder is not the Space that was open before. Nothing was changed.")
-        path = resolve_inventory_path(target, migrate=True)
-        before = path.read_text(encoding="utf-8") if path.is_file() else None
-        result = storage_drawers_mutate(
-            target, str(payload.get("operation") or ""), drawer_id=payload.get("drawer_id"),
-            proposed=payload.get("space"), space=space,
-        )
-        try:
-            _write_metadata(target, "space", result["space"], expected_space_id=expected)
-        except Exception:
-            # The typed definition stays authoritative: put the Inventory back.
-            if before is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.write_text(before, encoding="utf-8")
-            raise
+        # One semantic transaction: the rollback snapshot, the mutation, the
+        # metadata commit and any rollback all sit inside the Inventory lock, so
+        # a rollback can never overwrite newer Inventory work.
+        with INVENTORY_LOCK:
+            path = resolve_inventory_path(target, migrate=True)
+            before = path.read_text(encoding="utf-8") if path.is_file() else None
+            result = storage_drawers_mutate(
+                target, str(payload.get("operation") or ""), drawer_id=payload.get("drawer_id"),
+                proposed=payload.get("space"), space=space,
+            )
+            try:
+                _write_metadata(target, "space", result["space"], expected_space_id=expected)
+            except Exception:
+                # The typed definition stays authoritative: put the Inventory back.
+                if before is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_text(before, encoding="utf-8")
+                raise
         remember(target)
         return result
 
