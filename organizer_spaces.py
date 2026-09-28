@@ -29,6 +29,10 @@ import threading
 from typing import Any, Callable
 import uuid
 
+from organizer_printer_profile import (
+    apply_printer_profile_to_preferences,
+    printer_profile_state,
+)
 from organizer_inventory import (
     INVENTORY_FILENAME,
     configure_space,
@@ -37,18 +41,24 @@ from organizer_inventory import (
     normalise_space_definition,
     normalise_storage_box,
     resolve_inventory_path,
+    storage_drawers_mutate,
 )
 from organizer_product_rules import SURFACE_TRIM_HEIGHTS
 import organizer_storage
+from organizer_storage_drawers import (
+    normalise_storage_drawers_definition,
+    prepare_new_storage_drawers_definition,
+    storage_drawers_recent_summary,
+)
 
 MAX_RECENT = 8
 METADATA_FILE = ".wavefinity.json"
 LEGACY_METADATA_FILE = ".wavefinity-space.json"
 SPACE_ID_REQUIRED_VERSION = 5
 RESUME_REQUIRED_VERSION = 8
-METADATA_VERSION = 8
+METADATA_VERSION = 9
 SPACE_SETUP_VERSION = 1
-SUPPORTED_METADATA_VERSIONS = {2, 3, 4, 5, 6, 7, 8}
+SUPPORTED_METADATA_VERSIONS = {2, 3, 4, 5, 6, 7, 8, 9}
 _UNSET = object()
 
 
@@ -314,8 +324,13 @@ def _json_file(path: Path, *, strict: bool = False) -> dict[str, Any] | None:
 
 
 def _space(raw: Any) -> dict[str, Any] | None:
-    if not isinstance(raw, dict) or raw.get("kind") not in {"drawer", "box", "surface", "portable", "pegboard"}:
+    if not isinstance(raw, dict) or raw.get("kind") not in {"drawer", "box", "surface", "portable", "pegboard", "storage_drawers"}:
         return None
+    if raw.get("kind") == "storage_drawers":
+        try:
+            return normalise_storage_drawers_definition(raw)
+        except (TypeError, ValueError):
+            return None
     if raw.get("kind") == "pegboard":
         try:
             return normalise_space_definition(raw)
@@ -532,6 +547,7 @@ def _write_metadata(
     *, keep_bin_defaults: Any = _UNSET, bin_defaults: Any = _UNSET,
     part_defaults: Any = _UNSET, resume_design: Any = _UNSET, resume_pending: Any = _UNSET,
     preserve_space: bool = False, expected_space_id: str | None = None,
+    structural_output_updates: Any = _UNSET,
 ) -> None:
     # The whole read/preserve/write transaction - including the temp-file
     # replace - is one critical section, so a resume checkpoint write can
@@ -559,6 +575,7 @@ def _write_metadata(
             saved_resume_design: dict[str, Any] | None = None
             saved_resume_pending = False
             saved_space: dict[str, Any] | None = None
+            saved_structural: dict[str, Any] = {}
             current_id: str | None = None
             target = folder / METADATA_FILE
             if target.exists():
@@ -574,6 +591,8 @@ def _write_metadata(
                     )
                     saved_resume_design, saved_resume_pending = _metadata_resume(current, int(version))
                     saved_space = _space(current.get("space"))
+                    if isinstance(current.get("structural_outputs"), dict):
+                        saved_structural = dict(current["structural_outputs"])
                     # The one choke point that keeps a Space's identity: an
                     # existing valid ID is always preserved. Only pre-v5 metadata
                     # may gain one; damaged v5 must never be re-identified.
@@ -622,6 +641,20 @@ def _write_metadata(
                 resolved_resume_pending = False
             payload["resume_design"] = resolved_resume_design
             payload["resume_pending"] = resolved_resume_pending
+            # Fix 084B: materialized structural-output manifests live beside
+            # (never inside) the Space definition and survive every write. An
+            # explicit update merges/deletes only its named keys, here, under
+            # the same lock as the read above.
+            if structural_output_updates is not _UNSET:
+                if not isinstance(structural_output_updates, dict):
+                    raise ValueError("structural output updates must be an object")
+                for key, value in structural_output_updates.items():
+                    if value is None:
+                        saved_structural.pop(key, None)
+                    else:
+                        saved_structural[key] = value
+            if saved_structural:
+                payload["structural_outputs"] = saved_structural
         else:
             payload["inventory"] = bool(inventory)
         target = folder / METADATA_FILE
@@ -739,16 +772,21 @@ def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
 
 def _recent_entry(info: dict[str, Any]) -> dict[str, Any]:
     space = info["space"] or {}
-    return {
+    cabinet = space.get("kind") == "storage_drawers"
+    entry = {
         "folder": info["folder"],
         "name": space.get("name") or info["folder_name"],
         "folder_mode": info["folder_mode"],
         "space_id": info.get("space_id"),
         "inventory": info["inventory"],
         "kind": space.get("kind"),
-        "size": [space["x"], space["y"], space["z"]] if space else None,
+        # A cabinet's top-level z is only a compatibility total, never a height.
+        "size": None if cabinet or not space else [space["x"], space["y"], space["z"]],
         "missing": info["missing"],
     }
+    if cabinet:
+        entry["summary_text"] = f"{storage_drawers_recent_summary(space)} each"
+    return entry
 
 
 # ------------------------------------------------- Space registry (profile)
@@ -883,6 +921,25 @@ def _output_is_forgotten_typed_space(target: Path, prefs: dict[str, Any]) -> boo
     if _metadata_version(target) != METADATA_VERSION:
         return False
     return info["space_id"] not in _space_registry(prefs)
+
+
+def structural_output_manifest(folder: Path, key: str) -> dict[str, Any] | None:
+    """A materialized structural-output manifest from a folder's metadata."""
+    data = _json_file(Path(folder) / METADATA_FILE)
+    outputs = (data or {}).get("structural_outputs")
+    value = outputs.get(key) if isinstance(outputs, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def commit_structural_output(
+    folder: Path, key: str, manifest: dict[str, Any] | None, *, expected_space_id: str | None,
+) -> None:
+    """Merge (or delete, with None) one manifest key under the metadata lock."""
+    _write_metadata(
+        Path(folder), "space", None, True, preserve_space=True,
+        expected_space_id=expected_space_id,
+        structural_output_updates={key: manifest},
+    )
 
 
 def space_routes(
@@ -1138,7 +1195,7 @@ def space_routes(
         }
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
-        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box"):
+        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
             if key in payload:
                 raw_def[key] = payload[key]
 
@@ -1161,6 +1218,8 @@ def space_routes(
             # can apply its legacy 80-character truncation behavior.
             folder_name = _space_folder_name(raw_def["name"])
             raw_def["name"] = folder_name
+            if raw_def.get("kind") == "storage_drawers":
+                raw_def = prepare_new_storage_drawers_definition(raw_def)
             validated = normalise_space_definition(raw_def)
             target = _new_space_target(current_space_root(prefs_for_create), folder_name)
             try:
@@ -1205,7 +1264,7 @@ def space_routes(
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
-        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box"):
+        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
             if key in payload:
                 raw_def[key] = payload[key]
 
@@ -1232,7 +1291,7 @@ def space_routes(
         raw_def = {"name": payload.get("name"), "kind": existing_space["kind"], "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
-        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box"):
+        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
             if key in payload:
                 raw_def[key] = payload[key]
 
@@ -1557,6 +1616,46 @@ def space_routes(
             commit_storage(old_root, new_root, moved=False)
             return done()
 
+    def printer_profile_route(payload):
+        raw = payload.get("profile")
+        if raw is None:
+            return printer_profile_state(load_preferences())
+        update = apply_printer_profile_to_preferences({}, raw)
+
+        def apply(prefs: dict[str, Any]) -> None:
+            prefs.update(update)
+        return printer_profile_state(mutate_preferences(apply))
+
+    def storage_drawers_mutate_route(payload):
+        target = folder(payload)
+        if not target.is_dir():
+            raise ValueError("that save folder could not be found")
+        prefs = load_preferences()
+        info = describe(target, prefs)
+        space = info.get("space")
+        if info["folder_mode"] != "space" or not isinstance(space, dict) or space.get("kind") != "storage_drawers":
+            raise ValueError("This folder is not a Storage Drawers Space.")
+        expected = _space_id(payload.get("space_id"))
+        if expected is None or info["space_id"] != expected:
+            raise ValueError("This folder is not the Space that was open before. Nothing was changed.")
+        path = resolve_inventory_path(target, migrate=True)
+        before = path.read_text(encoding="utf-8") if path.is_file() else None
+        result = storage_drawers_mutate(
+            target, str(payload.get("operation") or ""), drawer_id=payload.get("drawer_id"),
+            proposed=payload.get("space"), space=space,
+        )
+        try:
+            _write_metadata(target, "space", result["space"], expected_space_id=expected)
+        except Exception:
+            # The typed definition stays authoritative: put the Inventory back.
+            if before is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_text(before, encoding="utf-8")
+            raise
+        remember(target)
+        return result
+
     return {
         "/api/space/inspect": inspect,
         # Local startup: resolves the active Space by ID, not just a path.
@@ -1579,4 +1678,6 @@ def space_routes(
         "/api/space/storage-state": storage_state,
         "/api/space/storage-plan": storage_plan,
         "/api/space/storage-change": change_storage,
+        "/api/space/printer-profile": printer_profile_route,
+        "/api/space/storage-drawers-mutate": storage_drawers_mutate_route,
     }

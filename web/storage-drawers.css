@@ -26,3 +26,10 @@
   .sd-navigator { top: auto; right: 10px; bottom: 56px; width: 156px; max-height: 42%; }
   .sd-material-three, .sd-material-two, .sd-drawer-row { grid-template-columns: 1fr; }
 }
+.sd-workspace-host { position: absolute; z-index: 5; top: 16px; right: 16px; width: clamp(156px, 18vw, 196px); max-height: calc(100% - 32px); display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.sd-workspace-host[hidden] { display: none; }
+.sd-workspace-host .sd-navigator { position: static; width: auto; max-height: none; top: auto; right: auto; }
+.sd-workspace-host .sd-structural { padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel, white); box-shadow: 0 4px 16px #0002; }
+@media (max-width: 700px) {
+  .sd-workspace-host { top: auto; right: 10px; bottom: 56px; width: 156px; max-height: 42%; }
+}

@@ -77,6 +77,13 @@ Pocket, Post, Slot and Steps may include an optional `reference_object` with pos
 - The AI result is still an ordinary bin, not the Storage Box case itself.
 - Hard object-height cap: the Storage Box Space's own height.
 
+## Storage Drawers
+
+- The Space context is the selected physical drawer's usable width, depth and height.
+- Returned bins must fit inside that one drawer.
+- The AI result is still an ordinary bin. It must not invent or return cabinet structure (drawer count, frame, rails or cabinet settings).
+- Hard object-height cap: the selected drawer's usable height.
+
 ## Pegboard
 
 - Supports Standard Pegboard and IKEA SKÅDIS Space types.

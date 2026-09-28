@@ -33,6 +33,7 @@ from organizer_product_rules import SURFACE_TRIM_HEIGHTS
 
 STORAGE_BOX = "storage_box"
 BASE_TRIM = "base_trim"
+STORAGE_DRAWERS = "storage_drawers"
 STORAGE_BOX_KINDS = ("portable", "box")
 
 
@@ -43,6 +44,8 @@ def structural_kind(space: dict[str, Any] | None) -> str | None:
         return STORAGE_BOX
     if kind == "surface":
         return BASE_TRIM
+    if kind == "storage_drawers":
+        return STORAGE_DRAWERS
     return None
 
 

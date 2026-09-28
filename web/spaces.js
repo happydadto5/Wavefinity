@@ -32,6 +32,7 @@ const SP_KINDS = {
   portable: { icon: "🧰", label: "Storage Box" },
   surface: { icon: "🔲", label: "Surface" },
   drawer: { icon: "🗄️", label: "Drawer" },
+  storage_drawers: { icon: "🗃️", label: "Storage Drawers" },
   pegboard: { icon: "🧱", label: "Pegboard" },
   // Legacy kind, readable for migration only - never a current Space type;
   // it presents as a Storage Box, its recovery destination.
@@ -40,7 +41,7 @@ const SP_KINDS = {
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
 const SPACE_ID_REQUIRED_VERSION = 5;
-const FOLDER_METADATA_VERSION = 8;
+const FOLDER_METADATA_VERSION = 9;
 const RESUME_REQUIRED_VERSION = 8;
 const SPACE_SETUP_VERSION = 1;
 // One fixed name for every inventory-enabled folder: it never follows the
@@ -55,7 +56,10 @@ const spSame = (a, b) => {
 };
 
 SP.dialog = () => $("#welcome-dialog");
-SP.close = () => { if (SP.dialog().open) SP.dialog().close(); };
+SP.close = () => {
+  SP.destroyStorageDrawersForm?.();
+  if (SP.dialog().open) SP.dialog().close();
+};
 SP.showOnly = id => {
   SP.cancelInlineEdit();
   SP.cancelResumeAutoContinue();
@@ -382,7 +386,7 @@ SP.readMetadata = async handle => {
 };
 
 SP.validSpace = raw => {
-  if (!raw || !["drawer", "surface", "portable", "box", "pegboard"].includes(raw.kind)) return null;
+  if (!raw || !["drawer", "surface", "portable", "box", "pegboard", "storage_drawers"].includes(raw.kind)) return null;
   const space = {
     kind: raw.kind,
     name: String(raw.name || "").trim(),
@@ -403,6 +407,14 @@ SP.validSpace = raw => {
   }
   if ((space.kind === "portable" || space.kind === "box") && raw.storage_box && typeof raw.storage_box === "object") {
     space.storage_box = clone(raw.storage_box);
+  }
+  if (space.kind === "storage_drawers") {
+    // The cabinet block is validated and canonicalised by its own owner.
+    try {
+      SP.ensureStorageDrawersRules();
+      StorageDrawers.drawerDescriptors(raw);
+    } catch (_error) { return null; }
+    space.storage_drawers = clone(raw.storage_drawers);
   }
   if (space.kind === "pegboard") {
     const standard = SP.pegboardStandard(raw.pegboard_standard);
@@ -438,7 +450,7 @@ SP.classifyMetadata = record => {
   // v2 and v3 are readable migration inputs, same as the local backend
   // (organizer_spaces._folder_state); v4+ are already onboarded. Older
   // current formats upgrade in place; v4 only lacks the Space identity.
-  if (![2, 3, 4, 5, 6, 7, 8].includes(current.version)) return { status: "invalid" };
+  if (![2, 3, 4, 5, 6, 7, 8, 9].includes(current.version)) return { status: "invalid" };
   const needsMigration = current.version < 4 || current.setup_version !== SPACE_SETUP_VERSION;
   const explicitInventory = typeof current.inventory === "boolean" ? current.inventory : null;
   if (current.folder_mode === "design") {
@@ -495,6 +507,8 @@ SP.classifyMetadata = record => {
       part_defaults: partDefaults, needsMigration: spaceNeedsMigration,
       metadataVersion: current.version,
       resume_design: resumeDesign, resume_pending: resumePending,
+      structural_outputs: current.structural_outputs && typeof current.structural_outputs === "object"
+        && !Array.isArray(current.structural_outputs) ? current.structural_outputs : {},
     };
   }
   return { status: "invalid" };
@@ -561,6 +575,7 @@ SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, chan
     let resumeDesign = null;
     let resumePending = false;
     let currentSpace = null;
+    let structuralOutputs = {};
     const { current } = await SP.readMetadata(handle);
     const currentState = SP.classifyMetadata(current);
     if (!["missing", "design", "space"].includes(currentState.status)) throw SP.metadataError(currentState.status);
@@ -574,6 +589,7 @@ SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, chan
       resumeDesign = currentState.resume_design ?? null;
       resumePending = Boolean(currentState.resume_pending);
       currentSpace = currentState.space;
+      structuralOutputs = { ...(currentState.structural_outputs || {}) };
     }
     if ((preserveSpace || expectedSpaceId) && currentState.status !== "space") {
       throw new Error("This Space no longer exists in that folder. Nothing was changed.");
@@ -600,6 +616,15 @@ SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, chan
       throw new Error("The Space resume design must be an object or null.");
     }
     if (resumeDesign === null) resumePending = false;
+    // Fix 084B: structural-output manifests survive every ordinary write; an
+    // explicit update merges/deletes only its named keys, inside this same
+    // serialized read-modify-write.
+    if (Object.hasOwn(changes, "structural_output_updates")) {
+      for (const [key, value] of Object.entries(changes.structural_output_updates || {})) {
+        if (value === null) delete structuralOutputs[key];
+        else structuralOutputs[key] = value;
+      }
+    }
     metadata.space_id = spaceId || crypto.randomUUID();
     metadata.inventory = true;
     metadata.space = resolvedSpace;
@@ -608,6 +633,7 @@ SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, chan
     metadata.part_defaults = partDefaults;
     metadata.resume_design = resumeDesign;
     metadata.resume_pending = resumePending;
+    if (Object.keys(structuralOutputs).length) metadata.structural_outputs = structuralOutputs;
   }
   await WFFileSystem.writeText(handle, FOLDER_METADATA, JSON.stringify(metadata, null, 2));
   return metadata;
@@ -1328,7 +1354,7 @@ SP.renderRecent = () => {
     const unavailable = one.missing || one.invalid || one.conflict;
     const space = one.folder_mode === "space";
     const kind = SP_KINDS[one.kind];
-    const meta = [one.conflict ? "duplicate Space identity" : one.invalid ? "metadata unavailable" : space ? `${kind?.label || "Space"} · SPACE` : "Design folder", SP.sizeText(one.size), one.missing ? "folder not found" : ""]
+    const meta = [one.conflict ? "duplicate Space identity" : one.invalid ? "metadata unavailable" : space ? `${kind?.label || "Space"} · SPACE` : "Design folder", one.summary_text || SP.sizeText(one.size), one.missing ? "folder not found" : ""]
       .filter(Boolean).join(" · ");
     const current = spSame(one.folder, state.output) ? " <em>current</em>" : "";
     return `<li class="welcome-recent-item${unavailable ? " missing" : ""}">
@@ -1349,7 +1375,7 @@ SP.showResume = info => {
   const kind = SP_KINDS[space.kind] || SP_KINDS.drawer;
   $("#welcome-resume-icon").textContent = kind.icon;
   $("#welcome-resume-name").textContent = space.name || info.folder_name;
-  $("#welcome-resume-meta").textContent = [kind.label, SP.sizeText([space.x, space.y, space.z])].filter(Boolean).join(" · ");
+  $("#welcome-resume-meta").textContent = [kind.label, space.kind === "storage_drawers" ? SP.storageDrawersSummaryText(space) : SP.sizeText([space.x, space.y, space.z])].filter(Boolean).join(" · ");
   $("#welcome-resume-folder").textContent = info.folder;
   $("#welcome-resume-folder").title = info.folder;
   SP.renderStorageCard();
@@ -1480,10 +1506,14 @@ SP.showHome = (message = null) => {
 SP.renderStorageCard = () => {
   const info = SP.storage;
   document.querySelectorAll("[data-storage-card]").forEach(el => {
-    if (state.runtime.hosted || !info) {
-      el.hidden = true;
-      return;
-    }
+    // The card also owns the printer settings, so it stays visible in hosted
+    // mode; only the local Wavefinity Folder details come and go.
+    const details = el.querySelector("[data-storage-folder-details]");
+    const showFolder = !state.runtime.hosted && Boolean(info);
+    if (details) details.hidden = !showFolder;
+    el.toggleAttribute("data-folder-hidden", !showFolder);
+    el.hidden = false;
+    if (!showFolder) return;
     const lead = el.querySelector(".welcome-storage-lead");
     if (info.unavailable) {
       lead.textContent = "Your saved Space storage location could not be found. Choose a folder to continue.";
@@ -1496,10 +1526,10 @@ SP.renderStorageCard = () => {
     const leftover = el.querySelector(".welcome-storage-leftover");
     leftover.hidden = !info.leftover;
     leftover.textContent = info.leftover
-      ? `An extra copy of Wavefinity data is still at ${info.leftover}. Wavefinity did not delete it. You can delete it yourself once you are sure you don't need it.`
+      ? `An extra copy of Wavefinity data is still at ${info.leftover}. Wavefinity did not delete it. You can delete it yourself once you are sure you do not need it.`
       : "";
-    el.hidden = false;
   });
+  SP.mountPrinterProfiles?.();
 };
 
 // Quietly re-reads the storage state so the card never shows a stale root
@@ -1626,6 +1656,7 @@ SP.doStorageChange = async mode => {
 };
 
 SP.showTypeCards = () => {
+  SP.destroyStorageDrawersForm?.();
   SP.showOnly("space-type-cards");
   SP.showDialog();
   SP.dialog().scrollTop = 0;
@@ -1695,6 +1726,7 @@ SP.mountInlineEdit = () => {
 SP.cancelInlineEdit = () => {
   if (!SP.editing) return;
   SP.editing = false;
+  SP.destroyStorageDrawersForm?.();
   const form = $("#space-form");
   const host = $("#space-head-edit-host");
   if (form && SP.formHome) {
@@ -1746,6 +1778,11 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   document.querySelectorAll(".space-type-fields").forEach(el => el.hidden = true);
   const field = document.getElementById(`space-fields-${kind}`);
   if (field) field.hidden = false;
+  // The cabinet form owns its own name field.
+  const nameRow = document.getElementById("space-name-row");
+  if (nameRow) nameRow.hidden = kind === "storage_drawers";
+  if (kind === "storage_drawers") SP.mountStorageDrawersForm(prefillSpace, update);
+  else SP.destroyStorageDrawersForm();
   document.getElementById("space-name").value = prefillSpace?.name || "";
   document.getElementById("space-error").hidden = true;
   document.getElementById("space-note").textContent = "";
@@ -1858,6 +1895,7 @@ SP.readSetupValues = () => {
   };
 
   const kind = SP.setupKind;
+  if (kind === "storage_drawers") return SP.readStorageDrawersSetup();
   const name = document.getElementById("space-name").value.trim();
   if (!name) return fail("Give the Space a name.", "#space-name");
 
@@ -1959,7 +1997,14 @@ SP.create = async () => {
   if (SP.isUpdate) return SP.updateSpace();
   const values = SP.readSetupValues();
   if (!values) return;
-  const { kind, name, x, y, z, trimSize, extra = {} } = values;
+  let { kind, name, x, y, z, trimSize, extra = {} } = values;
+  if (kind === "storage_drawers" && state.runtime.hosted) {
+    // Hosted Create assigns the stable drawer IDs here, exactly once; the
+    // server keeps them. Local Create lets Python assign them.
+    const prepared = StorageDrawers.prepareCreateDraft({ kind, name, x, y, z, storage_drawers: extra.storage_drawers });
+    extra = { storage_drawers: prepared.storage_drawers };
+    z = prepared.z;
+  }
   const migrating = Boolean(SP.configureData);
   let folder = SP.configureData || null;
 
@@ -2716,9 +2761,10 @@ SP.structuralKind = () => {
   const kind = state.folderMode === "space" ? state.activeSpace?.kind : null;
   if (kind === "portable" || kind === "box") return "storage_box";
   if (kind === "surface") return "base_trim";
+  if (kind === "storage_drawers") return "storage_drawers";
   return null;
 };
-SP.structuralLabel = kind => kind === "storage_box" ? "Storage Box" : "Base Trim";
+SP.structuralLabel = kind => kind === "storage_box" ? "Storage Box" : kind === "storage_drawers" ? "Cabinet" : "Base Trim";
 SP.structuralInfo = { key: "", data: null, error: "" };
 SP.structuralBusy = false;
 SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP = "Printing needs local Wavefinity with Bambu Studio. Use Save to put the files in your folder.";
@@ -2741,15 +2787,9 @@ SP.refreshStructuralSummary = async () => {
   SP.renderSpaceInfo();
 };
 
-SP.structuralBed = () => {
-  const read = id => Number(document.getElementById(id)?.value);
-  const x = read("space-structural-bed-x");
-  const y = read("space-structural-bed-y");
-  return { bed_x_mm: Number.isFinite(x) && x > 0 ? x : undefined, bed_y_mm: Number.isFinite(y) && y > 0 ? y : undefined };
-};
-
 SP.runStructural = async (mode, event) => {
   const kind = SP.structuralKind();
+  if (kind === "storage_drawers") return SP.runCabinetStructural(mode);
   if (!kind || SP.structuralBusy) return;
   const label = SP.structuralLabel(kind);
   const hosted = Boolean(state.runtime.hosted);
@@ -2775,7 +2815,8 @@ SP.runStructural = async (mode, event) => {
   const space = clone(state.activeSpace);
   const payload = {
     space, output: state.output,
-    ...(kind === "base_trim" ? SP.structuralBed() : {}),
+    // Base Trim's bed is the one global printer profile; hosted supplies it.
+    ...(kind === "base_trim" && hosted ? { printer_profile: PrinterProfile.current() } : {}),
     ...(jointTest ? { joint_test_sample: true } : {}),
   };
   SP.structuralBusy = true;
@@ -2819,8 +2860,9 @@ SP.renderStructuralActions = () => {
   const box = document.getElementById("space-structural");
   if (!box) return;
   const kind = SP.structuralKind();
-  box.hidden = !kind;
-  if (!kind) return;
+  // The cabinet's Save/Print live in its workspace panel.
+  box.hidden = !kind || kind === "storage_drawers";
+  if (!kind || kind === "storage_drawers") return;
   const label = SP.structuralLabel(kind);
   const save = document.getElementById("space-structural-save");
   const print = document.getElementById("space-structural-print");
@@ -2830,8 +2872,6 @@ SP.renderStructuralActions = () => {
   save.disabled = SP.structuralBusy;
   print.disabled = SP.structuralBusy || hosted;
   print.title = hosted ? SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP : "";
-  const bed = document.getElementById("space-structural-bed");
-  if (bed) bed.hidden = kind !== "base_trim";
   const makeInsideBin = document.getElementById("space-make-inside-bin");
   if (makeInsideBin) makeInsideBin.hidden = kind !== "storage_box";
 };
@@ -2916,6 +2956,13 @@ SP.renderSpaceInfo = () => {
         const z = state.activeSpace.z;
         actualText = `${x} × ${y} mm`;
         usableText = `${fmt(x / unit)} × ${fmt(y / unit)} units, ${z} mm usable height`;
+    } else if (kind === "storage_drawers") {
+        // Never the compatibility z: the outside size comes from the server
+        // summary once it is already known.
+        const outside = SP.cabinetInfo.summary?.outside_xyz;
+        actualText = Array.isArray(outside) && outside.length === 3
+            ? `${outside.map(fmt).join(" × ")} mm` : "";
+        usableText = SP.storageDrawersSummaryText(state.activeSpace);
     } else if (kind === "pegboard") {
         const standard = SP.pegboardStandard(state.activeSpace.pegboard_standard);
         actualText = `${fmt(state.activeSpace.x)} × ${fmt(state.activeSpace.y)} mm`;
@@ -2939,6 +2986,7 @@ SP.renderSpaceInfo = () => {
     const btnShow = document.getElementById("space-head-show");
     if (btnShow) btnShow.hidden = state.runtime.hosted;
     SP.renderStructuralActions();
+    SP.updateCabinetWorkspace?.();
 };
 
 SP.showFolder = async () => {
@@ -2999,26 +3047,22 @@ const wireInfoButtons = (prefix = "space-head") => {
     if (btnPrint) btnPrint.addEventListener("click", SP.printStructural);
     const btnMakeInsideBin = document.getElementById("space-make-inside-bin");
     if (btnMakeInsideBin) btnMakeInsideBin.addEventListener("click", designerMakeInsideBin);
-    ["space-structural-bed-x", "space-structural-bed-y"].forEach(id => {
-        const input = document.getElementById(id);
-        if (!input) return;
-        try {
-            const saved = JSON.parse(localStorage.getItem("wavefinity-base-trim-bed") || "{}");
-            if (Number(saved[id]) > 0) input.value = String(saved[id]);
-        } catch (_error) {}
-        input.addEventListener("change", () => {
-            try {
-                const saved = JSON.parse(localStorage.getItem("wavefinity-base-trim-bed") || "{}");
-                localStorage.setItem("wavefinity-base-trim-bed", JSON.stringify({ ...saved, [id]: Number(input.value) }));
-            } catch (_error) {}
-        });
-    });
 };
 
 SP.updateSpace = async () => {
     const values = SP.readSetupValues();
     if (!values) return;
     const { kind, name, x, y, z, trimSize, extra = {} } = values;
+    if (kind === "storage_drawers") {
+        // Edit goes through the serialized cabinet mutation, which checks every
+        // current placement before Inventory or metadata is committed.
+        await SP.mutateCabinet("reconfigure", {
+          space: { kind, name, x, y, z, storage_drawers: extra.storage_drawers },
+        });
+        SP.cancelInlineEdit();
+        toast("Space updated.");
+        return;
+    }
     const context = typeof DL !== "undefined" ? DL.spaceContext() : null;
     const requireCurrent = () => { if (context) DL.requireSpaceContext(context); };
     if (kind === "surface" && typeof DL !== "undefined" && DL.loaded && !(await DL.save())) {
@@ -3083,6 +3127,485 @@ SP.updateSpace = async () => {
 
 
 
+// ------------------------------------------------------------ Storage Drawers (Fix 084B)
+//
+// Thin adapters only: the cabinet's rules, planning, geometry and UI live in the
+// StorageDrawers / StorageDrawersForm / StorageDrawersWorkspace / PrinterProfile
+// modules and the server's Storage Drawers owners. Nothing here plans a cabinet.
+
+SP.ensureStorageDrawersRules = () => {
+  const catalog = state.catalog;
+  if (SP._sdRulesCatalog === catalog) return;
+  StorageDrawers.configureRules({
+    baseUnit: catalog?.base_unit,
+    minDrawerHeight: catalog?.drawer_rules?.ordinary_bin_min_height_mm,
+  });
+  SP._sdRulesCatalog = catalog;
+};
+
+SP.storageDrawersSummaryText = space => {
+  try {
+    SP.ensureStorageDrawersRules();
+    const [x, y] = StorageDrawers.unitCounts(space);
+    const count = StorageDrawers.drawerDescriptors(space).length;
+    return `${count} ${count === 1 ? "drawer" : "drawers"} · ${fmt(x)} × ${fmt(y)} units each`;
+  } catch (_error) {
+    return "";
+  }
+};
+
+// ---- global printer build volume (one runtime authority: PrinterProfile)
+
+SP._printerHosts = new Map();
+
+SP.mountPrinterProfiles = () => {
+  document.querySelectorAll("[data-printer-profile-host]").forEach(host => {
+    if (SP._printerHosts.has(host)) return;
+    const callbacks = state.runtime.hosted
+      ? { hosted: true, onError: error => toast(error.message, true, 6000) }
+      : {
+        write: async (_key, value) => {
+          const saved = await api("/api/space/printer-profile", { profile: value.profile });
+          PrinterProfile.loadLocal(saved);
+        },
+        onError: error => toast(error.message, true, 6000),
+      };
+    SP._printerHosts.set(host, PrinterProfile.mount(host, callbacks));
+  });
+};
+
+SP.initPrinterProfile = async () => {
+  try {
+    if (state.runtime.hosted) {
+      const loaded = await PrinterProfile.loadHosted();
+      if (!loaded.explicit) {
+        PrinterProfile.persistHosted(PrinterProfile.readLegacyBaseTrimSeed() || PrinterProfile.DEFAULT);
+      }
+      PrinterProfile.retireLegacyBaseTrim();
+    } else {
+      const local = await api("/api/space/printer-profile", {});
+      PrinterProfile.loadLocal(local);
+      if (!local.explicit) {
+        const seed = PrinterProfile.readLegacyBaseTrimSeed() || PrinterProfile.DEFAULT;
+        // The old Base Trim key is retired only after the new authority holds it.
+        const saved = await api("/api/space/printer-profile", { profile: { ...seed } });
+        PrinterProfile.loadLocal(saved);
+        PrinterProfile.retireLegacyBaseTrim();
+      }
+    }
+  } catch (error) {
+    toast(`Printer settings could not be loaded: ${error.message}`, true, 6000);
+  }
+  PrinterProfile.subscribe(profile => {
+    SP.storageDrawersForm?.setPrinterProfile(profile);
+    SP.cabinetInfo.key = "";
+    SP.updateCabinetWorkspace();
+  });
+  SP.mountPrinterProfiles();
+};
+
+// ---- Create / Edit form host
+
+SP.destroyStorageDrawersForm = () => {
+  SP.storageDrawersForm?.destroy();
+  SP.storageDrawersForm = null;
+};
+
+SP.mountStorageDrawersForm = (prefill, update) => {
+  SP.destroyStorageDrawersForm();
+  SP.ensureStorageDrawersRules();
+  let initial = null;
+  if (prefill?.kind === "storage_drawers") {
+    initial = clone(prefill);
+    if (!update) {
+      // A repeat-size template never inherits the old cabinet's drawer identities.
+      initial.storage_drawers.drawers = initial.storage_drawers.drawers.map(row => ({
+        temp_key: `temporary:${crypto.randomUUID()}`, height_mm: row.height_mm, label_text: row.label_text || "",
+      }));
+    }
+  }
+  const createToken = crypto.randomUUID();
+  SP.storageDrawersForm = StorageDrawersForm.mount({
+    host: document.getElementById("space-fields-storage_drawers"),
+    initialSpace: initial,
+    catalog: state.catalog,
+    printerProfile: PrinterProfile.current(),
+    mode: update ? "edit" : "create",
+    callbacks: {
+      identity: () => update ? (state.activeSpaceId || state.activeSpace?.name) : createToken,
+      requestSummary: ({ space, printer_profile }) => api("/api/space/storage-drawers-summary", {
+        space, ...(state.runtime.hosted ? { printer_profile } : {}),
+      }),
+    },
+  });
+};
+
+SP.readStorageDrawersSetup = () => {
+  const result = SP.storageDrawersForm?.read();
+  if (!result) {
+    SP.fail("Storage Drawers settings are not ready.", "#space-create");
+    return null;
+  }
+  if (!result.ok) {
+    SP.fail(result.message, result.focusId ? `#${result.focusId}` : "#space-create");
+    return null;
+  }
+  const draft = result.spaceDraft;
+  return {
+    kind: "storage_drawers", name: draft.name, x: draft.x, y: draft.y, z: draft.z, trimSize: null,
+    extra: { storage_drawers: draft.storage_drawers },
+  };
+};
+
+// ---- serialized cabinet mutation (Add / Delete / Edit-reconfigure)
+
+SP._cabinetController = null;
+SP._releaseCabinet = null;
+
+SP.cabinetController = () => {
+  if (!SP._cabinetController) {
+    SP._cabinetController = StorageDrawers.createMutationController({
+      captureContext: () => DL.spaceContext(),
+      settleLayout: async () => {
+        if (!(await SP.leaveDrawerLayoutSafely())) throw new Error("Save the current layout before changing the cabinet.");
+      },
+      isCurrent: context => DL.spaceContextCurrent(context),
+      // From here until the result is adopted, ordinary layout saves wait.
+      advanceLayoutEpoch: () => {
+        DL.cabinetMutationEpoch += 1;
+        DL.cabinetMutating = new Promise(resolve => { SP._releaseCabinet = resolve; });
+      },
+      mutate: (operation, payload) => SP.cabinetMutate(operation, payload),
+      adopt: result => SP.adoptCabinetResult(result),
+    });
+  }
+  return SP._cabinetController;
+};
+
+SP.mutateCabinet = async (operation, payload = {}) => {
+  try {
+    return await SP.cabinetController().run(operation, payload);
+  } finally {
+    if (SP._releaseCabinet) {
+      const release = SP._releaseCabinet;
+      SP._releaseCabinet = null;
+      DL.cabinetMutating = null;
+      release();
+    }
+  }
+};
+
+SP.cabinetMutate = async (operation, { drawer_id = null, space = null } = {}) => {
+  if (!state.runtime.hosted) {
+    return api("/api/space/storage-drawers-mutate", {
+      output: state.output, space_id: state.activeSpaceId, operation, drawer_id, space,
+    });
+  }
+  // Hosted twin: the browser folder is the transaction owner.
+  const folder = state.browserFolder;
+  const spaceId = state.activeSpaceId;
+  const filename = SP.inventoryFilenameFor(folder);
+  const inventoryText = await SP.readInventoryFor(folder, { migrate: true });
+  const { current } = await SP.readMetadata(folder.handle);
+  const meta = SP.classifyMetadata(current);
+  if (meta.status !== "space" || meta.space_id !== spaceId) {
+    throw new Error("This folder is not the Space that was open before. Nothing was changed.");
+  }
+  const result = await api("/api/space/storage-drawers-mutate-text", {
+    inventory_text: inventoryText, inventory_title: meta.space.name, operation, drawer_id, space,
+  });
+  await WFFileSystem.writeText(folder.handle, filename, result.inventory_text);
+  try {
+    await SP.writeMetadata(folder.handle, "space", result.space, true, {}, { expectedSpaceId: spaceId });
+  } catch (error) {
+    await WFFileSystem.writeText(folder.handle, filename, inventoryText);
+    throw error;
+  }
+  return result;
+};
+
+SP.adoptCabinetResult = result => {
+  const keepRow = DL.selectedRow;
+  state.activeSpace = result.space;
+  DL.adopt(result);
+  DL.normaliseLayout(result.layout);
+  DL.reconcileCabinet();
+  DL.history = [];
+  DL.future = [];
+  DL.dirty = false;
+  DL.selected = null;
+  DL.selectedRow = keepRow && DL.bin(keepRow) ? keepRow : null;
+  DL.saveState = "saved";
+  DL.prune();
+  DL.clearSpacerPlan();
+  SP.cabinetInfo.key = "";
+  DL.emit();
+  DL.requestReport();
+  if (typeof DV !== "undefined") DV.fit();
+  SP.renderSpaceInfo();
+};
+
+SP.cabinetAdd = async () => {
+  try {
+    await SP.mutateCabinet("add");
+    toast("Drawer added.");
+  } catch (error) {
+    if (!DL.isStaleSpaceError(error)) toast(error.message, true, 6000);
+  }
+};
+
+SP.cabinetDelete = async drawerId => {
+  const rows = StorageDrawers.drawerDescriptors(state.activeSpace);
+  const index = rows.findIndex(row => row.id === drawerId);
+  if (index < 0 || rows.length <= 1) return;
+  if (DL.layout.drawers.find(one => one.id === drawerId)?.placements?.length) {
+    toast(`Empty Drawer ${index + 1} before deleting it.`, true, 5000);
+    return;
+  }
+  const ok = await appConfirmAction({
+    title: `Delete Drawer ${index + 1}?`,
+    message: `Delete Drawer ${index + 1}? It is removed from the cabinet.`,
+    actionLabel: "Delete Drawer",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await SP.mutateCabinet("delete", { drawer_id: drawerId });
+  } catch (error) {
+    if (!DL.isStaleSpaceError(error)) toast(error.message, true, 6000);
+  }
+};
+
+// ---- workspace navigator (mounted into the Space canvas host)
+
+SP.cabinetInfo = { key: "", summary: null, status: null, commitSerial: 0 };
+SP.cabinetWorkspace = null;
+
+SP.cabinetJumpToRow = async rowId => {
+  if (!DL.isStorageDrawers() || !SP.cabinetWorkspace) return false;
+  return SP.cabinetWorkspace.jumpToInventoryRow(rowId);
+};
+
+SP.cabinetCallbacks = () => ({
+  addDrawer: () => SP.cabinetAdd(),
+  deleteDrawer: drawerId => SP.cabinetDelete(drawerId),
+  saveCabinet: () => SP.runStructural("save"),
+  printCabinet: event => SP.runStructural("print", event),
+  setActiveDrawer: async id => {
+    DL.change(() => { DL.layout.active = id; }, { history: false });
+    DL.selected = null;
+    DL.emit();
+  },
+  clearCanvasPlacementSelection: () => { DL.selected = null; DL.emit(); },
+  selectedRow: () => DL.selectedRow,
+  clearSelectedRow: () => { DL.selectedRow = null; DL.emit(); },
+  selectRow: rowId => DL.selectRow(rowId),
+  revealPlacement: rowId => { DL.selectRow(rowId); DV.revealRow(rowId); },
+  reframeCamera: () => DV.fit(),
+});
+
+SP.updateCabinetWorkspace = () => {
+  const host = document.getElementById("sd-workspace-host");
+  if (!host) return;
+  const active = state.folderMode === "space" && DL.isStorageDrawers() && Boolean(DL.layout);
+  host.hidden = !active;
+  if (!active) {
+    SP.cabinetWorkspace?.destroy();
+    SP.cabinetWorkspace = null;
+    return;
+  }
+  try {
+    SP.ensureStorageDrawersRules();
+    const data = {
+      space: state.activeSpace, layout: DL.layout, editing: Boolean(SP.editing),
+      structuralStatus: SP.cabinetInfo.status, summary: SP.cabinetInfo.summary,
+    };
+    if (!SP.cabinetWorkspace) {
+      SP.cabinetWorkspace = StorageDrawersWorkspace.mount({ host, state: data, callbacks: SP.cabinetCallbacks() });
+    } else {
+      SP.cabinetWorkspace.update(data);
+    }
+    // Hosted Wavefinity has no local slicer: Print stays disabled, never a Save.
+    const buttons = host.querySelectorAll(".sd-structural button");
+    if (state.runtime.hosted && buttons[1]) {
+      buttons[1].disabled = true;
+      buttons[1].title = SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP;
+    }
+    SP.refreshCabinetStructural();
+  } catch (error) {
+    console.error("Storage Drawers workspace", error);
+  }
+};
+
+// The cabinet's fit summary and saved-file status. Local status comes from the
+// real files on disk; hosted status is recomputed from the committed browser
+// manifest and the actual files in the chosen folder - never from a server temp.
+SP.refreshCabinetStructural = async () => {
+  if (!DL.isStorageDrawers() || !state.activeSpace) return;
+  const hosted = Boolean(state.runtime.hosted);
+  const profile = PrinterProfile.current();
+  const key = JSON.stringify([state.activeSpace, profile, state.activeSpaceId, SP.cabinetInfo.commitSerial]);
+  if (SP.cabinetInfo.key === key) return;
+  SP.cabinetInfo = { ...SP.cabinetInfo, key };
+  try {
+    const result = await api("/api/space/structural-design", {
+      space: clone(state.activeSpace),
+      ...(hosted ? { printer_profile: profile } : { output: state.output, space_id: state.activeSpaceId }),
+    });
+    if (SP.cabinetInfo.key !== key) return;
+    SP.cabinetInfo.summary = result.summary;
+    SP.cabinetInfo.status = hosted ? await SP.hostedCabinetStatus(result.signature) : result.status;
+  } catch (error) {
+    if (SP.cabinetInfo.key !== key) return;
+    SP.cabinetInfo.summary = { fits_printer: false, first_fit_error: error.message };
+    SP.cabinetInfo.status = { status: "need_save" };
+  }
+  if (SP.cabinetInfo.key === key) SP.updateCabinetWorkspace();
+};
+
+SP.hostedCabinetStatus = async signature => {
+  const handle = state.browserFolder?.handle;
+  if (!handle) return { status: "need_save" };
+  const { current } = await SP.readMetadata(handle);
+  const manifest = SP.classifyMetadata(current).structural_outputs?.storage_drawers;
+  if (!manifest?.components?.length) return { status: "need_save" };
+  if (manifest.signature !== signature) return { status: "need_update" };
+  for (const component of manifest.components) {
+    if ((await WFFileSystem.sha256(handle, component.filename)) !== component.sha256) return { status: "need_save" };
+  }
+  return { status: "saved" };
+};
+
+// ---- structural Save / Print for the cabinet
+
+SP.runCabinetStructural = async mode => {
+  if (SP.structuralBusy) return;
+  const hosted = Boolean(state.runtime.hosted);
+  if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
+  if (mode === "print" && hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
+  if (mode === "print" && !state.slicer?.available) {
+    toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
+    return;
+  }
+  const context = DL.spaceContext();
+  const payload = {
+    space: clone(state.activeSpace),
+    ...(hosted ? { printer_profile: PrinterProfile.current() } : { output: state.output, space_id: state.activeSpaceId }),
+  };
+  const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\/]/).pop()))].join("\n");
+  SP.structuralBusy = true;
+  SP.renderSpaceInfo();
+  try {
+    let saved;
+    if (mode === "print") {
+      const result = await api("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
+      DL.requireSpaceContext(context);
+      if (result.partial) {
+        toast(result.error || "Cabinet files were saved, but the slicer did not open.", true, 8000);
+      } else {
+        toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\n${names(result.files)}`, false, 7000);
+      }
+      saved = result;
+    } else if (hosted) {
+      saved = await SP.hostedCabinetSave(payload, context);
+      DL.requireSpaceContext(context);
+      toast(`Saved cabinet files\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false, 8000);
+    } else {
+      saved = await api("/api/space/structural-generate", payload);
+      DL.requireSpaceContext(context);
+      toast(`Saved cabinet to ${saved.output || state.output}\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false, 8000);
+    }
+  } catch (error) {
+    if (DL.isStaleSpaceError(error)) {
+      toast("Cabinet files finished for the Space you left. Nothing was changed in the current Space.");
+    } else {
+      toast(error.message, true, 8000);
+    }
+  } finally {
+    SP.structuralBusy = false;
+    SP.cabinetInfo.commitSerial += 1;
+    SP.renderSpaceInfo();
+  }
+};
+
+// Hosted Save Cabinet: the browser folder owns the file transaction. Every
+// candidate file is downloaded and verified first, only files this cabinet
+// already owns (same bytes as its committed manifest) are replaced, and the
+// manifest is committed only after every write succeeded; any earlier failure
+// restores the prior bytes and removes newly created files.
+SP.hostedCabinetSave = async (payload, context) => {
+  const handle = state.browserFolder.handle;
+  const spaceId = state.activeSpaceId;
+  const exported = await api("/api/space/structural-generate", payload);
+  DL.requireSpaceContext(context);
+  const candidate = exported.manifest;
+  if (!candidate?.components?.length) throw new Error("The server did not return the cabinet files.");
+  const { current } = await SP.readMetadata(handle);
+  const meta = SP.classifyMetadata(current);
+  if (meta.status !== "space" || meta.space_id !== spaceId) {
+    throw new Error("This folder is not the Space that was open before. Nothing was changed.");
+  }
+  const prior = meta.structural_outputs?.storage_drawers || null;
+  const owned = new Map((prior?.components || []).map(one => [one.filename, one]));
+
+  const blobs = new Map();
+  for (const item of exported.files || []) {
+    const response = await fetch(item.url);
+    if (!response.ok) throw new Error(`Could not download ${item.name}.`);
+    blobs.set(item.name, await response.blob());
+  }
+  for (const component of candidate.components) {
+    const blob = blobs.get(component.filename);
+    if (!blob || (await WFFileSystem.sha256Blob(blob)) !== component.sha256) {
+      throw new Error("A cabinet file did not download correctly. Nothing was changed.");
+    }
+  }
+  for (const component of candidate.components) {
+    const existing = await WFFileSystem.sha256(handle, component.filename);
+    if (existing === null) continue;
+    if (owned.get(component.filename)?.sha256 !== existing) {
+      throw new Error(`${component.filename} changed outside Wavefinity; rename or move it before updating the cabinet.`);
+    }
+  }
+  const backups = new Map();
+  const created = [];
+  for (const component of candidate.components) {
+    const old = await WFFileSystem.readBlob(handle, component.filename);
+    if (old) backups.set(component.filename, new Blob([await old.arrayBuffer()]));
+    else created.push(component.filename);
+  }
+  try {
+    for (const component of candidate.components) {
+      await WFFileSystem.writeBlob(handle, component.filename, blobs.get(component.filename));
+    }
+    await SP.writeMetadata(handle, "space", null, true, {
+      structural_output_updates: { storage_drawers: candidate },
+    }, { preserveSpace: true, expectedSpaceId: spaceId });
+  } catch (error) {
+    for (const [name, blob] of backups) {
+      try { await WFFileSystem.writeBlob(handle, name, blob); } catch (_restore) { /* best effort */ }
+    }
+    for (const name of created) {
+      try { await WFFileSystem.removeFile(handle, name); } catch (_remove) { /* best effort */ }
+    }
+    throw error;
+  }
+  const warnings = [...(exported.warnings || [])];
+  const desired = new Set(candidate.components.map(one => one.filename));
+  for (const [name, old] of owned) {
+    if (desired.has(name)) continue;
+    try {
+      const hash = await WFFileSystem.sha256(handle, name);
+      if (hash === null) continue;
+      if (hash === old.sha256) await WFFileSystem.removeFile(handle, name);
+      else warnings.push(`${name} changed outside Wavefinity; left in place without cabinet ownership`);
+    } catch (_error) {
+      warnings.push(`Could not remove old cabinet file ${name}; remove it manually`);
+    }
+  }
+  return { files: [...desired], warnings };
+};
+
 // Startup must come after every SP.* helper it (transitively) depends on -
 // SP.wire, wireInfoButtons, SP.updateReadouts, SP.renderSpaceInfo,
 // and everything SP.launch()/SP.wire() call - is defined,
@@ -3091,6 +3614,8 @@ SP.updateSpace = async () => {
 // before it exists - see Fix 004 Correction 8.A.
 const startSpaces = async () => {
   try {
+    try { SP.ensureStorageDrawersRules(); } catch (_error) { /* catalog unavailable: validated lazily */ }
+    await SP.initPrinterProfile();
     SP.wire();
     // The routing decision - saved folder / Welcome / Resume / setup - is
     // made first, behind the startup cover the initial HTML already shows.

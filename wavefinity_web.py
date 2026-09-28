@@ -151,13 +151,45 @@ from organizer_product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
     ORDINARY_BIN_MIN_HEIGHT_MM,
 )
-from organizer_space_outputs import BASE_TRIM, STORAGE_BOX, structural_design, structural_kind
+from organizer_space_outputs import (
+    BASE_TRIM, STORAGE_BOX, STORAGE_DRAWERS, structural_design, structural_kind,
+)
+from organizer_inventory import storage_drawers_mutate_text
+from organizer_printer_profile import (
+    DEFAULT_PRINTER_BUILD_MM,
+    normalise_printer_profile,
+    printer_profile_from_preferences,
+)
+from organizer_storage_drawers import (
+    STORAGE_DRAWER_FIT_CHOICES,
+    STORAGE_DRAWER_FIT_DEFAULT,
+    STORAGE_DRAWER_FRAME_WIDTH_CHOICES,
+    STORAGE_DRAWER_FRAME_WIDTH_DEFAULT,
+    STORAGE_DRAWER_LABEL_LIMIT,
+    STORAGE_DRAWERS_MAX_DRAWERS,
+    STORAGE_DRAWERS_MAX_UNITS,
+    STORAGE_DRAWERS_MIN_DRAWERS,
+    STORAGE_DRAWERS_MIN_UNITS,
+    normalise_storage_drawers_definition,
+)
+from organizer_storage_drawer_geometry import storage_drawers_summary
+from organizer_storage_drawer_outputs import (
+    STRUCTURAL_OUTPUT_KEY,
+    materialize_storage_drawers,
+    structural_manifest_plan,
+    structural_signature,
+    structural_status,
+)
+from organizer_product_rules import STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
 from organizer_spaces import (
+    commit_structural_output,
     default_space_parent,
+    describe as describe_space_folder,
     effective_space_root,
     inventory_enabled,
     space_routes,
     storage_startup_state,
+    structural_output_manifest,
 )
 from organizer_app import (
     LABEL_POSITIONS,
@@ -1087,6 +1119,19 @@ def catalog_payload() -> dict[str, Any]:
             ],
             "default_label_relief_mm": 0.4,
             "legacy_raised_label_relief_mm": LID_LABEL_LEGACY_RAISED_MM,
+        },
+        "storage_drawers_rules": {
+            "default_usable_height_mm": STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM,
+            "min_units": STORAGE_DRAWERS_MIN_UNITS,
+            "max_units": STORAGE_DRAWERS_MAX_UNITS,
+            "min_drawers": STORAGE_DRAWERS_MIN_DRAWERS,
+            "max_drawers": STORAGE_DRAWERS_MAX_DRAWERS,
+            "drawer_fit_choices_mm": list(STORAGE_DRAWER_FIT_CHOICES),
+            "default_drawer_fit_mm": STORAGE_DRAWER_FIT_DEFAULT,
+            "frame_width_choices_mm": list(STORAGE_DRAWER_FRAME_WIDTH_CHOICES),
+            "default_frame_width_mm": STORAGE_DRAWER_FRAME_WIDTH_DEFAULT,
+            "label_limit": STORAGE_DRAWER_LABEL_LIMIT,
+            "default_printer_build_mm": list(DEFAULT_PRINTER_BUILD_MM),
         },
         "b4b_rules": {
             "grid_pitch_mm": GRID_PITCH,
@@ -2955,7 +3000,7 @@ def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if "trim_size" in payload:
         raw_def["trim_size"] = payload["trim_size"]
-    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box"):
+    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
         if key in payload:
             raw_def[key] = payload[key]
     return configure_space_text(
@@ -2974,7 +3019,7 @@ def configure_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if "trim_size" in payload:
         raw_def["trim_size"] = payload["trim_size"]
-    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box"):
+    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
         if key in payload:
             raw_def[key] = payload[key]
     return configure_space_text(
@@ -3424,21 +3469,121 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _printer_profile_for(payload: dict[str, Any]) -> dict[str, float]:
+    """The one printer build volume. Hosted servers do not own the user's
+    profile, so the browser supplies it; local reads the saved preferences."""
+    if HOSTED:
+        raw = payload.get("printer_profile")
+        return normalise_printer_profile(raw or dict(zip(("x_mm", "y_mm", "z_mm"), DEFAULT_PRINTER_BUILD_MM)))
+    return printer_profile_from_preferences(load_preferences())
+
+
 def _structural_request(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     """The kind and transient design for the Space definition in ``payload``."""
     space = payload.get("space")
     kind = structural_kind(space if isinstance(space, dict) else None)
-    if kind is None:
+    if kind is None or kind == STORAGE_DRAWERS:
         raise ValueError("This Space type has no structural output.")
-    design = structural_design(
-        space, bed_x_mm=payload.get("bed_x_mm"), bed_y_mm=payload.get("bed_y_mm"),
-    )
+    profile = _printer_profile_for(payload)
+    design = structural_design(space, bed_x_mm=profile["x_mm"], bed_y_mm=profile["y_mm"])
     return kind, design
+
+
+def _is_storage_drawers_request(payload: dict[str, Any]) -> bool:
+    space = payload.get("space")
+    return structural_kind(space if isinstance(space, dict) else None) == STORAGE_DRAWERS
+
+
+def storage_drawers_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Read-only cabinet summary for a draft or saved definition."""
+    space = payload.get("space")
+    if not isinstance(space, dict):
+        raise ValueError("Storage Drawers settings are missing.")
+    return storage_drawers_summary(space, _printer_profile_for(payload))
+
+
+def storage_drawers_mutate_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Hosted twin of the cabinet mutation: pure over the supplied Inventory text."""
+    return storage_drawers_mutate_text(
+        payload.get("inventory_text") or "",
+        title=str(payload.get("inventory_title") or "Wavefinity"),
+        operation=str(payload.get("operation") or ""),
+        drawer_id=payload.get("drawer_id"), proposed=payload.get("space"),
+    )
+
+
+def _local_cabinet_folder(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], str]:
+    """The real Space folder, its authoritative typed Space, and its identity."""
+    folder = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
+    info = describe_space_folder(folder, load_preferences())
+    space = info.get("space")
+    if info["folder_mode"] != "space" or not isinstance(space, dict) or space.get("kind") != "storage_drawers":
+        raise ValueError("This folder is not a Storage Drawers Space.")
+    expected = payload.get("space_id")
+    if expected and info["space_id"] != expected:
+        raise ValueError("This folder is not the Space that was open before. Nothing was changed.")
+    return folder, space, info["space_id"]
+
+
+def _storage_drawers_structural_design(payload: dict[str, Any]) -> dict[str, Any]:
+    space = normalise_storage_drawers_definition(payload["space"])
+    profile = _printer_profile_for(payload)
+    reply: dict[str, Any] = {
+        "kind": STORAGE_DRAWERS, "design": None,
+        "summary": storage_drawers_summary(space, profile),
+        "signature": structural_signature(space),
+        "printer_profile": profile,
+    }
+    if not HOSTED and payload.get("output"):
+        folder, _saved, _space_id = _local_cabinet_folder(payload)
+        reply["status"] = structural_status(
+            space, structural_output_manifest(folder, STRUCTURAL_OUTPUT_KEY), folder,
+        )
+        reply["manifest_plan"] = structural_manifest_plan(space, folder, profile)
+    return reply
+
+
+def _materialize_local_cabinet(payload: dict[str, Any]) -> dict[str, Any]:
+    """Write every cabinet file, then commit the manifest under the metadata lock."""
+    folder, space, space_id = _local_cabinet_folder(payload)
+    profile = _printer_profile_for(payload)
+    with GEOMETRY_LOCK:
+        result = materialize_storage_drawers(
+            space, folder, profile, structural_output_manifest(folder, STRUCTURAL_OUTPUT_KEY),
+        )
+    commit_structural_output(
+        folder, STRUCTURAL_OUTPUT_KEY, result["manifest"], expected_space_id=space_id,
+    )
+    return {
+        "output": str(folder), "files": [str(one) for one in result["files"]],
+        "manifest": result["manifest"], "warnings": result["warnings"],
+        "status": {"status": "saved"},
+    }
+
+
+def _hosted_cabinet_export(payload: dict[str, Any]) -> dict[str, Any]:
+    """Generate every candidate file in a temporary export; the browser folder
+    owns the final write and the manifest commit."""
+    space = normalise_storage_drawers_definition(payload["space"])
+    output = _generation_output(payload)
+    try:
+        with GEOMETRY_LOCK:
+            result = materialize_storage_drawers(space, output, _printer_profile_for(payload), None)
+    except Exception:
+        shutil.rmtree(output, ignore_errors=True)
+        raise
+    return _generation_reply(
+        result={"components": [{"output": str(one)} for one in result["files"]]},
+        output=output,
+        extra={"manifest": result["manifest"], "warnings": result["warnings"]},
+    )
 
 
 def structural_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """A Space's structural output design and a plain size summary. Read-only:
     never touches an Inventory."""
+    if _is_storage_drawers_request(payload):
+        return _storage_drawers_structural_design(payload)
     kind, design = _structural_request(payload)
     if kind == STORAGE_BOX:
         box = design_from_dict(design)[0]
@@ -3449,7 +3594,9 @@ def structural_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def structural_generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Save a Space's Storage Box or Base Trim files. Never logs an Inventory row."""
+    """Save a Space's Storage Box, Base Trim or cabinet files. Never logs an Inventory row."""
+    if _is_storage_drawers_request(payload):
+        return _hosted_cabinet_export(payload) if HOSTED else _materialize_local_cabinet(payload)
     _kind, design = _structural_request(payload)
     return generate_payload(
         {
@@ -3461,7 +3608,7 @@ def structural_generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def structural_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Send a Space's Storage Box or Base Trim to the slicer. Never logs an Inventory row.
+    """Send a Space's Storage Box, Base Trim or cabinet to the slicer. Never logs an Inventory row.
 
     Fix 056 D: a hidden ``joint_test_sample`` flag (Ctrl+Shift+click on Print
     Base Trim) swaps in the existing production joint-fit sample instead of
@@ -3469,6 +3616,23 @@ def structural_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     request for a Storage Box is ignored rather than routed to unrelated
     geometry.
     """
+    if _is_storage_drawers_request(payload):
+        if HOSTED:
+            raise ValueError("Hosted Wavefinity saves generated files to your selected folder instead.")
+        slicer_path = detect_bambu_studio(payload.get("slicer_path"))
+        if slicer_path is None or not slicer_path.is_file():
+            raise ValueError(
+                "Bambu Studio was not found. Please locate your Bambu Studio executable in settings or install Bambu Studio."
+            )
+        saved = _materialize_local_cabinet(payload)
+        try:
+            project_path = launch_slicer(slicer_path, [Path(one) for one in saved["files"]])
+        except Exception as error:
+            return {
+                **saved, "partial": True, "partial_stage": "slicer",
+                "error": f"Files were saved, but Bambu Studio did not open: {error}",
+            }
+        return {**saved, "slicer": str(slicer_path), "project": str(project_path) if project_path else None}
     kind, design = _structural_request(payload)
     joint_test = kind == BASE_TRIM and bool(payload.get("joint_test_sample"))
     return print_payload({
@@ -3504,7 +3668,7 @@ def ai_feature_reference_url() -> str:
 
 AI_MAX_DESCRIPTION = 4000
 AI_MAX_RESPONSE = 400_000
-AI_SPACE_KINDS = ("drawer", "box", "surface", "portable", "pegboard")
+AI_SPACE_KINDS = ("drawer", "box", "surface", "portable", "pegboard", "storage_drawers")
 # Capabilities a text-only AI cannot legally supply. They are offered to the
 # person as a recommendation, never as something the returned JSON may contain.
 AI_MEDIA_CAPABILITIES = ("photo",)
@@ -3788,6 +3952,7 @@ def ai_capability_manifest() -> dict[str, Any]:
             "drawer": "X/Y must fit the drawer opening in whole base units; height must not exceed the drawer height.",
             "box": "Height must not exceed the Space height; X/Y must fit the Space.",
             "portable": "Height must not exceed the Space height; X/Y must fit the Space.",
+            "storage_drawers": "The Space values are the selected physical drawer's usable X/Y/height; the bin must fit inside it. Never design or return cabinet structure.",
             "surface": "Base thickness and base mode are Space-controlled; keep them exactly as given.",
             "pegboard": "Keep box.pegboard exactly as given (it is the Space's mounting); stay at or above the pegboard minimum height.",
             "pegboard_rules": catalog["pegboard_rules"],
@@ -3845,7 +4010,7 @@ def _ai_space_context(raw: Any) -> dict[str, Any]:
     space: dict[str, Any] = {"typed_space": True, "kind": raw["kind"]}
     # Fix 078: Drawer and Storage Box (current `portable`, legacy `box`) are a
     # hard vertical ceiling at their Space z; Surface and Pegboard are not.
-    space["capped"] = raw["kind"] in ("drawer", "box", "portable")
+    space["capped"] = raw["kind"] in ("drawer", "box", "portable", "storage_drawers")
     for axis in ("x", "y", "z"):
         value = raw.get(axis)
         if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
@@ -3863,7 +4028,7 @@ def _ai_space_context(raw: Any) -> dict[str, Any]:
 
 
 def _capped_space_height(raw: Any) -> float | None:
-    if not isinstance(raw, dict) or raw.get("kind") not in ("drawer", "portable", "box"):
+    if not isinstance(raw, dict) or raw.get("kind") not in ("drawer", "portable", "box", "storage_drawers"):
         return None
     z = raw.get("z")
     return float(z) if isinstance(z, (int, float)) and not isinstance(z, bool) and math.isfinite(z) else None
@@ -4251,6 +4416,8 @@ POST_ROUTES = {
     "/api/space/structural-design": structural_design_payload,
     "/api/space/structural-generate": structural_generate_payload,
     "/api/space/structural-print": structural_print_payload,
+    "/api/space/storage-drawers-summary": storage_drawers_summary_payload,
+    "/api/space/storage-drawers-mutate-text": storage_drawers_mutate_text_payload,
     "/api/preferences": preferences_payload,
     "/api/space/show-folder": show_folder_payload,
     "/api/browse-output-folder": browse_output_folder_payload,

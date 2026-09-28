@@ -180,10 +180,33 @@ window.WFFileSystem = (() => {
     await handle.removeEntry(filename);
   };
 
+  // Structural-output ownership (Fix 084B): read a file back as a Blob (null if
+  // absent) and fingerprint it, so Wavefinity only ever replaces bytes it wrote.
+  const readBlob = async (handle, filename) => {
+    await requireWritableFolder(handle);
+    try {
+      return await (await handle.getFileHandle(filename)).getFile();
+    } catch (error) {
+      if (error.name === "NotFoundError") return null;
+      throw error;
+    }
+  };
+
+  const sha256Blob = async blob => {
+    const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  };
+
+  const sha256 = async (handle, filename) => {
+    const blob = await readBlob(handle, filename);
+    return blob ? sha256Blob(blob) : null;
+  };
+
   return {
     supportsDirectoryPicker, pickDirectory,
     queryReadWritePermission, requestReadWritePermission,
     writeBlob, writeText, readText, fileExists, listFilenames, removeFile,
+    readBlob, sha256, sha256Blob,
     save, load,
   };
 })();

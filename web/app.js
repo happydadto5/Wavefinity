@@ -699,11 +699,43 @@ function pegboardProductMinimums(standard) {
 // and height rules clamp them - a remembered value that no longer fits is
 // normalized, never turned into an invalid bin. With nothing remembered the
 // product starter sizing applies unchanged.
+// The selected physical drawer's usable X/Y/height for a Storage Drawers Space.
+function cabinetActiveLimits() {
+  if (state.activeSpace?.kind !== "storage_drawers" || typeof StorageDrawers === "undefined") return {};
+  try {
+    if (typeof SP !== "undefined") SP.ensureStorageDrawersRules();
+    return StorageDrawers.activeDrawerLimits(state.activeSpace, typeof DL !== "undefined" ? DL.layout : null);
+  } catch (_error) {
+    return {};
+  }
+}
+
+// The first time a cabinet's layout loads, an untouched starter bin is
+// re-sized to the drawer that is actually active (startup builds the starter
+// before the persisted active drawer is known). A resumed, bound or edited
+// design is never resized, and later drawer switches never resize anything.
+function reseedCabinetStarterAfterLayoutLoad() {
+  if (state.activeSpace?.kind !== "storage_drawers" || state.cabinetStarterSeededFor === state.activeSpaceId) return;
+  state.cabinetStarterSeededFor = state.activeSpaceId;
+  if (state.designInventoryId || state.spaceResumeDesign || state.spaceResumePending) return;
+  if (JSON.stringify(state.design) !== JSON.stringify(state.cleanDesign)) return;
+  const next = freshDesignForCurrentFolder();
+  if (JSON.stringify(next.box) === JSON.stringify(state.design.box)) return;
+  state.design = next;
+  state.cleanDesign = clone(next);
+  if (typeof syncForm === "function") syncForm();
+  if (typeof refreshPreview === "function") refreshPreview();
+}
+
 function applySpaceSizingDefaults(design, remembered = null) {
   if (state.folderMode !== "space" || !state.activeSpace) return design;
 
   const kind = state.activeSpace.kind;
-  const space = state.activeSpace;
+  // Storage Drawers: the physical drawer being designed for, never the
+  // cabinet's compatibility total.
+  const space = kind === "storage_drawers"
+    ? { ...state.activeSpace, ...cabinetActiveLimits() }
+    : state.activeSpace;
   const unit = state.catalog?.base_unit || 8;
   const rememberedBox = plainObject(remembered?.box) ? remembered.box : {};
   const rememberedLayout = plainObject(remembered?.layout) ? remembered.layout : {};
@@ -750,7 +782,7 @@ function applySpaceSizingDefaults(design, remembered = null) {
         ? Math.round(rememberedZ * 10) / 10
         : roundUpHalfMm(exactMinimum);
     }
-  } else if (kind === "portable" || kind === "box") {
+  } else if (kind === "portable" || kind === "box" || kind === "storage_drawers") {
     design.box.z = normalizeBinDimension(
       "z", haveRememberedZ ? Math.min(space.z, rememberedZ) : space.z,
     );
@@ -1237,8 +1269,9 @@ class AiHelpError extends Error {
 function aiSpaceContext() {
   const space = state.folderMode === "space" ? state.activeSpace : null;
   if (!space) return null;
+  const limits = space.kind === "storage_drawers" ? cabinetActiveLimits() : {};
   const context = {
-    kind: space.kind, x: space.x, y: space.y, z: space.z,
+    kind: space.kind, x: limits.x ?? space.x, y: limits.y ?? space.y, z: limits.z ?? space.z,
     trim_size: space.trim_size, pegboard_standard: space.pegboard_standard,
   };
   if (space.kind === "pegboard") {
@@ -1333,8 +1366,9 @@ function aiSpaceViolation(design, baseline) {
   if (box.x > maxX + 1e-6 || box.y > maxY + 1e-6) {
     return `The bin is ${fmt(box.x)} x ${fmt(box.y)} mm but this Space fits at most ${fmt(maxX)} x ${fmt(maxY)} mm.`;
   }
-  if (["drawer", "portable", "box"].includes(kind) && box.z > number(space.z, Infinity) + 1e-6) {
-    return `The bin is ${fmt(box.z)} mm tall but this Space is only ${fmt(space.z)} mm tall.`;
+  const spaceZ = kind === "storage_drawers" ? (cabinetActiveLimits().z ?? space.z) : space.z;
+  if (["drawer", "portable", "box", "storage_drawers"].includes(kind) && box.z > number(spaceZ, Infinity) + 1e-6) {
+    return `The bin is ${fmt(box.z)} mm tall but this Space is only ${fmt(spaceZ)} mm tall.`;
   }
   if (kind === "pegboard") {
     if (!box.pegboard?.enabled || box.pegboard.standard !== space.pegboard_standard ||
@@ -10016,8 +10050,9 @@ async function reconcileBoreBin(result) {
 
 function activeSpaceMaximumBinHeight() {
   if (state.folderMode !== "space" || !state.activeSpace) return undefined;
-  if (!["drawer", "portable", "box"].includes(state.activeSpace.kind)) return undefined;
-  const maximum = number(state.activeSpace.z, NaN);
+  if (!["drawer", "portable", "box", "storage_drawers"].includes(state.activeSpace.kind)) return undefined;
+  const maximum = number(
+    state.activeSpace.kind === "storage_drawers" ? cabinetActiveLimits().z : state.activeSpace.z, NaN);
   return Number.isFinite(maximum) ? maximum : undefined;
 }
 
@@ -14197,6 +14232,12 @@ async function init() {
   try {
     const catalog = await api("/api/catalog");
     state.catalog = catalog;
+    if (typeof StorageDrawers !== "undefined") {
+      StorageDrawers.configureRules({
+        baseUnit: state.catalog.base_unit,
+        minDrawerHeight: state.catalog.drawer_rules.ordinary_bin_min_height_mm,
+      });
+    }
     state.runtime = catalog.runtime || { hosted: false, filesystem: "server" };
     state.serverInstance = catalog.instance;
     state.apiCompat = catalog.api_compat;
