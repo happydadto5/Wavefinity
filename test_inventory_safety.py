@@ -13,7 +13,9 @@ from unittest import mock
 import organizer_drawer
 from organizer_drawer import print_inventory_bins, save_inventory_bins
 from organizer_inventory import (
+    configure_space,
     change_design_status,
+    storage_drawers_mutate,
     load_inventory,
     save_design_source,
     save_inventory,
@@ -425,6 +427,32 @@ out.notNow = { requeued: staleFileRefreshQueue.size, api: log.api.length };
 
 
 
+
+
+class StorageDrawersStaleSaveTests(unittest.TestCase):
+    def test_delayed_layout_save_cannot_undo_add_drawer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            configure_space(folder, raw_def={
+                "name": "Cabinet", "kind": "storage_drawers", "x": 96, "y": 96, "z": 120,
+                "storage_drawers": {"drawers": [{"height_mm": 40}, {"height_mm": 40}, {"height_mm": 40}]},
+            })
+            save_inventory(folder, new_bins=[record("Placed")])
+            layout = load_inventory(folder)["layout"]
+            layout["drawers"][0]["placements"].append({"bin": "B1", "gx": 0, "gy": 0})
+            save_inventory(folder, layout=layout)
+            stale = load_inventory(folder)["layout"]  # captured before the mutation
+
+            result = storage_drawers_mutate(folder, "add")
+            self.assertEqual(len(result["layout"]["drawers"]), 4)
+
+            with self.assertRaises(ValueError):
+                save_inventory(folder, layout=stale)  # the delayed old save
+
+            saved = load_inventory(folder)["layout"]
+            self.assertEqual([d["id"] for d in saved["drawers"]], [d["id"] for d in result["layout"]["drawers"]])
+            self.assertEqual(saved["active"], result["layout"]["active"])
+            self.assertEqual(saved["drawers"][0]["placements"][0]["bin"], "B1")
 
 
 if __name__ == "__main__":
