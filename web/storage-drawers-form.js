@@ -36,13 +36,16 @@
     const form = el("form", "sd-form"); host.append(form);
     const nameGroup = group(form, "Name");
     const name = input(space.name); name.maxLength = 80; name.required = true;
+    name.id = `sd-name-${epoch}`;
     nameGroup.append(labeled("Space name", name));
     const sizeGroup = group(form, "Size"); const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
     const x = input(space.x / 8, "number"), y = input(space.y / 8, "number");
+    x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
     for (const field of [x, y]) { field.min = "6"; field.max = "250"; field.step = "1"; field.required = true; }
     sizeGrid.append(labeled("X units", x), labeled("Y units", y));
     const drawersGroup = group(form, "Drawers");
     const count = input(block.drawers.length, "number"); count.min = "1"; count.max = "32"; count.step = "1";
+    count.id = `sd-count-${epoch}`;
     count.disabled = mode === "edit";
     drawersGroup.append(labeled("Number drawers", count));
     const drawerRows = el("div", "sd-drawer-rows"); drawersGroup.append(drawerRows);
@@ -60,6 +63,7 @@
     const labels = group(form, "Labels");
     const unitEnabled = select(String(block.unit_label_enabled), [["false","Unit label Off"],["true","Unit label On"]]);
     const unitText = input(block.unit_label_text); unitText.maxLength = 80;
+    unitText.id = `sd-unit-label-${epoch}`;
     const drawerEnabled = select(String(block.drawer_labels_enabled), [["false","Drawer labels Off"],["true","Drawer labels On"]]);
     const labelStyle = select(block.drawer_label_style, [["inlaid","Inlaid"],["raised","Raised"]]);
     const unitTextField = labeled("Unit label text", unitText), styleField = labeled("Drawer label style", labelStyle);
@@ -86,6 +90,7 @@
       block.drawers.forEach((row, index) => {
         const line = el("div", "sd-drawer-row"); line.append(el("strong", "", `Drawer ${index + 1}`));
         const height = input(row.height_mm, "number"); height.min = String(catalog?.drawer_rules?.ordinary_bin_min_height_mm ?? 6); height.step = "any"; height.required = true;
+        height.id = `sd-height-${epoch}-${index}`;
         height.addEventListener("input", () => { row.height_mm = Number(height.value); schedule(); });
         const label = input(row.label_text); label.maxLength = 80;
         label.addEventListener("input", () => { row.label_text = label.value; schedule(); });
@@ -104,6 +109,22 @@
       for (const [key, control] of Object.entries(materialFields)) b[key] = Number(control.value);
       next.z = b.drawers.reduce((sum, row) => sum + row.height_mm, 0); return next;
     };
+    const read = () => {
+      const fail = (message, focusId) => ({ ok: false, message, focusId });
+      if (!name.value.trim()) return fail("Enter a Space name", name.id);
+      for (const [field, axis] of [[x, "X"], [y, "Y"]]) {
+        const units = Number(field.value);
+        if (!Number.isInteger(units) || units < 6 || units > 250) return fail(`${axis} must be 6–250 whole units`, field.id);
+      }
+      if (!Number.isInteger(Number(count.value)) || Number(count.value) < 1 || Number(count.value) > 32) return fail("Number of drawers must be 1–32", count.id);
+      const minimum = Number(catalog?.drawer_rules?.ordinary_bin_min_height_mm ?? 6);
+      for (let i = 0; i < block.drawers.length; i++) {
+        const height = block.drawers[i].height_mm;
+        if (!Number.isFinite(height) || height < minimum) return fail(`Drawer ${i + 1} needs at least ${minimum} mm usable height`, `sd-height-${epoch}-${i}`);
+      }
+      if (unitEnabled.value === "true" && !unitText.value.trim()) return fail("Enter unit label text", unitText.id);
+      return { ok: true, spaceDraft: draft() };
+    };
     const showSummary = response => {
       const outside = response.outside_xyz || [];
       const units = response.field_units || [];
@@ -116,19 +137,19 @@
     const schedule = () => {
       valid = false; save.disabled = true; summary.textContent = "Checking cabinet…";
       clearTimeout(timer); const n = ++requestNumber; const identity = callbacks.identity?.() ?? space.id ?? space.name;
-      const pEpoch = profileEpoch; const next = draft();
+      const pEpoch = profileEpoch; const checked = read();
+      if (!checked.ok) { summary.textContent = checked.message; return; }
+      const next = checked.spaceDraft;
       const key = window.StorageDrawers.structuralDraftKey(next, printerProfile);
       timer = setTimeout(async () => {
         try {
-          if (!Number.isInteger(Number(x.value)) || !Number.isInteger(Number(y.value)) || Number(x.value) < 6 || Number(y.value) < 6 ||
-              Number(x.value) > 250 || Number(y.value) > 250 || !next.name || next.storage_drawers.unit_label_enabled && !next.storage_drawers.unit_label_text.trim()) throw new Error("Check the name, size, and label fields");
           const preview = copy(next);
           for (const row of preview.storage_drawers.drawers) {
             if (!row.id) row.id = row.temp_key?.slice("temporary:".length) || crypto.randomUUID();
           }
           const response = await callbacks.requestSummary({ space: preview, printer_profile: printerProfile });
           if (!live || epoch !== mountSerial || n !== requestNumber || pEpoch !== profileEpoch || identity !== (callbacks.identity?.() ?? space.id ?? space.name) || key !== window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) return;
-          showSummary(response); valid = true; save.disabled = false;
+          showSummary(response); valid = true; save.disabled = form.dataset.disabled === "true";
         } catch (error) {
           if (live && n === requestNumber) { summary.textContent = error.message || "Cabinet is invalid"; valid = false; save.disabled = true; }
         }
@@ -145,13 +166,23 @@
     form.addEventListener("change", () => { syncVisibility(); renderRows(); schedule(); });
     form.addEventListener("submit", async event => {
       event.preventDefault(); if (!valid) return;
-      try { const next = draft(); await callbacks.onSave(mode === "create" ? window.StorageDrawers.prepareCreateDraft(next) : next); }
+      try { const checked = read(); if (!checked.ok) throw new Error(checked.message);
+        await callbacks.onSave(mode === "create" ? window.StorageDrawers.prepareCreateDraft(checked.spaceDraft) : checked.spaceDraft); }
       catch (error) { summary.textContent = error.message || "Could not save"; }
     });
     cancel.addEventListener("click", () => callbacks.onCancel?.());
     syncVisibility(); renderRows(); schedule();
-    return { updatePrinterProfile(next) { printerProfile = copy(next); profileEpoch += 1; schedule(); },
-      destroy() { live = false; clearTimeout(timer); host.replaceChildren(); } };
+    return {
+      read,
+      setPrinterProfile(next) { printerProfile = copy(next); profileEpoch += 1; schedule(); },
+      refreshSummary() { schedule(); },
+      setDisabled(disabled) {
+        form.dataset.disabled = String(!!disabled);
+        for (const control of form.querySelectorAll("input, select, button")) control.disabled = !!disabled;
+        if (!disabled) { count.disabled = mode === "edit"; save.disabled = !valid; }
+      },
+      destroy() { live = false; mountSerial += 1; clearTimeout(timer); host.replaceChildren(); }
+    };
   };
   window.StorageDrawersForm = { mount };
 })();
