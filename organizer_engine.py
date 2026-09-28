@@ -266,6 +266,11 @@ LOCK_EMBED = 0.60         # bump/notch roots sink this far into their own wall
 LOCK_SAFE_SKIN = 0.05     # keep additive bump roots inside the mating surface
 LOCK_NOTCH_CLEARANCE = 0.12
 
+
+def connector_arm_thickness_floor() -> float:
+    """Arm thickness must be strictly greater than this (single authority)."""
+    return LOCK_PROTRUSION + LOCK_NOTCH_CLEARANCE + 0.3
+
 # --------------------------------------------------------------------------- #
 # floor label: text sunk into the inside floor.  The box gets a pocket and the
 # label is the solid that fills it flush, exported as its own object so Bambu
@@ -913,7 +918,7 @@ class ConnectorSpec:
             raise ValueError("cap thickness must be positive")
         if self.height <= self.cap_thickness:
             raise ValueError("connector height must exceed its cap thickness")
-        if self.arm_thickness <= LOCK_PROTRUSION + LOCK_NOTCH_CLEARANCE + 0.3:
+        if self.arm_thickness <= connector_arm_thickness_floor():
             raise ValueError("arm thickness leaves too little material at the notch")
 
     @property

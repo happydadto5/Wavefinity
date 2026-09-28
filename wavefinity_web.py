@@ -38,6 +38,7 @@ from urllib.request import urlopen
 import numpy as np
 
 from organizer_engine import (
+    connector_arm_thickness_floor,
     BASE_UNIT,
     BASE_PRESETS,
     B4B_BASE_PRESETS,
@@ -1359,6 +1360,7 @@ def catalog_payload() -> dict[str, Any]:
             },
             "sampler_boxes": DEFAULT_SAMPLE_BOXES,
         },
+        "connector_rules": {"arm_thickness_floor_mm": connector_arm_thickness_floor()},
         # The differing-clip rules, so the UI can show the self-adjusting
         # length / web thickness / printed height live without a round-trip.
         "connector_rules": {
@@ -1564,6 +1566,8 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
             value = float(value)
             if not math.isfinite(value) or value < low or (high is not None and value > high):
                 raise ValueError("Connector settings are outside the allowed range.")
+            if key == "arm_thickness" and value <= connector_arm_thickness_floor():
+                raise ValueError("Connector arm thickness is too thin to generate.")
             settings[key] = value
         if not isinstance(raw.get("different_heights"), bool):
             raise ValueError("Connector settings are incomplete.")

@@ -3604,7 +3604,12 @@ function normalizeConnectorSettings(raw, fallback = {}) {
   const result = {};
   for (const [key, [low, high]] of Object.entries(CONNECTOR_SETTING_LIMITS)) {
     const value = source[key];
-    const legal = typeof value === "number" && Number.isFinite(value) && value >= low && value <= high;
+    let legal = typeof value === "number" && Number.isFinite(value) && value >= low && value <= high;
+    if (key === "arm_thickness") {
+      // The generator's own floor, served by the catalog; unknown means not legal.
+      const floor = state.catalog?.connector_rules?.arm_thickness_floor_mm;
+      legal = legal && typeof floor === "number" && value > floor;
+    }
     result[key] = legal ? value : fallback[key];
   }
   result.different_heights = typeof source.different_heights === "boolean"
