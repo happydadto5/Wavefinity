@@ -46,6 +46,8 @@ const DL = {
   saving: false,
   saveAgain: false,
   savePromise: null,     // Fix 019 correction C1.1: the in-flight serialized save chain, if any
+  cabinetMutationEpoch: 0, // Fix 084B: bumped by every Storage Drawers Add/Delete/Reconfigure
+  cabinetMutating: null,   // Fix 084B: the in-flight cabinet mutation, if any
   saveState: "idle",     // idle | saving | saved | error
   savedAt: null,
   saveError: "",
@@ -257,6 +259,18 @@ DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
 DL.isPegboard = (drawer = DL.drawer()) => drawer?.boundary === "pegboard";
 DL.isSurface = () => DL.layout?.space?.kind === "surface";
+DL.isStorageDrawers = () => state.activeSpace?.kind === "storage_drawers";
+
+// Storage Drawers: the layout's drawers are always the typed cabinet's stable
+// descriptors, every one mating with zero clearance. Placements are kept.
+DL.reconcileCabinet = () => {
+  if (!DL.isStorageDrawers() || !DL.layout) return;
+  if (typeof SP !== "undefined") SP.ensureStorageDrawersRules();
+  const reconciled = StorageDrawers.reconcileProjection(state.activeSpace, DL.layout);
+  DL.layout.drawers = reconciled.drawers.map(one => ({ ...one, ...DL.canonicalLayoutRules("mating") }));
+  DL.layout.active = reconciled.active;
+  DL.layout.space = reconciled.space;
+};
 DL.planningMap = () => DL.report?.planning_heights || {};
 DL.rowPlanning = one => DL.planningMap()[one?.id] || one?.planning || null;
 DL.effectiveHeight = one => Number(DL.rowPlanning(one)?.effective_mm ?? DL.partHeight(one));
@@ -696,8 +710,10 @@ DL.load = async () => {
     DL.selectedRow = null;
     DL.saveState = "idle";
   }
+  DL.reconcileCabinet();
   DL.prune();
   DL.loaded = true;
+  if (typeof reseedCabinetStarterAfterLayoutLoad === "function") reseedCabinetStarterAfterLayoutLoad();
   DL.emit();
   DL.requestReport();
   await DL.refreshPegboardLayoutsAfterLoad();
@@ -733,6 +749,9 @@ DL.ensureLoaded = () => {
 // small internal loop driven by DL.savePromise/DL.saveAgain, not polling.
 DL.save = () => {
   if (state.relocating) return Promise.resolve(false);
+  // A cabinet mutation owns the layout until it adopts its result; a save
+  // queued before it must wait and then send the canonical layout instead.
+  if (DL.cabinetMutating) return DL.cabinetMutating.then(() => DL.save(), () => DL.save());
   DL.saveSoon.cancel();
   if (!DL.layout) return Promise.resolve(true);
   if (DL.savePromise) {
@@ -761,8 +780,10 @@ DL._runSaveChain = async () => {
     DL.emit();
     const sent = DL.snapshot();
     const context = DL.spaceContext();
+    const cabinetEpoch = DL.cabinetMutationEpoch;
     try {
       const data = await DL.inventoryCall("/api/drawer/save", { layout: DL.layout }, { context });
+      if (cabinetEpoch !== DL.cabinetMutationEpoch) { ok = false; continue; }
       DL.adopt(data);
       DL.exists = true;
       if (DL.snapshot() === sent) DL.dirty = false;
@@ -771,6 +792,8 @@ DL._runSaveChain = async () => {
       ok = true;
     } catch (error) {
       ok = false;
+      // A save overtaken by a cabinet mutation is simply superseded.
+      if (cabinetEpoch !== DL.cabinetMutationEpoch) continue;
       if (!DL.isStaleSpaceError(error)) {
         DL.saveState = "error";
         DL.saveError = error.message;

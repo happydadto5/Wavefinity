@@ -417,6 +417,7 @@ DP.onInventoryClick = async event => {
   else if (action === "edit") DP.openInventoryRow(one.id);
   else if (action === "delete") DP.deleteRow(one);
   else if (!action && !event.target.closest("button, input, select, a, textarea")) {
+    if (DL.isStorageDrawers()) await SP.cabinetJumpToRow(one.id);
     DL.selectRow(one.id);
   }
 };
@@ -430,6 +431,9 @@ DP.openInventoryRow = async id => {
     state.folderMode === "space" && DL.active && DL.spaceContextCurrent(spaceContext);
   DP.showPendingMode("design");
   try {
+    // A row placed in another physical drawer switches to it first, keeping
+    // the row selected.
+    if (DL.isStorageDrawers()) await SP.cabinetJumpToRow(id);
     if (!(await designerEditInventoryRow(id, acceptTransition)) || !acceptTransition()) return false;
     DL.selectRow(id);
     DP.setMode("design");
@@ -616,6 +620,7 @@ DP.update = () => {
   DV.renderEmptyState();
   DV.renderStaging();
   DV.render();
+  if (typeof SP !== "undefined" && SP.updateCabinetWorkspace) SP.updateCabinetWorkspace();
 };
 
 DP.syncHistory = () => {
@@ -632,7 +637,9 @@ DP.renderDrawer = () => {
   const surface = DL.isSurface();
   const spacerSection = $("#dl-spacers");
   const detailsCard = $("#dl-space-details-card");
-  if (detailsCard) detailsCard.hidden = DP.singleTypedSpace();
+  // A Storage Drawers cabinet owns its drawers (the navigator); the generic
+  // drawer selector, size and Add/Delete card never applies to it.
+  if (detailsCard) detailsCard.hidden = DP.singleTypedSpace() || DL.isStorageDrawers();
   if (spacerSection) spacerSection.hidden = pegboard || surface;
   $("#dl-surface-fill").hidden = !surface;
   $("#dl-height").closest("label").hidden = surface;
@@ -821,7 +828,8 @@ DP.renderInventory = (force = false) => {
   const counts = DL.bins.map(one => [one.id, DL.placedCount(one.id)]);
   const signature = JSON.stringify([DL.bins, counts, Object.keys(DL.layout.design_specs || {}), DL.report?.planning_heights,
     Boolean(state.runtime.hosted), Boolean(state.slicer?.available),
-    DP.filter, selectedRow, drawer.id, drawer.height, [...DP.printSelected]]);
+    DP.filter, selectedRow, drawer.id, drawer.height, [...DP.printSelected],
+    DL.isStorageDrawers() ? DL.layout.drawers.map(one => [one.id, one.height, one.placements.map(p => p.bin)]) : null]);
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
   const bins = DP.filteredBins();
@@ -835,11 +843,16 @@ DP.renderInventory = (force = false) => {
   const range = DV.heightRange();
   const kinds = { b4b: "Storage Box", manual: "Added by hand" };
   const kindLabel = one => one.kind === "spacer" ? (one.boundary === "edge" ? "Edge spacer" : "X spacer") : kinds[one.kind];
+  const cabinet = DL.isStorageDrawers();
   list.innerHTML = bins.map(one => {
     const placed = DL.placedCount(one.id);
-    const [w, d] = DL.cells(one, drawer);
-    const units = value => fmt(value * DL.grid(drawer).step / DL.UNIT);
-    const tooTall = !DL.isSurface() && one.z > drawer.height + 1e-6;
+    // A placed row is judged against the drawer that actually holds it; an
+    // unplaced one against the active drawer.
+    const holdingId = cabinet ? StorageDrawers.drawerHoldingRow(DL.layout, one.id) : null;
+    const home = (holdingId && DL.layout.drawers.find(one => one.id === holdingId)) || drawer;
+    const [w, d] = DL.cells(one, home);
+    const units = value => fmt(value * DL.grid(home).step / DL.UNIT);
+    const tooTall = !DL.isSurface() && one.z > home.height + 1e-6;
     const plan = DL.rowPlanning(one);
     const planningText = DL.isSurface()
       ? one.object_height_mm == null ? "Object height not set"
@@ -850,7 +863,7 @@ DP.renderInventory = (force = false) => {
     const color = DV.binColor(one, range);
     const flags = [
       DL.stackable(one) ? DL.stackName(one.stack) : "", kindLabel(one),
-      tooTall ? `Taller than ${drawer.name}` : "",
+      tooTall ? `Taller than ${home.name}` : "",
     ].filter(Boolean);
     const classes = [one.id === selectedRow ? "selected" : "", tooTall ? "too-tall" : "",
       spacer ? "spacer-row" : "", one.status === "printed" ? "printed" : ""].filter(Boolean).join(" ");
@@ -869,7 +882,7 @@ DP.renderInventory = (force = false) => {
       : `<span class="dl-print-placeholder" aria-hidden="true"></span>`;
     const lifecycle = spacer
       ? `<small>${dlPlural(placed, "placement")} · ${one.qty} printed</small>`
-      : `<small class="dl-status">${placed ? "Placed" : "Unplaced"} · ${DL.statusLabel(one)}</small>`;
+      : `<small class="dl-status">${cabinet ? StorageDrawers.rowLocationText(DL.layout, one.id) : (placed ? "Placed" : "Unplaced")} · ${DL.statusLabel(one)}</small>`;
     const actions = spacer ? "" : `<div class="dl-row-actions">
           ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>` : ""}
           <button type="button" class="button danger dl-small" data-act="delete">Delete</button>

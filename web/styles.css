@@ -1372,6 +1372,8 @@ dialog:not([open]) { display: none; }
 }
 .welcome-storage-row .button { margin: 0; flex: 0 0 auto; }
 .welcome-storage-leftover { margin: 8px 0 0; }
+.welcome-printer-profile { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.welcome-storage[data-folder-hidden] .welcome-printer-profile { margin-top: 0; padding-top: 0; border-top: 0; }
 body.relocating > :not(dialog) { pointer-events: none; }
 .storage-choice { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 0; cursor: pointer; }
 .storage-choice input { margin-top: 4px; }
@@ -1492,10 +1494,17 @@ body.relocating > :not(dialog) { pointer-events: none; }
 
 .type-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
   margin-top: 4px;
+}
+.type-cards > .type-card { grid-column: span 2; }
+.type-cards > .type-card:nth-child(4) { grid-column: 2 / span 2; }
+.type-cards > .type-card:nth-child(5) { grid-column: 4 / span 2; }
+@media (max-width: 700px) {
+  .type-cards { grid-template-columns: 1fr; }
+  .type-cards > .type-card, .type-cards > .type-card:nth-child(4), .type-cards > .type-card:nth-child(5) { grid-column: auto; }
 }
 .type-card {
   min-width: 0;

@@ -6,6 +6,7 @@
   <title>Wavefinity</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/drawer.css">
+  <link rel="stylesheet" href="/storage-drawers.css">
 </head>
 <body>
   <div id="startup-cover" class="startup-cover" role="status" aria-live="polite">
@@ -47,10 +48,6 @@
                 <button id="space-structural-save" class="button secondary dl-small" type="button">Save Storage Box</button>
                 <button id="space-structural-print" class="button secondary dl-small" type="button">Print Storage Box</button>
                 <button id="space-make-inside-bin" class="button secondary dl-small" type="button" hidden>Make Inside Bin</button>
-              </div>
-              <div id="space-structural-bed" class="space-structural-bed" hidden>
-                <label>Printer bed X <span class="unit">mm</span><input id="space-structural-bed-x" type="number" min="1" step="1" value="256"></label>
-                <label>Printer bed Y <span class="unit">mm</span><input id="space-structural-bed-y" type="number" min="1" step="1" value="256"></label>
               </div>
             </div>
           </div>
@@ -809,12 +806,15 @@
         <p class="welcome-lead">Use a Space when you want Wavefinity to plan a drawer, storage box, surface, or pegboard. Or design bins on their own without a Space.</p>
         <p id="welcome-startup-error" class="field-error" hidden></p>
         <div class="welcome-storage" data-storage-card hidden>
-          <p class="welcome-storage-lead"></p>
-          <div class="welcome-storage-row">
-            <code class="welcome-storage-path"></code>
-            <button class="button secondary welcome-storage-change" type="button">Change Location&#8230;</button>
+          <div data-storage-folder-details>
+            <p class="welcome-storage-lead"></p>
+            <div class="welcome-storage-row">
+              <code class="welcome-storage-path"></code>
+              <button class="button secondary welcome-storage-change" type="button">Change Location&#8230;</button>
+            </div>
+            <p class="welcome-storage-lead welcome-storage-leftover" hidden></p>
           </div>
-          <p class="welcome-storage-lead welcome-storage-leftover" hidden></p>
+          <div class="welcome-printer-profile" data-printer-profile-host></div>
         </div>
         <div class="welcome-actions">
           <button id="welcome-create" class="button primary" type="button">Create New Space</button>
@@ -841,12 +841,15 @@
           </span>
         </div>
         <div class="welcome-storage" data-storage-card hidden>
-          <p class="welcome-storage-lead"></p>
-          <div class="welcome-storage-row">
-            <code class="welcome-storage-path"></code>
-            <button class="button secondary welcome-storage-change" type="button">Change Location&#8230;</button>
+          <div data-storage-folder-details>
+            <p class="welcome-storage-lead"></p>
+            <div class="welcome-storage-row">
+              <code class="welcome-storage-path"></code>
+              <button class="button secondary welcome-storage-change" type="button">Change Location&#8230;</button>
+            </div>
+            <p class="welcome-storage-lead welcome-storage-leftover" hidden></p>
           </div>
-          <p class="welcome-storage-lead welcome-storage-leftover" hidden></p>
+          <div class="welcome-printer-profile" data-printer-profile-host></div>
         </div>
         <div class="welcome-actions">
           <button id="welcome-resume-continue" class="button primary" type="button">Open Space</button>
@@ -921,6 +924,17 @@
               decoding="async">
             <h3>Drawer</h3>
             <p>An existing drawer you want to fill with bins.</p>
+          </button>
+          <button class="type-card" data-kind="storage_drawers" type="button">
+            <img
+              class="type-card-image"
+              src="/images/StorageDrawers.png"
+              alt=""
+              width="480"
+              height="360"
+              decoding="async">
+            <h3>Storage Drawers</h3>
+            <p>A printable mini cabinet with drawers sized for Wavefinity bins.</p>
           </button>
           <button class="type-card" data-kind="surface" type="button">
             <img
@@ -1127,6 +1141,8 @@
           </div>
         </div>
 
+        <div id="space-fields-storage_drawers" class="space-type-fields" hidden></div>
+
         <div id="space-fields-pegboard" class="space-type-fields" hidden>
           <div class="space-dimension-row">
             <label class="space-field"><span>Board standard</span><select id="pegboard-standard"></select></label>
@@ -1207,6 +1223,10 @@
   <script src="/drawer-model.js" defer></script>
   <script src="/drawer-view.js" defer></script>
   <script src="/drawer-panel.js" defer></script>
+  <script src="/printer-profile.js" defer></script>
+  <script src="/storage-drawers.js" defer></script>
+  <script src="/storage-drawers-form.js" defer></script>
+  <script src="/storage-drawers-workspace.js" defer></script>
   <script src="/spaces.js" defer></script>
 </body>
 </html>

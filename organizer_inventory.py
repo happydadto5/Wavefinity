@@ -55,6 +55,14 @@ from organizer_product_rules import (
     SURFACE_TRIM_HEIGHTS,
 )
 from organizer_pegboard import normalise_pegboard_space
+from organizer_storage_drawers import (
+    normalise_storage_drawers_definition,
+    plan_add_drawer,
+    plan_delete_drawer,
+    plan_reconfigure,
+    prepare_new_storage_drawers_definition,
+    reconcile_storage_drawers_layout,
+)
 
 INVENTORY_LOCK = threading.RLock()
 INVENTORY_FILENAME = "Wavefinity bins.md"
@@ -89,7 +97,7 @@ DEFAULT_NEW_BIN_QTY = 0
 # migration only (see normalise_space_definition's allow_legacy) - it must
 # never be a normal writable current kind, or every caller that omits
 # allow_legacy (the default) would still silently accept and persist it.
-SPACE_KINDS = ("drawer", "surface", "portable", "pegboard")
+SPACE_KINDS = ("drawer", "surface", "portable", "pegboard", "storage_drawers")
 LEGACY_SPACE_KINDS = ("box",)
 
 _HEADER_KEYS = {
@@ -329,6 +337,8 @@ def _migrate_drawer_boundaries(layout: dict[str, Any] | None) -> None:
     drawers = [d for d in (layout.get("drawers") or []) if isinstance(d, dict)]
     if not isinstance(space, dict) or not drawers:
         return
+    if space.get("kind") == "storage_drawers":
+        return  # every cabinet drawer is always mating/zero-clearance
     target = (
         "pegboard" if space.get("kind") == "pegboard"
         else "mating" if space.get("kind") == "box"
@@ -1007,6 +1017,27 @@ def _clean_bin(raw: dict[str, Any], *, partial: bool) -> dict[str, Any]:
     return clean
 
 
+def _keep_current_cabinet(current: Any, submitted: dict[str, Any]) -> dict[str, Any]:
+    """A Storage Drawers cabinet is changed only by its mutation owner.
+
+    An ordinary layout save queued before an Add/Delete/Reconfigure must not
+    resurrect the old drawer list or descriptors: a different drawer set is
+    refused, and the saved cabinet definition/projection always wins.
+    """
+    space = current.get("space") if isinstance(current, dict) else None
+    if not isinstance(space, dict) or space.get("kind") != "storage_drawers":
+        return submitted
+    saved = {one.get("id"): one for one in current.get("drawers") or [] if isinstance(one, dict)}
+    sent = [one for one in submitted.get("drawers") or [] if isinstance(one, dict)]
+    if [one.get("id") for one in sent] != [one.get("id") for one in current.get("drawers") or []]:
+        raise ValueError("This cabinet changed since the layout was loaded. Reload the Space and try again.")
+    drawers = []
+    for one in sent:
+        fixed = {key: saved[one["id"]].get(key) for key in ("name", "width", "depth", "height", "clearance", "boundary")}
+        drawers.append({**one, **fixed})
+    return {**submitted, "space": space, "drawers": drawers}
+
+
 def _merge_inventory(
     current: dict[str, Any], *,
     layout: Any = _KEEP,
@@ -1019,6 +1050,8 @@ def _merge_inventory(
     bins = current["bins"]
     existing_ids = {one["id"] for one in bins}
     chosen = current["layout"] if layout is _KEEP else layout
+    if layout is not _KEEP and isinstance(chosen, dict):
+        chosen = _keep_current_cabinet(current["layout"], chosen)
     if isinstance(chosen, dict):
         # Layout saves may have been queued before a design autosave. The
         # Inventory source map always comes from the latest file transaction.
@@ -1361,6 +1394,11 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
         resolved = normalise_pegboard_space(raw)
         return {"name": name, "kind": kind, **resolved}
 
+    if kind == "storage_drawers":
+        # Strict re-normalisation of a saved/edited cabinet; Create prepares
+        # fresh drawer IDs once beforehand (see configure_space).
+        return normalise_storage_drawers_definition({**raw, "name": name})
+
     x, y, z = (_number(raw.get(axis)) for axis in ("x", "y", "z"))
     if min(x, y, z) <= 0:
         raise ValueError("a space needs its inside X, Y and Z in mm")
@@ -1421,6 +1459,12 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
     layout["space"] = space_def
 
     kind = space_def["kind"]
+    if kind == "storage_drawers":
+        reconciled = reconcile_storage_drawers_layout(layout, space_def)
+        layout.clear()
+        layout.update(reconciled)
+        layout["version"] = 1
+        return
     x, y, z = space_def["x"], space_def["y"], space_def["z"]
 
     drawers = layout.setdefault("drawers", [])
@@ -1513,6 +1557,19 @@ def _carry_storage_box(raw_def: dict[str, Any], layout: dict[str, Any], mode: st
     return raw_def
 
 
+def _configured_space_definition(
+    raw_def: dict[str, Any], layout: dict[str, Any], mode: str, allow_legacy: bool,
+) -> dict[str, Any]:
+    if raw_def.get("kind") == "storage_drawers":
+        if mode == "update":
+            raise ValueError("Edit a Storage Drawers Space from its cabinet editor.")
+        raw_def = prepare_new_storage_drawers_definition({
+            **raw_def, "name": str(raw_def.get("name") or "").strip()[:80],
+        })
+    return normalise_space_definition(
+        _carry_storage_box(raw_def, layout, mode), allow_legacy=allow_legacy)
+
+
 def configure_space(
     output_dir: Path | str, *, raw_def: dict[str, Any], mode: str = "create", allow_legacy: bool = False
 ) -> dict[str, Any]:
@@ -1522,13 +1579,59 @@ def configure_space(
         layout = current["layout"] if isinstance(current["layout"], dict) else {}
         if mode == "create" and isinstance(layout.get("space"), dict):
             raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
-        space_def = normalise_space_definition(
-            _carry_storage_box(raw_def, layout, mode), allow_legacy=allow_legacy)
+        space_def = _configured_space_definition(raw_def, layout, mode, allow_legacy)
         _setup_space_layout(layout, space_def)
         if mode == "update" and space_def["kind"] == "surface":
             _reconcile_surface_bases(current["bins"], layout, space_def["z"])
         _write(path, current["bins"], layout, current["legacy"])
         return _payload(path, _read(path))
+
+
+def _plan_cabinet_mutation(
+    current: dict[str, Any], operation: str, drawer_id: Any, proposed: Any, space: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run one 084A cabinet planner against the current layout. Pure."""
+    layout = current["layout"] if isinstance(current["layout"], dict) else {}
+    base = space if isinstance(space, dict) else layout.get("space")
+    if not isinstance(base, dict) or base.get("kind") != "storage_drawers":
+        raise ValueError("This folder does not hold a Storage Drawers Space.")
+    if operation == "add":
+        canonical, updated, _added = plan_add_drawer(base, layout)
+    elif operation == "delete":
+        canonical, updated, _next = plan_delete_drawer(base, layout, str(drawer_id or ""))
+    elif operation == "reconfigure":
+        if not isinstance(proposed, dict):
+            raise ValueError("Storage Drawers settings are missing.")
+        canonical, updated = plan_reconfigure(base, layout, proposed, current["bins"])
+    else:
+        raise ValueError("Unknown cabinet change.")
+    return canonical, updated
+
+
+def storage_drawers_mutate(
+    output_dir: Path | str, operation: str, *, drawer_id: Any = None, proposed: Any = None,
+    space: Any = None,
+) -> dict[str, Any]:
+    """Serialized cabinet Add/Delete/Reconfigure on a local folder's Inventory."""
+    with INVENTORY_LOCK:
+        path = resolve_inventory_path(output_dir, migrate=True)
+        current = _read(path)
+        canonical, updated = _plan_cabinet_mutation(current, operation, drawer_id, proposed, space)
+        _write(path, current["bins"], updated, current["legacy"])
+        return {**_payload(path, _read(path)), "space": canonical}
+
+
+def storage_drawers_mutate_text(
+    text: str, *, title: str, operation: str, drawer_id: Any = None, proposed: Any = None,
+    space: Any = None,
+) -> dict[str, Any]:
+    """The browser-folder twin: pure with respect to the user's files."""
+    with INVENTORY_LOCK:
+        current = parse_inventory(str(text or ""))
+        canonical, updated = _plan_cabinet_mutation(current, operation, drawer_id, proposed, space)
+        rendered = render_inventory(str(title or canonical["name"]), current["bins"], updated)
+        return {**_text_payload(rendered, str(title or canonical["name"]), parse_inventory(rendered)),
+                "space": canonical}
 
 
 def configure_space_text(
@@ -1540,8 +1643,7 @@ def configure_space_text(
         layout = current["layout"] if isinstance(current["layout"], dict) else {}
         if mode == "create" and isinstance(layout.get("space"), dict):
             raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
-        space_def = normalise_space_definition(
-            _carry_storage_box(raw_def, layout, mode), allow_legacy=allow_legacy)
+        space_def = _configured_space_definition(raw_def, layout, mode, allow_legacy)
         _setup_space_layout(layout, space_def)
         if mode == "update" and space_def["kind"] == "surface":
             _reconcile_surface_bases(current["bins"], layout, space_def["z"])

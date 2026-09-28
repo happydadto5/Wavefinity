@@ -218,7 +218,3 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .space-actions .button-row { margin-top: 0; }
 .space-structural { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .space-structural[hidden] { display: none; }
-.space-structural .space-structural-bed { display: flex; gap: 8px; margin-top: 6px; }
-.space-structural .space-structural-bed[hidden] { display: none; }
-.space-structural .space-structural-bed label { flex: 1; font-size: 11px; color: var(--muted); }
-.space-structural .space-structural-bed input { margin: 0; padding: 5px 6px; font-size: 12px; }
