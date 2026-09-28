@@ -171,6 +171,8 @@ from organizer_storage_drawers import (
     STORAGE_DRAWERS_MIN_DRAWERS,
     STORAGE_DRAWERS_MIN_UNITS,
     normalise_storage_drawers_definition,
+    reset_storage_drawers_definition,
+    storage_drawers_definition_problem,
 )
 from organizer_storage_drawer_geometry import storage_drawers_summary
 from organizer_storage_drawer_outputs import (
@@ -179,6 +181,7 @@ from organizer_storage_drawer_outputs import (
     structural_manifest_plan,
     structural_signature,
     structural_status,
+    sweep_cabinet_debris,
 )
 from organizer_product_rules import STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
 from organizer_spaces import (
@@ -3517,7 +3520,10 @@ def _printer_profile_for(payload: dict[str, Any]) -> dict[str, float]:
     if HOSTED:
         raw = payload.get("printer_profile")
         return normalise_printer_profile(raw or dict(zip(("x_mm", "y_mm", "z_mm"), DEFAULT_PRINTER_BUILD_MM)))
-    return printer_profile_from_preferences(load_preferences())
+    try:
+        return printer_profile_from_preferences(load_preferences())
+    except ValueError as error:
+        raise ValueError("Printer Settings could not be read. Open Printer Settings and choose Reset Printer Settings.") from error
 
 
 def _structural_request(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -3555,47 +3561,66 @@ def storage_drawers_mutate_text_payload(payload: dict[str, Any]) -> dict[str, An
 
 
 def _local_cabinet_folder(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], str]:
-    """The real Space folder, its authoritative typed Space, and its identity."""
+    """The real Space folder, its authoritative typed Space, and its identity.
+
+    The Space identity is mandatory: cabinet output is never written into, or
+    handed to a slicer from, a folder whose current Space ID was not confirmed.
+    """
     folder = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
     info = describe_space_folder(folder, load_preferences())
     space = info.get("space")
     if info["folder_mode"] != "space" or not isinstance(space, dict) or space.get("kind") != "storage_drawers":
         raise ValueError("This folder is not a Storage Drawers Space.")
     expected = payload.get("space_id")
-    if expected and info["space_id"] != expected:
+    if not expected:
+        raise ValueError("The cabinet's Space could not be confirmed. Reopen the Space and try again. Nothing was changed.")
+    if info["space_id"] != expected:
         raise ValueError("This folder is not the Space that was open before. Nothing was changed.")
+    if info.get("cabinet_recovery"):
+        raise ValueError("The cabinet settings are damaged. Choose Reset cabinet settings first. "
+                         + info["cabinet_recovery"]["message"])
+    # Orphan app-owned temp/backup files from an interrupted earlier save.
+    sweep_cabinet_debris(folder)
     return folder, space, info["space_id"]
 
 
 def _storage_drawers_structural_design(payload: dict[str, Any]) -> dict[str, Any]:
     space = normalise_storage_drawers_definition(payload["space"])
     profile = _printer_profile_for(payload)
+    plan = structural_manifest_plan(space, Path(payload.get("output") or DEFAULT_OUTPUT), profile)
     reply: dict[str, Any] = {
         "kind": STORAGE_DRAWERS, "design": None,
         "summary": storage_drawers_summary(space, profile),
         "signature": structural_signature(space),
+        "orientations": {one["key"]: one["orientation"] for one in plan["components"]},
         "printer_profile": profile,
     }
     if not HOSTED and payload.get("output"):
         folder, _saved, _space_id = _local_cabinet_folder(payload)
         reply["status"] = structural_status(
-            space, structural_output_manifest(folder, STRUCTURAL_OUTPUT_KEY), folder,
+            space, structural_output_manifest(folder, STRUCTURAL_OUTPUT_KEY), folder, profile,
         )
         reply["manifest_plan"] = structural_manifest_plan(space, folder, profile)
     return reply
 
 
 def _materialize_local_cabinet(payload: dict[str, Any]) -> dict[str, Any]:
-    """Write every cabinet file, then commit the manifest under the metadata lock."""
+    """Write every cabinet file and commit the manifest as one rollback-safe
+    transaction. The manifest is committed under the metadata lock and Space-ID
+    check while the pre-attempt backups still exist."""
     folder, space, space_id = _local_cabinet_folder(payload)
     profile = _printer_profile_for(payload)
+
+    def commit(manifest: dict[str, Any]) -> None:
+        commit_structural_output(
+            folder, STRUCTURAL_OUTPUT_KEY, manifest, expected_space_id=space_id,
+        )
+
     with GEOMETRY_LOCK:
         result = materialize_storage_drawers(
             space, folder, profile, structural_output_manifest(folder, STRUCTURAL_OUTPUT_KEY),
+            commit=commit,
         )
-    commit_structural_output(
-        folder, STRUCTURAL_OUTPUT_KEY, result["manifest"], expected_space_id=space_id,
-    )
     return {
         "output": str(folder), "files": [str(one) for one in result["files"]],
         "manifest": result["manifest"], "warnings": result["warnings"],
@@ -3619,6 +3644,21 @@ def _hosted_cabinet_export(payload: dict[str, Any]) -> dict[str, Any]:
         output=output,
         extra={"manifest": result["manifest"], "warnings": result["warnings"]},
     )
+
+
+def storage_drawers_validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Pure: the canonical normalizer over a raw Storage Drawers Space. Hosted
+    inspection and setup use it so browser and desktop accept the same cabinets."""
+    return {"space": normalise_storage_drawers_definition(payload.get("space"))}
+
+
+def storage_drawers_reset_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Pure: what Reset cabinet settings would leave, plus why it is needed."""
+    raw = payload.get("space")
+    return {
+        "space": reset_storage_drawers_definition(raw),
+        "message": storage_drawers_definition_problem(raw) or "",
+    }
 
 
 def structural_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -4459,6 +4499,8 @@ POST_ROUTES = {
     "/api/space/structural-generate": structural_generate_payload,
     "/api/space/structural-print": structural_print_payload,
     "/api/space/storage-drawers-summary": storage_drawers_summary_payload,
+    "/api/space/storage-drawers-validate": storage_drawers_validate_payload,
+    "/api/space/storage-drawers-reset": storage_drawers_reset_payload,
     "/api/space/storage-drawers-mutate-text": storage_drawers_mutate_text_payload,
     "/api/preferences": preferences_payload,
     "/api/space/show-folder": show_folder_payload,

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import trimesh
 from shapely.geometry import Polygon, box as shape_box
+from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
 from organizer_b4b import (B4B_STACK_RECESS_DEPTH, B4B_MIN_FLOOR_SKIN,
@@ -28,8 +29,26 @@ SD_FRONT_SHOULDER_MM = 1.6
 SD_RAIL_LEDGE_MM = 2.4
 SD_RAIL_CAPTURE_MM = 1.6
 SD_RAIL_LEADIN_MM = 3.0
-SD_STOP_LIFT_DEG = 7.5
+# Drawer catch: a low symmetric bump the drawer's rear wing rides over. The wing
+# only has to climb SD_CATCH_OVERLAP_MM - less than the smallest fit's vertical
+# play - so Tight, Standard and Loose all push in and pull out straight.
+SD_CATCH_OVERLAP_MM = 0.25
+SD_CATCH_LENGTH_MM = 8.0
 SD_TOP_DETENT_COUNT = 2
+# Top retention: a spring arm on each side with a catch nose, and a lip in the
+# Top's channel. The arm is 1.2 mm thick in its bending direction and 16 mm long,
+# so the ~0.7 mm release travel stays well inside a safe elastic strain.
+SD_DETENT_ARM_OFFSET_MM = 0.1
+SD_DETENT_ARM_W_MM = 1.2
+SD_DETENT_ARM_L_MM = 16.0
+SD_DETENT_ARM_T_MM = 1.0
+SD_DETENT_ENGAGE_MM = 0.5
+SD_DETENT_NOSE_L_MM = 3.0
+SD_DETENT_LIP_L_MM = 2.0
+SD_DETENT_LIP_GAP_MM = 0.2
+SD_DETENT_CHANNEL_CLEAR_MM = 0.3
+SD_DETENT_RIB_WALL_MM = 1.2
+SD_REAR_PANEL_INSET_MM = 0.1
 
 
 @dataclass(frozen=True)
@@ -40,6 +59,7 @@ class StorageDrawerComponent:
     object_groups: tuple | None
     bounds_xyz: tuple[float, float, float]
     allowed_orientations: tuple[str, ...]
+    flip_up: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,9 +128,10 @@ def _runner(x0, x1, y0, y1, z0):
     return translated(_extrude_polygon(profile, SD_RAIL_CAPTURE_MM), (0,0,z0))
 
 
-def _stop_ramp(x0, x1, y0, y1, z0):
-    rise = math.tan(math.radians(SD_STOP_LIFT_DEG)) * (y1-y0)
-    wedge = _extrude_polygon(Polygon([(y0,z0), (y1,z0), (y1,z0+rise)]), x1-x0)
+def _catch_bump(x0, x1, y0, y1, z0, height):
+    """A symmetric ridge: gentle slope both ways, so the drawer never has to lift."""
+    ridge = orient(Polygon([(y0, z0), (y1, z0), ((y0 + y1) / 2, z0 + height)]), 1.0)
+    wedge = _extrude_polygon(ridge, x1 - x0)
     wedge.apply_transform(np.array([[0,0,1,x0],[1,0,0,0],[0,1,0,0],[0,0,0,1]], float))
     return wedge
 
@@ -132,8 +153,8 @@ def _sliding_dovetail(center_x, y0, y1, root_z, direction, land, *, female=False
         section = unary_union([section, shape_box(center_x-neck/2, min(root_z,z1),
                                                   center_x+neck/2, max(root_z,z1))])
     solid = _extrude_polygon(section, y1-y0)
+    # This swap has determinant -1; trimesh already restores the winding.
     solid.apply_transform(np.array([[1,0,0,0],[0,0,1,y0],[0,1,0,0],[0,0,0,1]], float))
-    solid.invert()
     return solid
 
 
@@ -203,9 +224,15 @@ def _make_datum(space):
         floors.append(cursor + block["drawer_base_mm"])
         cursor += pitch
     floors.reverse()
-    frame = max(block["open_frame_width_mm"], track_reach + runner + fit)
+    # Full derives its internal frame/track support width from structure alone,
+    # so a hidden Open selection can never move Full geometry. Only Open lets the
+    # selected width promote upward.
+    structural_frame = track_reach + runner + fit
+    frame = (max(block["open_frame_width_mm"], structural_frame)
+             if block["cabinet_style"] == "open" else structural_frame)
     floors = tuple(floors)
-    side_bottom_z = min(base+0.55*joint_land-0.25,
+    # The lower sliding dovetail reaches down to the base plate's top face.
+    side_bottom_z = min(base,
                         *(floor-SD_RAIL_LEDGE_MM-fit for floor in floors))
     lowest_z = min(0.0, side_bottom_z)
     fascia_bottoms = tuple(floor - block["drawer_base_mm"] for floor in floors)
@@ -220,20 +247,26 @@ def _make_datum(space):
 def _front_plan(block, width, row, ordinal):
     height = row["height_mm"] + block["drawer_base_mm"]
     has_label = block["drawer_labels_enabled"] and bool(row["label_text"])
-    sizes = ("large", "medium", "small") if block["drawer_handle_size"] == "auto" else (block["drawer_handle_size"],)
-    if not block["drawer_handles"]:
+    handles = block["drawer_handles"]
+    choice = block["drawer_handle_size"]
+    sizes = ("large", "medium", "small") if choice == "auto" else (choice,)
+    if not handles:
         sizes = (None,)
+    pull_failed = label_failed = False
     for size in sizes:
         try:
-            pull = (resolve_lid_handle((-width/2, -height/2, width/2, height/2),
-                                       "pull", size, "middle") if size else None)
+            try:
+                pull = (resolve_lid_handle((-width/2, -height/2, width/2, height/2),
+                                           "pull", size, "middle") if size else None)
+            except ValueError as error:
+                raise _PullFit(str(error)) from error
             if pull is not None:
                 kx0, ky0, kx1, ky1 = handle_keepout(pull)
                 if kx0 < -width/2 or kx1 > width/2:
-                    raise ValueError("Pull needs a wider fascia")
+                    raise _PullFit("Pull needs a wider fascia")
                 pull_z = height - LID_HANDLE_EDGE_MARGIN - ky1
                 if pull_z + ky0 < LID_HANDLE_EDGE_MARGIN:
-                    raise ValueError("Pull needs a taller fascia")
+                    raise _PullFit("Pull needs a taller fascia")
                 label_top = pull_z + ky0 - 1.0
             else:
                 pull_z = 0.0
@@ -243,17 +276,63 @@ def _front_plan(block, width, row, ordinal):
             if has_label:
                 label_bottom = 2.0
                 if label_top <= label_bottom:
-                    raise ValueError("Pull and label need more height")
-                label_outline = _fitted_label(row["label_text"],
-                    Zone(-width/2+4, label_bottom, width/2-4, label_top))
+                    raise _LabelFit("Pull and label need more height")
+                try:
+                    label_outline = _fitted_label(row["label_text"],
+                        Zone(-width/2+4, label_bottom, width/2-4, label_top))
+                except ValueError as error:
+                    raise _LabelFit(str(error)) from error
                 label_center = (label_bottom + label_top) / 2.0
             projection = max(float(pull.bounds[1][2]) if pull is not None else 0.0,
                              0.4 if has_label and block["drawer_label_style"] == "raised" else 0.0)
             return _FrontPlan(pull, size or "", pull_z, label_outline,
                               label_center, projection)
-        except ValueError:
-            continue
-    raise ValueError(f"Drawer {ordinal}: Pull and label do not fit; use Auto, a smaller Pull, shorter label, or taller drawer")
+        except _PullFit:
+            pull_failed = True
+        except _LabelFit:
+            label_failed = True
+    raise ValueError(_front_plan_message(ordinal, choice, handles, pull_failed, label_failed, has_label))
+
+
+class _PullFit(ValueError):
+    """The chosen pull cannot fit this fascia."""
+
+
+class _LabelFit(ValueError):
+    """The drawer label cannot fit beside the pull."""
+
+
+def _front_plan_message(ordinal, choice, handles, pull_failed, label_failed, has_label):
+    """Direct guidance that matches the actual settings - never suggests Auto
+    when Auto is already selected, and blames the label only when it contributed."""
+    name = f"Drawer {ordinal}"
+    if not handles:
+        return f"{name}'s label does not fit. Shorten the label or increase its height."
+    if label_failed and not pull_failed:
+        fixes = ["increase its height", "shorten the label"]
+        if choice == "auto":
+            fixes.append("turn Handles off")
+        else:
+            if choice != "small":
+                fixes.append("choose a smaller pull or Auto")
+            fixes.append("turn Handles off")
+        return f"{name}'s pull and label do not both fit. " + _join_fixes(fixes)
+    if choice == "auto":
+        return f"{name} is too short for a pull. Increase its height or turn Handles off."
+    fixes = ["increase its height"]
+    if choice != "small":
+        fixes.append("choose a smaller pull or Auto")
+    fixes.append("turn Handles off")
+    if label_failed and has_label:
+        fixes.insert(1, "shorten the label")
+    return f"{name} is too short for the {choice} pull. " + _join_fixes(fixes)
+
+
+def _join_fixes(fixes):
+    if len(fixes) == 1:
+        return fixes[0][0].upper() + fixes[0][1:] + "."
+    head = ", ".join(fixes[:-1])
+    return head[0].upper() + head[1:] + ", or " + fixes[-1] + "."
 
 
 def _datum_components(space, datum):
@@ -280,8 +359,8 @@ def _datum_components(space, datum):
             Zone(-datum.outer_x/2+margin_x, -datum.body_depth/2+margin_y,
                  datum.outer_x/2-margin_x, datum.body_depth/2-margin_y))
 
-    def add(key, name, bounds, make, orientations=("flat", "bed_90")):
-        pieces.append((key, name, bounds, make, orientations))
+    def add(key, name, bounds, make, orientations=("flat", "bed_90"), flip_up=False):
+        pieces.append((key, name, bounds, make, orientations, flip_up))
 
     # Broad plate skin stays selected; local ribs hold the sliding dovetails.
     def plate(z0, thickness, top=False):
@@ -289,6 +368,7 @@ def _datum_components(space, datum):
         plate_body = _box(0, datum.front, z0, datum.outer_x, datum.rear, z0+thickness)
         ribs = []
         cutters = []
+        lips = []
         root_z = z0-length if top else z0+thickness+length
         direction = 1 if top else -1
         for left in (True, False):
@@ -309,16 +389,28 @@ def _datum_components(space, datum):
                 def xr(a, b):
                     return sorted((inner+sign*a, inner+sign*b))
                 fy0 = datum.front+datum.frame/2
-                fy1 = fy0+10.0
-                px0, px1 = xr(-0.2, 1.5)
-                ribs.append(_box(px0, fy0+2.2, root_z+0.1,
-                                 px1, fy1+0.5, root_z+1.8))
-                # Clear the entire finger path through the local track rib.
-                # The top plate skin above the channel remains continuous.
+                fy1 = fy0+SD_DETENT_ARM_L_MM
+                arm_out = SD_DETENT_ARM_OFFSET_MM+SD_DETENT_ARM_W_MM
+                wall_d = arm_out+SD_DETENT_ENGAGE_MM+SD_DETENT_CHANNEL_CLEAR_MM
+                # Reinforcing rib beside the channel: full-height walls, 1.2 mm
+                # thick, joined to the plate above. It stops short of the rear
+                # panel, and the channel below is cut clear of it entirely.
+                px0, px1 = xr(-0.2, wall_d+SD_DETENT_RIB_WALL_MM)
+                ribs.append(_box(px0, fy0+2.2, root_z-0.6,
+                                 px1, fy1+0.5, root_z+2.4))
+                # The channel opens through the Top's front edge, so the whole
+                # arm, its root and the catch nose travel in clear space
+                # from first contact to final seating - never through the rib.
                 cx0, cx1 = sorted((panel_x0-0.2 if left else panel_x0+datum.panel+0.2,
-                                    inner+sign*1.3))
-                cutters.append(_box(cx0, fy0-0.2, root_z+0.2,
-                                    cx1, fy1+0.2, root_z+1.6))
+                                    inner+sign*wall_d))
+                cutters.append(_box(cx0, datum.front-0.2, root_z+0.2,
+                                    cx1, fy1+0.2, root_z+0.4+SD_DETENT_ARM_T_MM+0.2))
+                # The nose's flat face rides just behind this lip once seated.
+                nose_y0 = fy1-SD_DETENT_NOSE_L_MM
+                lip_y1 = nose_y0-SD_DETENT_LIP_GAP_MM
+                lx0, lx1 = xr(arm_out+SD_DETENT_LIP_GAP_MM, wall_d+0.2)
+                lips.append(_box(lx0, lip_y1-SD_DETENT_LIP_L_MM, root_z+0.1,
+                                 lx1, lip_y1, root_z+0.5+SD_DETENT_ARM_T_MM+0.1))
         if not top:
             rear_t = block["cabinet_wall_mm"]
             cutters.append(_box(datum.track_reach-SD_JOINT_CLEARANCE_MM,
@@ -338,10 +430,13 @@ def _datum_components(space, datum):
             label.apply_translation((datum.outer_x/2, (datum.front+datum.rear)/2, z0+thickness-min(0.5, thickness/3)))
             cutters.append(label)
             label_group = (("Unit label", label),)
-        return difference([union([plate_body, *ribs]), *cutters]), label_group
+        body = difference([union([plate_body, *ribs]), *cutters])
+        if lips:
+            body = union([body, *lips])
+        return body, label_group
     rib_height = 0.55 * datum.joint_land + 0.8
     add("cabinet_base", "Cabinet Base", (datum.outer_x, datum.body_depth, datum.base+rib_height), lambda: plate(0, datum.base))
-    add("cabinet_top", "Cabinet Top", (datum.outer_x, datum.body_depth, datum.top+rib_height), lambda: plate(datum.outer_z-datum.top, datum.top, True))
+    add("cabinet_top", "Cabinet Top", (datum.outer_x, datum.body_depth, datum.top+rib_height), lambda: plate(datum.outer_z-datum.top, datum.top, True), flip_up=True)
 
     # Sides contain rail ledges, capture lips, rear keyways and two front detents.
     for left in (True, False):
@@ -366,7 +461,9 @@ def _datum_components(space, datum):
             inner = x0+datum.track_reach if left else x0
             for floor in datum.floors:
                 # Bounded reinforcement links the thin broad panel to rail root.
-                root_x0, root_x1 = (panel_x0, inner+0.2) if left else (inner-0.2, panel_x0+datum.panel)
+                # The band stops exactly at the rail face (the ledge boxes below
+                # overlap it), so the rear panel's edge passes it without contact.
+                root_x0, root_x1 = (panel_x0, inner) if left else (inner, panel_x0+datum.panel)
                 bars.append(_box(root_x0, datum.front, floor-SD_RAIL_LEDGE_MM-datum.fit,
                                  root_x1, datum.rear, floor+2*SD_RAIL_CAPTURE_MM+datum.fit))
                 a, b = (inner-0.2, inner+datum.rail_ledge) if left else (inner-datum.rail_ledge, inner+0.2)
@@ -381,65 +478,80 @@ def _datum_components(space, datum):
                 stop_x0, stop_x1 = ((body_edge-1.4+datum.fit, body_edge-0.2)
                                     if left else (body_edge+0.2, body_edge+1.4-datum.fit))
                 stop_y0 = datum.front+SD_RAIL_LEADIN_MM+12.0
-                stop_y1 = stop_y0+8.0
+                stop_y1 = stop_y0+SD_CATCH_LENGTH_MM
                 root_x0, root_x1 = ((inner-0.2, stop_x1) if left else (stop_x0, inner+0.2))
                 bars.append(_box(root_x0, stop_y0, floor-SD_RAIL_LEDGE_MM-datum.fit,
                                  root_x1, stop_y1, floor-0.25-datum.fit))
-                bars.append(_stop_ramp(stop_x0, stop_x1, stop_y0, stop_y1,
-                                       floor-0.5-datum.fit))
+                # The drawer wing's underside is at floor-0.5; the bump peaks only
+                # SD_CATCH_OVERLAP_MM above it, and slopes both ways.
+                bump_base = floor-0.5-datum.fit
+                bars.append(_catch_bump(stop_x0, stop_x1, stop_y0, stop_y1, bump_base,
+                                        datum.fit+SD_CATCH_OVERLAP_MM))
             center = x0+datum.track_reach/2
             bars.append(_sliding_dovetail(center, datum.front+SD_FRONT_SHOULDER_MM,
                                           datum.rear, base_root, -1, datum.joint_land))
             bars.append(_sliding_dovetail(center, datum.front,
                                           datum.rear-SD_FRONT_SHOULDER_MM,
                                           top_root, 1, datum.joint_land))
-            # Each spring finger has a reinforced root, free length and ramp nose.
+            # Each spring arm has a reinforced root, a long free length and a
+            # catch nose: ramp on the rear side, flat catch face on the front side.
             detent_y0 = datum.front+datum.frame/2
-            detent_y1 = detent_y0+10.0
+            detent_y1 = detent_y0+SD_DETENT_ARM_L_MM
             detent_z = top_root+0.4
             direction = 1 if left else -1
             def fx(distance):
                 return inner+direction*distance
-            bars.append(_box(min(panel_x0, fx(-0.6)), detent_y0, detent_z,
-                             max(panel_x0+datum.panel, fx(0.7)), detent_y0+2.0, detent_z+1.0))
-            bars.append(_box(min(fx(0.1),fx(0.7)), detent_y0+1.8, detent_z,
-                             max(fx(0.1),fx(0.7)), detent_y1, detent_z+1.0))
-            nose_profile = Polygon([(fx(0.7),detent_y1-2.0), (fx(1.1),detent_y1),
-                                    (fx(0.7),detent_y1), (fx(0.1),detent_y1-2.0)])
-            bars.append(translated(_extrude_polygon(nose_profile, 1.0), (0,0,detent_z)))
+            arm_a = SD_DETENT_ARM_OFFSET_MM
+            arm_out = arm_a+SD_DETENT_ARM_W_MM
+            spans = (panel_x0, panel_x0+datum.panel, fx(-0.6), fx(arm_out))
+            bars.append(_box(min(spans), detent_y0, detent_z,
+                             max(spans), detent_y0+2.0, detent_z+SD_DETENT_ARM_T_MM))
+            bars.append(_box(min(fx(arm_a), fx(arm_out)), detent_y0+1.8, detent_z,
+                             max(fx(arm_a), fx(arm_out)), detent_y1, detent_z+SD_DETENT_ARM_T_MM))
+            nose_y0 = detent_y1-SD_DETENT_NOSE_L_MM
+            nose_profile = orient(Polygon([
+                (fx(arm_out-0.2), nose_y0), (fx(arm_out+SD_DETENT_ENGAGE_MM), nose_y0),
+                (fx(arm_out+SD_DETENT_ENGAGE_MM), nose_y0+0.4), (fx(arm_out), detent_y1),
+                (fx(arm_out-0.2), detent_y1)]), 1.0)
+            bars.append(translated(_extrude_polygon(nose_profile, SD_DETENT_ARM_T_MM), (0,0,detent_z)))
             # Rear key land is local to the vertical drop-in groove.
-            rear_root_x0, rear_root_x1 = (panel_x0, inner+0.2) if left else (inner-0.2, panel_x0+datum.panel)
+            rear_root_x0, rear_root_x1 = (panel_x0, inner) if left else (inner, panel_x0+datum.panel)
             bars.append(_box(rear_root_x0, datum.rear-datum.frame, base_root,
                              rear_root_x1, datum.rear, top_root))
             solid = union(bars)
+            # The drop-in groove is open through the side's top edge: nothing
+            # caps it, and the rear panel's body edge sits clear of the land.
             rear_half = block["cabinet_wall_mm"]/2
             slot_x0 = inner-rear_half-SD_JOINT_CLEARANCE_MM
             slot_x1 = inner+rear_half+SD_JOINT_CLEARANCE_MM
             slot = _box(slot_x0, datum.rear-block["cabinet_wall_mm"]-SD_JOINT_CLEARANCE_MM,
-                        datum.base+SD_JOINT_LAND_MIN_MM, slot_x1,
+                        datum.base+SD_JOINT_LAND_MIN_MM-SD_JOINT_CLEARANCE_MM, slot_x1,
                         datum.rear+SD_JOINT_CLEARANCE_MM,
-                        datum.outer_z-datum.top-SD_JOINT_LAND_MIN_MM)
+                        datum.outer_z-datum.top+1.0)
             return difference([solid, slot])
         side_reach = (datum.track_reach + SD_RAIL_CAPTURE_MM + datum.fit
                       + SD_RAIL_LEDGE_MM - 0.2)
         add(key, name, (side_reach, datum.body_depth,
                         datum.outer_z-datum.top-datum.side_bottom_z),
-            side_mesh, ("broad_yz", "broad_yz_90"))
+            side_mesh, ("broad_yz", "broad_yz_90"), flip_up=not left)
 
     # Rear is entirely behind the closed drawer clearance datum.
     rear_t = block["cabinet_wall_mm"]
+    # Body edges sit a hair inside the side rail faces; only the tabs enter the grooves.
+    rear_lo = datum.track_reach+SD_REAR_PANEL_INSET_MM
+    rear_hi = datum.outer_x-datum.track_reach-SD_REAR_PANEL_INSET_MM
     def rear_keys():
         tabs = []
         for x0 in (datum.track_reach-rear_t/2, datum.outer_x-datum.track_reach-rear_t/2):
             tabs.append(_box(x0, datum.rear-rear_t, datum.base+SD_JOINT_LAND_MIN_MM,
                              x0+rear_t, datum.rear, datum.outer_z-datum.top-SD_JOINT_LAND_MIN_MM))
-        tabs.append(_box(datum.track_reach, datum.rear-rear_t, datum.base/2,
-                         datum.outer_x-datum.track_reach, datum.rear, datum.base+SD_JOINT_LAND_MIN_MM))
+        tabs.append(_box(rear_lo, datum.rear-rear_t, datum.base/2,
+                         rear_hi, datum.rear, datum.base+SD_JOINT_LAND_MIN_MM))
         return tabs
     if block["rear_support"] == "solid":
         def rear_mesh():
-            panel = _box(datum.track_reach, datum.rear-rear_t, datum.base,
-                         datum.outer_x-datum.track_reach, datum.rear, datum.outer_z-datum.top)
+            panel = _box(rear_lo, datum.rear-rear_t, datum.base,
+                         rear_hi, datum.rear, datum.outer_z-datum.top)
             return union([panel, *rear_keys()])
         add("rear_solid", "Rear Solid Back",
             (datum.outer_x-2*datum.track_reach+rear_t, rear_t,
@@ -450,14 +562,16 @@ def _datum_components(space, datum):
             width = max(SD_REAR_CROSS_MIN_WIDTH_MM, SD_JOINT_LAND_MIN_MM)
             # Two crossing diagonal bands as one printable component.
             from shapely.geometry import LineString
-            lo, hi = datum.track_reach, datum.outer_x-datum.track_reach
+            lo, hi = rear_lo, rear_hi
             zlo, zhi = datum.base, datum.outer_z-datum.top
             a = LineString([(lo, zlo), (hi, zhi)]).buffer(width/2, cap_style=2)
             b = LineString([(lo, zhi), (hi, zlo)]).buffer(width/2, cap_style=2)
             poly = a.union(b).intersection(shape_box(lo, zlo, hi, zhi))
+            # The clip repeats the box corners; a doubled vertex leaves the
+            # extrusion non-watertight, so the outline is cleaned first.
+            poly = poly.simplify(1e-6)
             mesh = _extrude_polygon(poly, rear_t)
             mesh.apply_transform(np.array([[1,0,0,0],[0,0,1,datum.rear-rear_t],[0,1,0,0],[0,0,0,1]], float))
-            mesh.invert()
             return union([mesh, *rear_keys()])
         add("rear_cross", "Rear Cross Brace",
             (datum.outer_x-2*datum.track_reach+rear_t, rear_t,
@@ -542,17 +656,43 @@ def resolve_storage_drawers_plan(space: dict, *, build_meshes: bool = True) -> S
     datum = _make_datum(canonical)
     definitions, warnings = _datum_components(canonical, datum)
     components = []
-    for key, name, bounds, maker, orientations in definitions:
+    for key, name, bounds, maker, orientations, flip_up in definitions:
         built = maker() if build_meshes else None
         mesh, groups = built if isinstance(built, tuple) else (built, ())
         actual = trimesh.util.concatenate([mesh, *(part for _label, part in groups)]) if groups else mesh
         components.append(StorageDrawerComponent(key, name, mesh, tuple(groups),
-                                                 _bounds(actual) if actual is not None else tuple(float(v) for v in bounds), orientations))
+                                                 _bounds(actual) if actual is not None else tuple(float(v) for v in bounds),
+                                                 orientations, flip_up))
     stack_projection = B4B_STACK_RECESS_DEPTH if canonical["storage_drawers"]["stacking"] else 0.0
     return StorageDrawersPlan(canonical, (datum.outer_x, datum.outer_y,
                                          datum.outer_z-datum.lowest_z+stack_projection),
                               datum.base, datum.top, datum.frame, datum.pitches,
                               tuple(components), tuple(warnings))
+
+
+_FIT_ADVICE = {
+    "cabinet_base": "reduce the X or Y size",
+    "cabinet_top": "reduce the X or Y size",
+    "side": "reduce the Y depth, the number of drawers or their heights",
+    "frame": "reduce the Y depth, the number of drawers or their heights",
+    "rear": "reduce the X size, the number of drawers or their heights",
+    "drawer": "reduce that drawer's X or Y size or its height",
+    "stack_peg": "check the printer build volume",
+}
+
+
+def _fit_advice(key: str) -> str:
+    for name, text in _FIT_ADVICE.items():
+        if key.startswith(name):
+            return f"Try to {text}, or change Printer Settings."
+    return "Reduce the cabinet size or change Printer Settings."
+
+
+def _fit_message(name: str, key: str, bounds, profile: dict) -> str:
+    size = " × ".join(f"{v:.1f}" for v in bounds)
+    bed = f"{profile['x_mm']:g} × {profile['y_mm']:g} × {profile['z_mm']:g}"
+    return (f"{name} is {size} mm and does not fit the {bed} mm printer in any orientation. "
+            + _fit_advice(key))
 
 
 def storage_drawers_summary(space: dict, printer_profile: dict | None = None) -> dict:
@@ -561,16 +701,24 @@ def storage_drawers_summary(space: dict, printer_profile: dict | None = None) ->
     fits = []
     for component in plan.components:
         fit = component_fit(component.bounds_xyz, component.allowed_orientations, profile)
+        if not fit["fits"]:
+            fit = {**fit, "reason": _fit_message(component.display_name, component.key,
+                                                 component.bounds_xyz, profile)}
         fits.append({"key": component.key, "name": component.display_name,
                      "bounds_xyz": list(component.bounds_xyz), **fit})
     ux, uy = storage_drawers_unit_counts(plan.space)
+    block = plan.space["storage_drawers"]
+    first_bad = next((one for one in fits if not one["fits"]), None)
     return {"outside_xyz": list(plan.outside_xyz), "field_units": [ux, uy],
             "field_mm": [plan.space["x"], plan.space["y"]],
             "drawer_count": len(plan.drawer_pitches_mm),
+            "cabinet_style": block["cabinet_style"],
+            "printer_mm": [profile["x_mm"], profile["y_mm"], profile["z_mm"]],
             "drawers": [{"id": row["id"], "name": f"Drawer {i}", "height_mm": row["height_mm"], "pitch_mm": plan.drawer_pitches_mm[i-1]}
-                        for i, row in enumerate(plan.space["storage_drawers"]["drawers"], 1)],
+                        for i, row in enumerate(block["drawers"], 1)],
             "effective_material": {"base_mm": plan.effective_base_mm, "top_mm": plan.effective_top_mm,
-                                   "frame_width_mm": plan.resolved_frame_width_mm},
-            "components": fits, "fits_printer": all(one["fits"] for one in fits),
-            "first_fit_error": next((one["reason"] for one in fits if not one["fits"]), None),
+                                   "frame_width_mm": plan.resolved_frame_width_mm if block["cabinet_style"] == "open" else None},
+            "components": fits, "fits_printer": first_bad is None,
+            "first_fit_error": first_bad["reason"] if first_bad else None,
+            "first_fit_part": first_bad["name"] if first_bad else None,
             "warnings": list(plan.warnings)}

@@ -30,7 +30,9 @@ from typing import Any, Callable
 import uuid
 
 from organizer_printer_profile import (
+    PRINTER_PREF_KEYS,
     apply_printer_profile_to_preferences,
+    default_printer_profile_state,
     printer_profile_state,
 )
 from organizer_inventory import (
@@ -49,6 +51,8 @@ import organizer_storage
 from organizer_storage_drawers import (
     normalise_storage_drawers_definition,
     prepare_new_storage_drawers_definition,
+    reset_storage_drawers_definition,
+    storage_drawers_definition_problem,
     storage_drawers_recent_summary,
 )
 
@@ -363,6 +367,32 @@ def _space(raw: Any) -> dict[str, Any] | None:
     return res
 
 
+def _repairable_cabinet(raw: Any) -> dict[str, Any] | None:
+    """A typed Storage Drawers Space whose *known* cabinet settings are damaged.
+
+    Returns the in-memory repaired copy (never written by classification), or
+    None when ``raw`` is not a Storage Drawers Space at all.
+    """
+    if not isinstance(raw, dict) or raw.get("kind") != "storage_drawers":
+        return None
+    try:
+        return reset_storage_drawers_definition(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cabinet_recovery(folder: Path) -> dict[str, str] | None:
+    """The plain-language reason a typed cabinet's stored settings are damaged."""
+    metadata = _json_file(folder / METADATA_FILE)
+    if not isinstance(metadata, dict) or metadata.get("folder_mode") != "space":
+        return None
+    raw = metadata.get("space")
+    if not isinstance(raw, dict) or raw.get("kind") != "storage_drawers":
+        return None
+    problem = storage_drawers_definition_problem(raw)
+    return {"message": problem} if problem else None
+
+
 def _explicit_inventory(metadata: dict[str, Any] | None) -> bool | None:
     """A metadata file's own recorded choice, or None if it never said."""
     if not isinstance(metadata, dict):
@@ -465,6 +495,12 @@ def _folder_state(
         needs_setup = int(version) < 4 or setup_version != SPACE_SETUP_VERSION
         if metadata.get("folder_mode") == "space":
             metadata_space = _space(metadata.get("space"))
+            damaged_cabinet = False
+            if not metadata_space:
+                # Damaged known cabinet settings keep the Space's identity and
+                # its Inventory; the caller shows the recovery state.
+                metadata_space = _repairable_cabinet(metadata.get("space"))
+                damaged_cabinet = metadata_space is not None
             if metadata_space:
                 metadata_defaults = _metadata_space_defaults(metadata, int(version))
                 # Schema-validate the resume checkpoint here too, even though
@@ -473,7 +509,7 @@ def _folder_state(
                 _metadata_resume(metadata, int(version))
                 if int(version) >= SPACE_ID_REQUIRED_VERSION and _space_id(metadata.get("space_id")) is None:
                     raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
-                chosen_space = explicit_space or metadata_space
+                chosen_space = metadata_space if damaged_cabinet else (explicit_space or metadata_space)
                 # A stored legacy "box" identity always requires the
                 # explicit migration/setup pass, even inside an otherwise
                 # fully-valid v4 + setup_version-1 metadata file left over
@@ -592,6 +628,10 @@ def _write_metadata(
                     )
                     saved_resume_design, saved_resume_pending = _metadata_resume(current, int(version))
                     saved_space = _space(current.get("space"))
+                    if saved_space is None and _repairable_cabinet(current.get("space")) is not None:
+                        # Damaged cabinet settings are preserved byte-for-byte by
+                        # every ordinary write; only an explicit reset replaces them.
+                        saved_space = current["space"]
                     if isinstance(current.get("structural_outputs"), dict):
                         saved_structural = dict(current["structural_outputs"])
                     # The one choke point that keeps a Space's identity: an
@@ -768,6 +808,7 @@ def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
         "resume_pending": resume_pending,
         "exists": wavefinity_exists,
         "no_inventory": not inventory,
+        "cabinet_recovery": _cabinet_recovery(folder) if mode == "space" and not needs_setup else None,
     }
 
 
@@ -1669,9 +1710,19 @@ def space_routes(
             return done()
 
     def printer_profile_route(payload):
+        if payload.get("reset") is True:
+            # One-click recovery: only the printer-profile keys go back to defaults.
+            def clear(prefs: dict[str, Any]) -> None:
+                for key in PRINTER_PREF_KEYS:
+                    prefs.pop(key, None)
+            return printer_profile_state(mutate_preferences(clear))
         raw = payload.get("profile")
         if raw is None:
-            return printer_profile_state(load_preferences())
+            try:
+                return printer_profile_state(load_preferences())
+            except ValueError:
+                return default_printer_profile_state(
+                    "Printer Settings could not be read. Choose Reset Printer Settings to use the defaults.")
         update = apply_printer_profile_to_preferences({}, raw)
 
         def apply(prefs: dict[str, Any]) -> None:
@@ -1690,6 +1741,12 @@ def space_routes(
         expected = _space_id(payload.get("space_id"))
         if expected is None or info["space_id"] != expected:
             raise ValueError("This folder is not the Space that was open before. Nothing was changed.")
+        operation = str(payload.get("operation") or "")
+        recovery = info.get("cabinet_recovery")
+        if recovery and operation != "reset":
+            raise ValueError(f"Reset cabinet settings before changing the cabinet. {recovery['message']}")
+        if operation == "reset" and not recovery:
+            raise ValueError("The cabinet settings are not damaged.")
         # One semantic transaction: the rollback snapshot, the mutation, the
         # metadata commit and any rollback all sit inside the Inventory lock, so
         # a rollback can never overwrite newer Inventory work.
@@ -1697,7 +1754,7 @@ def space_routes(
             path = resolve_inventory_path(target, migrate=True)
             before = path.read_text(encoding="utf-8") if path.is_file() else None
             result = storage_drawers_mutate(
-                target, str(payload.get("operation") or ""), drawer_id=payload.get("drawer_id"),
+                target, operation, drawer_id=payload.get("drawer_id"),
                 proposed=payload.get("space"), space=space,
             )
             try:
