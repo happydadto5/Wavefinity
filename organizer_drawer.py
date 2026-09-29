@@ -106,6 +106,7 @@ from organizer_b4b import B4B_STACK_RECESS_DEPTH, b4b_summary
 from organizer_product_rules import DRAWER_HARD_CLEARANCE_MM, SURFACE_TRIM_HEIGHTS
 from organizer_stack import STACK_MIN_WALL, STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
 from organizer_pegboard import pegboard_layout_for_bin, pegboard_standard
+from organizer_edge_mount import edge_mount_projection_envelope
 
 UNIT = BASE_UNIT
 SNAPS = (8.0, 4.0)
@@ -424,6 +425,17 @@ def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict
     base = chain[0]
     first = by_id[base["bin"]]
     w, d = bin_cells(first, drawer)
+    ex = {"l": 0, "t": 0, "r": 0, "b": 0}
+    if drawer.get("boundary") != "pegboard":
+        spec = ((specs or {}).get(first["id"]) or {}).get("box") or {}
+        envelope = edge_mount_projection_envelope(spec.get("edge_mount"))
+        if envelope:
+            grid = drawer_grid(drawer)
+            side = envelope["side"]
+            axis_step = grid.get("step_y", grid["step"]) if side in ("front", "back") else grid.get("step_x", grid["step"])
+            ex[{"front": "t", "back": "b", "left": "l", "right": "r"}[side]] = math.ceil(
+                envelope["projection_mm"] / axis_step
+            )
     layers, issues, top, plan_top = [], [], 0.0, 0.0
     for index, placement in enumerate(chain):
         one = by_id[placement["bin"]]
@@ -449,6 +461,7 @@ def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict
         "bin": base["bin"], "copy": int(base.get("copy", 0)),
         "gx": _cell(base["gx"], drawer), "gy": _cell(base["gy"], drawer),
         "w": w, "d": d, "h": top, "plan_h": plan_top,
+        "ex": ex,
         "kind": first.get("kind", "bin"), "name": first.get("name", ""),
         "chain": chain, "layers": layers, "top": by_id[chain[-1]["bin"]], "issues": issues,
     }
@@ -771,8 +784,9 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         base = item["chain"][0]
         if per_unit == 1 and (float(base["gx"]) % 1 or float(base["gy"]) % 1):
             problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sits off the 8 mm grid - move it to snap it back"})
-        x0, y0 = item["gx"], item["gy"]
-        x1, y1 = x0 + item["w"], y0 + item["d"]
+        ex = item["ex"]
+        x0, y0 = item["gx"] - ex["l"], item["gy"] - ex["t"]
+        x1, y1 = item["gx"] + item["w"] + ex["r"], item["gy"] + item["d"] + ex["b"]
         if x0 < 0 or y0 < 0 or x1 > cols or y1 > rows:
             problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sticks out of the drawer"})
         cx0, cy0, cx1, cy1 = max(0, x0), max(0, y0), min(cols, x1), min(rows, y1)

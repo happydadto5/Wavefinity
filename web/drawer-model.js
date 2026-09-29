@@ -327,6 +327,23 @@ DL.cells = (one, drawer = DL.drawer()) => {
   const cy = Math.max(1, Math.ceil((DL.isPegboard(drawer) ? one.z : one.y) / grid.stepY - 1e-6));
   return [cx, cy];
 };
+DL.edgeMountEnvelope = one => {
+  const spec = DL.layout?.design_specs?.[one.id]?.box?.edge_mount;
+  if (!spec?.label_enabled) return null;
+  const side = String(spec.side || "front").trim().toLowerCase();
+  if (!["front", "back", "left", "right"].includes(side)) throw new Error(`Invalid Edge Mount side: ${side}`);
+  return { side, projection_mm: Number(spec.label_projection_mm) };
+};
+DL.envelopeExt = (one, drawer = DL.drawer()) => {
+  const ex = { l: 0, t: 0, r: 0, b: 0 };
+  if (DL.isPegboard(drawer)) return ex;
+  const envelope = DL.edgeMountEnvelope(one);
+  if (!envelope) return ex;
+  const grid = DL.grid(drawer);
+  const axisStep = ["front", "back"].includes(envelope.side) ? grid.stepY : grid.stepX;
+  ex[{ front: "t", back: "b", left: "l", right: "r" }[envelope.side]] = Math.ceil(envelope.projection_mm / axisStep);
+  return ex;
+};
 DL.toCell = (units, drawer = DL.drawer()) => DL.isPegboard(drawer) ? Math.round(Number(units)) : Math.round(Number(units) * DL.grid(drawer).perUnit);
 DL.toUnits = (cell, drawer = DL.drawer()) => DL.isPegboard(drawer) ? cell : cell / DL.grid(drawer).perUnit;
 
@@ -402,6 +419,7 @@ DL.items = (drawer = DL.drawer()) => DL.chains(drawer).map(chain => {
   return {
     key: DL.key(chain[0]), keys: layers.map(layer => layer.key), chain, bins, layers,
     gx: DL.toCell(chain[0].gx, drawer), gy: DL.toCell(chain[0].gy, drawer), w, d, h: top,
+    ex: DL.envelopeExt(bins[0], drawer),
     plan_h: DL.isSurface() ? DL.stackPlanningHeight(layers) : top,
   };
 });
@@ -496,10 +514,12 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
   }
   const grid = DL.grid(drawer);
   const [w, d] = DL.cells(bins[0], drawer);
+  const ex = DL.envelopeExt(bins[0], drawer);
+  const ax0 = gx - ex.l, ay0 = gy - ex.t, ax1 = gx + w + ex.r, ay1 = gy + d + ex.b;
   const height = DL.stackHeight(bins);
   const cap = DL.heightCap(drawer);
   if (!DL.isPegboard(drawer) && !DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
-  if (gx < 0 || gy < 0 || gx + w > grid.cols || gy + d > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the pegboard." : "That would stick out of the Space." };
+  if (ax0 < 0 || ay0 < 0 || ax1 > grid.cols || ay1 > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the pegboard." : "That would stick out of the Space." };
   if (DL.isPegboard(drawer)) {
     const layout = DL.pegboardLayouts[bins[0].id] || bins[0].pegboard_layout;
     if (!layout || layout.error) return { ok: false, reason: layout?.error || "Mount layout is still loading." };
@@ -522,7 +542,9 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
   }
   for (const item of DL.items(drawer)) {
     if (item.keys.every(key => ignore.has(key))) continue;
-    if (gx < item.gx + item.w && item.gx < gx + w && gy < item.gy + item.d && item.gy < gy + d) {
+    const bx0 = item.gx - item.ex.l, by0 = item.gy - item.ex.t;
+    const bx1 = item.gx + item.w + item.ex.r, by1 = item.gy + item.d + item.ex.b;
+    if (ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1) {
       return { ok: false, reason: `That overlaps ${DL.label(item.bins[0])}.` };
     }
   }

@@ -132,6 +132,16 @@ def _normalize_side(side: str) -> str:
     return value
 
 
+def edge_mount_projection_envelope(spec):
+    """Return the enabled Projecting Label's outward planning envelope."""
+    if not spec or not bool(spec.get("label_enabled")):
+        return None
+    return {
+        "side": _normalize_side(spec.get("side")),
+        "projection_mm": float(spec["label_projection_mm"]),
+    }
+
+
 def _wall_normal_axis(side: str) -> str:
     return "y" if side in ("front", "back") else "x"
 
