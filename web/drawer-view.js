@@ -261,7 +261,9 @@ DV.entries = (drawer, grid) => {
   const drag = DV.drag?.moved ? DV.drag : null;
   for (const item of DL.items(drawer)) {
     const layers = item.layers.filter(layer => !drag?.keys.has(layer.key));
-    if (layers.length) entries.push({ key: item.key, item, ex: item.ex, ...box(item.gx, item.gy, item.w, item.d), layers, mode: "" });
+    if (layers.length) entries.push({ key: item.key, item,
+      ex: DL.envelopeExtForBins(layers.map(layer => layer.bin), drawer),
+      ...box(item.gx, item.gy, item.w, item.d), layers, mode: "" });
   }
   for (const p of drawer.placements.filter(DL.isEdgePlacement)) {
     const one = DL.bin(p.bin);
@@ -276,7 +278,9 @@ DV.entries = (drawer, grid) => {
     const start = target ? target.h - (DL.stackSteps[bins[0].stack] ?? 0) : 0;
     const where = target ? box(target.gx, target.gy, target.w, target.d) : box(ghost.gx, ghost.gy, w, d);
     const mode = drag?.outside ? "leaving" : ghost.valid ? "ghost" : "invalid";
-    entries.push({ key: "__ghost", ...where, ex: target?.ex || DL.envelopeExt(bins[0], drawer), layers: DV.layersFor(bins, keys, start), mode, ghost: true });
+    entries.push({ key: "__ghost", ...where,
+      ex: DL.envelopeExtForBins(target ? [...target.bins, ...bins] : bins, drawer),
+      layers: DV.layersFor(bins, keys, start), mode, ghost: true });
   }
   return entries;
 };
@@ -442,6 +446,7 @@ DV.paint = () => {
 DV.paintScene = (ctx, drawer, cam) => {
   const grid = DL.grid(drawer);
   const step = grid.step;
+  const entries = DV.entries(drawer, grid);
   const { W, D, H, eye } = cam;
   const rimH = cam.rimH ?? H;
   const shape = points => {
@@ -489,9 +494,10 @@ DV.paintScene = (ctx, drawer, cam) => {
   // Empty cells, and the largest empty spot the report found.
   {
     const taken = new Set();
-    DL.items(drawer).forEach(item => {
-      for (let r = item.gy - item.ex.t; r < item.gy + item.d + item.ex.b; r += 1) {
-        for (let c = item.gx - item.ex.l; c < item.gx + item.w + item.ex.r; c += 1) taken.add(`${c},${r}`);
+    entries.filter(entry => entry.item).forEach(entry => {
+      const { item, ex } = entry;
+      for (let r = item.gy - ex.t; r < item.gy + item.d + ex.b; r += 1) {
+        for (let c = item.gx - ex.l; c < item.gx + item.w + ex.r; c += 1) taken.add(`${c},${r}`);
       }
     });
     const inset = Math.min(0.6, step / 10);
@@ -532,7 +538,7 @@ DV.paintScene = (ctx, drawer, cam) => {
   const problems = DV.problemKeys();
   const hits = [];
   const inset = 0.35;
-  for (const entry of DV.paintOrder(DV.entries(drawer, grid), eye)) {
+  for (const entry of DV.paintOrder(entries, eye)) {
     const x0 = entry.x0 + inset, x1 = entry.x1 - inset, y0 = entry.y0 + inset, y1 = entry.y1 - inset;
     const keys = entry.layers.map(layer => layer.key);
     const pick = entry.ghost ? null
@@ -610,17 +616,14 @@ DV.paintScene = (ctx, drawer, cam) => {
     if (topFace) DV.drawLabel(ctx, entry, topFace, topInk);
     if (entry.ex && Object.values(entry.ex).some(Boolean)) {
       const { l, t, r, b } = entry.ex;
-      const x0 = entry.x0 - l * grid.stepX;
-      const y0 = entry.y0 - t * grid.stepY;
-      const x1 = entry.x1 + r * grid.stepX;
-      const y1 = entry.y1 + b * grid.stepY;
-      const band = l ? flat(x0, entry.y0, entry.x0, entry.y1, 0.2)
-        : r ? flat(entry.x1, entry.y0, x1, entry.y1, 0.2)
-          : t ? flat(entry.x0, y0, entry.x1, entry.y0, 0.2)
-            : flat(entry.x0, entry.y1, entry.x1, y1, 0.2);
+      const bands = [];
+      if (l) bands.push(flat(entry.x0 - l * grid.stepX, entry.y0, entry.x0, entry.y1, 0.2));
+      if (t) bands.push(flat(entry.x0, entry.y0 - t * grid.stepY, entry.x1, entry.y0, 0.2));
+      if (r) bands.push(flat(entry.x1, entry.y0, entry.x1 + r * grid.stepX, entry.y1, 0.2));
+      if (b) bands.push(flat(entry.x0, entry.y1, entry.x1, entry.y1 + b * grid.stepY, 0.2));
       ctx.save();
       ctx.setLineDash([5, 4]);
-      face(band, entry.ghost ? "rgba(196,123,66,.25)" : null, "#c47b42", 1);
+      bands.forEach(band => face(band, entry.ghost ? "rgba(196,123,66,.25)" : null, "#c47b42", 1));
       ctx.restore();
     }
   }
@@ -815,7 +818,7 @@ DV.stackTarget = (bins, sx, sy, skip) => {
   if (!hit?.grid) return { target: null, refusal: "" };
   const item = DL.items().find(one => one.keys.includes(hit.key));
   if (!item || item.keys.some(key => skip?.has(key))) return { target: null, refusal: "" };
-  const fit = DL.fitsOn(DL.drawer(), bins, item);
+  const fit = DL.fitsOn(DL.drawer(), bins, item, skip);
   return fit.ok ? { target: item, refusal: "" } : { target: null, refusal: fit.reason };
 };
 
