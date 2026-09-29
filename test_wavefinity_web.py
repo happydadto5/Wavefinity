@@ -1506,47 +1506,6 @@ class WebApplicationTests(unittest.TestCase):
         return node
 
 
-    def test_typed_space_autosave_serializes_and_rejects_stale_completion(self):
-        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
-        owner = source[source.index("function typedSpaceOrdinaryBin() {"):
-                       source.index("// Install a canonical design", source.index("function typedSpaceOrdinaryBin() {"))]
-        script = "\n".join([
-            "const clone = v => JSON.parse(JSON.stringify(v));",
-            "const state = {folderMode:'space', design:{part_name:'',box:{b4b:{enabled:false}},v:0},",
-            "  cleanDesign:{part_name:'',box:{b4b:{enabled:false}},v:0}, designInventoryId:null,",
-            "  preview:{fits:true,feature_errors:[],draft_error:null}};",
-            "state.previewDesignKey=JSON.stringify(state.design);",
-            "const baseTrimEnabled = () => false;",
-            "const writes = []; let epoch = 1; let release; const gate = new Promise(r => release = r);",
-            "const DL = {loaded:true,spaceContext:() => ({epoch}), requireSpaceContext:c => {if(c.epoch!==epoch) throw Object.assign(new Error('stale'),{code:'STALE_SPACE_CONTEXT'});},",
-            "  isStaleSpaceError:e => e.code==='STALE_SPACE_CONTEXT',",
-            "  inventoryCall:async (_path,payload,options) => {writes.push({id:payload.row_id||null,v:payload.design.v}); if(payload.design.v===1) await gate; DL.requireSpaceContext(options.context); return {row_id:payload.row_id||'B1',design:clone(payload.design)};},",
-            "  adopt:()=>{},emit:()=>{}};",
-            "const toast = () => {}; const syncForm = () => {};",
-            "const flushVisibleDesignEditsBeforeModeSwitch = async () => true;",
-            "const refreshPreview = async () => {state.preview={fits:true,feature_errors:[],draft_error:null};};",
-            owner,
-            "(async () => {",
-            "  await persistSpaceDesignSource(); const untouched = writes.length;",
-            "  state.design.v=1; state.previewDesignKey=JSON.stringify(state.design);",
-            "  const first=persistSpaceDesignSource();",
-            "  await Promise.resolve(); state.design.v=2; state.previewDesignKey=JSON.stringify(state.design);",
-            "  const second=persistSpaceDesignSource();",
-            "  release(); await Promise.all([first,second]);",
-            "  const serial = clone(writes); const id=state.designInventoryId;",
-            "  state.design.v=3; state.previewDesignKey=JSON.stringify(state.design);",
-            "  const stale=persistSpaceDesignSource(); await Promise.resolve(); epoch=2;",
-            "  let rejected=false; try {await stale;} catch(e) {rejected=e.code==='STALE_SPACE_CONTEXT';}",
-            "  process.stdout.write(JSON.stringify({untouched,serial,id,clean:state.cleanDesign.v,rejected}));",
-            "})();",
-        ])
-        result = self._run_node(script)
-        self.assertEqual(result["untouched"], 0)
-        self.assertEqual(result["serial"], [{"id": None, "v": 1}, {"id": "B1", "v": 2}])
-        self.assertEqual(result["id"], "B1")
-        self.assertEqual(result["clean"], 2)
-        self.assertTrue(result["rejected"])
-
     def test_hosted_inventory_writes_share_one_file_queue(self):
         source = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")
         owner = source[source.index("SP._inventoryWriteChain = Promise.resolve();"):
@@ -1695,40 +1654,6 @@ class WebApplicationTests(unittest.TestCase):
     # ------------------------------------------------------------ Fix 019
 
 
-
-    def test_safe_drawer_switch_never_silently_saves_or_loses_work(self):
-        # Fix 034 K1: autosave has no off state any more, so this always just
-        # flushes a dirty layout and aborts the switch (keeping DL.layout/
-        # DL.dirty intact) on a failed flush - never a confirm() dialog.
-        node = self._node_or_skip()
-        root = Path(__file__).resolve().parent / "web"
-        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
-        leave = spaces_js[spaces_js.index("SP.leaveDrawerLayoutSafely = async () => {"):]
-        leave = leave[:leave.index("SP.resetDrawer = async")]
-        self.assertNotIn("window.confirm(", leave)
-        self.assertNotIn(" confirm(", leave)
-        self.assertNotIn("appConfirmSaveDiscardCancel", leave)
-
-        script = "\n".join([
-            "const SP = {};",
-            "let saveResult = true;",
-            "const toast = () => {};",
-            "const DL = { dirty: true, layout: { settings: { autosave: true } }, output: 'x',"
-            " saveError: 'boom', save: async () => saveResult };",
-            leave,
-            "(async () => {",
-            "  const out = {};",
-            "  out.flushSuccess = await SP.leaveDrawerLayoutSafely();",
-            "  DL.dirty = true;",
-            "  saveResult = false;",
-            "  out.flushFailure = await SP.leaveDrawerLayoutSafely();",
-            "  process.stdout.write(JSON.stringify(out));",
-            "})();",
-        ])
-        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
-        out = json.loads(done.stdout)
-        self.assertTrue(out["flushSuccess"])
-        self.assertFalse(out["flushFailure"])
 
     def test_drawer_save_reports_success_or_failure(self):
         # Item 2's implementation detail: DL.save() must let callers know

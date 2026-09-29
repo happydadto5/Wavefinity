@@ -167,14 +167,19 @@ def canonical_text_feature(one: Feature) -> Feature:
 
 
 def retargeted_text(box: BoxSpec, one: Feature, mode: str = "fused") -> Feature:
-    """Re-centre a Text whose Text Type just moved it between base and rim.
+    """Reset a Text whose lettering or Text Type just changed.
 
-    The browser marks the change with ``retarget``. The destination seeds its own
-    Letter height (a fitting 15 mm on the base, the rim default on a rim) and the
-    Text is centred there; the marker is consumed and never saved.
+    The browser marks a sizing-relevant change with ``retarget`` and seeds the
+    Space's remembered default as ``cap_height`` when the Space has one. The
+    Text is reset to the authoritative destination zone — ``layout_zone`` for
+    base, ``top_label_zone`` for rim; a supplied ``cap_height`` is kept as the
+    wanted height and the canonical fit clamps it to the largest height that
+    fits (no 15 mm ceiling on a supplied height). With no supplied height the
+    product defaults apply (15 mm ideal on the base, the rim default on a
+    rim). The marker is consumed and never saved.
     """
     options = {key: value for key, value in one.options.items()
-               if key not in ("retarget", "cap_height", "text_v2", "auto")}
+               if key not in ("retarget", "text_v2", "auto")}
     if options.get("level") == "rim":
         side = str(options.get("rim_side") or "back").lower()
         return canonical_text_feature(replace(
@@ -182,7 +187,7 @@ def retargeted_text(box: BoxSpec, one: Feature, mode: str = "fused") -> Feature:
     zone = layout_zone(box, mode)
     seeded = replace(one, zone=zone, options=options)
     try:
-        cap = min(TEXT_CAP_HEIGHT_IDEAL, text_fitted(seeded)[0])
+        cap = text_fitted(seeded)[0]
     except ValueError:
         cap = TEXT_CAP_HEIGHT_IDEAL
     options["cap_height"] = cap
