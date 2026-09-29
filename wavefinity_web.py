@@ -145,9 +145,15 @@ from organizer_inserts import (
 from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED, is_walls_only, normalize_bore_style, bore_reference_top
 from organizer_inserts._core import ITEM_CLEARANCE, ITEM_PROFILES, feature_touches_wall
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
-from bambu_handoff import is_bambu_studio_executable, stage_bambu_inputs
-from organizer_drawer import drawer_routes, stack_part_height
-from organizer_inventory import append_bin, configure_space_text, resolve_inventory_path
+from bambu_handoff import _validate_settings_safe, is_bambu_studio_executable, stage_bambu_inputs
+from organizer_drawer import (
+    drawer_report, drawer_routes, generate_connectors, inventory_row_files,
+    prepare_inventory_bins, stack_part_height,
+)
+from organizer_inventory import (
+    append_bin, configure_space_text, design_specs, load_inventory, mark_printed_rows,
+    normalise_storage_box, resolve_inventory_path,
+)
 from organizer_product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
     ORDINARY_BIN_MIN_HEIGHT_MM,
@@ -159,6 +165,7 @@ from organizer_inventory import storage_drawers_mutate_text
 from organizer_printer_profile import (
     DEFAULT_PRINTER_BUILD_MM,
     normalise_printer_profile,
+    print_file_fit_issues,
     printer_profile_from_preferences,
 )
 from organizer_storage_drawers import (
@@ -2111,6 +2118,20 @@ def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
     planning_record = inventory_bin_record(stack_request, resolved, None, label, part_name, scoop)
     planning = object_height_plan(canonical, resolved.object_height_mm)
     planning["effective_mm"] = max(stack_part_height(planning_record), planning["object_top_mm"] or 0.0)
+    storage_box_height_warning = None
+    raw_space = payload.get("space")
+    if isinstance(raw_space, dict) and raw_space.get("kind") in ("portable", "box"):
+        cap = float(raw_space["z"]) + normalise_storage_box(raw_space.get("storage_box"))["lid_headroom_mm"]
+        if stack_block is not None and stack_block["enabled"]:
+            height = stack_block["closed_height_mm"] + stack_block["pitch_mm"]
+            warning_kind = "two_bins"
+        else:
+            height = stack_block["closed_height_mm"] if lid_enabled(stack_request) else stack_part_height(planning_record)
+            warning_kind = "one_bin"
+        if height > cap + 1e-6:
+            storage_box_height_warning = {
+                "kind": warning_kind, "height_mm": round(height, 3), "cap_mm": round(cap, 3),
+            }
     effective = list(layout.features)
     if draft is not None:
         if selected is not None and 0 <= selected < len(effective):
@@ -2122,6 +2143,7 @@ def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
         "design": canonical,
         "planning": planning,
         "bore_ceiling_warning": bore_warning,
+        "storage_box_height_warning": storage_box_height_warning,
         "stack": stack_block,
         "label_outline": scene["label_outline"],
         "label_meta": scene["label_meta"],
@@ -3800,6 +3822,207 @@ def structural_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     })
 
 
+def _local_storage_box_print_folder(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], str]:
+    """Bind a local print attempt to the typed Space's durable identity."""
+    root = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
+    prefs = load_preferences()
+    info = describe_space_folder(root, prefs)
+    expected = payload.get("space_id")
+    space = info.get("space")
+    if not expected or info.get("space_id") != expected or info.get("folder_mode") != "space" \
+            or not isinstance(space, dict) or space.get("kind") not in ("portable", "box"):
+        raise ValueError("This is not the Storage Box Space that was open before. Nothing was printed.")
+    if prefs.get("active_space_id") and prefs["active_space_id"] != expected:
+        raise ValueError("You switched Spaces during this print attempt. Nothing was printed.")
+    return root, space, expected
+
+
+def storage_box_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Preflight one authoritative case + placed-bin + connector handoff."""
+    if HOSTED:
+        raise ValueError("Hosted Wavefinity saves generated files to your selected folder instead.")
+    slicer = detect_bambu_studio(payload.get("slicer_path"))
+    if slicer is None or not slicer.is_file():
+        raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
+    profile = _printer_profile_for(payload)
+    root, space, space_id = _local_storage_box_print_folder(payload)
+    inventory = load_inventory(root)
+    layout, bins = inventory["layout"], inventory["bins"]
+    if not isinstance(layout, dict) or not isinstance(layout.get("space"), dict) \
+            or layout["space"].get("kind") not in ("portable", "box"):
+        raise ValueError("The Storage Box arrangement is unavailable. Reopen its Space and try again.")
+    by_id = {one["id"]: one for one in bins}
+    source_specs = design_specs(layout)
+    issues: list[str] = []
+    arranged_space = layout["space"]
+    if any(abs(float(arranged_space.get(axis, 0)) - float(space[axis])) > 1e-6 for axis in ("x", "y", "z")) \
+            or normalise_storage_box(arranged_space.get("storage_box")) != normalise_storage_box(space.get("storage_box")):
+        issues.append("Storage Box settings and saved arrangement disagree. Reopen this Space and try again.")
+    selected: list[str] = []
+    for drawer in layout.get("drawers") or []:
+        report = drawer_report(drawer, bins, layout=layout)
+        issues.extend(
+            problem["message"] for problem in report["problems"]
+            if problem["type"] != "height"
+        )
+        for placement in drawer.get("placements") or []:
+            row_id = placement.get("bin")
+            one = by_id.get(row_id)
+            if one is None:
+                continue  # report above names every missing placement
+            if one.get("kind") in ("spacer", "manual") or one.get("status") == "printed":
+                continue
+            if one.get("kind") not in ("bin", "b4b"):
+                issues.append(f"{one.get('name') or row_id}: this row cannot be printed")
+                continue
+            if row_id not in selected:
+                selected.append(row_id)
+    # Inspect every selection before making any new file; one bad row must not
+    # conceal other already-knowable identity or file failures.
+    eligible: list[str] = []
+    for row_id in selected:
+        one = by_id[row_id]
+        source = source_specs.get(row_id)
+        try:
+            files = inventory_row_files(root, one) if str(one.get("file") or "").strip() else []
+        except ValueError as error:
+            files = []
+            if not isinstance(source, dict):
+                issues.append(f"{one.get('name') or row_id}: {error}")
+        if not files and not isinstance(source, dict):
+            issues.append(f"{one.get('name') or row_id}: no current file or editable design is available")
+        elif not files:
+            try:
+                design_from_dict(source)
+            except Exception as error:
+                issues.append(f"{one.get('name') or row_id}: its saved design is invalid ({error})")
+                continue
+            eligible.append(row_id)
+        else:
+            eligible.append(row_id)
+    prepared_files: dict[str, list[Path]] = {}
+    prepared_specs: dict[str, dict[str, Any]] = {}
+    errors: list[str] = list(dict.fromkeys(issues))
+    def context_problem() -> str | None:
+        try:
+            _local_storage_box_print_folder(payload)
+            return None
+        except Exception as error:
+            return str(error)
+
+    stale_context = False
+    for row_id in eligible:
+        changed = context_problem()
+        if changed:
+            errors.append(changed)
+            stale_context = True
+            break
+        try:
+            prepared = prepare_inventory_bins(root, [row_id], _generate_bin_from_design_spec)
+            if prepared["failed"]:
+                failed = prepared["failed"]
+                errors.append(f"{failed['name']}: {failed['error']}")
+            else:
+                prepared_files.update(prepared["files"])
+                prepared_specs.update(prepared["specs"])
+        except Exception as error:
+            errors.append(f"{by_id[row_id].get('name') or row_id}: {error}")
+        changed = context_problem()
+        if changed:
+            errors.append(changed)
+            stale_context = True
+            break
+
+    case_files: list[Path] = []
+    if not stale_context:
+        try:
+            case = structural_generate_payload({"space": space, "output": str(root)})
+            case_files = _extract_generated_files(case)
+            if not case_files:
+                errors.append("Storage Box: no structural files were made")
+        except Exception as error:
+            errors.append(f"Storage Box: {error}")
+        changed = context_problem()
+        if changed:
+            errors.append(changed)
+            stale_context = True
+
+    connector_files: list[Path] = []
+    current = None
+    if not stale_context:
+        try:
+            current = load_inventory(root)
+        except Exception as error:
+            errors.append(f"Inventory could not be re-read after generation: {error}")
+    for drawer in ((layout.get("drawers") or []) if current is not None else []):
+        changed = context_problem()
+        if changed:
+            errors.append(changed)
+            stale_context = True
+            break
+        try:
+            expected_count = drawer_report(drawer, current["bins"], layout=layout)["connector_total"]
+            made = generate_connectors(root, layout, current["bins"], drawer.get("id"))
+            made_count = sum(int(one["count"]) for one in made["connectors"])
+            if made_count != expected_count:
+                errors.append("Space connectors: " + "; ".join(made["notes"] or [
+                    f"only {made_count} of {expected_count} required connectors could be made"]))
+            for one in made["connectors"]:
+                connector_files.extend([root / one["file"]] * int(one["count"]))
+        except Exception as error:
+            errors.append(f"Space connectors: {error}")
+        changed = context_problem()
+        if changed:
+            errors.append(changed)
+            stale_context = True
+            break
+
+    files = [*case_files]
+    for row_id in selected:
+        files.extend(prepared_files.get(row_id, []))  # exactly one bin occurrence per row
+    files.extend(connector_files)
+    for path in dict.fromkeys(files):
+        errors.extend(print_file_fit_issues(path, profile))
+        try:
+            _validate_settings_safe(path)
+        except Exception as error:
+            errors.append(f"{path.name}: {error}")
+
+    def partial(stage: str, problems: list[str]) -> dict[str, Any]:
+        return {**load_inventory(root), "partial": True, "partial_stage": stage,
+                "error": "\n".join(problems), "errors": problems,
+                "selected_rows": selected, "files": [str(path) for path in files]}
+
+    if errors:
+        return partial("context" if stale_context else "preflight", errors)
+    # A Space switch or a concurrent layout edit cannot turn this request into
+    # an implicit print of a different arrangement.
+    try:
+        _root, _space, confirmed_id = _local_storage_box_print_folder(payload)
+        latest = load_inventory(root)
+        def print_layout(value):
+            return {key: item for key, item in value.items() if key != "stale_files"}
+        if confirmed_id != space_id or print_layout(latest["layout"]) != print_layout(layout):
+            return partial("context", ["The Storage Box arrangement changed while files were prepared. Try again."])
+        latest_by_id = {one["id"]: one for one in latest["bins"]}
+        for row_id in selected:
+            row = latest_by_id.get(row_id)
+            if row is None or row.get("status") == "printed" or inventory_row_files(root, row) != prepared_files.get(row_id):
+                return partial("context", [f"{row_id} changed while files were prepared. Try again."])
+    except Exception as error:
+        return partial("context", [str(error)])
+    try:
+        launch_slicer(slicer, files)
+    except Exception as error:
+        return partial("slicer", [f"Bambu Studio did not open: {error}. Files were kept."])
+    try:
+        marked = mark_printed_rows(root, selected, prepared_specs) if selected else load_inventory(root)
+    except Exception as error:
+        return partial("status", [f"Bambu Studio opened, but Printed status could not be recorded: {error}. Check Inventory."])
+    return {**marked, "selected_rows": selected, "files": [str(path) for path in files],
+            "slicer": str(slicer)}
+
+
 # ---------------------------------------------------------------- AI Help (Fix 073)
 #
 # Wavefinity never calls an AI provider. This section only builds the prompt a
@@ -4573,6 +4796,7 @@ POST_ROUTES = {
     "/api/space/structural-design": structural_design_payload,
     "/api/space/structural-generate": structural_generate_payload,
     "/api/space/structural-print": structural_print_payload,
+    "/api/space/storage-box-print": storage_box_print_payload,
     "/api/space/storage-drawers-summary": storage_drawers_summary_payload,
     "/api/space/storage-drawers-validate": storage_drawers_validate_payload,
     "/api/space/storage-drawers-reset": storage_drawers_reset_payload,

@@ -59,7 +59,8 @@ from shapely.geometry import box as shape_box
 from shapely.ops import unary_union
 import trimesh
 
-from organizer_app import connector_filename, design_source_payload, design_to_dict, generate_side_file, object_height_plan
+from organizer_app import connector_filename, design_from_dict, design_source_payload, design_to_dict, generate_side_file, object_height_plan
+from organizer_stack import stack_summary
 from organizer_engine import (
     BASE_UNIT,
     MAX_BOX_SIZE,
@@ -91,6 +92,8 @@ from organizer_inventory import (
     load_inventory,
     load_inventory_text,
     mark_printed_rows,
+    normalise_storage_box,
+    storage_box_defaults,
     next_bin_id,
     save_design_source as _save_design_source_row,
     save_design_source_text as _save_design_source_row_text,
@@ -99,7 +102,7 @@ from organizer_inventory import (
     update_bin_file,
 )
 from organizer_inserts import Layout
-from organizer_b4b import B4B_STACK_RECESS_DEPTH
+from organizer_b4b import B4B_STACK_RECESS_DEPTH, b4b_summary
 from organizer_product_rules import DRAWER_HARD_CLEARANCE_MM, SURFACE_TRIM_HEIGHTS
 from organizer_stack import STACK_MIN_WALL, STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
 from organizer_pegboard import pegboard_layout_for_bin, pegboard_standard
@@ -292,6 +295,70 @@ def is_surface_layout(layout: dict[str, Any] | None) -> bool:
     return isinstance(space, dict) and space.get("kind") == "surface"
 
 
+def is_storage_box_layout(layout: dict[str, Any] | None) -> bool:
+    space = layout.get("space") if isinstance(layout, dict) else None
+    return isinstance(space, dict) and space.get("kind") in ("portable", "box")
+
+
+def storage_box_height_cap(layout: dict[str, Any]) -> float:
+    space = layout["space"]
+    return float(space["z"]) + normalise_storage_box(space.get("storage_box"))["lid_headroom_mm"]
+
+
+def stack_wall(one: dict[str, Any], specs: dict[str, Any]) -> float | None:
+    """Inventory wall is authoritative; old rows may inherit their source wall."""
+    value = one.get("wall")
+    if value is None:
+        value = ((specs.get(one["id"]) or {}).get("box") or {}).get("wall")
+    try:
+        wall = float(value)
+    except (TypeError, ValueError):
+        return None
+    return wall if math.isfinite(wall) and wall > 0 else None
+
+
+def stack_compatibility_issue(upper: dict[str, Any], lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
+    """The same physical stack rule used by placement and report."""
+    if upper.get("stack", "none") == "none" or lower.get("stack", "none") == "none":
+        return "Both bins must be printed for stacking"
+    if upper.get("stack") != lower.get("stack"):
+        return "Stacking modes must match"
+    if not (_close(upper["x"], lower["x"]) and _close(upper["y"], lower["y"])):
+        return "Bins need the same footprint to stack"
+    top_wall, bottom_wall = stack_wall(upper, specs), stack_wall(lower, specs)
+    if top_wall is None or bottom_wall is None:
+        return "Stacking wall thickness is unknown; save both bin designs before stacking"
+    if not _close(top_wall, bottom_wall):
+        return "Bins need the same footprint and compatible stacking wall thickness"
+    return None
+
+
+def storage_box_stack_metrics(layout: dict[str, Any] | None, bins: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    """Transient physical heights from the canonical design, never Inventory schema."""
+    if not is_storage_box_layout(layout):
+        return {}
+    specs = design_specs(layout)
+    metrics = {}
+    for one in bins:
+        source = specs.get(one["id"])
+        if one.get("kind") not in ("bin", "b4b") or not isinstance(source, dict):
+            continue
+        box = design_from_dict(source)[0]
+        if one.get("kind") == "b4b" and box.b4b.enabled:
+            height = b4b_summary(box)["assembled_envelope_mm"][2]
+            metrics[one["id"]] = {
+                "physical_mm": height,
+                "pitch_mm": height - (B4B_STACK_RECESS_DEPTH if box.b4b.stacking else 0),
+            }
+        else:
+            summary = stack_summary(box)
+            metrics[one["id"]] = {
+                "physical_mm": summary["closed_height_mm"],
+                "pitch_mm": summary["pitch_mm"],
+            }
+    return metrics
+
+
 def surface_planning_heights(layout: dict[str, Any] | None, bins: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     if not is_surface_layout(layout):
         return {}
@@ -350,7 +417,9 @@ def _chains(drawer: dict[str, Any], by_id: dict[str, dict]) -> tuple[list[list[d
 
 
 def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict],
-                plans: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+                plans: dict[str, dict[str, Any]] | None = None,
+                specs: dict[str, Any] | None = None,
+                storage_box: bool = False) -> dict[str, Any]:
     """One grid footprint: a single bin, or a stack of them."""
     base = chain[0]
     first = by_id[base["bin"]]
@@ -361,16 +430,15 @@ def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict
         bottom = 0.0
         if index:
             below = by_id[chain[index - 1]["bin"]]
-            mode, under = one.get("stack", "none"), below.get("stack", "none")
-            if mode == "none":
-                issues.append(f"{_label(one)} was not printed to stack")
-            elif under != mode:
-                issues.append(f"{_label(one)} ({mode} stacking) cannot snap onto {_label(below)} ({'not stackable' if under == 'none' else under + ' stacking'})")
-            if not (_close(one["x"], below["x"]) and _close(one["y"], below["y"])):
-                issues.append(f"{_label(one)} is not the same size as {_label(below)} under it")
-            bottom = top - STACK_STEPS.get(mode, 0.0)
-        top = bottom + stack_part_height(one)
-        layer_plan_top = bottom + ((plans or {}).get(one["id"], {}).get("effective_mm", stack_part_height(one)))
+            issue = stack_compatibility_issue(one, below, specs or {})
+            if issue:
+                issues.append(f"{_label(one)} cannot stack on {_label(below)}: {issue}")
+            bottom = (layers[-1]["z0"] + (plans or {}).get(below["id"], {}).get("pitch_mm", stack_pitch(below))
+                      if storage_box else top - STACK_STEPS.get(one.get("stack", "none"), 0.0))
+        physical = ((plans or {}).get(one["id"], {}).get("physical_mm", stack_part_height(one))
+                    if storage_box else stack_part_height(one))
+        top = bottom + physical
+        layer_plan_top = bottom + ((plans or {}).get(one["id"], {}).get("effective_mm", physical))
         plan_top = max(plan_top, layer_plan_top)
         layers.append({
             "key": _key(placement), "bin": placement["bin"], "copy": int(placement.get("copy", 0)),
@@ -678,7 +746,9 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     grid = drawer_grid(drawer)
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
     by_id = {one["id"]: one for one in bins}
-    plans = surface_planning_heights(layout, bins)
+    storage_box = is_storage_box_layout(layout)
+    plans = storage_box_stack_metrics(layout, bins) if storage_box else surface_planning_heights(layout, bins)
+    specs = design_specs(layout)
     owner = np.full((rows, cols), -1, dtype=int)
     problems: list[dict[str, Any]] = []
     for placement in drawer["placements"]:
@@ -687,7 +757,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     chains, loose = _chains(drawer, by_id)
     for placement in loose:
         problems.append({"type": "floating", "keys": [_key(placement)], "message": f"{_label(by_id[placement['bin']])} is stacked on nothing"})
-    items = [_stack_item(chain, drawer, by_id, plans) for chain in chains]
+    items = [_stack_item(chain, drawer, by_id, plans, specs, storage_box) for chain in chains]
     per_unit = _per_unit(drawer)
     for index, item in enumerate(items):
         label = _label(by_id[item["bin"]])
@@ -695,8 +765,9 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
             label = f"The stack of {len(item['layers'])} on {label}"
         for issue in item["issues"]:
             problems.append({"type": "stack", "keys": item["keys"], "message": issue})
-        if not is_surface_layout(layout) and item["h"] > drawer["height"] + 1e-6:
-            problems.append({"type": "too_tall", "keys": item["keys"], "message": f"{label} is {item['h']:g} mm tall; the drawer takes {drawer['height']:g} mm"})
+        height_cap = storage_box_height_cap(layout) if storage_box else drawer["height"]
+        if not is_surface_layout(layout) and item["h"] > height_cap + 1e-6:
+            problems.append({"type": "too_tall", "keys": item["keys"], "message": f"{label} is {item['h']:g} mm tall; this Space takes {height_cap:g} mm"})
         base = item["chain"][0]
         if per_unit == 1 and (float(base["gx"]) % 1 or float(base["gy"]) % 1):
             problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sits off the 8 mm grid - move it to snap it back"})
@@ -1563,7 +1634,9 @@ def drawer_routes(
 
     def with_rules(result: dict[str, Any]) -> dict[str, Any]:
         # The view needs the stacking steps for live stack heights while dragging.
-        return {**result, "stack_steps": STACK_STEPS}
+        return {**result, "stack_steps": STACK_STEPS,
+                "stack_metrics": storage_box_stack_metrics(result.get("layout"), result.get("bins") or []),
+                "storage_box_headroom_default_mm": storage_box_defaults()["lid_headroom_mm"]}
 
     def load(payload):
         if hosted:

@@ -4067,7 +4067,7 @@ function syncLidForm() {
   }
   const note = $("#lid-option-note");
   note.textContent = config === "stackable_bin"
-    ? "No lid. This bin stacks directly onto another matching bin. Remove Lid & Stacking to go back to no lid and no stacking."
+    ? "No lid. This bin stacks directly onto another bin with the same footprint and compatible stacking geometry. Remove Lid & Stacking to go back to no lid and no stacking."
     : config === "stackable_lid"
       ? "Handle and raised lettering are unavailable because the next bin needs a flat seating surface."
       : "One removable lid with a handle. This bin is not stackable.";
@@ -9334,10 +9334,20 @@ function appConfirm({
       appConfirm.checked = Boolean(checkboxLabel && checkBox?.checked);
       primaryBtn.onclick = secondaryBtn.onclick = cancelBtn.onclick = null;
       dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("click", onBackdrop);
+      dialog.removeEventListener("close", onClose);
       if (dialog.open) dialog.close();
       resolve(choice);
     };
     const onCancel = event => { event.preventDefault(); finish("cancel"); };
+    const onBackdrop = event => {
+      if (event.target !== dialog) return;
+      const bounds = dialog.getBoundingClientRect();
+      if (event.clientX < bounds.left || event.clientX > bounds.right ||
+          event.clientY < bounds.top || event.clientY > bounds.bottom) finish("cancel");
+    };
+    // A close event from the previous confirmation may arrive after this one opens.
+    const onClose = () => { if (!dialog.open) finish("cancel"); };
 
     titleEl.textContent = title || "";
     msgEl.textContent = message || "";
@@ -9359,6 +9369,8 @@ function appConfirm({
     cancelBtn.onclick = () => finish("cancel");
 
     dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("click", onBackdrop);
+    dialog.addEventListener("close", onClose);
     if (!dialog.open) dialog.showModal();
     // Focus always stays on a safe default - the primary action, or Cancel
     // when the primary itself is the dangerous one - never on a danger-
@@ -9949,6 +9961,7 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   if (actions.length) setError("", actions);
   state.textMeta = result.text_meta || [];
   updateBoreCeilingWarning(result.bore_ceiling_warning);
+  updateStorageBoxHeightWarning(result.storage_box_height_warning);
   state.fitError = Boolean(result.feature_errors.length || result.draft_error);
   updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
   updateAutoExpandButton();
@@ -9970,6 +9983,15 @@ function updateBoreCeilingWarning(warning) {
     : "";
 }
 
+function updateStorageBoxHeightWarning(warning) {
+  const element = $("#storage-box-height-warning");
+  if (!element) return;
+  element.hidden = !warning;
+  element.textContent = !warning ? "" : warning.kind === "two_bins"
+    ? `Two of these bins would stack to ${fmt(warning.height_mm)} mm; this Storage Box has ${fmt(warning.cap_mm)} mm of usable closed height.`
+    : `This bin is ${fmt(warning.height_mm)} mm tall; this Storage Box has ${fmt(warning.cap_mm)} mm of usable closed height. It may not fit when the lid is closed.`;
+}
+
 // `persistResume: false` (Fix 032 Correction 4, C4.2) renders a normal,
 // fully valid preview WITHOUT queuing it as the Space's resume checkpoint.
 // Used only for the one narrow starter preview that replaces a stored
@@ -9984,6 +10006,7 @@ async function refreshPreview({ persistResume = true } = {}) {
   const lidEpochAtRequest = state.lidThicknessEpoch;
   if (state.folderMode !== "space" || !["drawer", "portable", "box"].includes(state.activeSpace?.kind)) {
     updateBoreCeilingWarning(null);
+    updateStorageBoxHeightWarning(null);
   }
   beginPreviewWait(request);
   state.canGenerate = false;

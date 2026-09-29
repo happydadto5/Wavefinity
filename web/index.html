@@ -46,7 +46,7 @@
             <div id="space-structural" class="space-structural" hidden>
               <div class="button-row">
                 <button id="space-structural-save" class="button secondary dl-small" type="button">Save Storage Box</button>
-                <button id="space-structural-print" class="button secondary dl-small" type="button">Print Storage Box</button>
+                <button id="space-structural-print" class="button secondary dl-small" type="button">Print Storage Box + Bins</button>
                 <button id="space-make-inside-bin" class="button secondary dl-small" type="button" hidden>Make Inside Bin</button>
               </div>
             </div>
@@ -473,6 +473,7 @@
         <div class="preview-hint"><span id="preview-state">Building preview…</span></div>
       </div>
       <p id="bore-ceiling-warning" class="bore-ceiling-warning" role="status" hidden></p>
+      <p id="storage-box-height-warning" class="bore-ceiling-warning" role="status" hidden></p>
       <div class="canvas-wrap active" data-canvas="3d">
         <canvas id="preview-3d-solid" aria-hidden="true"></canvas>
         <canvas id="preview-3d" role="img" aria-label="3D design preview" aria-describedby="preview-help"></canvas>
@@ -1133,7 +1134,7 @@
             <div id="portable-case-options-group" class="storage-box-group">
               <h5 class="storage-box-subtitle">Case options</h5>
               <div class="space-dimension-row">
-                <label class="space-field"><span>Stacking</span>
+                <label class="space-field"><span>Case stacking</span>
                   <select id="portable-stacking"><option value="false" selected>Not stackable</option><option value="true">Stackable</option></select>
                 </label>
                 <label id="portable-handle-row" class="space-field"><span>Carrying handle</span>

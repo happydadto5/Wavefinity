@@ -2997,7 +2997,47 @@ SP.runStructural = async (mode, event) => {
   }
 };
 SP.saveStructural = () => SP.runStructural("save");
-SP.printStructural = event => SP.runStructural("print", event);
+SP.printStorageBox = async () => {
+  if (SP.structuralBusy || SP.structuralKind() !== "storage_box") return;
+  if (state.runtime.hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
+  if (!state.slicer?.available) {
+    toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
+    return;
+  }
+  const context = DL.spaceContext();
+  SP.structuralBusy = true;
+  SP.renderSpaceInfo();
+  try {
+    DL.requireSpaceContext(context);
+    if (typeof flushSpaceDesignAutosave === "function" &&
+        !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
+    DL.requireSpaceContext(context);
+    if (!(await DL.save())) return;
+    DL.requireSpaceContext(context);
+    const result = await api("/api/space/storage-box-print", {
+      output: context.output, space_id: context.spaceId,
+      slicer_path: state.slicer?.path || null,
+    });
+    DL.requireSpaceContext(context);
+    DL.adoptBatchResult(result);
+    DP.renderInventory(true);
+    DL.emit();
+    DL.requestReport();
+    if (result.partial) toast(result.error || "Storage Box print stopped before Bambu Studio opened.", true, 10000);
+    else toast(`Sent Storage Box + Bins to ${state.slicer?.name || "Bambu Studio"}!\n${(result.files || []).map(file => String(file).split(/[\\/]/).pop()).join("\n")}`, false, 8000);
+  } catch (error) {
+    if (DL.isStaleSpaceError(error)) {
+      toast("Storage Box print belongs to the Space you left. The current Space was not changed.");
+    } else {
+      toast(error.message, true, 8000);
+    }
+  } finally {
+    SP.structuralBusy = false;
+    SP.renderSpaceInfo();
+  }
+};
+SP.printStructural = event => SP.structuralKind() === "storage_box"
+  ? SP.printStorageBox() : SP.runStructural("print", event);
 
 SP.renderStructuralActions = () => {
   const box = document.getElementById("space-structural");
@@ -3011,7 +3051,7 @@ SP.renderStructuralActions = () => {
   const print = document.getElementById("space-structural-print");
   const hosted = Boolean(state.runtime.hosted);
   save.textContent = `Save ${label}`;
-  print.textContent = `Print ${label}`;
+  print.textContent = kind === "storage_box" ? "Print Storage Box + Bins" : `Print ${label}`;
   save.disabled = SP.structuralBusy;
   print.disabled = SP.structuralBusy || hosted;
   print.title = hosted ? SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP : "";
@@ -3189,7 +3229,16 @@ const wireInfoButtons = (prefix = "space-head") => {
     const btnPrint = document.getElementById("space-structural-print");
     if (btnPrint) btnPrint.addEventListener("click", SP.printStructural);
     const btnMakeInsideBin = document.getElementById("space-make-inside-bin");
-    if (btnMakeInsideBin) btnMakeInsideBin.addEventListener("click", designerMakeInsideBin);
+    if (btnMakeInsideBin) btnMakeInsideBin.addEventListener("click", async () => {
+      const context = DL.spaceContext();
+      const confirmed = await appConfirmAction({
+        title: "Create one full-size inside bin?",
+        message: "This creates one bin sized to fill the Storage Box's available interior, so other bins cannot be placed beside it.",
+        actionLabel: "Continue", cancelLabel: "Cancel",
+      });
+      if (!confirmed || !DL.spaceContextCurrent(context) || SP.structuralKind() !== "storage_box") return;
+      await designerMakeInsideBin();
+    });
 };
 
 SP.updateSpace = async () => {
@@ -3211,8 +3260,8 @@ SP.updateSpace = async () => {
     }
     const context = typeof DL !== "undefined" ? DL.spaceContext() : null;
     const requireCurrent = () => { if (context) DL.requireSpaceContext(context); };
-    if (kind === "surface" && typeof DL !== "undefined" && DL.loaded && !(await DL.save())) {
-        throw new Error("Save the current Surface layout before changing its edge.");
+    if ((kind === "surface" || kind === "portable") && typeof DL !== "undefined" && DL.loaded && !(await DL.save())) {
+        throw new Error("Save the current Space layout before changing its size or case settings.");
     }
     requireCurrent();
 
@@ -3265,6 +3314,13 @@ SP.updateSpace = async () => {
             if (typeof syncForm === "function") syncForm();
             if (typeof refreshPreview === "function") await refreshPreview();
         }
+    }
+    if (kind === "portable") {
+        if (typeof DL !== "undefined" && DL.loaded) {
+            await DL.load();
+            requireCurrent();
+        }
+        if (typeof refreshPreview === "function") await refreshPreview();
     }
     if ((kind === "drawer" || kind === "pegboard") && typeof DL !== "undefined" && DL.active) {
         DL.syncSingleDrawerFromSpace(state.activeSpace);
