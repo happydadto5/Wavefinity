@@ -8923,8 +8923,12 @@ async function refreshDraft() {
       }
       if (state.draft.options.retarget) {
         delete state.draft.options.retarget;
-        if (result.feature.options?.cap_height !== undefined) {
-          state.draft.options.cap_height = result.feature.options.cap_height;
+        // Adopt the effective fitted cap first: for rim Text the feature's
+        // own cap_height is still the requested (remembered) height.
+        const effectiveCap =
+          result.resolved_options?.cap_height ?? result.feature.options?.cap_height;
+        if (effectiveCap !== undefined) {
+          state.draft.options.cap_height = effectiveCap;
         }
         renderDraftFields();
       }
