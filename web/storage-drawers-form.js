@@ -81,7 +81,7 @@
     const handleSize = select(block.drawer_handle_size, [["auto", "Auto"], ["small", "Small"], ["medium", "Medium"], ["large", "Large"]]);
     const handleField = labeled("Pull size", handleSize);
     drawersGroup.append(countField,
-      labeled("Drawer fit", fit, "Changes drawer-to-cabinet clearance only. Cabinet joints keep their own fixed engineering clearance."),
+      labeled("Drawer fit", fit, "Changes drawer-to-cabinet clearance only. Cabinet joints keep their own fixed engineering clearance. Tight leaves the drawer catch almost no working margin — print your first cabinet on Standard."),
       labeled("Handles", handles), handleField);
     const drawerRows = el("div", "sd-drawer-rows"); drawersGroup.append(drawerRows);
     const cabinet = group(form, "Cabinet");
