@@ -3260,8 +3260,8 @@ SP.updateSpace = async () => {
     }
     const context = typeof DL !== "undefined" ? DL.spaceContext() : null;
     const requireCurrent = () => { if (context) DL.requireSpaceContext(context); };
-    if (kind === "surface" && typeof DL !== "undefined" && DL.loaded && !(await DL.save())) {
-        throw new Error("Save the current Surface layout before changing its edge.");
+    if ((kind === "surface" || kind === "portable") && typeof DL !== "undefined" && DL.loaded && !(await DL.save())) {
+        throw new Error("Save the current Space layout before changing its size or case settings.");
     }
     requireCurrent();
 
@@ -3314,6 +3314,13 @@ SP.updateSpace = async () => {
             if (typeof syncForm === "function") syncForm();
             if (typeof refreshPreview === "function") await refreshPreview();
         }
+    }
+    if (kind === "portable") {
+        if (typeof DL !== "undefined" && DL.loaded) {
+            await DL.load();
+            requireCurrent();
+        }
+        if (typeof refreshPreview === "function") await refreshPreview();
     }
     if ((kind === "drawer" || kind === "pegboard") && typeof DL !== "undefined" && DL.active) {
         DL.syncSingleDrawerFromSpace(state.activeSpace);
