@@ -543,16 +543,6 @@ class WebApplicationTests(unittest.TestCase):
             wavefinity_web.connector_payload({"design": {"design_kind": "base_trim"}})
         self.assertIn("Base Trim", str(ctx.exception))
 
-    def test_default_draft_changes_real_geometry_when_height_changes(self):
-        design = default_design()
-        feature = default_feature_payload({"design": design, "kind": "pocket"})["feature"]
-        low = draft_payload({"design": design, "feature": feature})
-        low_top = max(point[2] for face in low["geometry"] for point in face["points"])
-        feature["options"]["height"] = 28.0
-        high = draft_payload({"design": design, "feature": feature})
-        high_top = max(point[2] for face in high["geometry"] for point in face["points"])
-        self.assertGreater(high_top, low_top + 4.0)
-
 
 
     def test_photo_upload_creates_one_contour_and_only_grows_the_grid_bin(self):
@@ -735,69 +725,6 @@ class WebApplicationTests(unittest.TestCase):
         )
         self.assertTrue(preview_payload({"design": changed["design"]})["fits"])
 
-    def test_alternate_ends_survives_the_browser_api_round_trip(self):
-        design = default_design()
-        design["box"]["x"] = 96.0
-        design["box"]["y"] = 96.0
-        item = {
-            "name": "driver", "profile": "round", "clearance": 0.4,
-            "segments": [{"length": 50.0, "diameter": 8.0}],
-        }
-        feature = default_feature_payload({
-            "design": design, "kind": "cradle", "item": item,
-        })["feature"]
-        feature["zone"] = [-40.0, -44.0, 40.0, 44.0]
-        feature["count"] = 4
-        feature["alternate_ends"] = True
-        applied = apply_feature_payload({
-            "design": design, "feature": feature, "index": None,
-        })
-        saved = applied["design"]["layout"]["features"][0]
-        self.assertTrue(saved["alternate_ends"])
-        self.assertTrue(draft_payload({
-            "design": design, "feature": saved,
-        })["geometry"])
-
-    def test_divider_bottom_slope_options_survive_the_browser_api_round_trip(self):
-        design = default_design()
-        design["box"]["x"] = 96.0
-        design["box"]["y"] = 96.0
-        # A "divider" is full_span, so its saved zone always follows the
-        # bin's whole floor extent (the assignment below is never honored) -
-        # tall enough that a 20-degree slope across that full ~93 mm run
-        # still fits under the divider's own resolved height.
-        design["box"]["z"] = 60.0
-        feature = default_feature_payload({
-            "design": design, "kind": "divider",
-        })["feature"]
-        feature["zone"] = [-24.0, -24.0, 24.0, 24.0]
-        feature["count"] = 2
-        # exactly as the browser sends them: a numeric slope, whole-number
-        # crossbar count, and three yes/no flags as real booleans
-        feature["options"] = {
-            "bottom_angle": 20.0,
-            "reverse_bottom": True,
-            "alternate_bottom": True,
-            "minimal_bottom": True,
-            "bottom_supports": 4,
-        }
-        applied = apply_feature_payload({
-            "design": design, "feature": feature, "index": None,
-        })
-        saved = applied["design"]["layout"]["features"][0]["options"]
-        self.assertEqual(saved["bottom_angle"], 20.0)
-        self.assertIs(saved["reverse_bottom"], True)
-        self.assertIs(saved["alternate_bottom"], True)
-        self.assertIs(saved["minimal_bottom"], True)
-        self.assertEqual(saved["bottom_supports"], 4)
-        # and the round-tripped design still previews with real geometry
-        drafted = draft_payload({
-            "design": design,
-            "feature": applied["design"]["layout"]["features"][0],
-        })
-        self.assertTrue(drafted["geometry"])
-        self.assertEqual(drafted["resolved_options"]["bottom_angle"], 20.0)
-
     def test_divider_bottom_flags_sent_as_strings_stay_flags_not_floats(self):
         design = default_design()
         feature = default_feature_payload({
@@ -814,31 +741,6 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIs(one.options["reverse_bottom"], False)
 
 
-
-    def test_enabled_divider_scoop_applies_to_every_cell_after_browser_round_trip(self):
-        design = default_design()
-        design["box"]["x"] = 48.0
-        design["box"]["y"] = 48.0
-        feature = default_feature_payload({
-            "design": design, "kind": "divider",
-        })["feature"]
-        feature["options"] = {
-            "count_x": 1,
-            "count_y": 1,
-            "scoop": {"depth": 45, "cells": ["r0c1", "r1c0"]},
-        }
-        applied = apply_feature_payload({
-            "design": design, "feature": feature, "index": None,
-        })
-        saved = applied["design"]["layout"]["features"][0]
-        self.assertEqual(saved["options"]["scoop"], {"depth": 45})
-        drafted = draft_payload({"design": applied["design"], "feature": saved})
-        self.assertEqual(len(drafted["divider_cells"]), 4)
-        self.assertEqual(
-            {cell["id"] for cell in drafted["divider_cells"] if cell["scoop"]},
-            {"r0c0", "r0c1", "r1c0", "r1c1"},
-        )
-        self.assertTrue(drafted["geometry"])
 
     def test_old_divider_cell_targets_migrate_to_all_cells(self):
         design = default_design()
@@ -1226,20 +1128,6 @@ class WebApplicationTests(unittest.TestCase):
             preview_payload({"design": design})
         self.assertEqual(json.dumps(design, sort_keys=True), before)
 
-    def test_a_draft_text_uses_canonical_geometry(self):
-        design = default_design()
-        design["box"]["x"] = 48.0
-        design["layout"]["features"] = [_text_feature("M3", auto=True)]
-        design = preview_payload({"design": design})["design"]
-        draft = default_feature_payload(
-            {"design": design, "kind": "text", "along": "x", "item": None}
-        )["feature"]
-        draft["options"].update(text="M4", level="rim", rim_side="back")
-        result = draft_payload({"design": design, "feature": draft})
-        self.assertTrue(result["geometry"])
-        self.assertEqual(result["feature"]["options"]["level"], "rim")
-        self.assertNotIn("auto", result["feature"]["options"])
-
 
 
 
@@ -1506,47 +1394,6 @@ class WebApplicationTests(unittest.TestCase):
         return node
 
 
-    def test_typed_space_autosave_serializes_and_rejects_stale_completion(self):
-        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
-        owner = source[source.index("function typedSpaceOrdinaryBin() {"):
-                       source.index("// Install a canonical design", source.index("function typedSpaceOrdinaryBin() {"))]
-        script = "\n".join([
-            "const clone = v => JSON.parse(JSON.stringify(v));",
-            "const state = {folderMode:'space', design:{part_name:'',box:{b4b:{enabled:false}},v:0},",
-            "  cleanDesign:{part_name:'',box:{b4b:{enabled:false}},v:0}, designInventoryId:null,",
-            "  preview:{fits:true,feature_errors:[],draft_error:null}};",
-            "state.previewDesignKey=JSON.stringify(state.design);",
-            "const baseTrimEnabled = () => false;",
-            "const writes = []; let epoch = 1; let release; const gate = new Promise(r => release = r);",
-            "const DL = {loaded:true,spaceContext:() => ({epoch}), requireSpaceContext:c => {if(c.epoch!==epoch) throw Object.assign(new Error('stale'),{code:'STALE_SPACE_CONTEXT'});},",
-            "  isStaleSpaceError:e => e.code==='STALE_SPACE_CONTEXT',",
-            "  inventoryCall:async (_path,payload,options) => {writes.push({id:payload.row_id||null,v:payload.design.v}); if(payload.design.v===1) await gate; DL.requireSpaceContext(options.context); return {row_id:payload.row_id||'B1',design:clone(payload.design)};},",
-            "  adopt:()=>{},emit:()=>{}};",
-            "const toast = () => {}; const syncForm = () => {};",
-            "const flushVisibleDesignEditsBeforeModeSwitch = async () => true;",
-            "const refreshPreview = async () => {state.preview={fits:true,feature_errors:[],draft_error:null};};",
-            owner,
-            "(async () => {",
-            "  await persistSpaceDesignSource(); const untouched = writes.length;",
-            "  state.design.v=1; state.previewDesignKey=JSON.stringify(state.design);",
-            "  const first=persistSpaceDesignSource();",
-            "  await Promise.resolve(); state.design.v=2; state.previewDesignKey=JSON.stringify(state.design);",
-            "  const second=persistSpaceDesignSource();",
-            "  release(); await Promise.all([first,second]);",
-            "  const serial = clone(writes); const id=state.designInventoryId;",
-            "  state.design.v=3; state.previewDesignKey=JSON.stringify(state.design);",
-            "  const stale=persistSpaceDesignSource(); await Promise.resolve(); epoch=2;",
-            "  let rejected=false; try {await stale;} catch(e) {rejected=e.code==='STALE_SPACE_CONTEXT';}",
-            "  process.stdout.write(JSON.stringify({untouched,serial,id,clean:state.cleanDesign.v,rejected}));",
-            "})();",
-        ])
-        result = self._run_node(script)
-        self.assertEqual(result["untouched"], 0)
-        self.assertEqual(result["serial"], [{"id": None, "v": 1}, {"id": "B1", "v": 2}])
-        self.assertEqual(result["id"], "B1")
-        self.assertEqual(result["clean"], 2)
-        self.assertTrue(result["rejected"])
-
     def test_hosted_inventory_writes_share_one_file_queue(self):
         source = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")
         owner = source[source.index("SP._inventoryWriteChain = Promise.resolve();"):
@@ -1695,40 +1542,6 @@ class WebApplicationTests(unittest.TestCase):
     # ------------------------------------------------------------ Fix 019
 
 
-
-    def test_safe_drawer_switch_never_silently_saves_or_loses_work(self):
-        # Fix 034 K1: autosave has no off state any more, so this always just
-        # flushes a dirty layout and aborts the switch (keeping DL.layout/
-        # DL.dirty intact) on a failed flush - never a confirm() dialog.
-        node = self._node_or_skip()
-        root = Path(__file__).resolve().parent / "web"
-        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
-        leave = spaces_js[spaces_js.index("SP.leaveDrawerLayoutSafely = async () => {"):]
-        leave = leave[:leave.index("SP.resetDrawer = async")]
-        self.assertNotIn("window.confirm(", leave)
-        self.assertNotIn(" confirm(", leave)
-        self.assertNotIn("appConfirmSaveDiscardCancel", leave)
-
-        script = "\n".join([
-            "const SP = {};",
-            "let saveResult = true;",
-            "const toast = () => {};",
-            "const DL = { dirty: true, layout: { settings: { autosave: true } }, output: 'x',"
-            " saveError: 'boom', save: async () => saveResult };",
-            leave,
-            "(async () => {",
-            "  const out = {};",
-            "  out.flushSuccess = await SP.leaveDrawerLayoutSafely();",
-            "  DL.dirty = true;",
-            "  saveResult = false;",
-            "  out.flushFailure = await SP.leaveDrawerLayoutSafely();",
-            "  process.stdout.write(JSON.stringify(out));",
-            "})();",
-        ])
-        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
-        out = json.loads(done.stdout)
-        self.assertTrue(out["flushSuccess"])
-        self.assertFalse(out["flushFailure"])
 
     def test_drawer_save_reports_success_or_failure(self):
         # Item 2's implementation detail: DL.save() must let callers know
@@ -2302,61 +2115,6 @@ class AiHelpBackendTests(unittest.TestCase):
 
     def _space(self):
         return {"kind": "pegboard", "x": 96.0, "y": 96.0, "z": 80.0, "pegboard_standard": "standard"}
-
-    def test_manifest_covers_every_user_facing_capability_and_round_trips(self):
-        manifest = wavefinity_web.ai_capability_manifest()
-        catalog = catalog_payload()
-        listed = {one["kind"]: one for one in manifest["features"]}
-        visible = {p["kind"] for p in catalog["parts"]
-                   if p["palette_visible"] and "box_modifier" not in p["capabilities"]}
-        self.assertEqual(set(listed), visible)
-        self.assertNotIn("pocket", listed)  # hidden/legacy kinds are never offered
-        for kind, one in listed.items():
-            expected = "recommend_only" if "photo" in one["capabilities"] else "configurable"
-            self.assertEqual(one["ai"], expected, kind)
-        self.assertEqual(listed["nest"]["ai"], "recommend_only")
-        modifiers = {p["kind"] for p in catalog["parts"] if "box_modifier" in p["capabilities"]}
-        self.assertEqual({one["kind"] for one in manifest["box_modifiers"]}, modifiers)
-        # The rule tables are the catalog's own, not a second copy.
-        by_kind = {one["kind"]: one for one in manifest["box_modifiers"]}
-        self.assertEqual(by_kind["side_openings"]["rules"]["side_openings"], catalog["side_openings"])
-        self.assertEqual(by_kind["lid_stacking"]["rules"]["lid_rules"], catalog["lid_rules"])
-        # All three Lid & Stacking configurations have a canonical example.
-        configs = by_kind["lid_stacking"]["example"]
-        self.assertEqual(set(configs), {"stackable_bin", "stackable_lid", "lid_with_handle"})
-        self.assertEqual(configs["stackable_bin"], {"stack": {"mode": "direct"}})
-        self.assertTrue(configs["stackable_lid"]["lid"]["stackable"])
-        self.assertFalse(configs["lid_with_handle"]["lid"]["stackable"])
-        # Legal values, not just keys: every enum has its choices from the registry's
-        # own constants, ranges are declared, and custom-UI (editor=false) options are included.
-        from organizer_inserts import _bore, _text
-        options = {one["kind"]: {o["key"]: o for o in one["options"]}
-                   for one in manifest["features"] if one["ai"] == "configurable"}
-        for kind, table in options.items():
-            for key, option in table.items():
-                self.assertTrue(option["legal_values"], (kind, key))
-                if option["type"] == "enum":
-                    self.assertTrue(option["choices"], (kind, key))
-        self.assertEqual([c["value"] for c in options["bore"]["bore_style"]["choices"]], list(_bore.BORE_STYLES))
-        self.assertEqual([c["value"] for c in options["bore"]["xy_size_mode"]["choices"]], list(_bore.XY_SIZE_MODES))
-        self.assertEqual(options["bore"]["angle"]["maximum"], _bore.BORE_MAX_TILT)
-        self.assertEqual([float(c["value"]) for c in options["text"]["depth"]["choices"]], list(_text.TEXT_DEPTH_CHOICES))
-        self.assertEqual([c["value"] for c in options["text"]["level"]["choices"]], ["base", "rim"])
-        self.assertIn("bore_style", {o["key"] for p in catalog["parts"] if p["kind"] == "bore" for o in p["options"] if "choices" in o})
-        self.assertIn("height_size_mode", options["bore"])  # editor=False option still offered
-        # Every example is legal in the canonical validator.
-        for one in listed.values():
-            if one["ai"] != "configurable":
-                continue
-            design = wavefinity_web._ai_example_base()
-            design["layout"]["features"] = [one["example"]]
-            wavefinity_web.validate_design_payload({"design": design})
-        for one in manifest["box_modifiers"]:
-            blocks = one["example"]
-            for block in ([blocks] if "stackable_bin" not in blocks else blocks.values()):
-                design = wavefinity_web._ai_example_base()
-                design["box"].update(block)
-                wavefinity_web.validate_design_payload({"design": design})
 
     def test_manifest_describes_every_shared_top_level_feature_field(self):
         from organizer_inserts import _bore

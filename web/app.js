@@ -485,6 +485,16 @@ function partDefaultsFromFeature(feature) {
   return cleanPartDefaultEntry(copy);
 }
 
+// The Space's remembered Text default: the last qualifying (>= 5 mm) Text
+// height actually applied in this Space, or null when the Space has none.
+// Untyped Design has no remembered Space Text height.
+function spaceRememberedTextHeight() {
+  if (state.folderMode !== "space") return null;
+  const raw = state.spacePartDefaults?.text?.options?.cap_height;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 5 ? value : null;
+}
+
 // Reduces any stored per-feature entry (including older shapes that may carry
 // text, features or modifier presence) to the known safe fields.
 function cleanPartDefaultEntry(entry) {
@@ -504,6 +514,9 @@ function cleanPartDefaultEntry(entry) {
     delete clean.options.raised;
     delete clean.options.rim_side;
     delete clean.options.quarter_turns;
+    // A Text footprint is fully derived from its lettering and height; a
+    // glyph-derived zone is not a reusable setting and must never steer a fit.
+    delete clean.zone_size;
   }
   if (Object.hasOwn(entry, "count")) clean.count = entry.count;
   if (typeof entry.along === "string") clean.along = entry.along;
@@ -637,6 +650,20 @@ function rememberSpacePreferences(design, previous) {
   for (const kind of new Set((design.layout?.features || []).map(one => one.kind))) {
     const entry = changedPartDefault(design, previous, kind);
     if (!entry) continue;
+    if (kind === "text" && entry.options) {
+      const cap = Number(entry.options.cap_height);
+      if (Number.isFinite(cap) && cap > 0 && cap < 5) {
+        // A forced sub-5 height is usable for this Text but never becomes the
+        // Space default. Keep the previous qualifying default; other reusable
+        // Text settings (e.g. depth) still update.
+        const previousQualifying = spaceRememberedTextHeight();
+        if (previousQualifying !== null) {
+          entry.options.cap_height = previousQualifying;
+        } else {
+          delete entry.options.cap_height;
+        }
+      }
+    }
     parts[kind] = entry;
     partsChanged = true;
   }
@@ -8522,31 +8549,51 @@ function updateDraftFromFields(event) {
   if (info.flags.text) {
     const fields = $("#draft-fields");
     const said = $('[data-draft="option:text"]', fields);
+    let letteringChanged = false;
     if (said) {
       one.options.text = said.value;
       seedPartNameFromText(one);
-      if (changed === "option:text" && said.value.trim()) {
-        delete one.options.cap_height;
-        delete one.options.text_v2;
-        if (one.options.level === "rim") one.options.retarget = "rim";
-      }
+      letteringChanged = changed === "option:text" && said.value.trim() !== "";
     }
     const type = get("option:text_type") || "base_inlaid";
     const oldLevel = one.options.level === "rim" ? "rim" : "base";
-    one.options.level = type.startsWith("rim_") ? "rim" : "base";
-    one.options.raised = type.endsWith("raised");
+    const oldRaised = Boolean(one.options.raised);
+    const oldRimSide = one.options.level === "rim"
+      ? String(one.options.rim_side || "back").toLowerCase() : null;
+    const newLevel = type.startsWith("rim_") ? "rim" : "base";
+    const newRaised = type.endsWith("raised");
+    one.options.level = newLevel;
+    one.options.raised = newRaised;
     delete one.options.auto;
-    if (oldLevel !== one.options.level) {
-      // The server re-centres it and seeds a fitting Letter height for the
-      // new destination, then this marker is gone.
-      one.options.retarget = one.options.level;
-      delete one.options.cap_height;
-      delete one.options.text_v2;
-    }
-    if (one.options.level === "rim") {
+    if (newLevel === "rim") {
       one.options.rim_side = get("option:rim_side") || one.options.rim_side || "back";
     } else {
       delete one.options.rim_side;
+    }
+    const newRimSide = newLevel === "rim"
+      ? String(one.options.rim_side || "back").toLowerCase() : null;
+    // One ordered sizing-relevant reset, after the new destination is known.
+    // A sizing-relevant change re-seeds the Space remembered default (or the
+    // product default when the Space has none) and marks retarget so the
+    // server refits from the full destination zone - never from the old
+    // small derived zone.
+    const sizingRelevant =
+      letteringChanged ||
+      (changed === "option:text_type" &&
+        (newLevel !== oldLevel || newRaised !== oldRaised)) ||
+      (changed === "option:rim_side" && newLevel === "rim" &&
+        newRimSide !== oldRimSide);
+    if (sizingRelevant) {
+      const remembered = spaceRememberedTextHeight();
+      if (remembered !== null) {
+        // Try the Space's remembered default first; the server clamps it to
+        // the largest height that fits.
+        one.options.cap_height = remembered;
+      } else {
+        delete one.options.cap_height;
+      }
+      one.options.retarget = newLevel;
+      delete one.options.text_v2;
     }
     const destination = one.options.level === "rim"
       ? `rim:${one.options.rim_side || "back"}` : "base";

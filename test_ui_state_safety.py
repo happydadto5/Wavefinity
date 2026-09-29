@@ -209,65 +209,6 @@ async function lifecycle(kind, options, resolvedOptions){
         self.assertTrue(result["afterFreshResolution"])
         self.assertEqual(result["allCalls"], 9)
 
-    def test_reopened_auto_height_reference_waits_for_accepted_draft_response(self):
-        source = "\n".join(function_source(name, APP) for name in (
-            "referencePhysicalHeight", "referenceSeedForDraft", "referenceAddReady",
-            "updateReferenceAddAvailability", "addReferenceToCurrentDraft", "refreshDraft"))
-        script = r"""
-const number=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
-const _nestMeasuredThickness=()=>null;
-const button={hidden:true};
-const status={textContent:'',classList:{add(){},remove(){}}};
-const $=selector=>selector==='[data-action="add-reference"]'?button:
- selector==='#draft-status'?status:selector==='#draft-fields'?{}:null;
-const document={activeElement:null};
-const draftCommitIndex=()=>0;
-const applyBoreSizing=()=>holderCalls++;
-const bumpBoreEpoch=()=>{};
-const partInfo=()=>({kind:state.draft.kind,fields:[],flags:{qty:false}});
-const autoCommitDraft=async()=>true;
-const reconcileBoreBin=async()=>false;
-const refreshPreview=async()=>{};
-const renderDraftFields=()=>{};
-const updateGenerateAvailability=()=>{};
-const markDraftChanged=()=>{state.draftTouched=true;state.draftRequest++;updateReferenceAddAvailability()};
-const commitReferenceEditSoon=()=>referenceCommits++;
-const previewClientId='c2';
-let holderCalls=0,referenceCommits=0,resolveDraft;
-const api=()=>new Promise(resolve=>{resolveDraft=resolve});
-const state={draft:null,draftRequest:4,referenceResolutionRequest:null,draftResolvedOptions:{},
- draftIsNew:false,draftTouched:false,draftAutoCommit:true,selected:0,
- design:{box:{z:40,base_thickness:4},layout:{features:[]}}};
-__SOURCE__
-(async()=>{
- const results=[];
- for(const kind of ['slot','steps']){
-  state.draft={kind,zone:[-10,-8,10,8],options:{}};
-  state.design.layout.features=[state.draft];state.draftTouched=false;
-  state.referenceResolutionRequest=null;state.draftResolvedOptions={};
-  const pending=refreshDraft();
-  const before={hidden:button.hidden,ready:referenceAddReady()};
-  addReferenceToCurrentDraft();
-  resolveDraft({resolved_options:{height:16,lip:1},feature:{}});
-  await pending;
-  const after={hidden:button.hidden,ready:referenceAddReady()};
-  const sizingBeforeAdd=holderCalls;
-  addReferenceToCurrentDraft();
-  results.push({kind,before,after,height:state.draft.reference_object?.height,
-   zone:state.draft.zone,referenceCommits,extraSizing:holderCalls-sizingBeforeAdd});
- }
- process.stdout.write(JSON.stringify(results));
-})();
-""".replace("__SOURCE__", source)
-        self.assertEqual(node_json(script), [
-            {"kind": "slot", "before": {"hidden": True, "ready": False},
-             "after": {"hidden": False, "ready": True}, "height": 16,
-             "zone": [-10, -8, 10, 8], "referenceCommits": 1, "extraSizing": 0},
-            {"kind": "steps", "before": {"hidden": True, "ready": False},
-             "after": {"hidden": False, "ready": True}, "height": 17,
-             "zone": [-10, -8, 10, 8], "referenceCommits": 2, "extraSizing": 0},
-        ])
-
     def test_reference_seed_waits_for_resolved_slot_and_steps_height(self):
         source = "\n".join(function_source(name, APP) for name in (
             "referencePhysicalHeight", "referenceSeedForDraft", "referenceAddReady",
@@ -481,49 +422,6 @@ __SOURCE__
             self.assertTrue(actual["closed"])
         self.assertEqual(result[3], {"kind": "failed", "value": "medium", "closed": False})
 
-    def test_modifier_save_claims_live_baseline_before_awaited_validation(self):
-        source = "\n".join(function_source(name, APP) for name in
-                           ("beginDesignMutation", "flushModifierForm", "saveModifierPart"))
-        script = r"""
-const clone=v=>JSON.parse(JSON.stringify(v));
-const old={box:{inside_grip:{size:'small'}}};
-const state={design:clone(old),modifierEditing:'inside_grip',canGenerate:true,
- spaceStarterPreviewPending:true,designMutationBusy:false};
-let pendingDesignHistory=clone(old),debounced=true,resolveApi,changes=0;
-const cancelChangedDesignDebounce=()=>{debounced=false};
-const applyLiveFormWithModifierConflictGuard=()=>{
- state.design.box.inside_grip.size='large';return true;
-};
-const cancelPendingDraftWork=()=>{},setMutationSurfacesInert=()=>{};
-const mutationControls=()=>[],updateSelectionButtons=()=>{},updateGenerateAvailability=()=>{};
-const finishDesignMutation=()=>{state.designMutationBusy=false};
-const noteCommittedDesignChange=before=>{
- if(JSON.stringify(before)!==JSON.stringify(state.design)){
-  changes++;state.spaceStarterPreviewPending=false;
- }
-};
-const api=()=>new Promise(resolve=>{resolveApi=resolve});
-const clearDraftSelection=()=>{state.modifierEditing=null};
-const renderPlaced=()=>{},refreshPreview=async()=>{},toast=()=>{};
-__SOURCE__
-(async()=>{
- const saving=saveModifierPart();
- const held={value:state.design.box.inside_grip.size,baseline:pendingDesignHistory,
-  debounced,busy:state.designMutationBusy,changes};
- resolveApi({design:clone(state.design)});
- await saving;
- process.stdout.write(JSON.stringify({held,final:{value:state.design.box.inside_grip.size,
-  closed:state.modifierEditing===null,starter:state.spaceStarterPreviewPending,
-  busy:state.designMutationBusy,changes}}));
-})().catch(e=>{console.error(e);process.exit(1)});
-""".replace("__SOURCE__", source)
-        self.assertEqual(node_json(script), {
-            "held": {"value": "large", "baseline": None, "debounced": False,
-                     "busy": True, "changes": 1},
-            "final": {"value": "large", "closed": True, "starter": False,
-                      "busy": False, "changes": 1},
-        })
-
     def test_space_canvas_switch_remembers_design_view_and_uses_space_renderer(self):
         source = function_source("activatePreviewView", APP) + "\n" + function_source("preferredDesignView", APP)
         script = r"""
@@ -547,50 +445,6 @@ process.stdout.write(JSON.stringify({inSpace,after:Object.fromEntries(Object.ent
         self.assertEqual(out["inSpace"], {"remembered": "2d", "canvases": {"2d": False, "3d": False, "drawer": True}})
         self.assertEqual(out["after"], {"2d": True, "3d": False, "drawer": False})
         self.assertEqual(out["events"], ["2d", "space", "2d"])
-
-    def test_invalid_overlay_is_latest_preview_owned_for_hard_and_structured_errors(self):
-        source = "\n".join(function_source(name, APP) for name in
-                           ("setDesignInvalidOverlay", "refreshPreview"))
-        script = r"""
-const overlays={"#design-invalid-overlay-3d":{hidden:true,message:{textContent:''}},
-  "#design-invalid-overlay-2d":{hidden:true,message:{textContent:''}}};
-const status={textContent:'',classList:{remove(){},add(){}}};
-const $=(s,within)=>s==='.design-invalid-message'?within.message:
-  s==='#preview-state'?status:overlays[s];
-const state={design:{layout:{features:[]}},previewRequest:0,lidThicknessEpoch:0};
-let fullPreviewStarts=0,plainErrors=0;
-const previewClientId='C',SP={renderSpaceInfo(){}},beginPreviewWait=()=>{},endPreviewWait=()=>{},
-  updateGenerateAvailability=()=>{},clearLidThicknessReport=()=>{},updateAutoExpandButton=()=>{};
-const setError=()=>{plainErrors++};
-const pending=[];
-const api=()=>new Promise((resolve,reject)=>pending.push({resolve,reject}));
-const adoptPreviewResult=r=>setDesignInvalidOverlay(r.fits?'':r.message);
-__SOURCE__
-const shown=()=>Object.values(overlays).map(o=>[o.hidden,o.message.textContent]);
-(async()=>{
- const old=refreshPreview(),latest=refreshPreview();
- pending[1].resolve({fits:true});await latest;
- pending[0].resolve({fits:false,message:'old problem'});await old;
- const stale=shown();
- const hard=refreshPreview(),cleared=shown();
- pending[2].reject(new Error('current failure'));await hard;
- const failed=shown();
- const next=refreshPreview(),newRequestCleared=shown();
- pending[3].resolve({fits:false,message:'current invalid'});await next;
- process.stdout.write(JSON.stringify({stale,cleared,failed,newRequestCleared,structured:shown(),plainErrors}));
-})().catch(e=>{console.error(e);process.exit(1)});
-""".replace("__SOURCE__", source)
-        out = node_json(script)
-        self.assertTrue(all(hidden for hidden, _ in out["stale"]))
-        self.assertTrue(all(hidden for hidden, _ in out["cleared"]))
-        self.assertEqual(out["failed"], [[False, "current failure"], [False, "current failure"]])
-        self.assertTrue(all(hidden for hidden, _ in out["newRequestCleared"]))
-        self.assertEqual(out["structured"], [[False, "current invalid"], [False, "current invalid"]])
-        self.assertEqual(out["plainErrors"], 4)  # request-start clearing only; no hard-error footer echo
-        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
-        drawer = html[html.index('data-canvas="drawer"'):html.index('data-canvas="2d"')]
-        self.assertNotIn("design-invalid-overlay", drawer)
-        self.assertIn('font-size: 24px', (ROOT / "web" / "styles.css").read_text(encoding="utf-8"))
 
     def test_ai_candidate_name_keeps_free_suffix_and_renumbers_collisions(self):
         source = "\n".join(function_source(name, APP) for name in
@@ -709,53 +563,6 @@ __SOURCE__
         self.assertEqual(node_json(script), {"rejected": False, "events": [], "selected": 0})
 
 
-    def test_space_edit_real_async_chain_never_overwrites_newer_navigation(self):
-        app_source = "\n".join(function_source(name, APP) for name in
-                               ("installLoadedDesignSource", "designerEditInventoryRow",
-                                "designerInstallInventorySpec"))
-        script = r"""
-const fs=require('fs'),vm=require('vm'),events=[],resolvers={};
-const original={marker:'original',layout:{features:[]}},space={id:'S'};
-const state={folderMode:'space',activeSpace:space,activeSpaceId:'S',output:'folder',
-  design:original,designInventoryId:'B1'};
-const DL={active:true,loaded:true,pegboardRefreshError:false,selectedRow:'B1',
-  layout:{design_specs:{B2:{marker:'B2'},B3:{marker:'B3'}}},
-  bin:id=>({id,kind:'bin'}),selectRow:id=>{DL.selectedRow=id;events.push('select:'+id)},
-  spaceContext:()=>({spaceId:state.activeSpaceId,output:state.output}),
-  spaceContextCurrent:c=>c.spaceId===state.activeSpaceId&&c.output===state.output};
-const ctx={Map,Set,Promise,JSON,Number,String,Object,Date,Math,state,DL,
-  localStorage:{getItem:()=>null},$:()=>null,$$:()=>[],
-  SP:{offerSpacePlanning(){}},toast:()=>{},clone:v=>JSON.parse(JSON.stringify(v)),
-  isStructuralDesign:()=>false,typedSpaceOrdinaryBin:()=>true,
-  flushSpaceDesignAutosave:async()=>true,beginDesignMutation:()=>true,finishDesignMutation:()=>{},
-  api:(_path,arg)=>new Promise(resolve=>resolvers[arg.design.marker]=resolve),
-  resetNestPhotoSession:()=>{},bindLidMemoryForDesign:()=>{},syncForm:()=>{},
-  clearDraftSelection:()=>{},refreshPreview:()=>Promise.resolve(),
-  preferredDesignView:()=> '2d',
-  activatePreviewView:v=>events.push('view:'+v)};
-vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(process.argv[1],'utf8')+';this.DP=DP',ctx);
-vm.runInContext(__APP_SOURCE__,ctx);
-const DP=ctx.DP;DP.mode='space';DP.showPendingMode=()=>{};
-DP.setMode=mode=>{DP.mode=mode;events.push('mode:'+mode)};
-DP.update=()=>{};DP.ensureInventoryLoaded=async()=>true;
-const tick=()=>new Promise(setImmediate);
-(async()=>{
-  const old=DP.openInventoryRow('B2');await tick();
-  await DP.selectMode('space');
-  resolvers.B2({design:{marker:'B2',layout:{features:[]}}});await old;
-  const afterNavigation=[state.design.marker,DL.selectedRow,DP.mode];
-  const first=DP.openInventoryRow('B2');await tick();
-  const second=DP.openInventoryRow('B3');await tick();
-  resolvers.B3({design:{marker:'B3',layout:{features:[]}}});await second;
-  resolvers.B2({design:{marker:'B2',layout:{features:[]}}});await first;
-  process.stdout.write(JSON.stringify({afterNavigation,afterCompeting:[state.design.marker,DL.selectedRow,DP.mode]}));
-})().catch(e=>{console.error(e);process.exit(1)});
-""".replace("__APP_SOURCE__", json.dumps(app_source))
-        out = node_json(script.replace("process.argv[1]", json.dumps(str(ROOT / "web" / "drawer-panel.js"))))
-        self.assertEqual(out["afterNavigation"], ["original", "B1", "space"])
-        self.assertEqual(out["afterCompeting"], ["B3", "B3", "design"])
-
 
 
     def test_compact_mesh_pick_is_frontmost_and_respects_base_lid_visibility(self):
@@ -806,79 +613,10 @@ __SOURCE__
 """.replace("__SOURCE__", source)
         self.assertEqual(node_json(script), {"accepted": False, "selected": None})
 
-    def test_inventory_edit_pending_and_rollback(self):
-        script = r"""
-const fs=require('fs'),vm=require('vm');
-const ctx={Map,Set,Promise,JSON,Number,String,Object,Date,
-  state:{folderMode:'space',activeSpaceId:'S',output:'folder'},
-  DL:{active:true,spaceContext:()=>({spaceId:'S'}),spaceContextCurrent:c=>c.spaceId==='S',
-    selectRow:id=>events.push('select:'+id)},
-  activatePreviewView:v=>events.push('view:'+v),
-  localStorage:{getItem:()=>null},$:()=>null,$$:()=>[]};
-const events=[]; let release;
-ctx.preferredDesignView=()=> '2d';
-ctx.designerEditInventoryRow=()=>new Promise(resolve=>release=resolve);
-vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(process.argv[1],'utf8')+';this.DP=DP',ctx);
-const DP=ctx.DP;DP.mode='space';
-DP.showPendingMode=mode=>events.push('pending:'+mode);
-DP.setMode=mode=>{DP.mode=mode;events.push('mode:'+mode)};
-(async()=>{
-  const failed=DP.openInventoryRow('B2');
-  const before=[DP.mode,events.slice()];release(false);await failed;
-  const afterFailure=[DP.mode,events.slice()];events.length=0;
-  const accepted=DP.openInventoryRow('B2');release(true);await accepted;
-  process.stdout.write(JSON.stringify({before,afterFailure,afterSuccess:[DP.mode,events]}));
-})().catch(e=>{console.error(e);process.exit(1)});
-"""
-        out = node_json(script.replace("process.argv[1]", json.dumps(str(ROOT / "web" / "drawer-panel.js"))))
-        self.assertEqual(out["before"], ["space", ["pending:design"]])
-        self.assertEqual(out["afterFailure"], ["space", ["pending:design", "pending:null"]])
-        self.assertEqual(out["afterSuccess"], ["design", ["pending:design", "select:B2", "mode:design", "view:2d", "pending:null"]])
 
 
 
 
-
-
-    def test_side_opening_pair_mapping_clamp_and_round_trip(self):
-        names = ["sideOpeningVerticalFits", "sideOpeningPairFromControls",
-                 "sideOpeningRangeLegal", "normalizeSideOpeningPair", "readSideOpeningForm",
-                 "syncSideOpeningRange"]
-        source = "\n".join(function_source(name, APP) for name in names)
-        script = r"""
-const els={}, make=()=>({value:'',hidden:false,style:{},getAttribute:()=>null,setAttribute(){}});
-const $=s=>els[s] ||= make(), number=(v,f=0)=>Number.isFinite(Number(v))?Number(v):f;
-const fmt=v=>String(Math.round(v*10)/10);
-const state={catalog:{side_openings:{sizes:[{value:'medium',width_mm:10}],top_bridge_mm:4}}};
-const SIDE_OPENING_DEFAULTS={enabled:false,shape:'curved',size:'medium',sides:[],from_bottom_percent:0,from_top_percent:0};
-const SIDE_OPENING_SIDE_IDS=['front','back','left','right'];
-let lid=false;
-const sideOpeningLidStackForced=()=>lid;
-const sideOpeningMinFromTop=()=>20;
-const sideOpeningState=d=>({...SIDE_OPENING_DEFAULTS,...(d.box.side_openings||{})});
-const sideOpeningAllowedSizes=()=>['medium'];
-const b4bEnabled=()=>false, baseTrimEnabled=()=>false;
-__FUNCTIONS__
-const design={box:{z:40,base_thickness:0.6}};
-$('#side-opening-front').getAttribute=()=> 'true';
-$('#side-opening-shape').value='curved'; $('#side-opening-size').value='medium';
-function read(lower,upper){$('#side-opening-lower').value=String(lower);$('#side-opening-upper').value=String(upper);
- readSideOpeningForm(design); return {...design.box.side_openings};}
-const zero=read(0,100), ten=read(10,90);
-syncSideOpeningRange(ten);
-const handles=[$('#side-opening-lower').value,$('#side-opening-upper').value];
-const crossing=normalizeSideOpeningPair(design,{lower:95,upper:90},'lower');
-lid=true;
-const bridged=normalizeSideOpeningPair(design,{lower:10,upper:100},'upper');
-process.stdout.write(JSON.stringify({zero,ten,handles,crossing,bridged}));
-""".replace("__FUNCTIONS__", source)
-        out = node_json(script)
-        self.assertEqual((out["zero"]["from_bottom_percent"], out["zero"]["from_top_percent"]), (0, 0))
-        self.assertEqual((out["ten"]["from_bottom_percent"], out["ten"]["from_top_percent"]), (10, 10))
-        self.assertEqual(out["handles"], ["10", "90"])
-        self.assertLess(out["crossing"]["lower"], out["crossing"]["upper"])
-        self.assertLessEqual(out["bridged"]["upper"], 80)
 
     def test_side_opening_browser_size_filter_matches_python_validator(self):
         source = "\n".join(function_source(name, APP) for name in

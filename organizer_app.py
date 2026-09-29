@@ -779,6 +779,60 @@ def _valid_preview_floor_ring(
     ]
 
 
+def _floor_faces_with_text_pockets(floor_cavity, floor_z, outlines):
+    """Floor faces with inlaid-Text glyph holes cut out (plain fused path).
+
+    ``floor_cavity`` is the validated open ring from
+    ``_valid_preview_floor_ring``; ``outlines`` are the 2D glyph outlines of
+    the effective inlaid base-Text set, in the same preview coordinates.
+    Returns face tuples ``(points, kind, normal, layer, owner)`` with kind
+    ``"floor"``.
+
+    Each resulting component is triangulated with a hole-respecting
+    (constrained) earcut triangulation. Shapely's unconstrained Delaunay
+    ``triangulate`` refills holes, and filtering its triangles with
+    ``component.covers(tri)`` leaves gaps in the floor wherever the Delaunay
+    edges do not follow the glyph outline, so it is not used. Triangles are
+    the emission unit so the 2D painter and the GL renderer need no new
+    polygon-with-holes support, and ``floorZ`` still resolves from the
+    ``floor``-kind faces. If the triangulation ever fails its own area check,
+    the helper returns the original uncut ring - today's rendering, never a
+    new breakage.
+    """
+    plain = [([(*point, floor_z) for point in floor_cavity],
+              "floor", (0.0, 0.0, 1.0), 1, None)]
+    try:
+        cut = Polygon(floor_cavity)
+        for outline in outlines:
+            cut = cut.difference(outline)
+        if cut.is_empty:
+            return plain
+        components = cut.geoms if isinstance(cut, MultiPolygon) else [cut]
+        faces = []
+        area = 0.0
+        for component in components:
+            if not isinstance(component, Polygon) or component.is_empty:
+                continue
+            vertices, triangles = trimesh.creation.triangulate_polygon(component)
+            for corner in triangles:
+                (x0, y0), (x1, y1), (x2, y2) = (
+                    (float(vertices[i][0]), float(vertices[i][1])) for i in corner)
+                twice = (x1 - x0) * (y2 - y1) - (y1 - y0) * (x2 - x1)
+                if abs(twice) / 2.0 < PREVIEW_MIN_FACE_AREA:
+                    continue
+                ring = [(x0, y0), (x1, y1), (x2, y2)]
+                if twice < 0:
+                    ring.reverse()
+                area += abs(twice) / 2.0
+                faces.append(([(x, y, floor_z) for x, y in ring],
+                              "floor", (0.0, 0.0, 1.0), 1, None))
+        if not faces or abs(area - cut.area) > 1e-4 * cut.area:
+            return plain
+        return faces
+    except Exception:
+        return plain
+
+
 # A preview pixel covers roughly a tenth of a millimetre of model even at full
 # zoom, so a micron is far below anything the browser can draw.  Rounding there
 # costs nothing visible and makes the payload it has to parse much smaller.
@@ -984,6 +1038,28 @@ def apply_surface_lightweight_base(body: trimesh.Trimesh, box: BoxSpec,
     return difference([body, trimesh.util.concatenate(cutters)])
 
 
+def _preview_base_texts(features, draft, selected):
+    """The effective inlaid base-Text set for the preview pocket work.
+
+    Resolved saved features with ``selected`` replaced by the live ``draft``
+    (when a draft exists). Rim, raised, blank and non-Text features are
+    excluded. Divider labels are not Text features and never enter this set.
+    """
+    effective = [
+        one for index, one in enumerate(features)
+        if not (draft is not None and selected is not None and index == selected)
+    ]
+    if draft is not None:
+        effective.append(draft)
+    return [
+        one for one in effective
+        if is_text(one)
+        and one.options.get("level") != "rim"
+        and not text_is_raised(one)
+        and (text_of(one) or "").strip()
+    ]
+
+
 def insert_plate_solid(box: BoxSpec, mode: str):
     """The standalone insert's base plate, sitting on the bin floor.
 
@@ -1138,6 +1214,17 @@ def preview_geometry(
     cut_fused_pieces = mode == "fused" and box.edge_mount.holes_enabled
     cut_side_opening_pieces = mode == "fused" and box.side_openings.enabled
 
+    # Inlaid base Text: the solids that pocket the receiving surface in preview,
+    # exactly as export cuts them (bin shell when fused, insert plate otherwise).
+    from organizer_inserts._text import build_text
+    base_inlay_meshes = []
+    text_pocket_error = None
+    for one in _preview_base_texts(features, draft, selected):
+        try:
+            base_inlay_meshes.extend(build_text(box, one, base_height(box, mode)))
+        except Exception:
+            continue
+
     if (box.edge_mount.active or box.side_openings.enabled or box.pegboard.enabled
             or (layout is not None and layout.surface_lightweight_base)):
         # make_box() already includes Lift Grabbers; Edge Mount also adds the
@@ -1150,6 +1237,12 @@ def preview_geometry(
             shell_body = apply_edge_mount_structure(box, shell_body)
         if box.pegboard.enabled:
             shell_body = apply_pegboard_mount_structure(box, shell_body)
+        if mode == "fused" and base_inlay_meshes:
+            try:
+                shell_body = apply_texts(
+                    shell_body, [("", mesh, False) for mesh in base_inlay_meshes])
+            except Exception as error:
+                text_pocket_error = f"text pocket: {error}"
         if layout is not None:
             shell_body = apply_surface_lightweight_base(shell_body, box, layout)
         if box.side_openings.enabled:
@@ -1172,8 +1265,19 @@ def preview_geometry(
             geometry.append(([(a[0], a[1], rim_z), (b[0], b[1], rim_z),
                               (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
                              "rim", (0.0, 0.0, 1.0), 0, None))
-        geometry.append(([(*point, floor_z) for point in floor_cavity],
-                         "floor", (0.0, 0.0, 1.0), 1, None))
+        floor_outlines = []
+        if mode == "fused":
+            for one in _preview_base_texts(features, draft, selected):
+                try:
+                    floor_outlines.append(text_placed_outline(one))
+                except Exception:
+                    continue
+        if floor_outlines:
+            geometry.extend(_floor_faces_with_text_pockets(
+                floor_cavity, floor_z, floor_outlines))
+        else:
+            geometry.append(([(*point, floor_z) for point in floor_cavity],
+                             "floor", (0.0, 0.0, 1.0), 1, None))
 
     if tidy and rim_side:
         ledge_mesh = make_top_label_ledge(box, rim_side)
@@ -1208,12 +1312,21 @@ def preview_geometry(
 
     plate = insert_plate_solid(box, mode)
     if plate is not None:
+        if mode != "fused" and base_inlay_meshes:
+            try:
+                plate = apply_texts(
+                    plate, [("", mesh, False) for mesh in base_inlay_meshes])
+            except Exception as error:
+                if text_pocket_error is None:
+                    text_pocket_error = f"text pocket: {error}"
         geometry.extend(_mesh_preview_geometry(plate, "insert_base"))
     base_z = base_height(box, mode)
     # Holders belong to whichever part they are printed as: the bin when fused,
     # the insert otherwise.  The prefix picks the colour family.
     part_kind = "feature" if mode == "fused" else "insert"
     feature_errors = []
+    if text_pocket_error is not None:
+        feature_errors.append(text_pocket_error)
     invalid_feature_indexes = []
     conflicting_feature_indexes = []
     feature_overhang_mm = [0.0 for _ in features]
@@ -1403,6 +1516,11 @@ def preview_geometry(
             try:
                 from organizer_inserts._text import rim_text_geometry
                 ledge, glyph, _cap, _surface = rim_text_geometry(box, one)
+                if not text_is_raised(one):
+                    try:
+                        ledge = difference([ledge, glyph])
+                    except Exception as pocket_error:
+                        feature_errors.append(f"text pocket: {pocket_error}")
                 for mesh, kind in ((ledge, "top_label_ledge"), (glyph, "feature_text")):
                     start = len(geometry)
                     faces = _mesh_preview_geometry(mesh, kind)
@@ -1507,7 +1625,17 @@ def preview_geometry(
                                         mode=mode, include_text=True)
                 if is_text(draft) and draft.options.get("level") == "rim":
                     from organizer_inserts._text import rim_text_geometry
-                    solids = [rim_text_geometry(box, draft)[0], *solids]
+                    draft_ledge, draft_glyph, _cap, _surface = rim_text_geometry(box, draft)
+                    if not text_is_raised(draft):
+                        try:
+                            draft_ledge = difference([draft_ledge, draft_glyph])
+                        except Exception as pocket_error:
+                            # Only the pocket boolean failed; record it on the
+                            # draft-error channel, keep any primary error, and
+                            # still draw the uncut ledge.
+                            if draft_error is None:
+                                draft_error = f"text pocket: {pocket_error}"
+                    solids = [draft_ledge, *solids]
                 if solids:
                     draft_overhang_mm = round(max(
                         0.0, max(float(s.bounds[1][2]) for s in solids) - box.z,
@@ -1545,7 +1673,17 @@ def preview_geometry(
                                         mode=mode, include_text=True)
                 if is_text(draft) and draft.options.get("level") == "rim":
                     from organizer_inserts._text import rim_text_geometry
-                    solids = [rim_text_geometry(box, draft)[0], *solids]
+                    draft_ledge, draft_glyph, _cap, _surface = rim_text_geometry(box, draft)
+                    if not text_is_raised(draft):
+                        try:
+                            draft_ledge = difference([draft_ledge, draft_glyph])
+                        except Exception as pocket_error:
+                            # Only the pocket boolean failed; record it on the
+                            # draft-error channel, keep any primary error, and
+                            # still draw the uncut ledge.
+                            if draft_error is None:
+                                draft_error = f"text pocket: {pocket_error}"
+                    solids = [draft_ledge, *solids]
                 if solids:
                     draft_overhang_mm = round(max(
                         0.0, max(float(s.bounds[1][2]) for s in solids) - box.z,
