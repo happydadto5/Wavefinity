@@ -259,7 +259,7 @@ DV.entries = (drawer, grid) => {
   const drag = DV.drag?.moved ? DV.drag : null;
   for (const item of DL.items(drawer)) {
     const layers = item.layers.filter(layer => !drag?.keys.has(layer.key));
-    if (layers.length) entries.push({ key: item.key, item, ...box(item.gx, item.gy, item.w, item.d), layers, mode: "" });
+    if (layers.length) entries.push({ key: item.key, item, ex: item.ex, ...box(item.gx, item.gy, item.w, item.d), layers, mode: "" });
   }
   for (const p of drawer.placements.filter(DL.isEdgePlacement)) {
     const one = DL.bin(p.bin);
@@ -274,7 +274,7 @@ DV.entries = (drawer, grid) => {
     const start = target ? target.h - (DL.stackSteps[bins[0].stack] ?? 0) : 0;
     const where = target ? box(target.gx, target.gy, target.w, target.d) : box(ghost.gx, ghost.gy, w, d);
     const mode = drag?.outside ? "leaving" : ghost.valid ? "ghost" : "invalid";
-    entries.push({ key: "__ghost", ...where, layers: DV.layersFor(bins, keys, start), mode, ghost: true });
+    entries.push({ key: "__ghost", ...where, ex: target?.ex || DL.envelopeExt(bins[0], drawer), layers: DV.layersFor(bins, keys, start), mode, ghost: true });
   }
   return entries;
 };
@@ -487,7 +487,9 @@ DV.paintScene = (ctx, drawer, cam) => {
   {
     const taken = new Set();
     DL.items(drawer).forEach(item => {
-      for (let r = item.gy; r < item.gy + item.d; r += 1) for (let c = item.gx; c < item.gx + item.w; c += 1) taken.add(`${c},${r}`);
+      for (let r = item.gy - item.ex.t; r < item.gy + item.d + item.ex.b; r += 1) {
+        for (let c = item.gx - item.ex.l; c < item.gx + item.w + item.ex.r; c += 1) taken.add(`${c},${r}`);
+      }
     });
     const inset = Math.min(0.6, step / 10);
     ctx.fillStyle = "rgba(47,150,110,.14)";
@@ -603,6 +605,21 @@ DV.paintScene = (ctx, drawer, cam) => {
       }
     });
     if (topFace) DV.drawLabel(ctx, entry, topFace, topInk);
+    if (entry.ex && Object.values(entry.ex).some(Boolean)) {
+      const { l, t, r, b } = entry.ex;
+      const x0 = entry.x0 - l * grid.stepX;
+      const y0 = entry.y0 - t * grid.stepY;
+      const x1 = entry.x1 + r * grid.stepX;
+      const y1 = entry.y1 + b * grid.stepY;
+      const band = l ? flat(x0, entry.y0, entry.x0, entry.y1, 0.2)
+        : r ? flat(entry.x1, entry.y0, x1, entry.y1, 0.2)
+          : t ? flat(entry.x0, y0, entry.x1, entry.y0, 0.2)
+            : flat(entry.x0, entry.y1, entry.x1, y1, 0.2);
+      ctx.save();
+      ctx.setLineDash([5, 4]);
+      face(band, entry.ghost ? "rgba(196,123,66,.25)" : null, "#c47b42", 1);
+      ctx.restore();
+    }
   }
 
   // Walls between you and the drawer, see-through; then every rim.
