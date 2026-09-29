@@ -73,7 +73,7 @@ Wavefinity can also be used **without a typed Space**, in which case the user ca
 - Every ordinary bin is placed at most once.
 - Unplaced bins remain in the **Unplaced bins** rail.
 - Dragging a placed bin out of the Space unplaces it.
-- Bins can be stacked when their stacking rules are compatible.
+- Bins can be stacked when their mode, footprint, and wall mating geometry are compatible.
 - Placement checks include:
   - overlap;
   - outside-the-Space placement;
@@ -146,7 +146,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 
 ### Case options
 
-- **Stacking**
+- **Case stacking**
   - Not stackable.
   - Stackable.
 - **Carrying handle**
@@ -169,12 +169,15 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 ### Storage Box interiors
 
 - Storage Box itself can contain **Dividers**.
-- **Make Inside Bin** can start an ordinary bin sized to fit the Storage Box interior.
+- **Make Inside Bin** confirms before starting one ordinary bin sized to fill the Storage Box interior.
+- Designer gives an advisory physical-height warning for a bin, or for two identical stackable bins, when they exceed the case's closed-height allowance.
+- The existing Space arrangement determines which bins are inside the case and validates their physical stack height.
 
 ### Ownership
 
 - The Storage Box case is a Space-owned structural output.
-- It is saved/printed from the Space header.
+- **Save Storage Box** saves the case from the Space header.
+- **Print Storage Box + Bins** opens the case, placed Not Printed bins, and required Space connectors together in the slicer after file and printer-fit checks. Unplaced or already-Printed bins remain on their existing Inventory paths.
 - It is not an ordinary Designer Inventory row.
 
 ---
@@ -239,7 +242,7 @@ Pegboard mounting metadata is controlled by the Space and should not be casually
 - Edit Space.
 - Show Folder.
 - New Space.
-- Save/Print Storage Box when in a Storage Box Space.
+- Save Storage Box / Print Storage Box + Bins when in a Storage Box Space.
 - Save/Print Base Trim when in a Surface Space.
 
 ## 3.2 Inventory
@@ -689,7 +692,7 @@ One Lid & Stacking option can be active on a bin.
   - Direct bin-on-bin stacking.
   - No lid.
 - **Stackable bin on lid**
-  - Bin closes with a lid and keeps a top seat/recess for another matching bin.
+  - Bin closes with a lid and keeps a top seat/recess for another bin with the same footprint and compatible stacking geometry.
 - **Lid with handle — non-stackable**
   - Removable handled lid.
   - Not stackable.

@@ -20,6 +20,8 @@
 const DL = {
   UNIT: 8,
   stackSteps: { lid: 1, direct: 3, b4b: 2 },   // replaced by the server's values on load
+  stackMetrics: {},
+  storageBoxHeadroomDefault: 1, // replaced by the server's canonical default on load
   active: false,
   loaded: false,
   loadPromise: null,
@@ -262,6 +264,10 @@ DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
 DL.isPegboard = (drawer = DL.drawer()) => drawer?.boundary === "pegboard";
 DL.isSurface = () => DL.layout?.space?.kind === "surface";
+DL.isStorageBox = () => ["portable", "box"].includes(DL.layout?.space?.kind);
+DL.heightCap = drawer => DL.isStorageBox()
+  ? Number(DL.layout.space.z) + Number(DL.layout.space.storage_box?.lid_headroom_mm ?? DL.storageBoxHeadroomDefault)
+  : Number(drawer.height);
 DL.isStorageDrawers = () => state.activeSpace?.kind === "storage_drawers";
 
 // Storage Drawers: the layout's drawers are always the typed cabinet's stable
@@ -326,16 +332,35 @@ DL.toUnits = (cell, drawer = DL.drawer()) => DL.isPegboard(drawer) ? cell : cell
 
 // Inventory Z is the seating-datum module height. The top interlock remains
 // exposed on the physical envelope of the first/detached part.
-DL.pitch = one => one.stack === "b4b" ? Number(one.z) - (DL.stackSteps.b4b ?? 0) : Number(one.z);
-DL.partHeight = one => one.stack === "b4b" ? Number(one.z) : Number(one.z) + (DL.stackSteps[one.stack] ?? 0);
-DL.stackHeight = bins => bins.reduce((sum, one, index) => sum + (index ? DL.pitch(one) : DL.partHeight(one)), 0);
+DL.pitch = one => DL.isStorageBox() && Number.isFinite(DL.stackMetrics[one.id]?.pitch_mm)
+  ? DL.stackMetrics[one.id].pitch_mm
+  : one.stack === "b4b" ? Number(one.z) - (DL.stackSteps.b4b ?? 0) : Number(one.z);
+DL.partHeight = one => DL.isStorageBox() && Number.isFinite(DL.stackMetrics[one.id]?.physical_mm)
+  ? DL.stackMetrics[one.id].physical_mm
+  : one.stack === "b4b" ? Number(one.z) : Number(one.z) + (DL.stackSteps[one.stack] ?? 0);
+DL.stackHeight = bins => DL.isStorageBox()
+  ? bins.reduce((sum, one, index) => index
+    ? sum - DL.partHeight(bins[index - 1]) + DL.pitch(bins[index - 1]) + DL.partHeight(one)
+    : DL.partHeight(one), 0)
+  : bins.reduce((sum, one, index) => sum + (index ? DL.pitch(one) : DL.partHeight(one)), 0);
+
+DL.stackWall = one => {
+  const rowWall = one?.wall;
+  const raw = rowWall === null || rowWall === undefined
+    ? DL.layout?.design_specs?.[one.id]?.box?.wall : rowWall;
+  const wall = Number(raw);
+  return raw !== null && raw !== undefined && Number.isFinite(wall) && wall > 0 ? wall : null;
+};
 
 // Why `upper` cannot snap onto `lower`, or "" if it can.
 DL.stackRefusal = (upper, lower) => {
   if (!DL.stackable(upper)) return `${DL.label(upper)} was not printed to stack.`;
   if (!DL.stackable(lower)) return `${DL.label(lower)} was not printed to stack.`;
   if (upper.stack !== lower.stack) return `A ${DL.stackName(upper.stack).toLowerCase()} bin cannot snap onto a ${DL.stackName(lower.stack).toLowerCase()} bin.`;
-  if (Math.abs(upper.x - lower.x) > 0.05 || Math.abs(upper.y - lower.y) > 0.05) return "Only bins of the same size snap onto each other.";
+  if (Math.abs(upper.x - lower.x) >= 0.05 || Math.abs(upper.y - lower.y) >= 0.05) return "Only bins of the same size snap onto each other.";
+  const upperWall = DL.stackWall(upper), lowerWall = DL.stackWall(lower);
+  if (upperWall === null || lowerWall === null) return "Stacking wall thickness is unknown. Save both bin designs before stacking.";
+  if (Math.abs(upperWall - lowerWall) >= 0.05) return "Bins need the same footprint and compatible stacking wall thickness.";
   return "";
 };
 
@@ -364,10 +389,14 @@ DL.items = (drawer = DL.drawer()) => DL.chains(drawer).map(chain => {
   const bins = chain.map(p => DL.bin(p.bin));
   const [w, d] = DL.cells(bins[0], drawer);
   let top = 0;
+  let previousBottom = 0;
   const layers = chain.map((p, index) => {
     const one = bins[index];
-    const bottom = index ? top - (DL.stackSteps[one.stack] ?? 0) : 0;
+    const bottom = index ? (DL.isStorageBox()
+      ? previousBottom + DL.pitch(bins[index - 1])
+      : top - (DL.stackSteps[one.stack] ?? 0)) : 0;
     top = bottom + DL.partHeight(one);
+    previousBottom = bottom;
     return { p, bin: one, key: DL.key(p), z0: bottom, z1: top };
   });
   return {
@@ -468,7 +497,8 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
   const grid = DL.grid(drawer);
   const [w, d] = DL.cells(bins[0], drawer);
   const height = DL.stackHeight(bins);
-  if (!DL.isPegboard(drawer) && !DL.isSurface() && height > drawer.height + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this Space's ${fmt(drawer.height)} mm.` };
+  const cap = DL.heightCap(drawer);
+  if (!DL.isPegboard(drawer) && !DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
   if (gx < 0 || gy < 0 || gx + w > grid.cols || gy + d > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the pegboard." : "That would stick out of the Space." };
   if (DL.isPegboard(drawer)) {
     const layout = DL.pegboardLayouts[bins[0].id] || bins[0].pegboard_layout;
@@ -505,8 +535,11 @@ DL.fitsOn = (drawer, bins, target) => {
   const lower = target.bins[target.bins.length - 1];
   const refusal = DL.stackRefusal(bins[0], lower);
   if (refusal) return { ok: false, reason: refusal };
-  const height = target.h - (DL.stackSteps[bins[0].stack] ?? 0) + DL.stackHeight(bins);
-  if (!DL.isSurface() && height > drawer.height + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this Space's ${fmt(drawer.height)} mm.` };
+  const height = DL.isStorageBox()
+    ? target.layers[target.layers.length - 1].z0 + DL.pitch(lower) + DL.stackHeight(bins)
+    : target.h - (DL.stackSteps[bins[0].stack] ?? 0) + DL.stackHeight(bins);
+  const cap = DL.heightCap(drawer);
+  if (!DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
   return { ok: true, reason: "" };
 };
 
@@ -647,6 +680,8 @@ DL.adopt = data => {
   DL.bins = data.bins || DL.bins;
   DL.file = data.file || DL.file;
   if (data.stack_steps) DL.stackSteps = data.stack_steps;
+  if (data.stack_metrics) DL.stackMetrics = data.stack_metrics;
+  if (data.storage_box_headroom_default_mm !== undefined) DL.storageBoxHeadroomDefault = data.storage_box_headroom_default_mm;
   if (DL.layout && data.layout && Object.hasOwn(data.layout, "design_specs")) {
     DL.layout.design_specs = DL.cleanTextConsent(data.layout.design_specs);
   }

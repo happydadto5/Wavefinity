@@ -1079,7 +1079,7 @@ DV.buildOverlay = () => {
     </div>
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
     <div id="dl-empty-state" class="dl-empty-state" hidden></div>
-    <div class="layout-hint dl-hint">Drag bins to move · drop on a same-size stackable bin to stack · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>`);
+    <div class="layout-hint dl-hint">Drag bins to move · drop on a bin with the same footprint and compatible stacking geometry to stack · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>`);
   // The staging rail sits immediately beside the physical Space, before the canvas.
   wrap.insertAdjacentHTML("afterbegin", `
     <aside id="dl-staging" class="dl-staging" aria-label="Unplaced bins">

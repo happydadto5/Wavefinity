@@ -123,3 +123,30 @@ def component_fit(bounds_xyz: tuple[float, float, float], allowed_orientations: 
         if all(size <= limit + 1e-6 for size, limit in zip(oriented, bed)):
             return {"fits": True, "orientation": name, "reason": ""}
     return {"fits": False, "orientation": "", "reason": f"Component {tuple(round(v, 2) for v in bounds_xyz)} mm exceeds printer {bed} mm"}
+
+
+def print_file_fit_issues(path, profile: dict) -> list[str]:
+    """Inspect the written model, including every transformed 3MF part."""
+    from pathlib import Path
+    import trimesh
+
+    source = Path(path)
+    if not source.is_file() or source.suffix.lower() != ".3mf":
+        return [f"{source.name}: a current 3MF file is unavailable"]
+    try:
+        scene = trimesh.load(source, force="scene")
+        parts = scene.dump(concatenate=False)
+        if not parts:
+            return [f"{source.name}: the 3MF has no printable component"]
+        candidates = [("complete file", scene.extents)] + [
+            (f"component {index + 1}", mesh.extents) for index, mesh in enumerate(parts)
+        ]
+        issues = []
+        for label, extents in candidates:
+            bounds = tuple(float(value) for value in extents)
+            fit = component_fit(bounds, ("flat", "bed_90"), profile)
+            if not fit["fits"]:
+                issues.append(f"{source.name} {label}: {fit['reason']}")
+        return issues
+    except Exception as error:
+        return [f"{source.name}: its 3MF print bounds could not be read ({error})"]
