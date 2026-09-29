@@ -114,7 +114,8 @@ MIN_EDGE_SPACER = 1.2           # thinnest edge spacer worth printing, at a wave
 MIN_SPACER_HEIGHT = 6.0         # a spacer frame still needs room for its lock bumps
 DEFAULT_SPACER_HEIGHT = 15.0
 SPACER_CONTACT_TARGET = 28.0    # target contact width of a back/right spacer, mm
-SPACER_DISTRIBUTE_EVERY = 100.0  # Fix 088 S88-3: one planned spacer per ~100 mm of exposed run
+SPACER_DISTRIBUTE_EVERY = 100.0
+SPACER_SELECTED_CAP = 8  # Fix 090: max selected spacer candidates, applied per run  # Fix 088 S88-3: one planned spacer per ~100 mm of exposed run
 RIB_WIDTH = 1.6                 # the X brace inside a spacer: four 0.4 mm lines
 MIN_RIB_SPAN = 10.0             # narrower than this inside, a frame needs no brace
 MIN_CONNECTOR_SEAM = 16.0       # mm of shared wall a connector needs
@@ -828,11 +829,20 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
     grid = drawer_grid(drawer)
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
     flexible = options.get("flexible", True)
+    by_id = {one["id"]: one for one in bins}
     # Fix 088 S88-2: Auto height is the default - half the tallest bin's
     # height, clamped like a manual height. A manual height is honoured only
     # when Auto is off.
     if options.get("height_auto", True):
-        tallest = max((float(b.get("z", 0) or 0) for b in bins), default=0)
+        # Fix 090: "tallest bin" means the tallest non-spacer bin actually
+        # placed in THIS drawer - not the whole Space inventory (which also
+        # holds unplaced bins and other drawers' bins).
+        tallest = 0.0
+        if rows and cols:
+            for placement in drawer.get("placements") or []:
+                one = by_id.get(placement.get("bin"))
+                if one and one.get("kind") not in SPACER_KINDS:
+                    tallest = max(tallest, float(one.get("z") or 0.0))
         auto_height = round(tallest / 2) if tallest > 0 else DEFAULT_SPACER_HEIGHT
         height = min(drawer["height"], max(MIN_SPACER_HEIGHT, auto_height))
     else:
@@ -845,17 +855,18 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
         "back": bool(raw_walls.get("back", True)),
         "right": bool(raw_walls.get("right", True)),
     }
-    by_id = {one["id"]: one for one in bins}
     notes: list[str] = []
 
     candidates = []
     selected = []
+    run_count = 0
 
     if rows and cols:
         if not any(walls.values()):
             notes.append("All spacer walls are off.")
             return {"drawer": drawer, "height": height, "resolved_height": height,
-                    "candidates": [], "selected": [], "notes": notes}
+                    "candidates": [], "selected": [], "notes": notes,
+                    "run_count": 0}
         wall = drawer["clearance"] / 2.0
         
         items = [i for i in _grid_items(drawer, by_id) if i["kind"] not in SPACER_KINDS]
@@ -932,8 +943,13 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
                     placement = {"bin": "spacer", "x": px, "y": py, "w": w, "d": d, "side": side}
                     area = w * d
                     score = comp_area / area if area > 0 else 0
+                    # Fix 090: run identity - one exposed segment before
+                    # distribution. A run's candidates are selected or
+                    # skipped as a unit so the cap never chops a run in half.
+                    run_id = f"{side}-{comp_idx}-{edge}-{start}-{end}"
                     made.append({"id": cid, "placements": [placement], "score": score,
-                                 "axis": "x" if vertical else "y", "comp": comp_idx, "edge": edge})
+                                 "axis": "x" if vertical else "y", "comp": comp_idx, "edge": edge,
+                                 "run_id": run_id})
                 return made
 
             for side in ("left", "back", "right"):
@@ -961,31 +977,53 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
         candidates.sort(key=lambda c: c["score"], reverse=True)
         # Fix 088 S88-3: keep the per-(component, axis) best-edge rule, but
         # select every candidate on the winning edge - the sub-segments of one
-        # logical run - not just the best one. Cap 8 total, best scores first.
+        # logical run - not just the best one.
+        # Fix 090: the cap is applied per candidate, best scores first, and
+        # is defined explicitly: a run MAY be partially selected when the
+        # cap binds. The survivors within a chopped run are its
+        # highest-scoring candidates - the end-clipped pieces first, so a
+        # truncated run keeps its ends covered. Whole-run-or-nothing was
+        # rejected: a small high-scoring run could starve a major run
+        # entirely (1 spacer placed where 8 gaps need them).
         winning_edge = {}
         for cand in candidates:
             key = (cand["comp"], cand["axis"])
             if key not in winning_edge:
                 winning_edge[key] = cand["edge"]
-        selected = [
-            {"id": cand["id"]} for cand in candidates
+        chosen = [
+            cand for cand in candidates
             if winning_edge.get((cand["comp"], cand["axis"])) == cand["edge"]
-        ][:8]
+        ][:SPACER_SELECTED_CAP]
+        selected = [{"id": cand["id"]} for cand in chosen]
+        run_count = len({cand["run_id"] for cand in chosen})
 
         for cand in candidates:
             cand.pop("score", None)
             cand.pop("axis", None)
             cand.pop("comp", None)
             cand.pop("edge", None)
+            cand.pop("run_id", None)
 
     return {"drawer": drawer, "height": height, "resolved_height": height,
-            "candidates": candidates, "selected": selected, "notes": notes}
+            "candidates": candidates, "selected": selected, "notes": notes,
+            "run_count": run_count}
 
 def _serpentine_flexure(w, d, side, flexible=True):
     web = 1.5
     pad_bin = 3.0
     pad_wall = 2.0
-    
+
+    if side == "left":
+        # Fix 090: the left wall mirrors the right wall - the bin is at +x
+        # and the wall at -x, so the wavy bin-pad belongs on the right and
+        # the solid wall-pad on the left. Mirror the right-wall geometry
+        # about its own vertical centreline so it stays exactly in place.
+        # (Falling through to the back-wall branch would build a flexure
+        # along the wrong axis with the pads on the wrong faces.)
+        mirrored = _serpentine_flexure(w, d, "right", flexible)
+        minx, _miny, maxx, _maxy = mirrored.bounds
+        return affinity.scale(mirrored, -1, 1, origin=((minx + maxx) / 2, 0))
+
     if side == "right":
         if flexible: w += 0.5
         if not flexible or w < pad_bin + pad_wall + web * 3:

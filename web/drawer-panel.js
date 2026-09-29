@@ -862,8 +862,9 @@ DP.updateSpacerHint = () => {
     hint.textContent = "";
     return;
   }
-  // The wall toggles join the fingerprint so changing them recomputes.
-  const signature = JSON.stringify([DL.spacerSignature(), DL.layout.settings.spacers]);
+  // The Space identity and wall toggles join the fingerprint so switching
+  // Space or changing them recomputes.
+  const signature = JSON.stringify([DL.spaceContext(), DL.spacerSignature(), DL.layout.settings.spacers]);
   if (DP.spacerHintCache?.signature === signature) {
     const count = DP.spacerHintCache.count;
     hint.textContent = count > 0 ? `${count} gap${count === 1 ? "" : "s"} could use spacers` : "";
@@ -879,10 +880,12 @@ DP.updateSpacerHint = () => {
         output: DL.output ?? DL.folder(), layout: DL.layout,
         drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
       });
-      count = (result.selected || []).length;
+      // Fix 090: count logical runs (one long gap plans several spacer
+      // candidates but is still one gap).
+      count = result.run_count ?? (result.selected || []).length;
     } catch (error) { count = 0; /* a hint must never fail visibly */ }
     // Publish only if the world hasn't moved on while planning.
-    const now = JSON.stringify([DL.spacerSignature(), DL.layout.settings.spacers]);
+    const now = JSON.stringify([DL.spaceContext(), DL.spacerSignature(), DL.layout.settings.spacers]);
     const stillUsable = !state.runtime.hosted && !$("#dl-spacers")?.open && !DL.spacerPlan &&
       DL.loaded && DL.drawer().placements.length > 0;
     if (now !== signature || !stillUsable) return;

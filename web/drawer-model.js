@@ -1125,32 +1125,55 @@ DL.savePlannedSpacers = async context => {
 
 DL.generateSelectedSpacers = () => DL.busyWith("spacers", context => DL.savePlannedSpacers(context));
 
-// Fix 088 S88-4: one click deletes the placed spacers, re-plans with the
-// current wall/height settings, then saves and places the replacements.
+// Fix 088 S88-4: one click re-plans with the current wall/height settings,
+// removes the old spacers, then saves and places the replacements.
 // No confirmation. Aborts - leaving everything as it was - when the
 // inventory deletion fails (the existing deletion already reported why,
 // under the Fix 087 printed-file policy).
+// Fix 090: planning happens FIRST and is read-only - existing spacers are
+// already excluded from spacer planning, so the plan is identical whether
+// or not the old spacers are still placed. If planning fails, nothing has
+// been deleted. Removal is scoped to the active drawer only: its spacer
+// placements are dropped from the layout, and an inventory row is deleted
+// only when no placement in ANY drawer still references it (one row can be
+// placed in more than one drawer).
 DL.refreshSpacers = () => DL.busyWith("spacers", async context => {
-  const spacerIds = DL.bins.filter(DL.isSpacer).map(one => one.id);
-  if (spacerIds.length) {
-    const ok = await DL.editBins({ delete_ids: spacerIds }, { context });
+  const result = await api("/api/drawer/spacers", {
+    output: DL.output ?? DL.folder(), layout: DL.layout,
+    drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
+  });
+  DL.requireSpaceContext(context);
+  const activeId = DL.layout.active;
+  const doomed = new Set(
+    (DL.drawer().placements || [])
+      .map(placement => placement.bin)
+      .filter(id => DL.isSpacer(DL.bin(id)))
+  );
+  let removedCount = 0;
+  if (doomed.size) {
+    const drawers = DL.layout.drawers.map(drawer => drawer.id !== activeId ? drawer : {
+      ...drawer,
+      placements: (drawer.placements || []).filter(placement => !doomed.has(placement.bin)),
+    });
+    const stillUsed = new Set();
+    drawers.forEach(drawer => (drawer.placements || []).forEach(placement => stillUsed.add(placement.bin)));
+    const deleteIds = [...doomed].filter(id => !stillUsed.has(id));
+    removedCount = doomed.size;
+    const ok = await DL.editBins({ layout: { ...DL.layout, drawers }, delete_ids: deleteIds }, { context });
     if (!ok) return;
     if (!DL.spaceContextCurrent(context)) {
       toast("Spacer deletion finished in the Space you left. The current Space was not changed.");
       return;
     }
   }
-  const result = await api("/api/drawer/spacers", {
-    output: DL.output ?? DL.folder(), layout: DL.layout,
-    drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
-  });
-  DL.requireSpaceContext(context);
   DL.spacerPlan = result.candidates || [];
   DL.spacerSelected = new Set((result.selected || []).map(c => c.id));
   DL.spacerPlanSignature = DL.spacerSignature();
   DL.emit();
   if (!DL.spacerSelected.size) {
-    toast("No gaps need spacers right now.");
+    toast(removedCount
+      ? `Removed ${removedCount} stale spacer${removedCount === 1 ? "" : "s"} - no gaps need spacers right now.`
+      : "No gaps need spacers right now.");
     return;
   }
   await DL.savePlannedSpacers(context);
