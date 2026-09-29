@@ -344,6 +344,11 @@ DL.envelopeExt = (one, drawer = DL.drawer()) => {
   ex[{ front: "t", back: "b", left: "l", right: "r" }[envelope.side]] = Math.ceil(envelope.projection_mm / axisStep);
   return ex;
 };
+DL.envelopeExtForBins = (bins, drawer = DL.drawer()) => bins.reduce((total, one) => {
+  const ex = DL.envelopeExt(one, drawer);
+  for (const side of ["l", "t", "r", "b"]) total[side] = Math.max(total[side], ex[side]);
+  return total;
+}, { l: 0, t: 0, r: 0, b: 0 });
 DL.toCell = (units, drawer = DL.drawer()) => DL.isPegboard(drawer) ? Math.round(Number(units)) : Math.round(Number(units) * DL.grid(drawer).perUnit);
 DL.toUnits = (cell, drawer = DL.drawer()) => DL.isPegboard(drawer) ? cell : cell / DL.grid(drawer).perUnit;
 
@@ -419,7 +424,7 @@ DL.items = (drawer = DL.drawer()) => DL.chains(drawer).map(chain => {
   return {
     key: DL.key(chain[0]), keys: layers.map(layer => layer.key), chain, bins, layers,
     gx: DL.toCell(chain[0].gx, drawer), gy: DL.toCell(chain[0].gy, drawer), w, d, h: top,
-    ex: DL.envelopeExt(bins[0], drawer),
+    ex: DL.envelopeExtForBins(bins, drawer),
     plan_h: DL.isSurface() ? DL.stackPlanningHeight(layers) : top,
   };
 });
@@ -508,17 +513,17 @@ DL.findPlacement = key => {
 // Can these bins (bottom first) stand as a footprint with its front-left cell
 // at (gx, gy)? `ignore` holds keys being moved. Used live while dragging, so
 // it answers in plain words.
-DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
+DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set(), { skipHeight = false } = {}) => {
   if (DL.isPegboard(drawer) && DL.pegboardRefreshError) {
     return { ok: false, reason: "Pegboard placement data is unavailable. Select Space again to retry the refresh." };
   }
   const grid = DL.grid(drawer);
   const [w, d] = DL.cells(bins[0], drawer);
-  const ex = DL.envelopeExt(bins[0], drawer);
+  const ex = DL.envelopeExtForBins(bins, drawer);
   const ax0 = gx - ex.l, ay0 = gy - ex.t, ax1 = gx + w + ex.r, ay1 = gy + d + ex.b;
   const height = DL.stackHeight(bins);
   const cap = DL.heightCap(drawer);
-  if (!DL.isPegboard(drawer) && !DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
+  if (!skipHeight && !DL.isPegboard(drawer) && !DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
   if (ax0 < 0 || ay0 < 0 || ax1 > grid.cols || ay1 > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the pegboard." : "That would stick out of the Space." };
   if (DL.isPegboard(drawer)) {
     const layout = DL.pegboardLayouts[bins[0].id] || bins[0].pegboard_layout;
@@ -541,9 +546,11 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
     }
   }
   for (const item of DL.items(drawer)) {
-    if (item.keys.every(key => ignore.has(key))) continue;
-    const bx0 = item.gx - item.ex.l, by0 = item.gy - item.ex.t;
-    const bx1 = item.gx + item.w + item.ex.r, by1 = item.gy + item.d + item.ex.b;
+    const remaining = item.layers.filter(layer => !ignore.has(layer.key));
+    if (!remaining.length) continue;
+    const otherEx = DL.envelopeExtForBins(remaining.map(layer => layer.bin), drawer);
+    const bx0 = item.gx - otherEx.l, by0 = item.gy - otherEx.t;
+    const bx1 = item.gx + item.w + otherEx.r, by1 = item.gy + item.d + otherEx.b;
     if (ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1) {
       return { ok: false, reason: `That overlaps ${DL.label(item.bins[0])}.` };
     }
@@ -552,7 +559,7 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
 };
 
 // Can these bins snap onto the top of this stack?
-DL.fitsOn = (drawer, bins, target) => {
+DL.fitsOn = (drawer, bins, target, movingKeys = new Set()) => {
   if (DL.isPegboard(drawer)) return { ok: false, reason: "Pegboard bins mount directly to the board and cannot be stacked here." };
   const lower = target.bins[target.bins.length - 1];
   const refusal = DL.stackRefusal(bins[0], lower);
@@ -562,7 +569,8 @@ DL.fitsOn = (drawer, bins, target) => {
     : target.h - (DL.stackSteps[bins[0].stack] ?? 0) + DL.stackHeight(bins);
   const cap = DL.heightCap(drawer);
   if (!DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
-  return { ok: true, reason: "" };
+  return DL.fitsAt(drawer, [...target.bins, ...bins], target.gx, target.gy,
+    new Set([...target.keys, ...(movingKeys || [])]), { skipHeight: true });
 };
 
 // ------------------------------------------------------------------ changes and undo

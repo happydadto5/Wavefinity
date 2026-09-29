@@ -427,15 +427,16 @@ def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict
     w, d = bin_cells(first, drawer)
     ex = {"l": 0, "t": 0, "r": 0, "b": 0}
     if drawer.get("boundary") != "pegboard":
-        spec = ((specs or {}).get(first["id"]) or {}).get("box") or {}
-        envelope = edge_mount_projection_envelope(spec.get("edge_mount"))
-        if envelope:
-            grid = drawer_grid(drawer)
-            side = envelope["side"]
-            axis_step = grid.get("step_y", grid["step"]) if side in ("front", "back") else grid.get("step_x", grid["step"])
-            ex[{"front": "t", "back": "b", "left": "l", "right": "r"}[side]] = math.ceil(
-                envelope["projection_mm"] / axis_step
-            )
+        grid = drawer_grid(drawer)
+        for placement in chain:
+            spec = ((specs or {}).get(placement["bin"]) or {}).get("box") or {}
+            envelope = edge_mount_projection_envelope(spec.get("edge_mount"))
+            if envelope:
+                side = envelope["side"]
+                axis_step = (grid.get("step_y", grid["step"]) if side in ("front", "back")
+                             else grid.get("step_x", grid["step"]))
+                key = {"front": "t", "back": "b", "left": "l", "right": "r"}[side]
+                ex[key] = max(ex[key], math.ceil(envelope["projection_mm"] / axis_step))
     layers, issues, top, plan_top = [], [], 0.0, 0.0
     for index, placement in enumerate(chain):
         one = by_id[placement["bin"]]
