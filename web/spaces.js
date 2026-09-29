@@ -166,15 +166,21 @@ SP.resolveSurface = (requestedX, requestedY, trimKey) => {
 // reproduces its current field exactly and can never grow the organizer. The
 // visible inputs always keep the maximum; they are never overwritten with the
 // smaller resolved finished size.
+// A stored maximum is kept only when it is finite, positive, at least the finished
+// outside size, and resolves (round down, same epsilon) to exactly the stored field;
+// otherwise that axis is reseeded, so damaged metadata can never enlarge a Surface.
 SP.surfaceMaxFor = space => {
-  const seed = SP.surfaceOutsideFor(Number(space.x), space.trim_size);
-  const seedY = SP.surfaceOutsideFor(Number(space.y), space.trim_size);
-  const stored = (value, minimum) => {
+  const { unit, gap } = SP.surfaceRules();
+  const width = SP.surfacePresetMap()[space.trim_size];
+  const axis = (field, value) => {
+    const seed = SP.surfaceOutsideFor(Number(field), space.trim_size);
+    if (value === null || value === undefined || value === "" || typeof value === "boolean") return seed;
     const number = Number(value);
-    return value !== null && value !== undefined && value !== "" && Number.isFinite(number) && number > 0
-      && number >= minimum - 1e-6 ? number : minimum;
+    if (!Number.isFinite(number) || number <= 0 || number < seed - 1e-6) return seed;
+    const units = Math.floor((number - (gap + 2 * width) + 1e-6) / unit);
+    return units === Math.round(Number(field) / unit) ? number : seed;
   };
-  return { x: stored(space.max_x_mm, seed), y: stored(space.max_y_mm, seedY) };
+  return { x: axis(space.x, space.max_x_mm), y: axis(space.y, space.max_y_mm) };
 };
 
 SP.surfaceTrimLabel = key =>
@@ -3114,8 +3120,8 @@ SP.hostedBaseTrimSave = async (payload, context) => {
   for (const piece of candidate.pieces) {
     const existing = await WFFileSystem.sha256(handle, piece.filename);
     if (existing === null) continue;
-    // Ours and unchanged, or byte-identical to the new file (nothing is lost).
-    if (existing !== owned.get(piece.filename) && existing !== piece.sha256) {
+    // Only a file the prior manifest owns, still unchanged, may be replaced.
+    if (owned.get(piece.filename) === undefined || owned.get(piece.filename) !== existing) {
       throw new Error(`${piece.filename} is already in this folder and was not made by this Base Trim, or it was changed outside Wavefinity. Rename or move it, then save again. Nothing was changed.`);
     }
     const old = await WFFileSystem.readBlob(handle, piece.filename);

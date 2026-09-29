@@ -157,6 +157,7 @@ from organizer_inventory import (
 from organizer_product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
     ORDINARY_BIN_MIN_HEIGHT_MM,
+    surface_maximums,
 )
 from organizer_space_outputs import (
     BASE_TRIM, STORAGE_BOX, STORAGE_DRAWERS, structural_design, structural_kind,
@@ -3934,6 +3935,15 @@ def _storage_box_arrangement_issue(arranged: dict[str, Any], space: dict[str, An
 def _surface_arrangement_issue(arranged: dict[str, Any], space: dict[str, Any]) -> str | None:
     if any(abs(float(arranged.get(axis, 0)) - float(space[axis])) > 1e-6 for axis in ("x", "y", "z")) \
             or arranged.get("trim_size") != space.get("trim_size"):
+        return "Surface settings and saved arrangement disagree. Reopen this Space and try again."
+    # Canonical maximums: a legacy layout with none seeds to its current finished
+    # footprint, so it only disagrees when a real maximum differs.
+    try:
+        saved = surface_maximums(arranged, float(arranged["x"]), float(arranged["y"]), arranged["trim_size"], strict=False)
+        authoritative = surface_maximums(space, float(space["x"]), float(space["y"]), space["trim_size"], strict=False)
+    except (KeyError, TypeError, ValueError):
+        return "Surface settings and saved arrangement disagree. Reopen this Space and try again."
+    if any(abs(one - other) > 1e-6 for one, other in zip(saved, authoritative)):
         return "Surface settings and saved arrangement disagree. Reopen this Space and try again."
     return None
 

@@ -242,9 +242,9 @@ def materialize_base_trim(
     same-name file is replaced only when the prior manifest proves it is ours and
     unchanged; anything else stops with the outside file left intact. The manifest
     is committed only after every final file is in place, while the pre-attempt
-    backups still exist, so a failed commit puts every file back. A same-name file
-    that is byte-identical to the new output loses nothing when replaced, so a
-    legacy untracked Base Trim file is adopted only in that exact case.
+    backups still exist, so a failed commit puts every file back. An unowned
+    same-name file is never replaced or adopted, even when its bytes happen to
+    equal the new output.
     """
     folder = Path(folder)
     with _TRANSACTION_LOCK:
@@ -262,10 +262,9 @@ def materialize_base_trim(
         try:
             staged = _generate_into(plan, staging)
             manifest = _manifest(plan, space_id, staged)
-            new_hashes = {item["filename"]: item["sha256"] for item in manifest["pieces"]}
             for name in desired:
                 final = folder / name
-                if final.exists() and file_sha256(final) not in (owned.get(name), new_hashes[name]):
+                if final.exists() and (name not in owned or file_sha256(final) != owned[name]):
                     raise BaseTrimOwnershipError(
                         f"{name} is already in this folder and was not made by this Base Trim, or it was "
                         "changed outside Wavefinity. Rename or move it, then save again. Nothing was changed."

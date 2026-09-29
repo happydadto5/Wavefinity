@@ -245,10 +245,18 @@ DV.fitText = (ctx, text, maxWidth) => {
 
 // Layers (bottom first) for bins standing on a stack or on the floor.
 DV.layersFor = (bins, keys, start) => {
+  // Storage Box and Surface advance from the prior layer's seating datum by its
+  // canonical pitch and stand at the canonical physical height; other Spaces keep
+  // the raw height / stack-step math.
+  const metrics = DL.usesStackMetrics();
   let top = 0;
+  let previous = start;
   return bins.map((one, index) => {
-    const bottom = index ? top - (DL.stackSteps[one.stack] ?? 0) : start;
-    top = bottom + Number(one.z);
+    const bottom = !index ? start
+      : metrics ? previous + DL.pitch(bins[index - 1])
+        : top - (DL.stackSteps[one.stack] ?? 0);
+    top = bottom + (metrics ? DL.partHeight(one) : Number(one.z));
+    previous = bottom;
     return { bin: one, key: keys[index], z0: bottom, z1: top };
   });
 };
@@ -275,7 +283,11 @@ DV.entries = (drawer, grid) => {
     const keys = drag ? [...drag.keys] : ["__drop"];
     const [w, d] = DL.cells(bins[0], drawer);
     const target = ghost.target;
-    const start = target ? target.h - (DL.stackSteps[bins[0].stack] ?? 0) : 0;
+    // A stack-target ghost starts at the target's next seating datum.
+    const topLayer = target?.layers[target.layers.length - 1];
+    const start = !target ? 0
+      : DL.usesStackMetrics() ? topLayer.z0 + DL.pitch(target.bins[target.bins.length - 1])
+        : target.h - (DL.stackSteps[bins[0].stack] ?? 0);
     const where = target ? box(target.gx, target.gy, target.w, target.d) : box(ghost.gx, ghost.gy, w, d);
     const mode = drag?.outside ? "leaving" : ghost.valid ? "ghost" : "invalid";
     entries.push({ key: "__ghost", ...where,
