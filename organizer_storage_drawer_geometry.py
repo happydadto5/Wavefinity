@@ -15,7 +15,7 @@ from organizer_b4b import (B4B_STACK_RECESS_DEPTH, B4B_MIN_FLOOR_SKIN,
                            B4B_STACK_BOSS_DIAMETER, B4B_STACK_FEMALE_RADIAL_CLEARANCE,
                            B4B_STACK_SOCKET_INTERFERENCE, B4B_STACK_BOSS_CHAMFER,
                            B4B_STACK_INSET_MIN, B4B_STACK_INSET_FRACTION)
-from organizer_engine import wavy_rect_cavity
+from organizer_engine import WAVE_MATING_GAP, wavy_rect_cavity
 from organizer_geometry import _extrude_polygon, difference, translated, union
 from organizer_inserts import Feature, Zone, text_fitted
 from organizer_lid_handle import resolve_lid_handle, handle_keepout, LID_HANDLE_EDGE_MARGIN
@@ -479,6 +479,18 @@ def _datum_components(space, datum):
                 a, b = (inner-0.2, inner+datum.rail_ledge) if left else (inner-datum.rail_ledge, inner+0.2)
                 bars.append(_box(a, datum.front+SD_RAIL_LEADIN_MM, floor-SD_RAIL_LEDGE_MM-datum.fit,
                                  b, datum.rear-datum.track_reach, floor-datum.fit))
+                # C-01: closed-position stop. A lug rising from the rear end
+                # of the lower rail ledge, in the ledge's own x-footprint
+                # (a, b). Its front face is exactly at the drawer runner's
+                # rear plane (datum.field_y) at flush, so the drawer cannot
+                # travel behind the fascia plane. Its depth is drawer_wall +
+                # fit (positive at every material/fit); the runner, web and
+                # wing end at that same plane, proving 0.0 mm over-travel for
+                # Tight/Standard/Loose and both cabinet styles.
+                bars.append(_box(a, datum.field_y,
+                                 floor-SD_RAIL_LEDGE_MM-datum.fit,
+                                 b, datum.rear-datum.track_reach,
+                                 floor+SD_RAIL_CAPTURE_MM))
                 bars.append(_box(a, datum.front+SD_RAIL_LEADIN_MM,
                                  floor+SD_RAIL_CAPTURE_MM+datum.fit, b,
                                  datum.rear-datum.track_reach, floor+2*SD_RAIL_CAPTURE_MM+datum.fit))
@@ -601,7 +613,14 @@ def _datum_components(space, datum):
             outer = _box(x0-datum.drawer_wall, y0-datum.drawer_wall, floor-datum.drawer_base,
                          x0+datum.field_x+datum.drawer_wall, y0+datum.field_y+datum.drawer_wall, floor+height)
             # The interior uses the same mating wave outline as ordinary bin surfaces.
-            cavity = wavy_rect_cavity(datum.field_x/2, datum.field_y/2, 0.0, wall=0.0)
+            # Nominal wall sits at field/2 + WAVE_MATING_GAP/2, the canonical
+            # mating datum shared with Storage Box / base trim: half the
+            # 0.25 mm seam gap belongs to the wall side. The outer box and
+            # grid-space bin layout are unchanged; its boundary clearance is
+            # nested_clearance() (0.2117 mm nominal) rather than half of it.
+            cavity = wavy_rect_cavity(datum.field_x/2 + WAVE_MATING_GAP/2,
+                                      datum.field_y/2 + WAVE_MATING_GAP/2,
+                                      0.0, wall=0.0)
             cut = _extrude_polygon(cavity, height+0.1)
             cut.apply_translation((x0+datum.field_x/2, datum.field_y/2, floor))
             body = difference([outer, cut])
@@ -612,7 +631,15 @@ def _datum_components(space, datum):
             for left in (True, False):
                 x = x0-datum.drawer_wall if left else x0+datum.field_x+datum.drawer_wall
                 a, b = (x-SD_RAIL_LEDGE_MM, x+0.4) if left else (x-0.4, x+SD_RAIL_LEDGE_MM)
-                main_a, main_b = (a, a+1.0) if left else (b-1.0, b)
+                # V-02: the fit setting sets running clearance, never bearing.
+                # Uncompensated bearing is 0.8-fit per side (0.20 mm at Loose);
+                # extend the runner bar toward the rail so engagement never
+                # drops below the proven Standard value of 0.40 mm per side:
+                # Tight/Standard/Loose are 0.50/0.40/0.40, with vertical
+                # clearances still exactly datum.fit.
+                _bearing_makeup = max(0.0, datum.fit - 0.40)
+                main_a, main_b = ((a-_bearing_makeup, a+1.0) if left
+                                  else (b-1.0, b+_bearing_makeup))
                 runners.append(_runner(main_a, main_b, datum.front+SD_RAIL_LEADIN_MM,
                                        datum.field_y, floor))
                 # A narrow upper web ties the support rail to the drawer wall
