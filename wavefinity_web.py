@@ -3861,7 +3861,10 @@ def storage_box_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     selected: list[str] = []
     for drawer in layout.get("drawers") or []:
         report = drawer_report(drawer, bins, layout=layout)
-        issues.extend(problem["message"] for problem in report["problems"])
+        issues.extend(
+            problem["message"] for problem in report["problems"]
+            if problem["type"] != "height"
+        )
         for placement in drawer.get("placements") or []:
             row_id = placement.get("bin")
             one = by_id.get(row_id)

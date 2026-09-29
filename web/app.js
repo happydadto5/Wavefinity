@@ -9334,10 +9334,20 @@ function appConfirm({
       appConfirm.checked = Boolean(checkboxLabel && checkBox?.checked);
       primaryBtn.onclick = secondaryBtn.onclick = cancelBtn.onclick = null;
       dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("click", onBackdrop);
+      dialog.removeEventListener("close", onClose);
       if (dialog.open) dialog.close();
       resolve(choice);
     };
     const onCancel = event => { event.preventDefault(); finish("cancel"); };
+    const onBackdrop = event => {
+      if (event.target !== dialog) return;
+      const bounds = dialog.getBoundingClientRect();
+      if (event.clientX < bounds.left || event.clientX > bounds.right ||
+          event.clientY < bounds.top || event.clientY > bounds.bottom) finish("cancel");
+    };
+    // A close event from the previous confirmation may arrive after this one opens.
+    const onClose = () => { if (!dialog.open) finish("cancel"); };
 
     titleEl.textContent = title || "";
     msgEl.textContent = message || "";
@@ -9359,6 +9369,8 @@ function appConfirm({
     cancelBtn.onclick = () => finish("cancel");
 
     dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("click", onBackdrop);
+    dialog.addEventListener("close", onClose);
     if (!dialog.open) dialog.showModal();
     // Focus always stays on a safe default - the primary action, or Cancel
     // when the primary itself is the dangerous one - never on a danger-
