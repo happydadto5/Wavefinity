@@ -269,6 +269,13 @@ DL.heightCap = drawer => DL.isStorageBox()
   ? Number(DL.layout.space.z) + Number(DL.layout.space.storage_box?.lid_headroom_mm ?? DL.storageBoxHeadroomDefault)
   : Number(drawer.height);
 DL.isStorageDrawers = () => state.activeSpace?.kind === "storage_drawers";
+// Storage Box and Surface share the server's canonical stack metrics.
+DL.usesStackMetrics = () => DL.isStorageBox() || DL.isSurface();
+// Report severity: height reach, unverified contents and interior groups only
+// advise; every other problem is a hard layout/stack problem.
+DL.isAdvisoryProblem = problem => problem?.severity
+  ? problem.severity === "advisory"
+  : ["height", "clearance", "restraint"].includes(problem?.type);
 
 // Storage Drawers: the layout's drawers are always the typed cabinet's stable
 // descriptors, every one mating with zero clearance. Placements are kept.
@@ -349,13 +356,13 @@ DL.toUnits = (cell, drawer = DL.drawer()) => DL.isPegboard(drawer) ? cell : cell
 
 // Inventory Z is the seating-datum module height. The top interlock remains
 // exposed on the physical envelope of the first/detached part.
-DL.pitch = one => DL.isStorageBox() && Number.isFinite(DL.stackMetrics[one.id]?.pitch_mm)
+DL.pitch = one => DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.id]?.pitch_mm)
   ? DL.stackMetrics[one.id].pitch_mm
   : one.stack === "b4b" ? Number(one.z) - (DL.stackSteps.b4b ?? 0) : Number(one.z);
-DL.partHeight = one => DL.isStorageBox() && Number.isFinite(DL.stackMetrics[one.id]?.physical_mm)
+DL.partHeight = one => DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.id]?.physical_mm)
   ? DL.stackMetrics[one.id].physical_mm
   : one.stack === "b4b" ? Number(one.z) : Number(one.z) + (DL.stackSteps[one.stack] ?? 0);
-DL.stackHeight = bins => DL.isStorageBox()
+DL.stackHeight = bins => DL.usesStackMetrics()
   ? bins.reduce((sum, one, index) => index
     ? sum - DL.partHeight(bins[index - 1]) + DL.pitch(bins[index - 1]) + DL.partHeight(one)
     : DL.partHeight(one), 0)
@@ -409,7 +416,7 @@ DL.items = (drawer = DL.drawer()) => DL.chains(drawer).map(chain => {
   let previousBottom = 0;
   const layers = chain.map((p, index) => {
     const one = bins[index];
-    const bottom = index ? (DL.isStorageBox()
+    const bottom = index ? (DL.usesStackMetrics()
       ? previousBottom + DL.pitch(bins[index - 1])
       : top - (DL.stackSteps[one.stack] ?? 0)) : 0;
     top = bottom + DL.partHeight(one);
@@ -427,6 +434,11 @@ DL.items = (drawer = DL.drawer()) => DL.chains(drawer).map(chain => {
 DL.placedCount = id => DL.layout.drawers.reduce(
   (sum, drawer) => sum + drawer.placements.filter(p => p.bin === id).length, 0);
 DL.isPlaced = id => DL.placedCount(id) > 0;
+// Placed ordinary bin rows whose Object height is still unknown (Surface planning
+// guidance only; spacers, manual rows and unplaced rows never count).
+DL.missingObjectHeightCount = () => DL.bins.filter(one =>
+  DL.isOrdinary(one) && one.kind !== "manual" && DL.isPlaced(one.id) &&
+  (one.object_height_mm === null || one.object_height_mm === undefined)).length;
 
 // Ordinary rows are the placeable, stageable bins; spacers are filler parts
 // planned from the Spacers section.
@@ -557,6 +569,14 @@ DL.fitsOn = (drawer, bins, target) => {
   const lower = target.bins[target.bins.length - 1];
   const refusal = DL.stackRefusal(bins[0], lower);
   if (refusal) return { ok: false, reason: refusal };
+  if (DL.isSurface()) {
+    // The upper bin seats at z0 + pitch. A known installed object that reaches past
+    // that plane blocks the stack; an unknown one is allowed (the report advises).
+    const objectTop = DL.rowPlanning(lower)?.object_top_mm;
+    if (objectTop !== null && objectTop !== undefined && Number(objectTop) > DL.pitch(lower) + 1e-6) {
+      return { ok: false, reason: `The object in ${DL.label(lower)} reaches above the next stack seating plane.` };
+    }
+  }
   const height = DL.isStorageBox()
     ? target.layers[target.layers.length - 1].z0 + DL.pitch(lower) + DL.stackHeight(bins)
     : target.h - (DL.stackSteps[bins[0].stack] ?? 0) + DL.stackHeight(bins);

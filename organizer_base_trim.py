@@ -723,6 +723,25 @@ def _base_filename(spec: BaseTrimSpec, part_name: str = "") -> str:
     return name
 
 
+def _piece_filenames(stem: str, total: int) -> list[str]:
+    return [
+        f"{stem}.3mf" if total == 1 else f"{stem} Part {index:02d} of {total:02d}.3mf"
+        for index in range(1, total + 1)
+    ]
+
+
+def base_trim_output_plan(spec: BaseTrimSpec, part_name: str = "") -> list[dict]:
+    """The deterministic piece files this Base Trim makes, without building any
+    geometry: ``[{number, label, kind, filename}]`` in piece order."""
+    validate_base_trim(spec)
+    pieces = plan_base_trim_pieces(spec)
+    names = _piece_filenames(_base_filename(spec, part_name), len(pieces))
+    return [
+        {"number": piece.index, "label": piece.label, "kind": piece.kind, "filename": name}
+        for piece, name in zip(pieces, names)
+    ]
+
+
 def generate_base_trim_files(
     spec: BaseTrimSpec,
     output_dir: Path,
@@ -735,13 +754,7 @@ def generate_base_trim_files(
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = _base_filename(spec, part_name)
     total = len(made)
-    targets = [
-        output_dir / (
-            f"{stem}.3mf" if total == 1
-            else f"{stem} Part {index:02d} of {total:02d}.3mf"
-        )
-        for index in range(1, total + 1)
-    ]
+    targets = [output_dir / name for name in _piece_filenames(stem, total)]
     if auto_timestamp and (not clean_label(part_name) or any(path.exists() for path in targets)):
         timestamp = datetime.now().strftime("%m%d%y%H%M%S")
         targets = [path.with_name(f"{path.stem} {timestamp}{path.suffix}") for path in targets]

@@ -146,11 +146,18 @@ DP.build = () => {
       </div>
     </section>
 
+    <section id="dl-surface-planning" class="control-section open dl-section" aria-label="Object planning" hidden>
+      <div class="section-heading no-toggle"><span>Object planning</span></div>
+      <div class="section-body">
+        <label class="checkbox-row"><span>Ask for missing Object height</span><input id="dl-surface-ask-height" type="checkbox" checked></label>
+        <p id="dl-surface-missing" class="dl-note" role="status"></p>
+      </div>
+    </section>
+
     <section id="dl-surface-fill" class="control-section open dl-section" aria-label="Fill Empty Space" hidden>
       <div class="section-heading no-toggle"><span>Fill Empty Space</span></div>
       <div class="section-body">
         <p class="dl-note">Turn free Surface cells into ordinary editable bins.</p>
-        <label class="checkbox-row"><span>Ask for missing Object height</span><input id="dl-surface-ask-height" type="checkbox" checked></label>
         <div class="dl-action-grid">
           <button type="button" id="dl-fill-plan" class="button secondary">Plan / Update Fill Bins</button>
           <button type="button" id="dl-fill-create" class="button secondary">Create Selected Fill Bins</button>
@@ -662,6 +669,7 @@ DP.update = () => {
   }
   DP.renderDrawer();
   DP.renderStats();
+  DP.renderSurfacePlanning();
   DP.renderSurfaceFill();
   DP.renderInventory();
   DP.renderSave();
@@ -694,6 +702,7 @@ DP.renderDrawer = () => {
   // drawer selector, size and Add/Delete card never applies to it.
   if (detailsCard) detailsCard.hidden = DP.singleTypedSpace() || DL.isStorageDrawers();
   if (spacerSection) spacerSection.hidden = pegboard || surface;
+  $("#dl-surface-planning").hidden = !surface;
   $("#dl-surface-fill").hidden = !surface;
   $("#dl-height").closest("label").hidden = surface;
   const select = $("#dl-drawer");
@@ -754,9 +763,21 @@ DP.renderDrawer = () => {
     + (edges.length ? `Left over at the edges: ${edges.join(", ")}.` : "No spare strip at the edges.");
 };
 
-DP.renderSurfaceFill = () => {
+// Object planning: the one visible owner of this Space's ask preference (it stays
+// available after "Don't ask again"), plus a quiet derived missing-height count.
+DP.renderSurfacePlanning = () => {
   if (!DL.isSurface()) return;
   dlSet("#dl-surface-ask-height", Boolean(DL.layout.settings.surface.ask_object_height), "checked");
+  const missing = DL.missingObjectHeightCount();
+  const note = $("#dl-surface-missing");
+  note.textContent = missing
+    ? `${missing} placed ${missing === 1 ? "bin" : "bins"} missing Object height`
+    : "";
+  note.classList.toggle("dl-warning", missing > 0);
+};
+
+DP.renderSurfaceFill = () => {
+  if (!DL.isSurface()) return;
   const busy = Boolean(DL.busy);
   $("#dl-fill-plan").disabled = busy;
   $("#dl-fill-plan").textContent = DL.busy === "fill" ? "Working…" : "Plan / Update Fill Bins";
@@ -838,7 +859,7 @@ DP.renderStats = () => {
   // Only actionable problems and warnings stay in this panel.
   const problems = report.problems;
   box.innerHTML = `
-    ${problems.length ? `<ul class="dl-problems">${problems.slice(0, 8).map(p => `<li class="${p.type === "height" ? "height" : ""}">${escapeHtml(p.message)}</li>`).join("")}${problems.length > 8 ? `<li>…and ${problems.length - 8} more</li>` : ""}</ul>` : ""}
+    ${problems.length ? `<ul class="dl-problems">${problems.slice(0, 8).map(p => `<li class="${DL.isAdvisoryProblem(p) ? "height" : ""}">${escapeHtml(p.message)}</li>`).join("")}${problems.length > 8 ? `<li>…and ${problems.length - 8} more</li>` : ""}</ul>` : ""}
     ${warnings}`;
   DP.updateSpacerHint();
 };

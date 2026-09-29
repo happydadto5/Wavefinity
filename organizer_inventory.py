@@ -53,6 +53,7 @@ from organizer_product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
     ORDINARY_BIN_MIN_HEIGHT_MM,
     SURFACE_TRIM_HEIGHTS,
+    surface_maximums,
 )
 from organizer_pegboard import normalise_pegboard_space
 from organizer_storage_drawers import (
@@ -1451,6 +1452,11 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
     result = {"name": name, "kind": kind, "x": x, "y": y, "z": z}
     if kind == "surface":
         result["trim_size"] = trim_size
+        # Fix 095: the user's maximum finished outside rectangle is durable
+        # authority beside the resolved field. A missing value is seeded from
+        # the current finished footprint, so it can never enlarge the Space.
+        result["max_x_mm"], result["max_y_mm"] = surface_maximums(
+            raw, x, y, trim_size, strict=True)
     if kind == "portable":
         result["storage_box"] = normalise_storage_box(raw.get("storage_box"))
     return result
@@ -1571,6 +1577,27 @@ def _configured_space_definition(
         _carry_storage_box(raw_def, layout, mode), allow_legacy=allow_legacy)
 
 
+def _refuse_stranding_surface_change(
+    bins: list[dict[str, Any]], layout: dict[str, Any], space_def: dict[str, Any], mode: str,
+) -> None:
+    """Fix 095: validate a Surface edit against the *proposed* Surface before any
+    write. The single local/hosted rule; a refusal changes nothing and never
+    unplaces, moves or clamps a bin."""
+    if mode != "update" or space_def.get("kind") != "surface" or not isinstance(layout.get("drawers"), list):
+        return
+    if not any(isinstance(one, dict) and one.get("placements") for one in layout["drawers"]):
+        return
+    from organizer_drawer import surface_reconfigure_problem  # organizer_drawer imports this module
+
+    proposed = copy.deepcopy(layout)
+    proposed_bins = copy.deepcopy(bins)
+    _setup_space_layout(proposed, space_def)
+    _reconcile_surface_bases(proposed_bins, proposed, space_def["z"])
+    problem = surface_reconfigure_problem(bins, layout, proposed_bins, proposed)
+    if problem:
+        raise ValueError(problem)
+
+
 def configure_space(
     output_dir: Path | str, *, raw_def: dict[str, Any], mode: str = "create", allow_legacy: bool = False
 ) -> dict[str, Any]:
@@ -1581,6 +1608,7 @@ def configure_space(
         if mode == "create" and isinstance(layout.get("space"), dict):
             raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
         space_def = _configured_space_definition(raw_def, layout, mode, allow_legacy)
+        _refuse_stranding_surface_change(current["bins"], layout, space_def, mode)
         _setup_space_layout(layout, space_def)
         if mode == "update" and space_def["kind"] == "surface":
             _reconcile_surface_bases(current["bins"], layout, space_def["z"])
@@ -1651,6 +1679,7 @@ def configure_space_text(
         if mode == "create" and isinstance(layout.get("space"), dict):
             raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
         space_def = _configured_space_definition(raw_def, layout, mode, allow_legacy)
+        _refuse_stranding_surface_change(current["bins"], layout, space_def, mode)
         _setup_space_layout(layout, space_def)
         if mode == "update" and space_def["kind"] == "surface":
             _reconcile_surface_bases(current["bins"], layout, space_def["z"])

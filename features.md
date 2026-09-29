@@ -48,7 +48,7 @@ Wavefinity currently has five typed Space types.
 | Space | Main purpose | Key configuration | Space-owned output / special behavior |
 | --- | --- | --- | --- |
 | **Drawer** | Organize bins inside a drawer or enclosed area | Usable inside width, depth, height | 3D arrangement, placement validation, stacking, unplaced-bin rail |
-| **Surface** | Organize bins on an open shelf/counter/other surface | Finished outside width/length, trim size | **Base Trim** plus Surface-specific bin base controls |
+| **Surface** | Organize bins on an open shelf/counter/other surface | Maximum outside width/length, trim size | **Base Trim** plus Surface-specific bin base controls |
 | **Storage Box** | Put Wavefinity bins inside a printable carrying/storage case | Outside width/length, usable inside height, case settings | **Storage Box case** with lid/stacking/handle/label/material options |
 | **Storage Drawers** | A printable multi-drawer mini cabinet for Wavefinity bins | Whole-unit width/depth, drawer count, per-drawer usable height, cabinet/drawer material, fit, handles, labels, stacking | **Cabinet** structural files (frame, drawers, fronts, rails) saved/printed from the cabinet panel |
 | **Pegboard** | Hang Wavefinity bins on a pegboard | Board standard, physical size or hole/slot count | Pegboard receivers/cleats on bins and board-grid-aware placement |
@@ -96,21 +96,36 @@ Wavefinity can also be used **without a typed Space**, in which case the user ca
 ### Setup
 
 - Surface name.
-- Finished outside width.
-- Finished outside length.
+- **Maximum width** and **Maximum length** (mm): the largest rectangle the whole organizer, including its Base Trim, may occupy.
+  - The inputs keep exactly what was entered; they are never replaced by the smaller rounded result. Changing trim size always re-resolves from the same maximum.
+  - The largest whole-Wavefinity-unit field that fits inside that rectangle is used; the readout shows the resolved field and the actual finished outside size.
+  - The maximum is saved with the Space. A Surface saved before this existed is seeded from its current finished size, so it never grows.
 - Trim size/preset.
 - Computed usable Wavefinity field.
 - Finished outside size and remaining/border space readouts.
+
+### Changing a Surface's size or trim
+
+- The proposed Surface is checked against every placed bin before anything is saved. If a bin (including a projecting Edge Mount label) would no longer fit, the change is refused with the affected bins named. Nothing is moved, unplaced, deleted, or resized.
+- Changing the trim edge height while some **Printed** bins still follow the Surface edge (Auto base) asks first: **Printed bins will keep their current base height** — Continue or Cancel. Continue freezes those printed bins at their existing base height; bins not yet printed follow the new edge.
 
 ### Base Trim
 
 A Surface owns a printable **Base Trim**.
 
-- Saved from the Space.
-- Printed from the Space.
+- Saved from the Space (**Save Base Trim**).
+- Printed with the Surface's bins from the Space (**Print Surface + Bins**).
 - Not an ordinary Inventory row.
 - Can be split/joined as needed for the selected printer-bed size.
 - Uses Wavefinity mating geometry to hold the Surface layout.
+- Friction-only: it makes no fastening guarantee.
+- A quiet line near the buttons shows current-printer readiness, e.g. **Base Trim · 3 pieces for current printer · Needs save**, or the fit reason if it cannot be planned for the printer.
+- Saved files are tracked in the Space's metadata. The status is **Current**, **Needs save** (missing, or the Surface, trim, name or printer no longer matches), or **Saved file changed outside Wavefinity**. Saving replaces or removes only files Wavefinity can prove it made; an unowned or changed same-name file is never overwritten or deleted.
+- Hosted Wavefinity writes the pieces to the chosen folder first and records the manifest only after every write succeeded.
+
+### Print Surface + Bins
+
+One action sends to the slicer, once: the current-printer Base Trim, every placed **Not Printed** ordinary bin (including bins in valid stacks), and the required connectors. Unplaced, already-Printed and spacer/manual rows are left out. Hard placement, boundary, overlap and stack problems stop the print before the slicer opens; reach, unverified-contents and interior-group advisories never do. Rows become Printed only after the slicer opens.
 
 ### Surface-bin options
 
@@ -124,6 +139,15 @@ Bins designed in a Surface Space can use Surface-specific base controls:
 - **Object height**
   - Planning-only physical object height.
   - Used for Space planning; does not change the bin geometry by itself.
+- Helper text: Auto matches the Base Trim edge. If you are not using the Base Trim, choose Custom.
+
+### Object planning and stacking
+
+- The Object-height prompt offers **Save Object height**, **Continue without one**, or **Cancel** (same as Escape: nothing is set or saved).
+- **Object planning** in the Surface layout controls holds the per-Space "Ask for missing Object height" setting (still available after "Don't ask again for this Space") and a quiet **N placed bins missing Object height** count.
+- Stacking respects installed objects: a known object that reaches above the next stack seating plane (direct or lid stacking) blocks the stack. An unknown Object height still allows the stack with the advisory **Contents clearance not verified — Object height is not set for <bin>.**
+- A group of placed bins with no shared edge against the Base Trim gets an advisory that it may slide within the open Surface. This is never a blocker, and edge contact is not a claim that anything is anchored or secured.
+- Tall planned objects widen the camera framing, but the Surface stays visually open: its rim is drawn at the real Base Trim edge height.
 
 ---
 
@@ -243,7 +267,7 @@ Pegboard mounting metadata is controlled by the Space and should not be casually
 - Show Folder.
 - New Space.
 - Save Storage Box / Print Storage Box + Bins when in a Storage Box Space.
-- Save/Print Base Trim when in a Surface Space.
+- Save Base Trim / Print Surface + Bins when in a Surface Space.
 
 ## 3.2 Inventory
 

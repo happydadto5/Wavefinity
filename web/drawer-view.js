@@ -160,7 +160,9 @@ DV.camera = (width, height, drawer, view = DV.view) => {
     const t = (z - b.eye[2]) / ray[2];
     return t > 0 ? V3.add(b.eye, V3.scale(ray, t)) : null;
   };
-  return { W, D, H, eye: b.eye, project, onPlane };
+  // Framing may grow to the tallest planned object, but the drawn rim/walls stay
+  // at the Space's real boundary height: an open Surface never grows tall walls.
+  return { W, D, H, rimH: DL.isSurface() ? drawer.height : H, eye: b.eye, project, onPlane };
 };
 
 DV.pegboardCamera = (width, height, drawer) => {
@@ -226,7 +228,7 @@ DV.hatch = (ctx, color) => {
 DV.problemKeys = () => {
   const keys = new Map();
   for (const problem of DL.report?.problems || []) {
-    const tone = problem.type === "height" ? "height" : "error";
+    const tone = DL.isAdvisoryProblem(problem) ? "height" : "error";
     problem.keys.forEach(key => { if (keys.get(key) !== "error") keys.set(key, tone); });
   }
   return keys;
@@ -441,6 +443,7 @@ DV.paintScene = (ctx, drawer, cam) => {
   const grid = DL.grid(drawer);
   const step = grid.step;
   const { W, D, H, eye } = cam;
+  const rimH = cam.rimH ?? H;
   const shape = points => {
     const screen = points.map(cam.project);
     ctx.beginPath();
@@ -456,10 +459,10 @@ DV.paintScene = (ctx, drawer, cam) => {
   };
   const flat = (x0, y0, x1, y1, z = 0) => [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
   const walls = [
-    { inside: eye[1] < D, points: [[0, D, 0], [W, D, 0], [W, D, H], [0, D, H]], tone: "#e2d7c2" },
-    { inside: eye[0] > 0, points: [[0, 0, 0], [0, D, 0], [0, D, H], [0, 0, H]], tone: "#dcd1bb" },
-    { inside: eye[0] < W, points: [[W, 0, 0], [W, D, 0], [W, D, H], [W, 0, H]], tone: "#d9cdb6" },
-    { inside: eye[1] > 0, points: [[0, 0, 0], [W, 0, 0], [W, 0, H], [0, 0, H]], tone: "#e0d5c0" },
+    { inside: eye[1] < D, points: [[0, D, 0], [W, D, 0], [W, D, rimH], [0, D, rimH]], tone: "#e2d7c2" },
+    { inside: eye[0] > 0, points: [[0, 0, 0], [0, D, 0], [0, D, rimH], [0, 0, rimH]], tone: "#dcd1bb" },
+    { inside: eye[0] < W, points: [[W, 0, 0], [W, D, 0], [W, D, rimH], [W, 0, rimH]], tone: "#d9cdb6" },
+    { inside: eye[1] > 0, points: [[0, 0, 0], [W, 0, 0], [W, 0, rimH], [0, 0, rimH]], tone: "#e0d5c0" },
   ];
 
   // The drawer: floor, then the inside faces of the walls you can see.
@@ -626,9 +629,9 @@ DV.paintScene = (ctx, drawer, cam) => {
   walls.filter(wall => !wall.inside).forEach(wall => face(wall.points, "rgba(224,213,192,.3)", "rgba(120,100,70,.45)"));
   ctx.strokeStyle = "rgba(110,90,60,.7)";
   ctx.lineWidth = 1.4;
-  face(flat(0, 0, W, D, H), null, "rgba(110,90,60,.6)", 1.4);
+  face(flat(0, 0, W, D, rimH), null, "rgba(110,90,60,.6)", 1.4);
   ctx.beginPath();
-  [[0, 0], [W, 0], [0, D], [W, D]].forEach(([x, y]) => line([x, y, 0], [x, y, H]));
+  [[0, 0], [W, 0], [0, D], [W, D]].forEach(([x, y]) => line([x, y, 0], [x, y, rimH]));
   ctx.stroke();
   const [fx, fy] = cam.project([W / 2, 0, 0]);
   ctx.fillStyle = "#66757d";

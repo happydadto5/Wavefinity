@@ -3465,6 +3465,7 @@ async function maybePromptSurfaceObjectHeight() {
     const finish = value => {
       $("#surface-object-height-save").onclick = null;
       $("#surface-object-height-continue").onclick = null;
+      $("#surface-object-height-cancel").onclick = null;
       dialog.removeEventListener("cancel", onCancel);
       if (dialog.open) dialog.close();
       resolve(value);
@@ -3475,7 +3476,10 @@ async function maybePromptSurfaceObjectHeight() {
       DL.change(() => { DL.layout.settings.surface.ask_object_height = false; }, { history: false });
       return DL.save();
     };
+    // Escape and the visible Cancel button are one path: close and abort the
+    // triggering operation with no Object height, skip flag or preference change.
     const onCancel = event => { event.preventDefault(); if (!busy) finish(false); };
+    $("#surface-object-height-cancel").onclick = () => { if (!busy) finish(false); };
     $("#surface-object-height-save").onclick = async () => {
       if (busy) return;
       const height = Number(input.value);

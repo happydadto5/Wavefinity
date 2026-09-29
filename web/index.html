@@ -44,6 +44,7 @@
               <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
             </div>
             <div id="space-structural" class="space-structural" hidden>
+              <p id="space-structural-summary" class="muted space-structural-summary" role="status" hidden></p>
               <div class="button-row">
                 <button id="space-structural-save" class="button secondary dl-small" type="button">Save Storage Box</button>
                 <button id="space-structural-print" class="button secondary dl-small" type="button">Print Storage Box + Bins</button>
@@ -99,6 +100,7 @@
                   <span id="surface-base-resolved" class="muted"></span>
                   <label class="checkbox-row" title="Removes hidden material underneath with support-free 45° cavities."><span>Lightweight base</span><input id="surface-lightweight-base" type="checkbox"></label>
                 </div>
+                <p class="muted surface-bin-help">Auto matches the Base Trim edge. If you are not using the Base Trim, choose Custom.</p>
               </div>
               <div class="setting-group"><span class="setting-group-label">Planning</span>
                 <div class="field-grid two">
@@ -749,6 +751,7 @@
     <label class="checkbox-row"><span>Don't ask again for this Space</span><input id="surface-object-height-no-ask" type="checkbox"></label>
     <p id="surface-object-height-error" class="field-error" hidden></p>
     <div class="button-row">
+      <button id="surface-object-height-cancel" type="button" class="button secondary">Cancel</button>
       <button id="surface-object-height-continue" type="button" class="button secondary">Continue without one</button>
       <button id="surface-object-height-save" type="button" class="button primary">Save Object height</button>
     </div>
@@ -1091,13 +1094,13 @@
 
         <div id="space-fields-surface" class="space-type-fields" hidden>
           <div class="space-dimension-row">
-            <label class="space-field"><span>Outside width <span class="unit">mm</span></span><input id="surface-x" type="number" min="1" step="any"></label>
-            <label class="space-field"><span>Outside length <span class="unit">mm</span></span><input id="surface-y" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Maximum width <span class="unit">mm</span></span><input id="surface-x" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Maximum length <span class="unit">mm</span></span><input id="surface-y" type="number" min="1" step="any"></label>
             <label class="space-field"><span>Trim size</span>
               <select id="surface-trim"></select>
             </label>
           </div>
-          <p class="dl-note">The largest Wavefinity field that fits inside these outside sizes is used. The finished Surface never exceeds them.</p>
+          <p class="dl-note">The largest Wavefinity field that fits inside this maximum width and length is used. The finished Surface, including its Base Trim, never exceeds them.</p>
           <div id="surface-readout" class="derived-readout" hidden>
             <dt>Wavefinity interior</dt><dd id="surface-size-readout"></dd>
             <dt>Edge trim</dt><dd id="surface-trim-readout"></dd>

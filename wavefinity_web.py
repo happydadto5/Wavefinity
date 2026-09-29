@@ -147,7 +147,7 @@ from organizer_inserts._core import ITEM_CLEARANCE, ITEM_PROFILES, feature_touch
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from bambu_handoff import _validate_settings_safe, is_bambu_studio_executable, stage_bambu_inputs
 from organizer_drawer import (
-    drawer_report, drawer_routes, generate_connectors, inventory_row_files,
+    blocking_problem_messages, drawer_report, drawer_routes, generate_connectors, inventory_row_files,
     prepare_inventory_bins, stack_part_height,
 )
 from organizer_inventory import (
@@ -183,6 +183,14 @@ from organizer_storage_drawers import (
     storage_drawers_definition_problem,
 )
 from organizer_storage_drawer_geometry import storage_drawers_summary
+from organizer_base_trim_outputs import (
+    BASE_TRIM_OUTPUT_KEY,
+    base_trim_plan,
+    base_trim_status,
+    export_base_trim,
+    materialize_base_trim,
+    public_plan as base_trim_public_plan,
+)
 from organizer_storage_drawer_outputs import (
     STRUCTURAL_OUTPUT_KEY,
     materialize_storage_drawers,
@@ -3093,6 +3101,9 @@ def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if "trim_size" in payload:
         raw_def["trim_size"] = payload["trim_size"]
+    for key in ("max_x_mm", "max_y_mm"):
+        if key in payload:
+            raw_def[key] = payload[key]
     for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
         if key in payload:
             raw_def[key] = payload[key]
@@ -3112,6 +3123,9 @@ def configure_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if "trim_size" in payload:
         raw_def["trim_size"] = payload["trim_size"]
+    for key in ("max_x_mm", "max_y_mm"):
+        if key in payload:
+            raw_def[key] = payload[key]
     for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
         if key in payload:
             raw_def[key] = payload[key]
@@ -3767,15 +3781,73 @@ def structural_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if kind == STORAGE_BOX:
         box = design_from_dict(design)[0]
         summary = b4b_summary(box)
-    else:
-        summary = base_trim_summary(base_trim_from_design(design))
-    return {"kind": kind, "design": design, "summary": summary}
+        return {"kind": kind, "design": design, "summary": summary}
+    summary = base_trim_summary(base_trim_from_design(design))
+    reply: dict[str, Any] = {"kind": kind, "design": design, "summary": summary}
+    profile = _printer_profile_for(payload)
+    plan = base_trim_plan(payload["space"], profile)
+    reply["plan"] = base_trim_public_plan(plan)
+    reply["signature"] = plan["signature"]
+    reply["printer_profile"] = profile
+    if not HOSTED and payload.get("output") and payload.get("space_id"):
+        folder, saved, space_id = _local_surface_folder(payload)
+        reply["status"] = base_trim_status(
+            saved, structural_output_manifest(folder, BASE_TRIM_OUTPUT_KEY), folder, profile,
+            space_id=space_id,
+        )
+    return reply
+
+
+def _is_base_trim_request(payload: dict[str, Any]) -> bool:
+    space = payload.get("space")
+    return structural_kind(space if isinstance(space, dict) else None) == BASE_TRIM
+
+
+def _materialize_local_base_trim(payload: dict[str, Any]) -> dict[str, Any]:
+    """Save every Base Trim piece and commit its manifest under the Space-ID guard."""
+    folder, space, space_id = _local_surface_folder(payload)
+    profile = _printer_profile_for(payload)
+
+    def commit(manifest: dict[str, Any]) -> None:
+        commit_structural_output(folder, BASE_TRIM_OUTPUT_KEY, manifest, expected_space_id=space_id)
+
+    with GEOMETRY_LOCK:
+        result = materialize_base_trim(
+            space, folder, profile, structural_output_manifest(folder, BASE_TRIM_OUTPUT_KEY),
+            space_id=space_id, commit=commit,
+        )
+    return {
+        "output": str(folder), "files": [str(one) for one in result["files"]],
+        "manifest": result["manifest"], "plan": result["plan"], "warnings": result["warnings"],
+        "status": {"status": "current"},
+    }
+
+
+def _hosted_base_trim_export(payload: dict[str, Any]) -> dict[str, Any]:
+    """Generate every Base Trim piece in a temporary export and return the manifest
+    for those exact bytes; the browser folder owns the final write and commit."""
+    output = _generation_output(payload)
+    try:
+        with GEOMETRY_LOCK:
+            result = export_base_trim(
+                payload["space"], output, _printer_profile_for(payload), payload.get("space_id"),
+            )
+    except Exception:
+        shutil.rmtree(output, ignore_errors=True)
+        raise
+    return _generation_reply(
+        result={"components": [{"output": str(one)} for one in result["files"]]},
+        output=output,
+        extra={"manifest": result["manifest"], "plan": result["plan"]},
+    )
 
 
 def structural_generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Save a Space's Storage Box, Base Trim or cabinet files. Never logs an Inventory row."""
     if _is_storage_drawers_request(payload):
         return _hosted_cabinet_export(payload) if HOSTED else _materialize_local_cabinet(payload)
+    if _is_base_trim_request(payload):
+        return _hosted_base_trim_export(payload) if HOSTED else _materialize_local_base_trim(payload)
     _kind, design = _structural_request(payload)
     return generate_payload(
         {
@@ -3837,34 +3909,77 @@ def _local_storage_box_print_folder(payload: dict[str, Any]) -> tuple[Path, dict
     return root, space, expected
 
 
-def storage_box_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Preflight one authoritative case + placed-bin + connector handoff."""
+def _local_surface_folder(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], str]:
+    """The real Surface folder, its authoritative typed Space, and its identity."""
+    root = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
+    prefs = load_preferences()
+    info = describe_space_folder(root, prefs)
+    expected = payload.get("space_id")
+    space = info.get("space")
+    if not expected or info.get("space_id") != expected or info.get("folder_mode") != "space" \
+            or not isinstance(space, dict) or space.get("kind") != "surface":
+        raise ValueError("This is not the Surface Space that was open before. Nothing was changed.")
+    if prefs.get("active_space_id") and prefs["active_space_id"] != expected:
+        raise ValueError("You switched Spaces during this attempt. Nothing was changed.")
+    return root, space, expected
+
+
+def _storage_box_arrangement_issue(arranged: dict[str, Any], space: dict[str, Any]) -> str | None:
+    if any(abs(float(arranged.get(axis, 0)) - float(space[axis])) > 1e-6 for axis in ("x", "y", "z")) \
+            or normalise_storage_box(arranged.get("storage_box")) != normalise_storage_box(space.get("storage_box")):
+        return "Storage Box settings and saved arrangement disagree. Reopen this Space and try again."
+    return None
+
+
+def _surface_arrangement_issue(arranged: dict[str, Any], space: dict[str, Any]) -> str | None:
+    if any(abs(float(arranged.get(axis, 0)) - float(space[axis])) > 1e-6 for axis in ("x", "y", "z")) \
+            or arranged.get("trim_size") != space.get("trim_size"):
+        return "Surface settings and saved arrangement disagree. Reopen this Space and try again."
+    return None
+
+
+def _storage_box_structural_files(root: Path, space: dict[str, Any], _space_id: str) -> list[Path]:
+    case = structural_generate_payload({"space": space, "output": str(root)})
+    return _extract_generated_files(case)
+
+
+def _surface_structural_files(root: Path, space: dict[str, Any], space_id: str) -> list[Path]:
+    saved = _materialize_local_base_trim({"space": space, "output": str(root), "space_id": space_id})
+    return [Path(one) for one in saved["files"]]
+
+
+def _combined_space_print(payload: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+    """One authoritative structural + placed-bin + connector handoff.
+
+    Shared by the Storage Box and Surface combined prints. ``cfg`` carries only
+    what differs: the Space binder, the accepted Space kinds, the arrangement
+    check and the structural file maker. Every preflight step runs before the
+    single slicer launch; no row becomes Printed until that launch succeeds.
+    """
     if HOSTED:
         raise ValueError("Hosted Wavefinity saves generated files to your selected folder instead.")
     slicer = detect_bambu_studio(payload.get("slicer_path"))
     if slicer is None or not slicer.is_file():
         raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
     profile = _printer_profile_for(payload)
-    root, space, space_id = _local_storage_box_print_folder(payload)
+    label = cfg["label"]
+    bind = cfg["bind"]
+    root, space, space_id = bind(payload)
     inventory = load_inventory(root)
     layout, bins = inventory["layout"], inventory["bins"]
     if not isinstance(layout, dict) or not isinstance(layout.get("space"), dict) \
-            or layout["space"].get("kind") not in ("portable", "box"):
-        raise ValueError("The Storage Box arrangement is unavailable. Reopen its Space and try again.")
+            or layout["space"].get("kind") not in cfg["kinds"]:
+        raise ValueError(f"The {label} arrangement is unavailable. Reopen its Space and try again.")
     by_id = {one["id"]: one for one in bins}
     source_specs = design_specs(layout)
     issues: list[str] = []
-    arranged_space = layout["space"]
-    if any(abs(float(arranged_space.get(axis, 0)) - float(space[axis])) > 1e-6 for axis in ("x", "y", "z")) \
-            or normalise_storage_box(arranged_space.get("storage_box")) != normalise_storage_box(space.get("storage_box")):
-        issues.append("Storage Box settings and saved arrangement disagree. Reopen this Space and try again.")
+    mismatch = cfg["arrangement_issue"](layout["space"], space)
+    if mismatch:
+        issues.append(mismatch)
     selected: list[str] = []
     for drawer in layout.get("drawers") or []:
         report = drawer_report(drawer, bins, layout=layout)
-        issues.extend(
-            problem["message"] for problem in report["problems"]
-            if problem["type"] != "height"
-        )
+        issues.extend(blocking_problem_messages(report))
         for placement in drawer.get("placements") or []:
             row_id = placement.get("bin")
             one = by_id.get(row_id)
@@ -3903,9 +4018,10 @@ def storage_box_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     prepared_files: dict[str, list[Path]] = {}
     prepared_specs: dict[str, dict[str, Any]] = {}
     errors: list[str] = list(dict.fromkeys(issues))
+
     def context_problem() -> str | None:
         try:
-            _local_storage_box_print_folder(payload)
+            bind(payload)
             return None
         except Exception as error:
             return str(error)
@@ -3933,15 +4049,14 @@ def storage_box_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
             stale_context = True
             break
 
-    case_files: list[Path] = []
+    structural_files: list[Path] = []
     if not stale_context:
         try:
-            case = structural_generate_payload({"space": space, "output": str(root)})
-            case_files = _extract_generated_files(case)
-            if not case_files:
-                errors.append("Storage Box: no structural files were made")
+            structural_files = cfg["structural_files"](root, space, space_id)
+            if not structural_files:
+                errors.append(f"{label}: no structural files were made")
         except Exception as error:
-            errors.append(f"Storage Box: {error}")
+            errors.append(f"{label}: {error}")
         changed = context_problem()
         if changed:
             errors.append(changed)
@@ -3977,7 +4092,7 @@ def storage_box_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
             stale_context = True
             break
 
-    files = [*case_files]
+    files = [*structural_files]
     for row_id in selected:
         files.extend(prepared_files.get(row_id, []))  # exactly one bin occurrence per row
     files.extend(connector_files)
@@ -3998,12 +4113,13 @@ def storage_box_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # A Space switch or a concurrent layout edit cannot turn this request into
     # an implicit print of a different arrangement.
     try:
-        _root, _space, confirmed_id = _local_storage_box_print_folder(payload)
+        _root, _space, confirmed_id = bind(payload)
         latest = load_inventory(root)
+
         def print_layout(value):
             return {key: item for key, item in value.items() if key != "stale_files"}
         if confirmed_id != space_id or print_layout(latest["layout"]) != print_layout(layout):
-            return partial("context", ["The Storage Box arrangement changed while files were prepared. Try again."])
+            return partial("context", [f"The {label} arrangement changed while files were prepared. Try again."])
         latest_by_id = {one["id"]: one for one in latest["bins"]}
         for row_id in selected:
             row = latest_by_id.get(row_id)
@@ -4021,6 +4137,26 @@ def storage_box_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         return partial("status", [f"Bambu Studio opened, but Printed status could not be recorded: {error}. Check Inventory."])
     return {**marked, "selected_rows": selected, "files": [str(path) for path in files],
             "slicer": str(slicer)}
+
+
+def storage_box_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Preflight one authoritative case + placed-bin + connector handoff."""
+    return _combined_space_print(payload, {
+        "label": "Storage Box", "kinds": ("portable", "box"),
+        "bind": _local_storage_box_print_folder,
+        "arrangement_issue": _storage_box_arrangement_issue,
+        "structural_files": _storage_box_structural_files,
+    })
+
+
+def surface_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Preflight one authoritative Base Trim + placed-bin + connector handoff."""
+    return _combined_space_print(payload, {
+        "label": "Surface", "kinds": ("surface",),
+        "bind": _local_surface_folder,
+        "arrangement_issue": _surface_arrangement_issue,
+        "structural_files": _surface_structural_files,
+    })
 
 
 # ---------------------------------------------------------------- AI Help (Fix 073)
@@ -4797,6 +4933,7 @@ POST_ROUTES = {
     "/api/space/structural-generate": structural_generate_payload,
     "/api/space/structural-print": structural_print_payload,
     "/api/space/storage-box-print": storage_box_print_payload,
+    "/api/space/surface-print": surface_print_payload,
     "/api/space/storage-drawers-summary": storage_drawers_summary_payload,
     "/api/space/storage-drawers-validate": storage_drawers_validate_payload,
     "/api/space/storage-drawers-reset": storage_drawers_reset_payload,

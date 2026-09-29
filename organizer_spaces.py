@@ -46,7 +46,7 @@ from organizer_inventory import (
     resolve_inventory_path,
     storage_drawers_mutate,
 )
-from organizer_product_rules import SURFACE_TRIM_HEIGHTS
+from organizer_product_rules import SURFACE_TRIM_HEIGHTS, surface_maximums
 import organizer_storage
 from organizer_storage_drawers import (
     normalise_storage_drawers_definition,
@@ -357,6 +357,10 @@ def _space(raw: Any) -> dict[str, Any] | None:
         expected = SURFACE_TRIM_HEIGHTS.get(trim_size)
         if expected is not None and math.isclose(size[2], expected, abs_tol=1e-6):
             res["trim_size"] = trim_size
+            # Fix 095: preserve the durable maximum; seed a missing/damaged one
+            # in memory from the current finished footprint (never growing it).
+            res["max_x_mm"], res["max_y_mm"] = surface_maximums(
+                raw, size[0], size[1], trim_size, strict=False)
     if raw.get("kind") in {"portable", "box"}:
         # A legacy Storage Box Space with no block reads the established
         # defaults; it needs no migration.
@@ -1288,6 +1292,9 @@ def space_routes(
         }
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
+        for key in ("max_x_mm", "max_y_mm"):
+            if key in payload:
+                raw_def[key] = payload[key]
         for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
             if key in payload:
                 raw_def[key] = payload[key]
@@ -1357,6 +1364,9 @@ def space_routes(
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
+        for key in ("max_x_mm", "max_y_mm"):
+            if key in payload:
+                raw_def[key] = payload[key]
         for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
             if key in payload:
                 raw_def[key] = payload[key]
@@ -1384,17 +1394,37 @@ def space_routes(
         raw_def = {"name": payload.get("name"), "kind": existing_space["kind"], "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
+        for key in ("max_x_mm", "max_y_mm"):
+            if key in payload:
+                raw_def[key] = payload[key]
         for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
             if key in payload:
                 raw_def[key] = payload[key]
 
-        result = configure_space(target, raw_def=raw_def, mode="update")
-        space = result["layout"]["space"]
-        # This route owns the new Space definition, but not the bin/part
-        # defaults - leave them _UNSET so _write_metadata() preserves the
-        # newest under-lock value rather than this possibly-stale pre-lock
-        # copy (Fix 032 Correction 4, C4.1).
-        _write_metadata(target, "space", space)
+        # Fix 095: a Surface edit is validated before either write (inside
+        # configure_space) and never left half applied: if the metadata write
+        # fails after the Inventory was replaced, the prior Inventory is put back.
+        with INVENTORY_LOCK:
+            inventory_path = resolve_inventory_path(target, migrate=True)
+            prior_inventory = (
+                inventory_path.read_bytes()
+                if existing_space["kind"] == "surface" and inventory_path.is_file() else None
+            )
+            result = configure_space(target, raw_def=raw_def, mode="update")
+            space = result["layout"]["space"]
+            # This route owns the new Space definition, but not the bin/part
+            # defaults - leave them _UNSET so _write_metadata() preserves the
+            # newest under-lock value rather than this possibly-stale pre-lock
+            # copy (Fix 032 Correction 4, C4.1).
+            try:
+                _write_metadata(target, "space", space)
+            except Exception:
+                if prior_inventory is not None:
+                    try:
+                        inventory_path.write_bytes(prior_inventory)
+                    except OSError:
+                        pass
+                raise
         remember(target)
         return reply(target)
 

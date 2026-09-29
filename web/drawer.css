@@ -223,3 +223,5 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .space-actions .button-row { margin-top: 0; }
 .space-structural { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .space-structural[hidden] { display: none; }
+.space-structural-summary { margin: 0 0 6px; font-size: 12px; }
+.space-structural-summary[hidden] { display: none; }

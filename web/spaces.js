@@ -161,12 +161,20 @@ SP.resolveSurface = (requestedX, requestedY, trimKey) => {
   };
 };
 
-// Show the resolved finished size in the visible inputs, so a hidden
-// request never lingers after resolution.
-SP.normalizeSurfaceInputs = resolved => {
-  if (!resolved?.ok) return;
-  document.getElementById("surface-x").value = fmt(resolved.outerX);
-  document.getElementById("surface-y").value = fmt(resolved.outerY);
+// The user's maximum finished outside rectangle (Fix 095). A Space that has
+// no stored maximum is seeded from its current finished footprint, so the seed
+// reproduces its current field exactly and can never grow the organizer. The
+// visible inputs always keep the maximum; they are never overwritten with the
+// smaller resolved finished size.
+SP.surfaceMaxFor = space => {
+  const seed = SP.surfaceOutsideFor(Number(space.x), space.trim_size);
+  const seedY = SP.surfaceOutsideFor(Number(space.y), space.trim_size);
+  const stored = (value, minimum) => {
+    const number = Number(value);
+    return value !== null && value !== undefined && value !== "" && Number.isFinite(number) && number > 0
+      && number >= minimum - 1e-6 ? number : minimum;
+  };
+  return { x: stored(space.max_x_mm, seed), y: stored(space.max_y_mm, seedY) };
 };
 
 SP.surfaceTrimLabel = key =>
@@ -436,6 +444,9 @@ SP.validSpace = raw => {
     const expected = SP.surfacePresetMap()[trimSize];
     if (Number.isFinite(expected) && Math.abs(space.z - expected) <= 1e-6) {
       space.trim_size = trimSize;
+      const maximum = SP.surfaceMaxFor({ ...space, max_x_mm: raw.max_x_mm, max_y_mm: raw.max_y_mm });
+      space.max_x_mm = maximum.x;
+      space.max_y_mm = maximum.y;
     }
   }
   if ((space.kind === "portable" || space.kind === "box") && raw.storage_box && typeof raw.storage_box === "object") {
@@ -1905,14 +1916,13 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
             : (SP.surfaceTrimKeyForHeight(prefillSpace.z) || "");
         }
       }
-      // Edit prefills the finished outside size from the stored interior
-      // field plus the selected trim; nothing is migrated.
+      // Edit prefills the saved maximum (a legacy Space with none is seeded from
+      // its current finished footprint); nothing is migrated.
       const prefillTrim = trimSelect?.value;
       const hasSize = prefillSpace?.x && prefillSpace?.y && prefillTrim;
-      document.getElementById("surface-x").value =
-        hasSize ? fmt(SP.surfaceOutsideFor(prefillSpace.x, prefillTrim)) : "";
-      document.getElementById("surface-y").value =
-        hasSize ? fmt(SP.surfaceOutsideFor(prefillSpace.y, prefillTrim)) : "";
+      const maximum = hasSize ? SP.surfaceMaxFor({ ...prefillSpace, trim_size: prefillTrim }) : null;
+      document.getElementById("surface-x").value = maximum ? fmt(maximum.x) : "";
+      document.getElementById("surface-y").value = maximum ? fmt(maximum.y) : "";
   } else if (kind === "portable") {
       document.getElementById("portable-x").value = prefillSpace?.x || "";
       document.getElementById("portable-y").value = prefillSpace?.y || "";
@@ -2009,18 +2019,15 @@ SP.readSetupValues = async () => {
 
   if (kind === "surface") {
     const trimSize = document.getElementById("surface-trim").value;
-    const resolved = SP.resolveSurface(
-      Number(document.getElementById("surface-x").value),
-      Number(document.getElementById("surface-y").value),
-      trimSize,
-    );
+    const maxX = Number(document.getElementById("surface-x").value);
+    const maxY = Number(document.getElementById("surface-y").value);
+    const resolved = SP.resolveSurface(maxX, maxY, trimSize);
     if (!resolved.ok) {
       return fail(
         resolved.error,
         SP.surfacePresetMap()[trimSize] === undefined ? "#surface-trim" : "#surface-x",
       );
     }
-    SP.normalizeSurfaceInputs(resolved);
     return {
       kind,
       name,
@@ -2028,6 +2035,7 @@ SP.readSetupValues = async () => {
       y: resolved.fieldY,
       z: SP.surfacePresetMap()[trimSize],
       trimSize,
+      extra: { max_x_mm: maxX, max_y_mm: maxY },
     };
   }
 
@@ -2700,20 +2708,10 @@ SP.wire = () => {
   ["portable-label-text"].forEach(id => document.getElementById(id)?.addEventListener("input", SP.updateReadouts));
   ["portable-lid-type", "portable-label-location"].forEach(id =>
     document.getElementById(id)?.addEventListener("change", SP.syncStorageBoxForm));
-  // Surface: on blur show the actual resolved outside size in the inputs.
-  ["surface-x", "surface-y"].forEach(id => {
-    document.getElementById(id)?.addEventListener("blur", () => {
-      const resolved = SP.resolveSurface(
-        Number(document.getElementById("surface-x").value),
-        Number(document.getElementById("surface-y").value),
-        document.getElementById("surface-trim").value,
-      );
-      SP.normalizeSurfaceInputs(resolved);
-      SP.updateReadouts();
-    });
-  });
-  // Changing trim re-resolves the largest field that fits the request that
-  // is currently visible; it never grows beyond it.
+  // Surface: the maximum stays exactly as typed; the readout below shows the
+  // resolved field and finished outside size.
+  // Changing trim re-resolves the largest field from that same maximum, never
+  // from a previously rounded result.
   document.getElementById("surface-trim")?.addEventListener("change", SP.updateReadouts);
   ["pegboard-standard", "pegboard-size-mode"].forEach(id => document.getElementById(id)?.addEventListener("change", SP.updateReadouts));
 };
@@ -2996,7 +2994,253 @@ SP.runStructural = async (mode, event) => {
     SP.renderSpaceInfo();
   }
 };
-SP.saveStructural = () => SP.runStructural("save");
+// ---- Surface Base Trim: owned-output lifecycle, current-printer readiness (Fix 095)
+//
+// The server owns the Base Trim piece plan, signature and, locally, the currentness
+// status. Hosted status is recomputed here from the committed browser manifest and
+// the real files in the chosen folder - never from a server temp.
+
+SP.baseTrimInfo = { key: "", plan: null, status: null, error: "", serial: 0 };
+
+SP.BASE_TRIM_STATUS_TEXT = {
+  current: "Current",
+  missing: "Needs save",
+  needs_update: "Needs save",
+  externally_changed: "Saved file changed outside Wavefinity",
+};
+
+SP.baseTrimSummaryText = () => {
+  const info = SP.baseTrimInfo;
+  if (info.error) return `Base Trim · ${info.error}`;
+  if (!info.plan || !info.status) return "";
+  const count = Number(info.plan.piece_count);
+  const pieces = `${count} ${count === 1 ? "piece" : "pieces"} for current printer`;
+  return `Base Trim · ${pieces} · ${SP.BASE_TRIM_STATUS_TEXT[info.status.status] || "Needs save"}`;
+};
+
+SP.hostedBaseTrimStatus = async (plan, signature) => {
+  const handle = state.browserFolder?.handle;
+  if (!handle) return { status: "missing" };
+  const { current } = await SP.readMetadata(handle);
+  const manifest = SP.classifyMetadata(current).structural_outputs?.base_trim;
+  const rows = manifest?.pieces;
+  if (manifest?.schema !== 1 || !Array.isArray(rows) || !rows.length ||
+      rows.some(one => typeof one?.filename !== "string" || typeof one?.sha256 !== "string") ||
+      (state.activeSpaceId && manifest.space_id !== state.activeSpaceId)) {
+    return { status: "missing" };
+  }
+  if (manifest.signature !== signature ||
+      rows.map(one => one.filename).join("\n") !== plan.filenames.join("\n")) {
+    return { status: "needs_update" };
+  }
+  const changed = [];
+  const absent = [];
+  for (const piece of rows) {
+    const hash = await WFFileSystem.sha256(handle, piece.filename);
+    if (hash === null) absent.push(piece.filename);
+    else if (hash !== piece.sha256) changed.push(piece.filename);
+  }
+  if (changed.length) return { status: "externally_changed", changed, absent };
+  if (absent.length) return { status: "missing", absent };
+  return { status: "current" };
+};
+
+SP.refreshBaseTrimSummary = async () => {
+  const space = state.activeSpace;
+  if (SP.structuralKind() !== "base_trim" || !space) return;
+  const hosted = Boolean(state.runtime.hosted);
+  const profile = PrinterProfile.current();
+  const key = JSON.stringify([space, profile, state.activeSpaceId, SP.baseTrimInfo.serial,
+    hosted ? state.browserFolder?.name : state.output]);
+  if (SP.baseTrimInfo.key === key) return;
+  SP.baseTrimInfo = { ...SP.baseTrimInfo, key, plan: null, status: null, error: "" };
+  try {
+    const result = await api("/api/space/structural-design", {
+      space: clone(space),
+      ...(hosted ? { printer_profile: profile } : { output: state.output, space_id: state.activeSpaceId }),
+    });
+    if (SP.baseTrimInfo.key !== key) return;
+    SP.baseTrimInfo.plan = result.plan;
+    SP.baseTrimInfo.status = hosted
+      ? await SP.hostedBaseTrimStatus(result.plan, result.signature) : result.status;
+  } catch (error) {
+    if (SP.baseTrimInfo.key !== key) return;
+    SP.baseTrimInfo.error = error.message;
+  }
+  if (SP.baseTrimInfo.key === key) SP.renderStructuralActions();
+};
+
+// Any change to what "current" is measured against re-derives the line next render.
+SP.invalidateBaseTrimSummary = () => {
+  SP.baseTrimInfo.key = "";
+  if (SP.structuralKind() === "base_trim") SP.renderSpaceInfo();
+};
+
+SP.fileNames = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\/]/).pop()))].join("\n");
+
+// Hosted Save: every piece is downloaded and verified first, only files the prior
+// manifest proves are ours (same name, same hash) are replaced, and the manifest is
+// committed only after every write succeeded. A failure puts every touched file back.
+SP.hostedBaseTrimSave = async (payload, context) => {
+  const handle = state.browserFolder.handle;
+  const spaceId = state.activeSpaceId;
+  const exported = await api("/api/space/structural-generate", { ...payload, space_id: spaceId });
+  DL.requireSpaceContext(context);
+  const candidate = exported.manifest;
+  if (!candidate?.pieces?.length) throw new Error("The server did not return the Base Trim files.");
+  const { current } = await SP.readMetadata(handle);
+  const meta = SP.classifyMetadata(current);
+  if (meta.status !== "space" || meta.space_id !== spaceId) {
+    throw new Error("This folder is not the Space that was open before. Nothing was changed.");
+  }
+  const prior = meta.structural_outputs?.base_trim || null;
+  const owned = new Map((prior?.schema === 1 && prior.space_id === spaceId && Array.isArray(prior.pieces) ? prior.pieces : [])
+    .filter(one => typeof one?.filename === "string" && typeof one?.sha256 === "string")
+    .map(one => [one.filename, one.sha256]));
+
+  const blobs = new Map();
+  for (const item of exported.files || []) {
+    const response = await fetch(item.url);
+    if (!response.ok) throw new Error(`Could not download ${item.name}.`);
+    blobs.set(item.name, await response.blob());
+  }
+  for (const piece of candidate.pieces) {
+    const blob = blobs.get(piece.filename);
+    if (!blob || (await WFFileSystem.sha256Blob(blob)) !== piece.sha256) {
+      throw new Error("A Base Trim file did not download correctly. Nothing was changed.");
+    }
+  }
+  const previous = new Map();
+  for (const piece of candidate.pieces) {
+    const existing = await WFFileSystem.sha256(handle, piece.filename);
+    if (existing === null) continue;
+    // Ours and unchanged, or byte-identical to the new file (nothing is lost).
+    if (existing !== owned.get(piece.filename) && existing !== piece.sha256) {
+      throw new Error(`${piece.filename} is already in this folder and was not made by this Base Trim, or it was changed outside Wavefinity. Rename or move it, then save again. Nothing was changed.`);
+    }
+    const old = await WFFileSystem.readBlob(handle, piece.filename);
+    if (old) previous.set(piece.filename, new Blob([await old.arrayBuffer()]));
+  }
+  const written = [];
+  try {
+    for (const piece of candidate.pieces) {
+      await WFFileSystem.writeBlob(handle, piece.filename, blobs.get(piece.filename));
+      written.push(piece.filename);
+    }
+    for (const piece of candidate.pieces) {
+      if ((await WFFileSystem.sha256(handle, piece.filename)) !== piece.sha256) {
+        throw new Error(`${piece.filename} did not save correctly.`);
+      }
+    }
+    DL.requireSpaceContext(context);
+    await SP.writeMetadata(handle, "space", null, true, {
+      structural_output_updates: { base_trim: candidate },
+    }, { preserveSpace: true, expectedSpaceId: spaceId });
+  } catch (error) {
+    // Files are never left claiming to be current: restore what was replaced and
+    // remove what was newly made, best effort.
+    for (const name of written) {
+      try {
+        if (previous.has(name)) await WFFileSystem.writeBlob(handle, name, previous.get(name));
+        else await SP.removeIfPresent(handle, name);
+      } catch (_restore) { /* the next status check reports the folder as it is */ }
+    }
+    throw error;
+  }
+  const warnings = [];
+  const desired = new Set(candidate.pieces.map(one => one.filename));
+  for (const [name, hash] of owned) {
+    if (desired.has(name)) continue;
+    try {
+      const existing = await WFFileSystem.sha256(handle, name);
+      if (existing === null) continue;
+      if (existing === hash) await WFFileSystem.removeFile(handle, name);
+      else warnings.push(`${name} changed outside Wavefinity; left in place without Base Trim ownership`);
+    } catch (_error) {
+      warnings.push(`Could not remove old Base Trim file ${name}; remove it manually`);
+    }
+  }
+  return { files: [...desired], warnings };
+};
+
+SP.saveBaseTrim = async () => {
+  if (SP.structuralBusy || SP.structuralKind() !== "base_trim") return;
+  const hosted = Boolean(state.runtime.hosted);
+  if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
+  const context = DL.spaceContext();
+  const payload = {
+    space: clone(state.activeSpace), space_id: state.activeSpaceId,
+    ...(hosted ? { printer_profile: PrinterProfile.current() } : { output: state.output }),
+  };
+  SP.structuralBusy = true;
+  SP.renderSpaceInfo();
+  try {
+    const saved = hosted
+      ? await SP.hostedBaseTrimSave(payload, context)
+      : await api("/api/space/structural-generate", payload);
+    DL.requireSpaceContext(context);
+    const warnings = saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : "";
+    toast(`Saved Base Trim${hosted ? "" : ` to ${saved.output || state.output}`}\n${SP.fileNames(saved.files)}${warnings}`, false, 7000);
+  } catch (error) {
+    if (DL.isStaleSpaceError(error)) {
+      toast("Base Trim finished for the Space you left. Nothing was changed in the current Space.");
+    } else {
+      toast(error.message, true, 8000);
+    }
+  } finally {
+    SP.structuralBusy = false;
+    SP.baseTrimInfo.serial += 1;
+    SP.renderSpaceInfo();
+  }
+};
+
+// The one Surface print: current-printer Base Trim + placed Not Printed bins + the
+// required connectors, handed to the slicer once. Ctrl+Shift+click stays the hidden
+// maintainer joint-fit sample (no bins, connectors or status changes).
+SP.printSurface = async event => {
+  if (SP.structuralBusy || SP.structuralKind() !== "base_trim") return;
+  if (state.runtime.hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
+  if (!state.slicer?.available) {
+    toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
+    return;
+  }
+  if (event?.ctrlKey && event?.shiftKey) return SP.runStructural("print", event);
+  const context = DL.spaceContext();
+  SP.structuralBusy = true;
+  SP.renderSpaceInfo();
+  try {
+    DL.requireSpaceContext(context);
+    if (typeof flushSpaceDesignAutosave === "function" &&
+        !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
+    DL.requireSpaceContext(context);
+    if (!(await DL.save())) return;
+    DL.requireSpaceContext(context);
+    const result = await api("/api/space/surface-print", {
+      output: context.output, space_id: context.spaceId,
+      slicer_path: state.slicer?.path || null,
+    });
+    DL.requireSpaceContext(context);
+    DL.adoptBatchResult(result);
+    DP.renderInventory(true);
+    DL.emit();
+    DL.requestReport();
+    if (result.partial) toast(result.error || "Surface print stopped before Bambu Studio opened.", true, 10000);
+    else toast(`Sent Surface + Bins to ${state.slicer?.name || "Bambu Studio"}!\n${SP.fileNames(result.files)}`, false, 8000);
+  } catch (error) {
+    if (DL.isStaleSpaceError(error)) {
+      toast("Surface print belongs to the Space you left. The current Space was not changed.");
+    } else {
+      toast(error.message, true, 8000);
+    }
+  } finally {
+    SP.structuralBusy = false;
+    SP.baseTrimInfo.serial += 1;
+    SP.renderSpaceInfo();
+  }
+};
+
+SP.saveStructural = () => SP.structuralKind() === "base_trim"
+  ? SP.saveBaseTrim() : SP.runStructural("save");
 SP.printStorageBox = async () => {
   if (SP.structuralBusy || SP.structuralKind() !== "storage_box") return;
   if (state.runtime.hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
@@ -3036,8 +3280,12 @@ SP.printStorageBox = async () => {
     SP.renderSpaceInfo();
   }
 };
-SP.printStructural = event => SP.structuralKind() === "storage_box"
-  ? SP.printStorageBox() : SP.runStructural("print", event);
+SP.printStructural = event => {
+  const kind = SP.structuralKind();
+  if (kind === "storage_box") return SP.printStorageBox();
+  if (kind === "base_trim") return SP.printSurface(event);
+  return SP.runStructural("print", event);
+};
 
 SP.renderStructuralActions = () => {
   const box = document.getElementById("space-structural");
@@ -3051,7 +3299,15 @@ SP.renderStructuralActions = () => {
   const print = document.getElementById("space-structural-print");
   const hosted = Boolean(state.runtime.hosted);
   save.textContent = `Save ${label}`;
-  print.textContent = kind === "storage_box" ? "Print Storage Box + Bins" : `Print ${label}`;
+  print.textContent = kind === "storage_box" ? "Print Storage Box + Bins"
+    : kind === "base_trim" ? "Print Surface + Bins" : `Print ${label}`;
+  const summary = document.getElementById("space-structural-summary");
+  if (summary) {
+    const text = kind === "base_trim" ? SP.baseTrimSummaryText() : "";
+    summary.hidden = !text;
+    summary.textContent = text;
+  }
+  if (kind === "base_trim") SP.refreshBaseTrimSummary();
   save.disabled = SP.structuralBusy;
   print.disabled = SP.structuralBusy || hosted;
   print.title = hosted ? SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP : "";
@@ -3241,6 +3497,30 @@ const wireInfoButtons = (prefix = "space-head") => {
     });
 };
 
+// Printed bins that still follow the Surface edge (Auto base) and would keep their
+// old physical base when the trim preset changes the edge height.
+SP.printedAutoBaseRows = trimSize => {
+    const presets = SP.surfacePresetMap();
+    const oldEdge = presets[state.activeSpace?.trim_size];
+    const newEdge = presets[trimSize];
+    if (!Number.isFinite(oldEdge) || !Number.isFinite(newEdge) || Math.abs(oldEdge - newEdge) <= 1e-9) return [];
+    const specs = DL.layout?.design_specs || {};
+    return (DL.bins || []).filter(one =>
+      one.status === "printed" && specs[one.id]?.layout?.surface_base_mode === "edge");
+};
+
+SP.confirmPrintedAutoBases = async trimSize => {
+    const rows = SP.printedAutoBaseRows(trimSize);
+    if (!rows.length) return true;
+    const names = rows.slice(0, 5).map(one => DL.label(one));
+    const shown = names.join(", ") + (rows.length > 5 ? ` and ${rows.length - 5} more` : "");
+    return appConfirmAction({
+      title: "Printed bins will keep their current base height",
+      message: `${shown} ${rows.length === 1 ? "is" : "are"} already printed and will remain at ${rows.length === 1 ? "its" : "their"} existing base height while the Base Trim changes. Bins not yet printed that follow the Surface edge will use the new trim.`,
+      actionLabel: "Continue", cancelLabel: "Cancel",
+    });
+};
+
 SP.updateSpace = async () => {
     const values = await SP.readSetupValues();
     if (!values) return;
@@ -3260,6 +3540,12 @@ SP.updateSpace = async () => {
     }
     const context = typeof DL !== "undefined" ? DL.spaceContext() : null;
     const requireCurrent = () => { if (context) DL.requireSpaceContext(context); };
+    // Fix 095: the one confirmation happens before anything is committed; Cancel
+    // leaves the Surface and its Inventory exactly as they were.
+    if (kind === "surface" && typeof DL !== "undefined" && DL.loaded) {
+        if (!(await SP.confirmPrintedAutoBases(trimSize))) return;
+        requireCurrent();
+    }
     if ((kind === "surface" || kind === "portable") && typeof DL !== "undefined" && DL.loaded && !(await DL.save())) {
         throw new Error("Save the current Space layout before changing its size or case settings.");
     }
@@ -3279,15 +3565,26 @@ SP.updateSpace = async () => {
           ...(trimSize ? { trim_size: trimSize } : {}),
         });
         requireCurrent();
-        await WFFileSystem.writeText(folder.handle, SP.inventoryFilenameFor(folder), result.inventory_text);
-        requireCurrent();
+        // The server validated the whole proposed Surface before returning this text,
+        // so nothing has been written yet. If the metadata write then fails, put the
+        // previous Inventory text back rather than leave a half-applied resize.
+        const inventoryName = SP.inventoryFilenameFor(folder);
+        await WFFileSystem.writeText(folder.handle, inventoryName, result.inventory_text);
         const space = result.layout.space;
-        // This call owns the new Space definition (just written above), but
-        // not the bin/part defaults - reading them here and passing them
-        // back would be exactly the stale pre-lock capture Correction 4
-        // eliminates; leaving them unset lets the serialized writer read
-        // the newest value from under its own lock instead (C4.1).
-        const metadata = await SP.writeMetadata(folder.handle, "space", space, true, {});
+        let metadata;
+        try {
+          requireCurrent();
+          // This call owns the new Space definition (just written above), but
+          // not the bin/part defaults - reading them here and passing them
+          // back would be exactly the stale pre-lock capture Correction 4
+          // eliminates; leaving them unset lets the serialized writer read
+          // the newest value from under its own lock instead (C4.1).
+          metadata = await SP.writeMetadata(folder.handle, "space", space, true, {});
+        } catch (error) {
+          try { await WFFileSystem.writeText(folder.handle, inventoryName, inventoryText); }
+          catch (_restore) { /* the folder is no longer writable; nothing more can be done */ }
+          throw error;
+        }
         requireCurrent();
         state.activeSpace = space;
         state.activeSpaceId = metadata.space_id || null;
@@ -3404,6 +3701,7 @@ SP.initPrinterProfile = async () => {
     SP.storageDrawersForm?.setPrinterProfile(profile);
     SP.cabinetInfo.key = "";
     SP.updateCabinetWorkspace();
+    SP.invalidateBaseTrimSummary();
   });
   SP.mountPrinterProfiles();
 };
@@ -4054,6 +4352,11 @@ const startSpaces = async () => {
   // refreshPreview() discards stale responses, so a later user action wins.
   if (!SP._activationPreviewRequested) await refreshPreview();
 };
+
+// A Base Trim file changed outside Wavefinity is noticed when the window is used again.
+window.addEventListener("focus", () => {
+  if (SP.structuralKind() === "base_trim" && !SP.structuralBusy) SP.invalidateBaseTrimSummary();
+});
 
 if (state.ready) {
   startSpaces();
