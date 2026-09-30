@@ -223,9 +223,17 @@ def sweep_base_trim_debris(folder: Path) -> None:
         _TRANSACTION_LOCK.release()
 
 
-def owned_by_previous(folder: Path, previous_manifest: Any) -> dict[str, str]:
-    """``{filename: sha256}`` a prior valid manifest proves Wavefinity made."""
+def owned_by_previous(folder: Path, previous_manifest: Any, space_id: str | None) -> dict[str, str]:
+    """``{filename: sha256}`` a prior valid manifest proves Wavefinity made.
+
+    The one local ownership gate: a manifest proves ownership only when it is valid
+    AND belongs to this Space. A missing current ``space_id``, a missing manifest
+    ``space_id`` or a different one proves nothing, so a copied or stale manifest
+    from another Space can never authorize a replacement or a stale-file cleanup.
+    """
     rows = _valid_pieces(previous_manifest)
+    if rows is None or not space_id or previous_manifest.get("space_id") != space_id:
+        return {}
     owned: dict[str, str] = {}
     for item in rows or []:
         owned[_safe_name(item["filename"])] = item["sha256"]
@@ -250,7 +258,7 @@ def materialize_base_trim(
     with _TRANSACTION_LOCK:
         sweep_base_trim_debris(folder)
         plan = base_trim_plan(space, printer_profile)
-        owned = owned_by_previous(folder, previous_manifest)
+        owned = owned_by_previous(folder, previous_manifest, space_id)
         desired = plan["filenames"]
         for name in desired:
             _safe_name(name)

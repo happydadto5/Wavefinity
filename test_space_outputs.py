@@ -27,7 +27,7 @@ from organizer_space_outputs import (
     storage_box_design,
     structural_kind,
 )
-from organizer_spaces import describe
+from organizer_spaces import _write_metadata, describe
 import organizer_storage_drawer_outputs as cabinet_outputs
 from organizer_engine import BASE_UNIT
 from organizer_storage_drawer_geometry import _make_datum, resolve_storage_drawers_plan
@@ -160,9 +160,16 @@ class StructuralOutputTests(unittest.TestCase):
         for space in (CASE, SURFACE):
             with self.subTest(kind=space["kind"]), tempfile.TemporaryDirectory() as tmp:
                 folder = Path(tmp) / "Space"
-                configure_space(folder, raw_def=space)
+                made = configure_space(folder, raw_def=space)
+                payload = {"space": space, "output": str(folder)}
+                if space["kind"] == "surface":
+                    # Base Trim Save records its manifest under the typed Space's identity,
+                    # so it is only supported for a real typed Surface folder.
+                    _write_metadata(folder, "space", made["layout"]["space"])
+                    payload["space_id"] = describe(folder, {})["space_id"]
                 before = load_inventory(folder)
-                result = wavefinity_web.structural_generate_payload({"space": space, "output": str(folder)})
+                with patch.object(wavefinity_web, "load_preferences", return_value={}):
+                    result = wavefinity_web.structural_generate_payload(payload)
                 self.assertTrue(list(folder.glob("*.3mf")))
                 self.assertNotIn("inventory_bin", result)
                 after = load_inventory(folder)
