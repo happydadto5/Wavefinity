@@ -5343,7 +5343,7 @@ for _side_effect_path in (
     "/api/drawer/surface-fill/create",
     "/api/drawer/spacers/generate",
     "/api/drawer/connectors",
-    "/api/drawer/print",
+    "/api/drawer/print-complete",
     "/api/drawer/print-spacers",
     "/api/drawer/print-bins",
     "/api/drawer/save-bins",

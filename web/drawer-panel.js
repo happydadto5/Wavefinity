@@ -214,7 +214,7 @@ DP.build = () => {
 
 // Fix 019 Item 3: the hosted backend rejects /api/drawer/spacers,
 // /api/drawer/spacers/generate, /api/drawer/print-spacers and
-// /api/drawer/print outright, so the remaining spacer actions stay unavailable in hosted mode
+// /api/drawer/print-complete outright, so the remaining spacer actions stay unavailable in hosted mode
 // on every render, not just once at build time.
 DP.HOSTED_UNSUPPORTED_TOOLTIP = "Hosted Wavefinity uses the normal Design save-to-folder workflow instead of local Space spacer/slicer operations.";
 // Fix 096 C4: spacer file generation now works hosted; only opening a local
