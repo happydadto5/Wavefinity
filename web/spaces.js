@@ -3176,7 +3176,7 @@ SP.runStructural = async (mode, event) => {
         toast(result.error || `${label} files were saved, but the slicer did not open.`, true, 8000);
       } else {
         const names = (result.files || []).map(file => String(file).split(/[\\/]/).pop());
-        toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\n${names.join("\n")}`, false, 7000);
+        toast(`Sent to ${state.slicer?.name || "the slicer"}!\n${names.join("\n")}`, false, 7000);
       }
     } else {
       const result = await apiSideEffect("/api/space/structural-generate", payload);
@@ -3548,7 +3548,7 @@ SP.printSurface = async event => {
     DL.emit();
     DL.requestReport();
     if (result.partial) toast(result.error || "Surface print stopped before Bambu Studio opened.", true, 10000);
-    else toast(`Sent Surface + Bins to ${state.slicer?.name || "Bambu Studio"}!\n${SP.fileNames(result.files)}`, false, 8000);
+    else toast(`Sent Surface + Bins to ${state.slicer?.name || "the slicer"}!\n${SP.fileNames(result.files)}`, false, 8000);
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
       toast("Surface print belongs to the Space you left. The current Space was not changed.");
@@ -3591,7 +3591,7 @@ SP.printStorageBox = async () => {
     DL.emit();
     DL.requestReport();
     if (result.partial) toast(result.error || "Storage Box print stopped before Bambu Studio opened.", true, 10000);
-    else toast(`Sent Storage Box + Bins to ${state.slicer?.name || "Bambu Studio"}!\n${(result.files || []).map(file => String(file).split(/[\\/]/).pop()).join("\n")}`, false, 8000);
+    else toast(`Sent Storage Box + Bins to ${state.slicer?.name || "the slicer"}!\n${(result.files || []).map(file => String(file).split(/[\\/]/).pop()).join("\n")}`, false, 8000);
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
       toast("Storage Box print belongs to the Space you left. The current Space was not changed.");
@@ -3634,6 +3634,14 @@ SP.renderStructuralActions = () => {
   save.disabled = SP.structuralBusy;
   print.disabled = SP.structuralBusy || hosted;
   print.title = hosted ? SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP : "";
+  // Fix 096 F9: visible reason beside the disabled Print button, not only a tooltip.
+  const printReason = document.getElementById("space-structural-print-reason");
+  if (printReason) {
+    printReason.hidden = !hosted;
+    printReason.textContent = hosted
+      ? "Printing is unavailable on hosted Wavefinity: there is no local slicer here."
+      : "";
+  }
   const makeInsideBin = document.getElementById("space-make-inside-bin");
   if (makeInsideBin) makeInsideBin.hidden = kind !== "storage_box";
 };
@@ -3671,7 +3679,7 @@ SP.renderSpaceInfo = () => {
         const x = state.activeSpace.x;
         const y = state.activeSpace.y;
         const z = state.activeSpace.z;
-        actualText = `${x} × ${y} × ${z} mm`;
+        actualText = `${fmt(x)} × ${fmt(y)} × ${fmt(z)} mm`;
         let gx = SP.drawerCapacity(x);
         let gy = SP.drawerCapacity(y);
         try {
@@ -3716,8 +3724,8 @@ SP.renderSpaceInfo = () => {
         const x = state.activeSpace.x;
         const y = state.activeSpace.y;
         const z = state.activeSpace.z;
-        actualText = `${x} × ${y} mm`;
-        usableText = `${fmt(x / unit)} × ${fmt(y / unit)} units, ${z} mm usable height`;
+        actualText = `${fmt(x)} × ${fmt(y)} mm`;
+        usableText = `${fmt(x / unit)} × ${fmt(y / unit)} units, ${fmt(z)} mm usable height`;
     } else if (kind === "storage_drawers") {
         // Never the compatibility z: the outside size comes from the server
         // summary once it is already known.
@@ -3766,7 +3774,7 @@ SP.showFolder = async () => {
     try {
         await api("/api/space/show-folder", { output: state.output });
     } catch (e) {
-        toast("Failed to open folder: " + e.message, true);
+        toast("Failed to open folder: " + friendlyError(e), true);
     }
 };
 
@@ -4077,7 +4085,7 @@ SP.mountStorageDrawersForm = (prefill, update) => {
   } catch (error) {
     // Fail closed: no form is built from rules that are not published.
     const note = document.createElement("p");
-    note.className = "sd-field-error"; note.textContent = error.message;
+    note.className = "sd-field-error"; note.textContent = friendlyError(error);
     host.replaceChildren(note);
     return;
   }
@@ -4342,6 +4350,14 @@ SP.updateCabinetWorkspace = () => {
     if (state.runtime.hosted && printButton) {
       printButton.disabled = true;
       printButton.title = SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP;
+      // Fix 096 F9: visible reason beside the disabled button, not only a tooltip.
+      let reason = host.querySelector(".sd-print-reason");
+      if (!reason) {
+        reason = document.createElement("p");
+        reason.className = "sd-help sd-print-reason";
+        printButton.after(reason);
+      }
+      reason.textContent = "Printing is unavailable on hosted Wavefinity: there is no local slicer here.";
     }
     if (!state.cabinetRecovery) SP.refreshCabinetStructural();
   } catch (error) {
@@ -4479,7 +4495,7 @@ SP.runCabinetStructural = async mode => {
       if (result.partial) {
         toast(result.error || "Cabinet files were saved, but the slicer did not open.", true, 8000);
       } else {
-        toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\n${names(result.files)}`, false, 7000);
+        toast(`Sent to ${state.slicer?.name || "the slicer"}!\n${names(result.files)}`, false, 7000);
       }
       saved = result;
     } else if (hosted) {

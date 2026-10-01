@@ -87,7 +87,7 @@
     },
     readLegacyBaseTrimSeed,
     retireLegacyBaseTrim() { localStorage.removeItem(LEGACY); },
-    summaryText() { return `Printer build volume — ${profile.x_mm} × ${profile.y_mm} × ${profile.z_mm} mm`; },
+    summaryText() { return `Printer build volume — ${fmt(profile.x_mm)} × ${fmt(profile.y_mm)} × ${fmt(profile.z_mm)} mm`; },
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     mount(host, callbacks = {}) {
       host.replaceChildren();

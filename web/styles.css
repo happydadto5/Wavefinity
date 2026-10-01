@@ -485,6 +485,10 @@ input[type="text"], input[type="number"], select {
   display: block; width: 100%; margin-top: 5px; padding: 9px 10px;
   border: 1px solid var(--line-dark); border-radius: 6px; background: white; color: var(--ink);
 }
+/* Fix 096 F2: standalone numeric values are compact by default. Numeric
+   fields inside a deliberate field-grid fill that cell. */
+input[type="number"] { width: min(100%, 9rem); }
+.field-grid input[type="number"] { width: 100%; }
 input:focus, select:focus { outline: 2px solid rgba(40,126,160,.24); border-color: var(--blue); }
 input[readonly] { background: #eef2f2; color: var(--muted); cursor: default; }
 input[readonly]:focus { outline: none; border-color: var(--line-dark); }
@@ -538,7 +542,7 @@ input[type="number"]::-webkit-inner-spin-button {
   background: var(--paper);
 }
 .pegboard-mount-row[hidden] { display: none; }
-.pegboard-mount-row > strong, .pegboard-mount-row > .muted { grid-column: 1 / -1; }
+.pegboard-mount-row > strong, .pegboard-mount-row > .muted, .pegboard-mount-row > .ink { grid-column: 1 / -1; }
 .pegboard-mount-row label { font-size: 12px; font-weight: 650; color: var(--muted); }
 .pegboard-mount-row select { margin-top: 4px; }
 /* Base and Walls as one 2-column row so they stay the same width; it wraps to
@@ -643,6 +647,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .quiet-status { color: var(--muted); font-size: 11px; }
 .quiet-status.error { color: var(--danger); font-weight: 650; }
 .muted { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.ink { color: var(--ink); font-size: 12px; line-height: 1.4; }
 .draft-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .draft-fields .wide { grid-column: 1 / -1; }
 .draft-fields .draft-triple { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; align-items: start; }
@@ -671,6 +676,13 @@ input[type="number"]::-webkit-inner-spin-button {
 .draft-fields .editor-group .pair { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; align-items: start; }
 .draft-fields > .pair { grid-column: 1 / -1; gap: 9px; }
 .draft-fields .editor-group .pair.triple { grid-template-columns: repeat(3, 1fr); }
+/* Fix 096 F3: shared pair/triple rows collapse to one column on narrow screens. */
+@media (max-width: 620px) {
+  .draft-fields .pair,
+  .draft-fields .editor-group .pair.triple {
+    grid-template-columns: 1fr;
+  }
+}
 .draft-fields .divider-slope-fields,
 .draft-fields .divider-slope-toggles { display: grid; gap: 8px; align-items: start; }
 .draft-fields .divider-slope-toggles { padding-top: 18px; }
@@ -708,6 +720,8 @@ input[type="number"]::-webkit-inner-spin-button {
 .bore-group-fields > label { min-width: 0; }
 .bore-auto-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; align-items: end; grid-column: 1 / -1; }
 .bore-auto-row > label { min-width: 0; }
+/* Fix 096 F3: Bore Width/Length share one deliberate two-column row - no dead third column. */
+.bore-auto-row.bore-auto-row-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 460px) {
   .draft-fields .bore-group { grid-template-columns: 1fr; gap: 4px; }
   .bore-group-fields, .bore-group-fields.bore-hole-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -730,6 +744,11 @@ input[type="number"]::-webkit-inner-spin-button {
 .fit-actions .button:hover { background: #fbe6c4; border-color: #d7ab63; }
 .button-row { display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap; }
 .button-row.equal > * { flex: 1; }
+/* Fix 096 F5: one shared dialog button-row convention. Inside a dialog, the
+   button row is right-aligned with an 8px gap; the Cancel (or least
+   destructive) button comes first in the DOM, the affirmative/action button
+   second, so the action always lands rightmost. */
+dialog .button-row { justify-content: flex-end; gap: 8px; }
 .placed-supports { display: grid; gap: 5px; }
 .placed-empty { border: 1px dashed var(--line-dark); border-radius: 7px; padding: 12px; color: var(--muted); text-align: center; font-size: 12px; }
 .placed-item {
@@ -1034,7 +1053,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .camera-views { flex-direction: column; }
 .camera-views-row { display: flex; }
 .camera-views-row:not(:last-child) { border-bottom: 1px solid var(--line); }
-.camera-controls button { min-width: 53px; border: 0; border-right: 1px solid var(--line); padding: 10px 13px; background: transparent; cursor: pointer; color: var(--muted); font-size: 15px; font-weight: 700; flex: 1; text-align: center; white-space: nowrap; }
+.camera-controls button { min-width: 53px; border: 0; border-right: 1px solid var(--line); padding: 10px 13px; background: transparent; cursor: pointer; color: var(--muted); font-size: var(--type-camera-button); font-weight: 700; flex: 1; text-align: center; white-space: nowrap; }
 .camera-controls button:last-child { border-right: 0; }
 .camera-controls button:hover, .camera-controls button.active { background: var(--teal-soft); color: var(--teal-dark); }
 /* Bin/Interior default to visible, so turning either off is the exception -
@@ -1086,31 +1105,13 @@ input[type="number"]::-webkit-inner-spin-button {
 .toast { position: fixed; right: 22px; bottom: 22px; max-width: min(440px, calc(100vw - 44px)); padding: 12px 15px; border-radius: 8px; background: #16333d; color: white; box-shadow: var(--shadow); font-size: 13px; opacity: 0; transform: translateY(12px); pointer-events: none; transition: .2s; z-index: 10; white-space: pre-line; }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.error { background: #7f302c; }
-.toast.prominent {
-  top: 50%;
-  right: auto;
-  bottom: auto;
-  left: 50%;
-  width: min(560px, calc(100vw - 40px));
-  box-sizing: border-box;
-  padding: 20px 24px;
-  border: 2px solid rgba(255,255,255,.7);
-  border-radius: 12px;
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.4;
-  text-align: center;
-  transform: translate(-50%, calc(-50% + 12px));
-}
-.toast.prominent.show { transform: translate(-50%, -50%); }
 
 dialog:not([open]) { display: none; }
 
-.support-layout-dialog { width: min(360px, calc(100vw - 32px)); border: 0; border-radius: 10px; padding: 20px; color: var(--ink); box-shadow: 0 18px 48px rgba(20,36,42,.25); }
-.support-layout-dialog::backdrop { background: rgba(20,36,42,.32); }
-.support-layout-dialog h2 { margin: 0 0 7px; font-size: 18px; }
+.support-layout-dialog { width: min(360px, calc(100vw - 32px)); border: 0; border-radius: 12px; padding: 20px; color: var(--ink); box-shadow: 0 18px 48px rgba(20,36,42,.25); }
+.support-layout-dialog::backdrop { background: rgba(14, 28, 34, .55); backdrop-filter: blur(2px); }
+.support-layout-dialog h2 { margin: 0 0 7px; font-size: var(--type-dialog-title); }
 .support-layout-dialog p { margin: 0 0 16px; color: var(--muted); }
-.support-layout-dialog .button-row { justify-content: end; }
 #draft-switch-dialog { width: min(440px, calc(100vw - 32px)); }
 .ai-help-dialog { width: min(840px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; }
 .ai-help-dialog .ai-help-field { display: grid; gap: 5px; margin: 0 0 10px; color: var(--ink); font-weight: 600; }
@@ -1143,7 +1144,7 @@ dialog:not([open]) { display: none; }
 .generation-dialog {
   width: min(440px, calc(100vw - 32px));
   border: 0;
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 0;
   color: var(--ink);
   background: #ffffff;
@@ -1154,15 +1155,15 @@ dialog:not([open]) { display: none; }
   display: none;
 }
 .generation-dialog::backdrop {
-  background: rgba(14, 28, 34, .65);
-  backdrop-filter: blur(3px);
+  background: rgba(14, 28, 34, .55);
+  backdrop-filter: blur(2px);
 }
 .generation-dialog-card {
   padding: 24px 28px;
 }
 .generation-dialog-header h2 {
   margin: 0 0 6px;
-  font-size: 20px;
+  font-size: var(--type-dialog-title);
   color: #14303a;
 }
 .generation-dialog-subtitle {
@@ -1293,7 +1294,7 @@ dialog:not([open]) { display: none; }
 .about-dialog:not([open]) { display: none; }
 .about-dialog::backdrop { background: rgba(14, 28, 34, .55); backdrop-filter: blur(2px); }
 .about-dialog-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.about-dialog-header h2 { margin: 0; font-size: 20px; color: #14303a; }
+.about-dialog-header h2 { margin: 0; font-size: var(--type-dialog-title); color: #14303a; }
 .about-runtime { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .about-runtime h3 { margin: 0 0 6px; font-size: 13px; color: var(--ink); }
 .about-runtime p { margin: 3px 0; }
@@ -1329,7 +1330,7 @@ dialog:not([open]) { display: none; }
 
 .startup-cover-card h2 {
   margin: 0 0 8px;
-  font-size: 20px;
+  font-size: var(--type-dialog-title);
   color: #14303a;
 }
 
@@ -1348,7 +1349,7 @@ dialog:not([open]) { display: none; }
 .welcome-dialog.busy { cursor: progress; }
 .welcome-dialog.busy button { pointer-events: none; }
 .welcome-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.welcome-header h2 { margin: 0; font-size: 20px; color: #14303a; }
+.welcome-header h2 { margin: 0; font-size: var(--type-dialog-title); color: #14303a; }
 .welcome-lead { margin: 0 0 14px; color: var(--muted); }
 .welcome-notice { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--line-dark); border-left: 4px solid var(--teal); background: var(--teal-soft); border-radius: 8px; color: var(--ink); font-size: 13px; line-height: 1.45; }
 .welcome-steps { list-style: none; margin: 0 0 18px; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; counter-reset: step; }
@@ -1686,7 +1687,6 @@ body.relocating > :not(dialog) { pointer-events: none; }
 }
 .grid-span-all { grid-column: 1 / -1; }
 .grid-span-two { grid-column: 1 / span 2; }
-.dialog-actions-spaced { margin-top: 16px; }
 .space-untyped-actions {
   justify-content: center;
   margin-top: 24px;
@@ -1764,7 +1764,6 @@ body.relocating > :not(dialog) { pointer-events: none; }
 #edge-mount-editor .edge-mount-text-field input[type="text"] { width: 100%; }
 /* Numeric inputs: ~80-100px effective width. */
 #edge-mount-editor .edge-mount-compact-number { flex: 0 0 auto; }
-#edge-mount-editor .edge-mount-compact-number input[type="number"] { width: 90px; }
 /* Small selects: ~110-150px as content requires. */
 #edge-mount-editor .edge-mount-compact-select { flex: 0 0 auto; }
 #edge-mount-editor .edge-mount-compact-select select { width: 130px; }

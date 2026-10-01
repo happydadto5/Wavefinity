@@ -428,22 +428,22 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
       const fontSize = Math.min(12, boxW / Math.max(4, info.name.length * 0.55));
       const subSize = Math.max(7.5, Math.min(9.5, fontSize * 0.8));
       const lineGap = subSize * 1.25;
-      ctx.font = `700 ${fontSize}px 'Segoe UI', sans-serif`;
+      ctx.font = `700 ${fontSize}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
       ctx.fillText(DV.fitText(ctx, info.name, boxW - 8), cx, cy - lineGap);
-      ctx.font = `500 ${subSize}px 'Segoe UI', sans-serif`;
+      ctx.font = `500 ${subSize}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
       ctx.fillText(DV.fitText(ctx, info.dimLine, boxW - 8), cx, cy);
       ctx.fillText(DV.fitText(ctx, info.heightLine, boxW - 8), cx, cy + lineGap);
     } else if (boxH >= 24 && boxW >= 40) {
       const fontSize = Math.min(11, boxW / Math.max(4, info.name.length * 0.55));
       const subSize = Math.max(7, Math.min(9, fontSize * 0.8));
       const lineGap = subSize * 0.65;
-      ctx.font = `700 ${fontSize}px 'Segoe UI', sans-serif`;
+      ctx.font = `700 ${fontSize}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
       ctx.fillText(DV.fitText(ctx, info.name, boxW - 8), cx, cy - lineGap);
-      ctx.font = `500 ${subSize}px 'Segoe UI', sans-serif`;
+      ctx.font = `500 ${subSize}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
       const compactDetail = `${fmt(one.x)}×${fmt(one.y)} · ${fmt(one.z)} mm`;
       ctx.fillText(DV.fitText(ctx, compactDetail, boxW - 8), cx, cy + lineGap);
     } else {
-      ctx.font = "600 11px 'Segoe UI', sans-serif";
+      ctx.font = '600 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
       ctx.fillText(DV.fitText(ctx, info.name, Math.max(20, boxW - 8)), cx, cy);
     }
     if (!entry.ghost) {
@@ -557,10 +557,10 @@ DV.paintScene = (ctx, drawer, cam) => {
         const [mx, my] = cam.project([(x0 + x1) / 2, (y0 + y1) / 2, 0]);
         if (Math.abs(bx - ax) > 70) {
           ctx.fillStyle = "rgba(31,107,69,.9)";
-          ctx.font = "600 11px 'Segoe UI', system-ui, sans-serif";
+          ctx.font = '600 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(`${fmt(spot.w_mm)} × ${fmt(spot.d_mm)} free`, mx, my);
+          ctx.fillText(`${fmt(spot.w_mm)} × ${fmt(spot.d_mm)} mm free`, mx, my);
         }
       });
     }
@@ -602,7 +602,7 @@ DV.paintScene = (ctx, drawer, cam) => {
         if (side) {
           const points = side.screen;
           ctx.fillStyle = color.ink;
-          ctx.font = "700 10px 'Segoe UI', sans-serif";
+          ctx.font = '700 10px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(DL.badgeLabel(one), points.reduce((sum, p) => sum + p[0], 0) / 4,
@@ -671,12 +671,12 @@ DV.paintScene = (ctx, drawer, cam) => {
   ctx.stroke();
   const [fx, fy] = cam.project([W / 2, 0, 0]);
   ctx.fillStyle = "#66757d";
-  ctx.font = "700 11px 'Segoe UI', system-ui, sans-serif";
+  ctx.font = '700 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.fillText(DL.isSurface()
-    ? `FRONT · ${fmt(W)} mm wide · ${fmt(D)} deep · ${fmt(drawer.height)} mm edge`
-    : `FRONT · ${fmt(W)} mm wide · ${fmt(D)} deep · ${fmt(H)} max height`, fx, fy + 10);
+    ? `FRONT · ${fmt(W)} mm wide · ${fmt(D)} mm deep · ${fmt(drawer.height)} mm edge`
+    : `FRONT · ${fmt(W)} mm wide · ${fmt(D)} mm deep · ${fmt(H)} max height`, fx, fy + 10);
   if (DL.isSurface() && DL.fillPlan) {
     DL.fillPlan.forEach(candidate => {
       const selected = DL.fillSelected.has(candidate.id);
@@ -772,7 +772,7 @@ DV.drawLabel = (ctx, entry, topFace, ink) => {
     ctx.fillStyle = ink;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = `650 ${size}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.font = `650 ${size}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
     ctx.fillText(DV.fitText(ctx, "Spacer", width - 6), cx, cy);
     return;
   }
@@ -789,21 +789,21 @@ DV.drawLabel = (ctx, entry, topFace, ink) => {
   if (can3Lines) {
     const subSize = Math.max(7.5, Math.min(10, size * 0.82));
     const lineGap = Math.max(9, size * 0.95);
-    ctx.font = `700 ${size}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.font = `700 ${size}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
     ctx.fillText(DV.fitText(ctx, info.name, width - 6), cx, cy - lineGap);
-    ctx.font = `500 ${subSize}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.font = `500 ${subSize}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
     ctx.fillText(DV.fitText(ctx, info.dimLine, width - 6), cx, cy);
     ctx.fillText(DV.fitText(ctx, info.fullHeightLine, width - 6), cx, cy + lineGap);
   } else if (can2Lines) {
     const subSize = Math.max(7, Math.min(9, size * 0.8));
     const lineGap = subSize * 0.65;
-    ctx.font = `700 ${size}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.font = `700 ${size}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
     ctx.fillText(DV.fitText(ctx, info.name, width - 6), cx, cy - lineGap);
-    ctx.font = `500 ${subSize}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.font = `500 ${subSize}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
     const compactDetail = `${fmt(top.x)}×${fmt(top.y)} · ${fmt(top.z)} mm` + (stackCount > 1 ? ` (${stackCount}×)` : "");
     ctx.fillText(DV.fitText(ctx, compactDetail, width - 6), cx, cy + lineGap);
   } else {
-    ctx.font = `650 ${size}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.font = `650 ${size}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
     ctx.fillText(DV.fitText(ctx, info.name, width - 6), cx, cy);
   }
 };

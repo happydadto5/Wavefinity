@@ -290,6 +290,7 @@ from organizer_stack import (
     stack_summary,
     validate_stack_design,
 )
+from organizer_slicer import slicer_display_name
 from organizer_edge_mount import (
     EDGE_HOLE_DEFAULT_SCREW_DIAMETER,
     EDGE_HOLE_DEFAULT_TOP_OFFSET,
@@ -1511,14 +1512,7 @@ def catalog_payload() -> dict[str, Any]:
 
 
 def slicer_name(slicer_path: Path | None) -> str:
-    if slicer_path is None:
-        return "Bambu Studio"
-    name = slicer_path.stem.replace("-", " ").replace("_", " ").title()
-    if "bambu" in name.lower():
-        return "Bambu Studio"
-    if "orca" in name.lower():
-        return "OrcaSlicer"
-    return name or "Bambu Studio"
+    return slicer_display_name(slicer_path) or "Bambu Studio"
 
 
 def _find_bambu_studio_windows() -> Path | None:
@@ -3632,8 +3626,12 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     slicer_path = detect_bambu_studio(custom)
     if slicer_path is None or not slicer_path.is_file():
         raise ValueError(
-            "Bambu Studio was not found. Please locate your Bambu Studio executable in settings or install Bambu Studio."
+            "A slicer was not found. Please locate your slicer executable in settings or install a slicer (Bambu Studio or OrcaSlicer)."
         )
+
+    # Fix 096 F11: user-facing copy names the detected slicer, never a hardcoded brand.
+    name = slicer_display_name(slicer_path) or "the slicer"
+    name_cap = slicer_display_name(slicer_path) or "The slicer"
 
     design_reused = False
     files: list[Path] = []
@@ -3661,7 +3659,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         files = _extract_generated_files(gen_result)
     design_files = list(files)
     if target not in {"connector", "sampler", "base_trim_joint_test"} and not design_files:
-        raise RuntimeError("No bin files were generated to send to Bambu Studio.")
+        raise RuntimeError(f"No bin files were generated to send to {name}.")
     # Fix 096 A1: a listed file that is missing or empty means the set is
     # incomplete - never hand a partial set to the slicer.
     for design_file in design_files:
@@ -3726,15 +3724,15 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         files.extend(connector_files)
 
     if not files:
-        raise RuntimeError("No 3MF files were generated to send to Bambu Studio.")
+        raise RuntimeError(f"No 3MF files were generated to send to {name}.")
 
     try:
         project_path = launch_slicer(slicer_path, files)
     except Exception as error:
         return {
             "partial": True,
-            "error": (f"Bambu Studio did not open: {error}" if design_reused and not (len(files) > len(design_files))
-                      else f"Files were saved, but Bambu Studio did not open: {error}"),
+            "error": (f"{name_cap} did not open: {error}" if design_reused and not (len(files) > len(design_files))
+                      else f"Files were saved, but {name} did not open: {error}"),
             "partial_stage": "slicer",
             "design_reused": design_reused,
             "design_files": [str(f) for f in design_files],
@@ -4117,15 +4115,17 @@ def structural_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         slicer_path = detect_bambu_studio(payload.get("slicer_path"))
         if slicer_path is None or not slicer_path.is_file():
             raise ValueError(
-                "Bambu Studio was not found. Please locate your Bambu Studio executable in settings or install Bambu Studio."
+                "A slicer was not found. Please locate your slicer executable in settings or install a slicer (Bambu Studio or OrcaSlicer)."
             )
+        # Fix 096 F11: user-facing copy names the detected slicer, never a hardcoded brand.
+        name = slicer_display_name(slicer_path) or "the slicer"
         saved = _materialize_local_cabinet(payload)
         try:
             project_path = launch_slicer(slicer_path, [Path(one) for one in saved["files"]])
         except Exception as error:
             return {
                 **saved, "partial": True, "partial_stage": "slicer",
-                "error": f"Files were saved, but Bambu Studio did not open: {error}",
+                "error": f"Files were saved, but {name} did not open: {error}",
             }
         return {**saved, "slicer": str(slicer_path), "project": str(project_path) if project_path else None}
     kind, design = _structural_request(payload)
@@ -4213,7 +4213,9 @@ def _combined_space_print(payload: dict[str, Any], cfg: dict[str, Any]) -> dict[
         raise ValueError("Hosted Wavefinity saves generated files to your selected folder instead.")
     slicer = detect_bambu_studio(payload.get("slicer_path"))
     if slicer is None or not slicer.is_file():
-        raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
+        raise ValueError("A slicer was not found. Locate it with Change slicer in the bin view.")
+    # Fix 096 F11: user-facing copy names the detected slicer, never a hardcoded brand.
+    name_cap = slicer_display_name(slicer) or "The slicer"
     profile = _printer_profile_for(payload)
     label = cfg["label"]
     bind = cfg["bind"]
@@ -4383,11 +4385,11 @@ def _combined_space_print(payload: dict[str, Any], cfg: dict[str, Any]) -> dict[
     try:
         launch_slicer(slicer, files)
     except Exception as error:
-        return partial("slicer", [f"Bambu Studio did not open: {error}. Files were kept."])
+        return partial("slicer", [f"{name_cap} did not open: {error}. Files were kept."])
     try:
         marked = mark_printed_rows(root, selected, prepared_specs) if selected else load_inventory(root)
     except Exception as error:
-        return partial("status", [f"Bambu Studio opened, but Printed status could not be recorded: {error}. Check Inventory."])
+        return partial("status", [f"{name_cap} opened, but Printed status could not be recorded: {error}. Check Inventory."])
     return {**marked, "selected_rows": selected, "files": [str(path) for path in files],
             "slicer": str(slicer)}
 

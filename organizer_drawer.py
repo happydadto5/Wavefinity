@@ -108,6 +108,7 @@ from organizer_product_rules import DRAWER_HARD_CLEARANCE_MM, SURFACE_TRIM_HEIGH
 from organizer_stack import STACK_MIN_WALL, STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
 from organizer_pegboard import pegboard_layout_for_bin, pegboard_standard
 from organizer_edge_mount import edge_mount_projection_envelope
+from organizer_slicer import slicer_display_name
 
 UNIT = BASE_UNIT
 SNAPS = (8.0, 4.0)
@@ -1597,7 +1598,9 @@ def print_spacers_and_connectors(
     # Preflight the authoritative slicer before any connector file is written.
     slicer = detect_slicer(slicer_path)
     if slicer is None or not Path(slicer).is_file():
-        raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
+        raise ValueError("A slicer was not found. Locate it with Change slicer in the bin view.")
+    # Fix 096 F11: user-facing copy names the detected slicer, never a hardcoded brand.
+    name = slicer_display_name(slicer) or "the slicer"
     counts: dict[str, int] = {}
     for placement in drawer.get("placements") or []:
         one = by_id.get(placement.get("bin"))
@@ -1620,7 +1623,7 @@ def print_spacers_and_connectors(
         return {
             "partial": True,
             "partial_stage": "slicer",
-            "error": f"Files were prepared, but Bambu Studio did not open: {error}",
+            "error": f"Files were prepared, but {name} did not open: {error}",
             "files": [str(path) for path in files],
             "counts": counts,
             "omitted": omitted,
@@ -1821,12 +1824,14 @@ def _batch_partial(
     }
 
 
-def _prepare_failure_text(prepared: dict[str, Any], slicer: bool) -> str:
+def _prepare_failure_text(prepared: dict[str, Any], slicer_name: str | None = None) -> str:
     failed = prepared["failed"]
     done = len(prepared["generated"])
     text = f"Could not prepare {failed['name']}: {failed['error']}."
     text += f" {_plural(done, 'bin')} saved before it stopped." if done else " Nothing new was saved."
-    return text + (" Bambu Studio was not opened." if slicer else "") + " Retry to finish the rest."
+    if slicer_name:
+        text += f" {slicer_name} was not opened."
+    return text + " Retry to finish the rest."
 
 
 def _plural(count: int, word: str) -> str:
@@ -1851,7 +1856,7 @@ def save_inventory_bins(
         raise ValueError("Select at least one bin to save.")
     prepared = prepare_inventory_bins(root, ids, generate_from_design)
     if prepared["failed"]:
-        return _batch_partial(prepared, "generate", _prepare_failure_text(prepared, slicer=False))
+        return _batch_partial(prepared, "generate", _prepare_failure_text(prepared))
     inventory = prepared["inventory"]
     connector_counts: dict[str, int] = {}
     notes: list[str] = []
@@ -1899,7 +1904,9 @@ def print_inventory_bins(
     # Inventory File-cell write or connector generation.
     slicer = detect_slicer(slicer_path)
     if slicer is None or not Path(slicer).is_file():
-        raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
+        raise ValueError("A slicer was not found. Locate it with Change slicer in the bin view.")
+    # Fix 096 F11: user-facing copy names the detected slicer, never a hardcoded brand.
+    name_cap = slicer_display_name(slicer) or "The slicer"
     by_id = {one["id"]: one for one in bins}
     counts: dict[str, int] = {}
     for bin_id, raw_count in (selection or {}).items():
@@ -1919,8 +1926,9 @@ def print_inventory_bins(
 
     prepared = prepare_inventory_bins(output_dir, list(counts), generate_from_design)
     if prepared["failed"]:
+        slicer_label = slicer_display_name(slicer) or "The slicer"
         return _batch_partial(
-            prepared, "generate", _prepare_failure_text(prepared, slicer=True), selection=counts)
+            prepared, "generate", _prepare_failure_text(prepared, slicer_label), selection=counts)
     rows_files = prepared["files"]
     specs = prepared["specs"]
     inventory = prepared["inventory"]
@@ -1934,7 +1942,7 @@ def print_inventory_bins(
             return _batch_partial(
                 prepared, "connectors",
                 f"The bins were saved, but the Space connectors could not be made: {error}. "
-                "Bambu Studio was not opened.", selection=counts)
+                f"{name_cap} was not opened.", selection=counts)
 
     launch_files: list[Path] = []
     for bin_id in counts:
@@ -1956,7 +1964,7 @@ def print_inventory_bins(
         # Printed). Return the refreshed Inventory so the browser matches disk.
         return _batch_partial(
             prepared, "slicer",
-            f"Bambu Studio did not open: {error}. Any files made during this attempt were kept.",
+            f"{name_cap} did not open: {error}. Any files made during this attempt were kept.",
             **result_counts)
 
     try:
@@ -1965,7 +1973,7 @@ def print_inventory_bins(
     except Exception as error:
         return _batch_partial(
             prepared, "status",
-            f"Bambu Studio opened, but the printed status could not be recorded: {error}. "
+            f"{name_cap} opened, but the printed status could not be recorded: {error}. "
             "Check the selected rows in Inventory.", **result_counts)
     return {**saved, **result_counts}
 
@@ -2547,7 +2555,7 @@ def drawer_routes(
                 raise ValueError("Select at least one spacer to print.")
             slicer = detect_slicer(payload.get("slicer_path"))
             if slicer is None or not Path(slicer).is_file():
-                raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
+                raise ValueError("A slicer was not found. Locate it with Change slicer in the bin view.")
             launch_slicer(Path(slicer), launch_files)
             return {"files": [str(path) for path in files], "counts": counts, "notes": []}
 
