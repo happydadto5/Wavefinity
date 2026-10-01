@@ -69,7 +69,14 @@
     },
     persistHosted(raw) {
       const next = normalise(raw);
-      localStorage.setItem(KEY, JSON.stringify({ profile: next, explicit: true }));
+      // Fix 096 A4: a failed persist must be visible; rethrow so the existing
+      // onError path keeps working exactly as before.
+      try {
+        localStorage.setItem(KEY, JSON.stringify({ profile: next, explicit: true }));
+      } catch (_error) {
+        toast("The printer profile could not be remembered in this browser.", true);
+        throw _error;
+      }
       return adopt(next, true);
     },
     // Only the printer-profile key goes back to defaults, and the reset is

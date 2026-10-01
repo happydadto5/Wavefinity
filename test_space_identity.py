@@ -58,7 +58,7 @@ def make_v4_space(parent: Path, name: str = "Old Name") -> Path:
     folder = parent / name
     folder.mkdir(parents=True)
     configure_space(folder, raw_def=dict(V4["space"]))
-    append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts")
+    append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts", design_spec={})
     (folder / INVENTORY_FILENAME).rename(folder / f"{name} bins.md")
     (folder / ".wavefinity.json").write_text(json.dumps(V4, indent=2), encoding="utf-8")
     return folder
@@ -394,7 +394,7 @@ class InventoryResolverTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Renamed Folder"
             folder.mkdir()
-            append_bin(folder, file="a.3mf", x=16, y=16, z=20, name="One")
+            append_bin(folder, file="a.3mf", x=16, y=16, z=20, name="One", design_spec={})
             canonical = folder / INVENTORY_FILENAME
             legacy = folder / "Older bins.md"
             canonical.rename(legacy)
@@ -431,7 +431,7 @@ class InventoryResolverTests(unittest.TestCase):
             (folder / "A bins.md").write_text("a", encoding="utf-8")
             (folder / "B bins.md").write_text("b", encoding="utf-8")
             with self.assertRaises(InventoryMigrationError):
-                append_bin(folder, file="x.3mf", x=8, y=8, z=8)
+                append_bin(folder, file="x.3mf", x=8, y=8, z=8, design_spec={})
             self.assertFalse((folder / INVENTORY_FILENAME).exists())
 
 

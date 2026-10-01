@@ -30,16 +30,31 @@ if errorlevel 1 (
 )
 
 if /i "%~1"=="--check" (
-    "%ORGANIZER_PY%" -c "import organizer_app, wavefinity_web as w; print('Organizer launcher ready'); print('Source:', w.SOURCE_ROOT); print('Fingerprint:', w.SOURCE_FINGERPRINT); print('Build:', w.SERVER_BUILD)"
+    "%ORGANIZER_PY%" wavefinity_freshness.py --check
     if errorlevel 1 exit /b 1
     exit /b 0
 )
+
+rem Fix 096 A6: source freshness gate. A clean main branch that is merely
+rem behind origin/main is fast-forwarded; dirty, ahead, diverged, detached,
+rem or wrong-branch states either proceed with a notice or stop here with
+rem plain instructions. The gate never resets, cleans, stashes, rebases, or
+rem force-updates.
+"%ORGANIZER_PY%" wavefinity_freshness.py --ensure-current
+if errorlevel 2 goto :updateblocked
+if errorlevel 1 goto :failed
 
 rem Run the long-lived local server without attaching it to this command
 rem window.  A later launch may replace it without leaving a paused window.
 start "" "%ORGANIZER_PYW%" wavefinity_web.py
 if errorlevel 1 goto :failed
 exit /b 0
+
+:updateblocked
+echo.
+echo Wavefinity did not start. Follow the instructions above, then run the launcher again.
+if /i not "%~1"=="--check" pause
+exit /b 1
 
 :failed
 echo.

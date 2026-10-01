@@ -227,6 +227,7 @@ from organizer_app import (
     design_source_payload,
     design_to_dict,
     generate_organizer_files,
+    generate_organizer_files_transactional,
     generate_corner_file,
     generate_side_file,
     inside_handle_conflict,
@@ -443,6 +444,105 @@ PID_FILE = Path(os.environ.get("WAVEFINITY_PID_FILE", str(APP_DIR / "wavefinity.
 EXPORT_LOCK = threading.RLock()
 EXPORT_TTL_SECONDS = 15 * 60
 EXPORTS: dict[str, dict[str, Any]] = {}
+
+# (Fix 096 A5) Side-effecting operations registry. The browser's timeout only
+# aborts its own wait: Python keeps running the Generate / Save / Print to
+# completion in the handler thread. Every side-effecting route registered in
+# A5-b runs through _idempotent_operation below: the client supplies one
+# operation_id per logical operation and the registry guarantees the route
+# body executes at most once per id. A duplicate id while the first request
+# is running returns {"operation_status": "running"}; after completion it
+# returns the stored result (or re-raises the stored error). The read-only
+# /api/operation-status endpoint lets the UI poll the first request until it
+# is terminal instead of showing a generic "try again".
+OPERATION_LOCK = threading.RLock()
+OPERATION_REGISTRY: dict[str, dict[str, Any]] = {}
+OPERATION_TTL_SECONDS = 60 * 60
+OPERATION_MAX_ENTRIES = 500
+
+
+def _prune_operations(now: float) -> None:
+    # (Fix 096 A5) Never evict a running operation: its id must keep mapping
+    # to the in-flight execution until it reaches a terminal state, otherwise
+    # a retried request with the same id could start a second execution.
+    # Only terminal (done/error) entries are pruned.
+    stale = [key for key, entry in OPERATION_REGISTRY.items()
+             if entry["status"] != "running"
+             and now - entry["finished_at"] > OPERATION_TTL_SECONDS]
+    for key in stale:
+        del OPERATION_REGISTRY[key]
+    while len(OPERATION_REGISTRY) > OPERATION_MAX_ENTRIES:
+        terminal = [key for key in OPERATION_REGISTRY
+                    if OPERATION_REGISTRY[key]["status"] != "running"]
+        if not terminal:
+            break
+        oldest = min(terminal,
+                     key=lambda key: OPERATION_REGISTRY[key]["finished_at"])
+        del OPERATION_REGISTRY[oldest]
+
+
+def _idempotent_operation(route):
+    """Run a side-effecting POST route at most once per client operation_id.
+
+    The id rides inside the request payload as "operation_id". A request with
+    no id, a non-string id, or an id longer than 128 characters runs exactly
+    as today (pass-through): reads and legacy callers are unaffected.
+    """
+    def wrapped(payload):
+        operation_id = payload.get("operation_id") if isinstance(payload, dict) else None
+        if not isinstance(operation_id, str) or not operation_id or len(operation_id) > 128:
+            return route(payload)
+        with OPERATION_LOCK:
+            _prune_operations(time.time())
+            entry = OPERATION_REGISTRY.get(operation_id)
+            if entry is not None:
+                if entry["status"] == "running":
+                    return {"operation_id": operation_id, "operation_status": "running"}
+                if entry["status"] == "done":
+                    return entry["result"]
+                # A stored failure re-raises in the same status class the first
+                # attempt produced, so a duplicate sees the same HTTP status
+                # (400 for client errors, 500 otherwise).
+                if entry["error_kind"] == "client":
+                    raise ValueError(entry["error"])
+                raise RuntimeError(entry["error"])
+            OPERATION_REGISTRY[operation_id] = {
+                "status": "running", "result": None,
+                "error": None, "error_kind": None, "finished_at": time.time(),
+            }
+        try:
+            result = route(payload)
+        except Exception as error:
+            with OPERATION_LOCK:
+                OPERATION_REGISTRY[operation_id] = {
+                    "status": "error", "result": None,
+                    "error": str(error) or "The earlier request failed.",
+                    "error_kind": "client" if isinstance(error, (KeyError, TypeError, ValueError)) else "server",
+                    "finished_at": time.time(),
+                }
+            raise
+        with OPERATION_LOCK:
+            OPERATION_REGISTRY[operation_id] = {
+                "status": "done", "result": result,
+                "error": None, "error_kind": None, "finished_at": time.time(),
+            }
+        return result
+    wrapped.__name__ = getattr(route, "__name__", "operation")
+    return wrapped
+
+
+def operation_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Read-only: report one side-effecting operation's state. (Fix 096 A5)"""
+    operation_id = payload.get("operation_id") if isinstance(payload, dict) else None
+    with OPERATION_LOCK:
+        entry = OPERATION_REGISTRY.get(operation_id) if isinstance(operation_id, str) else None
+    if entry is None:
+        return {"operation_id": operation_id, "operation_status": "unknown"}
+    if entry["status"] == "running":
+        return {"operation_id": operation_id, "operation_status": "running"}
+    if entry["status"] == "done":
+        return {"operation_id": operation_id, "operation_status": "done", "result": entry["result"]}
+    return {"operation_id": operation_id, "operation_status": "error", "error": entry["error"]}
 
 
 def default_design() -> dict[str, Any]:
@@ -3027,7 +3127,11 @@ def generate_payload(
     else:
         keep_log = requested_inventory and inventory_enabled(output, load_preferences())
     with GEOMETRY_LOCK:
-        result = generate_organizer_files(
+        # Fix 096 A1: the whole ordinary-bin file set installs as one unit -
+        # staged, validated, then promoted - and inventory logging runs only
+        # after the complete set promoted, so a row is never recorded for a
+        # partial set.
+        result = generate_organizer_files_transactional(
             box, layout, output, label, part_name, label_location, scoop,
             auto_timestamp=auto_timestamp,
             keep_log=keep_log and not HOSTED,
@@ -3419,7 +3523,9 @@ def _generate_bin_from_design_spec(output_dir: Path, design_spec: dict[str, Any]
     """
     box, layout, label, part_name, label_location, scoop = design_from_dict(design_spec)
     with GEOMETRY_LOCK:
-        result = generate_organizer_files(
+        # Fix 096 A1: on-demand batch generation installs as one unit too -
+        # a row is recorded Saved only after its whole file set promoted.
+        result = generate_organizer_files_transactional(
             box, layout, output_dir, label, part_name, label_location, scoop,
             auto_timestamp=False, keep_log=False,
         )
@@ -3525,6 +3631,14 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     design_files = list(files)
     if target not in {"connector", "sampler", "base_trim_joint_test"} and not design_files:
         raise RuntimeError("No bin files were generated to send to Bambu Studio.")
+    # Fix 096 A1: a listed file that is missing or empty means the set is
+    # incomplete - never hand a partial set to the slicer.
+    for design_file in design_files:
+        checked = Path(design_file)
+        if not checked.is_file() or checked.stat().st_size == 0:
+            raise RuntimeError(
+                "A bin file is missing or empty, so the slicer was not opened."
+            )
 
     # Only the explicit "with connectors" print (target "all") carries the
     # automatic connector bundle (a Side connector, plus 3-Way and 4-Way
@@ -4963,11 +5077,46 @@ POST_ROUTES.update({
         hosted=HOSTED, generate_from_design=_generate_bin_from_design_spec,
     ),
 })
+# (Fix 096 A5) Read-only operation status, plus the side-effecting route set.
+# Reads keep ordinary timeout/retry behavior: the wrapper is a pure
+# pass-through unless the client supplied an operation_id. structural_design
+# is deliberately absent (its own docstring: "Read-only: never touches an
+# Inventory"), as is the 15-second drawer summary route.
+POST_ROUTES["/api/operation-status"] = operation_status_payload
+for _side_effect_path in (
+    "/api/generate",
+    "/api/connector",
+    "/api/print",
+    "/api/space/structural-generate",
+    "/api/space/structural-print",
+    "/api/space/storage-box-print",
+    "/api/space/surface-print",
+    "/api/space/storage-drawers-reset",
+    "/api/space/storage-drawers-mutate-text",
+    "/api/drawer/save",
+    "/api/drawer/design-source/save",
+    "/api/drawer/design-source/duplicate",
+    "/api/drawer/design-source/status",
+    "/api/drawer/surface-fill/create",
+    "/api/drawer/spacers/generate",
+    "/api/drawer/connectors",
+    "/api/drawer/print",
+    "/api/drawer/print-spacers",
+    "/api/drawer/print-bins",
+    "/api/drawer/save-bins",
+):
+    POST_ROUTES[_side_effect_path] = _idempotent_operation(POST_ROUTES[_side_effect_path])
 if not HOSTED:
     POST_ROUTES.update({
         # Local save-folder selection and optional Space setup.
         **space_routes(DEFAULT_OUTPUT, load_preferences, save_preferences, mutate_preferences),
     })
+    # (Fix 096 A5) storage-drawers-mutate is side-effecting; it is registered
+    # inside space_routes() above, so it cannot join the A5-b wrap loop — the
+    # key does not exist yet at that point, and hosted mode never registers
+    # it at all.
+    POST_ROUTES["/api/space/storage-drawers-mutate"] = _idempotent_operation(
+        POST_ROUTES["/api/space/storage-drawers-mutate"])
 
 
 class WavefinityServer(ThreadingHTTPServer):
@@ -5138,6 +5287,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")))
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--check", action="store_true",
+                        help="print source freshness and build identity, then exit")
     return parser
 
 
@@ -5229,6 +5380,10 @@ def _replace_stale_process(requested_url: str, host: str, port: int) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.check:
+        # (Fix 096 A6) Source freshness/build identity without starting the server.
+        from wavefinity_freshness import check_report
+        return check_report()
     try:
         loopback = args.host.lower() == "localhost" or ipaddress.ip_address(args.host).is_loopback
     except ValueError:

@@ -29,7 +29,8 @@ try {
   if (Number.isFinite(saved.turn)) DV.view.turn = saved.turn;
 } catch (_error) {}
 DV.saveView = debounce(() => {
-  try { localStorage.setItem("wavefinity-drawer-camera", JSON.stringify({ tilt: DV.view.tilt, turn: DV.view.turn })); } catch (_error) {}
+  try { localStorage.setItem("wavefinity-drawer-camera", JSON.stringify({ tilt: DV.view.tilt, turn: DV.view.turn })); }
+  catch (_error) { toast("The camera view could not be remembered in this browser.", true); }
 }, 300);
 
 const dvClamp = (value, [low, high]) => Math.max(low, Math.min(high, Number(value) || 0));

@@ -419,7 +419,7 @@ SP.validateHostedCabinet = async record => {
         return { space: reply.space };
       } catch (error) {
         if (!error.status) throw error;
-        const reset = await api("/api/space/storage-drawers-reset", { space: raw });
+        const reset = await apiSideEffect("/api/space/storage-drawers-reset", { space: raw });
         return { recovery: { message: reset.message || error.message, resetSpace: reset.space } };
       }
     })();
@@ -942,7 +942,17 @@ SP.readInventoryFor = async (folder, { migrate = false } = {}) => {
 };
 
 SP._inventoryWriteChain = Promise.resolve();
-SP.inventoryRequest = async (path, extra = {}, { write = true, context = null } = {}) => {
+SP.inventoryRequest = async (
+  path,
+  extra = {},
+  {
+    write = true,
+    context = null,
+    sideEffect = false,
+    onStillFinishing = null,
+    ...requestOptions
+  } = {},
+) => {
   const folder = state.browserFolder;
   const handle = folder?.handle;
   if (!handle) throw new Error("Keeping an inventory needs folder access so Wavefinity can save it with your designs.");
@@ -998,20 +1008,14 @@ SP.inventoryRequest = async (path, extra = {}, { write = true, context = null } 
 // supplied a canonical design) attaches it as that row's design_specs entry
 // so a spec-only Wavefinity row stays reloadable even without Save to Space.
 SP.addInventoryBin = async (entry, designSpec = null) => {
-  let data = await SP.inventoryRequest("/api/drawer/save", { new_bins: [entry] });
-  if (designSpec) {
-    const added = (data.bins || []).find(one => one.file === entry.file);
-    if (added) {
-      data = await SP.inventoryRequest("/api/drawer/design-source/save", {
-        design: designSpec, row_id: added.id,
-      });
-      if (entry.file) {
-        data = await SP.inventoryRequest("/api/drawer/design-source/status", {
-          row_id: data.row_id, action: "saved", file: entry.file, design: data.design,
-        });
-      }
-    }
-  }
+  // Fix 096 A2: the row and its canonical editable source are one atomic
+  // creation - a bin/b4b row is never durably created without its
+  // design_specs entry, so no two-step window can leave it source-less.
+  // The backend raises (operation failure) if a bin/b4b row arrives without
+  // a spec.
+  const data = await SP.inventoryRequest("/api/drawer/save", {
+    new_bins: [entry], ...(designSpec ? { new_bin_specs: [designSpec] } : {}),
+  });
   if (typeof DL !== "undefined" && DL.active) {
     DL.adopt(data);
     DL.exists = true;
@@ -2160,7 +2164,11 @@ SP.create = async () => {
       inventory_text: inventoryText, inventory_title: name,
       name, kind, x, y, z, ...extra, ...(trimSize ? { trim_size: trimSize } : {}),
     });
-    await WFFileSystem.writeText(folder.handle, SP.inventoryFilenameFor(folder), result.inventory_text);
+    // Fix 096 A3: the inventory write and the metadata write are one logical
+    // commit - if the metadata write fails, put the previous Inventory text
+    // back rather than leave a half-applied new Space.
+    const inventoryName = SP.inventoryFilenameFor(folder);
+    await WFFileSystem.writeText(folder.handle, inventoryName, result.inventory_text);
     const space = result.layout.space;
     // This call owns the new Space definition, but not the bin/part
     // defaults - on Create there is nothing yet to preserve (the writer's
@@ -2170,12 +2178,38 @@ SP.create = async () => {
     // read/lock (Fix 032 Correction 4, C4.1 - this mirrors the previous
     // pre-lock SP.readMetadata() capture that used to run only when
     // `migrating`, now removed).
-    const metadata = await SP.writeMetadata(folder.handle, "space", space, true, {});
+    let metadata;
+    try {
+      metadata = await SP.writeMetadata(folder.handle, "space", space, true, {});
+    } catch (error) {
+      try {
+        await WFFileSystem.writeText(folder.handle, inventoryName, inventoryText);
+      } catch (_restore) {
+        // Fix 096 A3: a failed restore is a partial commit, not a clean
+        // failure - say so explicitly instead of reporting the original
+        // error while the new Inventory may still be durable.
+        throw new Error(
+          "The Space could not be " + (migrating ? "updated" : "created") +
+          ", and the previous Inventory could not be restored either. " +
+          "The Inventory may have changed - reopen the Space and check it before continuing.");
+      }
+      throw error;
+    }
     // Activate the selected target folder itself, not whatever folder was
     // previously active - see Fix 004 Correction 7.A. state.browserFolder
     // itself is set inside SP.applyFolder() below, never here (Fix 032
     // Correction 2, C2.1) - this only writes the remembered-active record.
-    await WFFileSystem.save("active", { handle: folder.handle, space_id: metadata.space_id });
+    // Fix 096 A3: a failed active-handle save is a different failure class -
+    // the Space files above committed fine, so keep the valid Space, say so
+    // truthfully, and continue activation instead of reporting a failed
+    // create/update.
+    try {
+      await WFFileSystem.save("active", { handle: folder.handle, space_id: metadata.space_id });
+    } catch (_remember) {
+      toast(migrating
+        ? "The Space was updated, but it could not be remembered as the current Space. Open it again from the Space list."
+        : "The Space was created, but it could not be remembered as the current Space. Open it again from the Space list.", true);
+    }
     info = {
       folder: folder.name, folder_name: folder.name, folder_mode: "space", space,
       space_id: metadata.space_id,
@@ -2214,6 +2248,9 @@ SP.create = async () => {
     }
     SP.recent = data.recent || [];
     info = data.folder;
+    // Fix 096 A3: the Space committed fine but could not be remembered as
+    // current - say so truthfully instead of silently dropping the warning.
+    if (data.remember_warning) toast(data.remember_warning, true);
   }
 
   // The leave decision is already resolved above - clear the old Drawer
@@ -2970,7 +3007,7 @@ SP.runStructural = async (mode, event) => {
   SP.renderSpaceInfo();
   try {
     if (printing) {
-      const result = await api("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
+      const result = await apiSideEffect("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
       DL.requireSpaceContext(context);
       if (result.partial) {
         // Files are a real side effect even though the slicer step failed -
@@ -2981,7 +3018,7 @@ SP.runStructural = async (mode, event) => {
         toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\n${names.join("\n")}`, false, 7000);
       }
     } else {
-      const result = await api("/api/space/structural-generate", payload);
+      const result = await apiSideEffect("/api/space/structural-generate", payload);
       DL.requireSpaceContext(context);
       const saved = await saveGeneratedFiles(result, { kind: "structural" });
       DL.requireSpaceContext(context);
@@ -3013,20 +3050,112 @@ SP.BASE_TRIM_STATUS_TEXT = {
   missing: "Needs save",
   needs_update: "Needs save",
   externally_changed: "Saved file changed outside Wavefinity",
+  recovery_error: "Needs recovery",
 };
 
 SP.baseTrimSummaryText = () => {
   const info = SP.baseTrimInfo;
   if (info.error) return `Base Trim · ${info.error}`;
+  if (info.status && info.status.status === "recovery_error") {
+    // (Fix 096 A8) An interrupted save that could not be settled: surface
+    // the recovery instructions, never "Needs save".
+    return `Base Trim · ${SP.BASE_TRIM_STATUS_TEXT.recovery_error} · ${info.status.message}`;
+  }
   if (!info.plan || !info.status) return "";
   const count = Number(info.plan.piece_count);
   const pieces = `${count} ${count === 1 ? "piece" : "pieces"} for current printer`;
   return `Base Trim · ${pieces} · ${SP.BASE_TRIM_STATUS_TEXT[info.status.status] || "Needs save"}`;
 };
 
+// ---- hosted Base Trim durable save journal (Fix 096 A8)
+//
+// Clones the hosted cabinet save journal pattern (Fix 086) under Base Trim's
+// own namespace. Before any owned final is replaced, an app-owned journal
+// (Space ID, prior and candidate manifests, filenames, backup filenames,
+// newly-created filenames) and durable backups are written into the folder
+// itself. The next hosted status or save settles the journal first, so an
+// interrupted save is idempotent across reload/retry. Cabinet journal keys
+// are never used here.
+SP.BASE_TRIM_JOURNAL = ".wavefinity-basetrim-journal.json";
+SP.BASE_TRIM_BACKUP_PREFIX = ".wavefinity-basetrim-backup-";
+SP.BASE_TRIM_BACKUP_NAME = /^\.wavefinity-basetrim-backup-[0-9a-f-]+-\d+\.3mf$/;
+
+SP.baseTrimRecoveryError = message =>
+  Object.assign(new Error(`Base Trim recovery is needed: ${message}`), { code: "BASE_TRIM_RECOVERY" });
+
+// A journal this tab is writing right now is a live transaction, not an
+// interrupted one: only the save itself (`own`) may settle it.
+SP._hostedBaseTrimSaving = false;
+
+// Orphan app-owned backups only, and only when no journal is active.
+SP.sweepHostedBaseTrimDebris = async handle => {
+  for (const name of await WFFileSystem.listFilenames(handle)) {
+    if (SP.BASE_TRIM_BACKUP_NAME.test(name)) {
+      try { await WFFileSystem.removeFile(handle, name); } catch (_error) { /* left for the next sweep */ }
+    }
+  }
+};
+
+SP.recoverBaseTrimJournal = async (handle, spaceId, { own = false } = {}) => {
+  if (SP._hostedBaseTrimSaving && !own) return "busy";
+  const text = await WFFileSystem.readText(handle, SP.BASE_TRIM_JOURNAL);
+  if (text === null) {
+    await SP.sweepHostedBaseTrimDebris(handle);
+    return "none";
+  }
+  let journal;
+  try {
+    journal = JSON.parse(text);
+    const valid = journal && journal.version === 1 && typeof journal.tx === "string" &&
+      typeof journal.space_id === "string" && Array.isArray(journal.files) &&
+      journal.candidate_manifest && typeof journal.candidate_manifest === "object" &&
+      journal.files.every(file => file && typeof file.name === "string" && typeof file.created === "boolean" &&
+        (file.created || (typeof file.backup === "string" && typeof file.original_sha256 === "string")));
+    if (!valid) throw new Error("invalid journal");
+  } catch (_error) {
+    throw SP.baseTrimRecoveryError(`the interrupted-save record in this folder (${SP.BASE_TRIM_JOURNAL}) is damaged. Check the Base Trim files, then delete that file to continue.`);
+  }
+  if (journal.space_id !== spaceId) {
+    throw SP.baseTrimRecoveryError("an unfinished Base Trim save in this folder belongs to a different Space.");
+  }
+  const { current } = await SP.readMetadata(handle);
+  const meta = SP.classifyMetadata(current);
+  if (meta.status !== "space" || meta.space_id !== spaceId) {
+    throw SP.baseTrimRecoveryError("this folder's Space could not be confirmed.");
+  }
+  const stored = meta.structural_outputs?.base_trim || null;
+  const committed = Boolean(stored) && JSON.stringify(stored) === JSON.stringify(journal.candidate_manifest);
+  if (!committed) {
+    for (const file of journal.files) {
+      if (file.created) {
+        await SP.removeIfPresent(handle, file.name);
+        continue;
+      }
+      const backup = await WFFileSystem.readBlob(handle, file.backup);
+      if (backup) {
+        if ((await WFFileSystem.sha256Blob(backup)) !== file.original_sha256) {
+          throw SP.baseTrimRecoveryError(`the backup of ${file.name} is damaged, so the original could not be restored.`);
+        }
+        await WFFileSystem.writeBlob(handle, file.name, new Blob([await backup.arrayBuffer()]));
+      } else if ((await WFFileSystem.sha256(handle, file.name)) !== file.original_sha256) {
+        throw SP.baseTrimRecoveryError(`the original ${file.name} could not be restored.`);
+      }
+    }
+  }
+  for (const file of journal.files) {
+    if (file.backup) await SP.removeIfPresent(handle, file.backup);
+  }
+  await SP.removeIfPresent(handle, SP.BASE_TRIM_JOURNAL);
+  return committed ? "committed" : "rolled_back";
+};
+
 SP.hostedBaseTrimStatus = async (plan, signature) => {
   const handle = state.browserFolder?.handle;
   if (!handle) return { status: "missing" };
+  if (SP._hostedBaseTrimSaving) return SP.baseTrimInfo.status || { status: "missing" };
+  // A journal left by an interrupted save is settled first: committed leftovers
+  // are cleaned, anything else is rolled back, before ownership is compared. (Fix 096 A8)
+  await SP.recoverBaseTrimJournal(handle, state.activeSpaceId);
   const { current } = await SP.readMetadata(handle);
   const manifest = SP.classifyMetadata(current).structural_outputs?.base_trim;
   const rows = manifest?.pieces;
@@ -3071,7 +3200,13 @@ SP.refreshBaseTrimSummary = async () => {
       ? await SP.hostedBaseTrimStatus(result.plan, result.signature) : result.status;
   } catch (error) {
     if (SP.baseTrimInfo.key !== key) return;
-    SP.baseTrimInfo.error = error.message;
+    if (error.code === "BASE_TRIM_RECOVERY") {
+      // An interrupted save that cannot be settled is a Base Trim recovery
+      // problem, never "changed outside Wavefinity". (Fix 096 A8)
+      SP.baseTrimInfo.status = { status: "recovery_error", message: error.message };
+    } else {
+      SP.baseTrimInfo.error = error.message;
+    }
   }
   if (SP.baseTrimInfo.key === key) SP.renderStructuralActions();
 };
@@ -3086,11 +3221,15 @@ SP.fileNames = files => [...new Set((files || []).map(file => String(file?.name 
 
 // Hosted Save: every piece is downloaded and verified first, only files the prior
 // manifest proves are ours (same name, same hash) are replaced, and the manifest is
-// committed only after every write succeeded. A failure puts every touched file back.
+// committed only after every write succeeded. A durable journal plus on-disk
+// backups make an interrupted save recoverable: the next status or save settles
+// the journal first, idempotently. (Fix 096 A8)
 SP.hostedBaseTrimSave = async (payload, context) => {
   const handle = state.browserFolder.handle;
   const spaceId = state.activeSpaceId;
-  const exported = await api("/api/space/structural-generate", { ...payload, space_id: spaceId });
+  // Settle any earlier interrupted save before ownership is compared.
+  await SP.recoverBaseTrimJournal(handle, spaceId);
+  const exported = await apiSideEffect("/api/space/structural-generate", { ...payload, space_id: spaceId });
   DL.requireSpaceContext(context);
   const candidate = exported.manifest;
   if (!candidate?.pieces?.length) throw new Error("The server did not return the Base Trim files.");
@@ -3116,7 +3255,6 @@ SP.hostedBaseTrimSave = async (payload, context) => {
       throw new Error("A Base Trim file did not download correctly. Nothing was changed.");
     }
   }
-  const previous = new Map();
   for (const piece of candidate.pieces) {
     const existing = await WFFileSystem.sha256(handle, piece.filename);
     if (existing === null) continue;
@@ -3124,14 +3262,30 @@ SP.hostedBaseTrimSave = async (payload, context) => {
     if (owned.get(piece.filename) === undefined || owned.get(piece.filename) !== existing) {
       throw new Error(`${piece.filename} is already in this folder and was not made by this Base Trim, or it was changed outside Wavefinity. Rename or move it, then save again. Nothing was changed.`);
     }
-    const old = await WFFileSystem.readBlob(handle, piece.filename);
-    if (old) previous.set(piece.filename, new Blob([await old.arrayBuffer()]));
   }
-  const written = [];
+  const txid = crypto.randomUUID();
+  const entries = [];
+  const backups = [];
+  for (const [index, piece] of candidate.pieces.entries()) {
+    const old = await WFFileSystem.readBlob(handle, piece.filename);
+    if (old) {
+      const bytes = new Blob([await old.arrayBuffer()]);
+      const backup = `${SP.BASE_TRIM_BACKUP_PREFIX}${txid}-${index}.3mf`;
+      entries.push({ name: piece.filename, created: false, backup, original_sha256: await WFFileSystem.sha256Blob(bytes) });
+      backups.push([backup, bytes]);
+    } else {
+      entries.push({ name: piece.filename, created: true });
+    }
+  }
+  SP._hostedBaseTrimSaving = true;
   try {
+    // Durable backups first, then the journal that names them, then the installs.
+    for (const [name, blob] of backups) await WFFileSystem.writeBlob(handle, name, blob);
+    await WFFileSystem.writeText(handle, SP.BASE_TRIM_JOURNAL, JSON.stringify({
+      version: 1, tx: txid, space_id: spaceId, prior_manifest: prior, candidate_manifest: candidate, files: entries,
+    }));
     for (const piece of candidate.pieces) {
       await WFFileSystem.writeBlob(handle, piece.filename, blobs.get(piece.filename));
-      written.push(piece.filename);
     }
     for (const piece of candidate.pieces) {
       if ((await WFFileSystem.sha256(handle, piece.filename)) !== piece.sha256) {
@@ -3143,16 +3297,18 @@ SP.hostedBaseTrimSave = async (payload, context) => {
       structural_output_updates: { base_trim: candidate },
     }, { preserveSpace: true, expectedSpaceId: spaceId });
   } catch (error) {
-    // Files are never left claiming to be current: restore what was replaced and
-    // remove what was newly made, best effort.
-    for (const name of written) {
-      try {
-        if (previous.has(name)) await WFFileSystem.writeBlob(handle, name, previous.get(name));
-        else await SP.removeIfPresent(handle, name);
-      } catch (_restore) { /* the next status check reports the folder as it is */ }
-    }
+    // Roll back from the same durable record a lost tab would have used.
+    try { await SP.recoverBaseTrimJournal(handle, spaceId, { own: true }); }
+    catch (_recovery) { /* the journal stays; the next status or save settles it */ }
+    SP._hostedBaseTrimSaving = false;
     throw error;
   }
+  // Committed: only now are the backups, then the journal, cleaned.
+  try {
+    for (const [name] of backups) await SP.removeIfPresent(handle, name);
+    await SP.removeIfPresent(handle, SP.BASE_TRIM_JOURNAL);
+  } catch (_cleanup) { /* committed leftovers are cleaned by the next status or save */ }
+  SP._hostedBaseTrimSaving = false;
   const warnings = [];
   const desired = new Set(candidate.pieces.map(one => one.filename));
   for (const [name, hash] of owned) {
@@ -3183,7 +3339,7 @@ SP.saveBaseTrim = async () => {
   try {
     const saved = hosted
       ? await SP.hostedBaseTrimSave(payload, context)
-      : await api("/api/space/structural-generate", payload);
+      : await apiSideEffect("/api/space/structural-generate", payload);
     DL.requireSpaceContext(context);
     const warnings = saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : "";
     toast(`Saved Base Trim${hosted ? "" : ` to ${saved.output || state.output}`}\n${SP.fileNames(saved.files)}${warnings}`, false, 7000);
@@ -3221,7 +3377,7 @@ SP.printSurface = async event => {
     DL.requireSpaceContext(context);
     if (!(await DL.save())) return;
     DL.requireSpaceContext(context);
-    const result = await api("/api/space/surface-print", {
+    const result = await apiSideEffect("/api/space/surface-print", {
       output: context.output, space_id: context.spaceId,
       slicer_path: state.slicer?.path || null,
     });
@@ -3264,7 +3420,7 @@ SP.printStorageBox = async () => {
     DL.requireSpaceContext(context);
     if (!(await DL.save())) return;
     DL.requireSpaceContext(context);
-    const result = await api("/api/space/storage-box-print", {
+    const result = await apiSideEffect("/api/space/storage-box-print", {
       output: context.output, space_id: context.spaceId,
       slicer_path: state.slicer?.path || null,
     });
@@ -3866,7 +4022,7 @@ SP.mutateCabinet = async (operation, payload = {}) => {
 
 SP.cabinetMutate = async (operation, { drawer_id = null, space = null } = {}) => {
   if (!state.runtime.hosted) {
-    return api("/api/space/storage-drawers-mutate", {
+    return apiSideEffect("/api/space/storage-drawers-mutate", {
       output: state.output, space_id: state.activeSpaceId, operation, drawer_id, space,
     });
   }
@@ -3883,7 +4039,7 @@ SP.cabinetMutate = async (operation, { drawer_id = null, space = null } = {}) =>
   if (meta.cabinet_recovery && operation !== "reset") {
     throw new Error(`Reset cabinet settings before changing the cabinet. ${meta.cabinet_recovery.message}`);
   }
-  const result = await api("/api/space/storage-drawers-mutate-text", {
+  const result = await apiSideEffect("/api/space/storage-drawers-mutate-text", {
     inventory_text: inventoryText, inventory_title: meta.space.name, operation, drawer_id,
     // Reset rebuilds from the folder's stored (damaged) definition.
     space: operation === "reset" ? current.data?.space : space,
@@ -4110,7 +4266,7 @@ SP.runCabinetStructural = async mode => {
   try {
     let saved;
     if (mode === "print") {
-      const result = await api("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
+      const result = await apiSideEffect("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
       wroteFiles = true;
       DL.requireSpaceContext(context);
       if (result.partial) {
@@ -4125,7 +4281,7 @@ SP.runCabinetStructural = async mode => {
       DL.requireSpaceContext(context);
       toast(`Saved cabinet files\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false, 8000);
     } else {
-      saved = await api("/api/space/structural-generate", payload);
+      saved = await apiSideEffect("/api/space/structural-generate", payload);
       wroteFiles = true;
       DL.requireSpaceContext(context);
       toast(`Saved cabinet to ${saved.output || state.output}\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false, 8000);
@@ -4239,7 +4395,7 @@ SP.hostedCabinetSave = async (payload, context) => {
   const spaceId = state.activeSpaceId;
   // Settle any earlier interrupted save before ownership is compared.
   await SP.recoverHostedCabinetJournal(handle, spaceId);
-  const exported = await api("/api/space/structural-generate", payload);
+  const exported = await apiSideEffect("/api/space/structural-generate", payload);
   DL.requireSpaceContext(context);
   const candidate = exported.manifest;
   if (!candidate?.components?.length) throw new Error("The server did not return the cabinet files.");

@@ -1005,7 +1005,7 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
     const wasPrinted = DL.bin(rowId)?.status === "printed";
     const data = await DL.inventoryCall("/api/drawer/design-source/save", {
       design, row_id: rowId || undefined,
-    }, { context });
+    }, { context, sideEffect: true });
     DL.requireSpaceContext(context);
     // The exact bin is now durable in design_specs. Space preferences follow
     // from that canonical design; a failure here never rolls the bin back.
@@ -1124,7 +1124,12 @@ async function designerEditInventoryRow(rowId, acceptTransition = null) {
   if (state.folderMode !== "space" || typeof DL === "undefined") return false;
   const one = DL.bin(rowId);
   const spec = DL.layout?.design_specs?.[rowId];
-  if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return false;
+  if (!one || !["bin", "b4b"].includes(one.kind)) return false;
+  // Fix 096 A2: keep the row visible, but say plainly why it can't be edited.
+  if (!spec) {
+    toast("The original editable design for this row is unavailable, so it can't be edited.", true);
+    return false;
+  }
   if (isStructuralDesign(spec)) {
     toast("A Storage Box or Base Trim is saved from its Space, not designed here.", true, 6000);
     return false;
@@ -1164,7 +1169,7 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
   if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return false;
   const generateRow = async context => {
     if (expected && !DL.spaceContextCurrent(expected)) return;
-    const result = await api("/api/generate", {
+    const result = await apiSideEffect("/api/generate", {
       design: clone(spec), output: state.output, connector: state.connector,
       keep_log: false,
     });
@@ -1189,7 +1194,7 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
     const file = files.join(", ");
     const saved = await DL.inventoryCall("/api/drawer/design-source/status", {
       row_id: rowId, action: "saved", file, design: clone(spec),
-    }, { context });
+    }, { context, sideEffect: true });
     DL.adopt(saved);
     DL.emit();
     toast(`Generated ${file}.`);
@@ -1929,7 +1934,7 @@ async function designerDuplicate() {
     try {
       const data = await DL.inventoryCall("/api/drawer/design-source/duplicate", {
         row_id: state.designInventoryId,
-      }, { context });
+      }, { context, sideEffect: true });
       DL.adopt(data);
       DL.emit();
       await installLoadedDesignSource(data.row_id, data.design, { successMessage: "Duplicated bin." });
@@ -2053,7 +2058,7 @@ function debounce(fn, delay) {
   return wrapped;
 }
 
-async function api(path, payload = null, { timeoutMs = 60000 } = {}) {
+async function api(path, payload = null, { timeoutMs = 60000, onStillFinishing = null } = {}) {
   // Every backend call is bounded: a stalled request must surface as an
   // error, never wedge the UI forever (e.g. the drawers configure form's
   // live validation, which blocks Create while its summary is pending).
@@ -2080,11 +2085,185 @@ async function api(path, payload = null, { timeoutMs = 60000 } = {}) {
     }
     return data;
   } catch (error) {
-    if (error?.name === "AbortError") throw new Error("The request took too long. Please try again.");
+    if (error?.name === "AbortError") {
+      // (Fix 096 A5) The abort only cancels this wait: a side-effecting
+      // request may still be running on the server. When the call carries an
+      // operation_id, never show the generic "try again" (the first request
+      // may still finish) - the UI switches to "Still finishing…" and the
+      // first request's result is polled instead.
+      const operationId = payload && typeof payload === "object" ? payload.operation_id : null;
+      // (Fix 096 A5) Status polls carry __noPoll, so a timed-out status check
+      // throws the ordinary timeout error instead of re-entering the poll loop.
+      const noPoll = Boolean(payload && typeof payload === "object" && payload.__noPoll);
+      if (typeof operationId === "string" && operationId && !noPoll) {
+        try {
+          (typeof onStillFinishing === "function" ? onStillFinishing : defaultStillFinishing)();
+        } catch (_ignored) { /* the poll below still runs */ }
+        return pollOperationResult(operationId);
+      }
+      throw new Error("The request took too long. Please try again.");
+    }
     throw error;
   } finally {
     clearTimeout(abortTimer);
   }
+}
+
+// (Fix 096 A5) Default "still finishing" UI for side-effecting calls that do
+// not supply their own hook.
+function defaultStillFinishing() {
+  toast("Still finishing…", false, 8000);
+}
+
+// (Fix 096 A5) Poll the read-only /api/operation-status endpoint until the
+// named operation is terminal, then return its result or throw its stored
+// error. The overall wait is capped so the UI can never wedge if the server
+// goes away mid-operation.
+async function pollOperationResult(operationId) {
+  const deadline = Date.now() + 10 * 60 * 1000;
+  for (;;) {
+    let status;
+    try {
+      status = await api("/api/operation-status", { operation_id: operationId, __noPoll: true }, { timeoutMs: 30000 });
+    } catch (error) {
+      // The status check itself failed: the operation may still be running,
+      // so mark it non-terminal - a retry must reuse this id.
+      error.operationStillRunning = true;
+      throw error;
+    }
+    if (status.operation_status === "done") return status.result;
+    if (status.operation_status === "error") throw new Error(status.error || "The earlier request failed.");
+    if (status.operation_status === "unknown") {
+      // The server has no record of this operation id: the first request may
+      // have completed and been pruned from the registry, or it may never
+      // have run. The outcome is INDETERMINATE - never "safe to try again".
+      // Pin the id as indeterminate so apiSideEffect() refuses a silent
+      // retry; the user must first establish whether the change landed (for
+      // example, reopen or refresh the Space and check), and only an explicit
+      // apiSideEffectStartOver() - separately confirmed in the UI as
+      // potentially duplicating the side effect - may clear it.
+      indeterminateOperationIds.add(operationId);
+      const error = new Error("The earlier request's outcome could not be established. Please check whether the change landed (for example, reopen or refresh the Space) before trying again - trying again now could apply the change twice.");
+      error.operationUnknown = true;
+      throw error;
+    }
+    if (Date.now() > deadline) {
+      // The operation may still be running: keep the id so a retry reuses it
+      // instead of minting a new one (which the server would execute again).
+      const error = new Error("The request is still finishing on the server. Please wait a little longer and try again.");
+      error.operationStillRunning = true;
+      throw error;
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+}
+
+// (Fix 096 A5) In-flight operation ids, keyed by a stable fingerprint of the
+// logical action (route + payload, minus any operation_id). A retry of the
+// same action reuses the first request's id until it is terminal, so the
+// server can never execute the same logical operation twice for one user
+// action. Entries are forgotten once the operation settles terminally. An
+// "unknown" registry result is indeterminate - the first request may already
+// have completed - so the id is never forgotten silently: it is pinned in
+// indeterminateOperationIds, and apiSideEffect() refuses any further silent
+// attempt for that id until the user explicitly confirms a fresh start.
+const inFlightOperationIds = new Map();
+const indeterminateOperationIds = new Set();
+
+function stableStringify(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return "[" + value.map(stableStringify).join(",") + "]";
+  return "{" + Object.keys(value).sort()
+    .map(key => JSON.stringify(key) + ":" + stableStringify(value[key]))
+    .join(",") + "}";
+}
+
+function operationFingerprint(path, payload) {
+  const body = { ...(payload || {}) };
+  delete body.operation_id;
+  return path + "\n" + stableStringify(body);
+}
+
+function mintOperationId() {
+  return (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+    ? crypto.randomUUID()
+    : `op-${Date.now()}-${Math.floor(Math.random() * 1000000000)}`;
+}
+
+// (Fix 096 A5) Side-effecting requests go through here. Each logical action
+// gets one operation_id, remembered in inFlightOperationIds and reused by any
+// retry until the operation is terminal (pass operationId to pin an explicit
+// id instead, which bypasses the map); the server registry guarantees the
+// operation never executes twice for the same id. If the browser's wait times
+// out, the UI switches to "Still finishing…" via onStillFinishing and the
+// first request's result is polled instead of inviting a duplicate. If the
+// outcome becomes indeterminate (server reports "unknown"), the id stays
+// pinned and any further silent attempt for it is refused - the user must
+// first establish whether the first request completed, and only an explicit
+// apiSideEffectStartOver() (separately confirmed in the UI as potentially
+// duplicating) may proceed.
+async function apiSideEffect(path, payload, { timeoutMs = 60000, operationId = null, onStillFinishing = null } = {}) {
+  const fingerprint = operationId ? null : operationFingerprint(path, payload);
+  let id = operationId || inFlightOperationIds.get(fingerprint);
+  if (!id) {
+    id = mintOperationId();
+    if (fingerprint) inFlightOperationIds.set(fingerprint, id);
+  }
+  if (indeterminateOperationIds.has(id)) {
+    // A previous attempt's outcome is indeterminate: refuse a silent retry.
+    // The user must establish whether the first request completed (for
+    // example, reopen or refresh the Space and check whether the change
+    // landed); only apiSideEffectStartOver() may proceed from here.
+    const error = new Error("The earlier request's outcome could not be established. Please check whether the change landed (for example, reopen or refresh the Space) before trying again - trying again now could apply the change twice.");
+    error.operationUnknown = true;
+    throw error;
+  }
+  const forget = () => { if (fingerprint) inFlightOperationIds.delete(fingerprint); };
+  let data;
+  try {
+    data = await api(path, { ...(payload || {}), operation_id: id }, { timeoutMs, onStillFinishing });
+  } catch (error) {
+    // Still running or indeterminate server-side: keep the id pinned. A
+    // pinned running id lets a retry reuse it; a pinned indeterminate id
+    // makes the entry guard above refuse any silent retry until the user
+    // explicitly confirms a fresh start. Any other outcome is terminal:
+    // forget it.
+    if (!error || (!error.operationStillRunning && !error.operationUnknown)) forget();
+    throw error;
+  }
+  if (data && data.operation_id === id && data.operation_status === "running") {
+    // A retry that reused an in-flight id: the server answered synchronously
+    // instead of executing again. Poll it exactly like a timed-out request.
+    try {
+      data = await pollOperationResult(id);
+    } catch (error) {
+      if (!error || (!error.operationStillRunning && !error.operationUnknown)) forget();
+      throw error;
+    }
+  }
+  forget();
+  return data;
+}
+
+// (Fix 096 A5) Explicit fresh attempt after an indeterminate outcome. The UI
+// offers this ONLY after telling the user to establish whether the first
+// request completed (for example, reopen or refresh the Space and check
+// whether the change landed), and labels the action as potentially applying
+// the change twice. It clears the pinned indeterminate id so the next
+// apiSideEffect() mints a genuinely fresh operation_id - never a reuse of the
+// indeterminate one. `operationId` is not accepted here: a caller-supplied id
+// would re-enter the same server operation that already returned "unknown".
+// This helper has no silent or internal callers.
+function apiSideEffectStartOver(path, payload, opts = {}) {
+  if (opts && opts.operationId) {
+    throw new TypeError("apiSideEffectStartOver does not accept operationId: the fresh start must mint a new operation_id.");
+  }
+  const fingerprint = operationFingerprint(path, payload);
+  const id = inFlightOperationIds.get(fingerprint);
+  if (id) indeterminateOperationIds.delete(id);
+  inFlightOperationIds.delete(fingerprint);
+  const { operationId: _ignored, ...rest } = opts;
+  return apiSideEffect(path, payload, rest);
 }
 
 let toastTimer;
@@ -3623,16 +3802,6 @@ function baseTrimEnabled(design = state.design) {
   return design?.design_kind === "base_trim";
 }
 
-function storedPreference(key, fallback) {
-  if (!state.runtime.hosted) return state.catalog?.preferences?.[key] ?? fallback;
-  try {
-    const raw = localStorage.getItem(`wavefinity-${key.replaceAll("_", "-")}`);
-    return raw === null ? fallback : raw;
-  } catch (_error) {
-    return fallback;
-  }
-}
-
 // R76: connector settings are system-wide (desktop preferences file, or
 // browser localStorage when hosted). Only these six fields are remembered.
 const CONNECTOR_SETTINGS_KEY = "wavefinity-connector-settings-v1";
@@ -3690,6 +3859,10 @@ function restoreConnectorSettings() {
 }
 
 let lastSavedConnectorSettings = "";
+// Fix 096 A4: connector saves run one at a time, in the order the user made
+// them - an older request can never finish (and become durable) after a newer
+// one. A failed link never breaks the chain.
+let connectorSettingsQueue = Promise.resolve();
 function persistConnectorSettings() {
   const settings = readConnectorSettingsFields();
   if (!settings) return;
@@ -3700,23 +3873,15 @@ function persistConnectorSettings() {
     catch (_error) { toast("Connector settings could not be remembered in this browser.", true); }
     return;
   }
-  api("/api/preferences", { connector_settings: settings })
-    .then(() => {
-      lastSavedConnectorSettings = text;
-      if (state.catalog?.preferences) state.catalog.preferences.connector_settings = settings;
-    })
-    .catch(() => toast("Connector settings could not be remembered.", true));
+  connectorSettingsQueue = connectorSettingsQueue.then(() =>
+    api("/api/preferences", { connector_settings: settings })
+      .then(() => {
+        lastSavedConnectorSettings = text;
+        if (state.catalog?.preferences) state.catalog.preferences.connector_settings = settings;
+      })
+      .catch(() => toast("Connector settings could not be remembered.", true))
+  );
 }
-
-function saveSimplePreference(key, value) {
-  if (state.runtime.hosted) {
-    try { localStorage.setItem(`wavefinity-${key.replaceAll("_", "-")}`, String(value)); } catch (_error) {}
-    return;
-  }
-  api("/api/preferences", { [key]: value }).catch(() => {});
-  if (state.catalog?.preferences) state.catalog.preferences[key] = value;
-}
-
 
 // Shared by updateDesignFromForm() and designHasChanges() so both compute the
 // same box.lift_grabbers from the live form. Mirrors readStackForm:
@@ -4374,9 +4539,17 @@ function updateDesignFromForm() {
   syncSurfaceControls();
 }
 
+// Fix 096 A4: output saves run one at a time, in the order the user made
+// them - an older request can never finish (and become durable) after a newer
+// one. A failed link never breaks the chain.
+let outputPreferenceQueue = Promise.resolve();
 const saveOutputPreference = debounce(output => {
   if (state.runtime.hosted) return;
-  api("/api/preferences", { output }).catch(() => {});
+  outputPreferenceQueue = outputPreferenceQueue.then(() =>
+    // Fix 096 A4: a failed save must be visible instead of silent.
+    api("/api/preferences", { output })
+      .catch(() => toast("The output folder could not be remembered.", true))
+  );
 }, 500);
 
 async function showLog() {
@@ -4662,7 +4835,7 @@ function wireSidebar() {
     drag = null;
     resizer.classList.remove("dragging");
     if (resizer.hasPointerCapture(event.pointerId)) resizer.releasePointerCapture(event.pointerId);
-    try { localStorage.setItem("wavefinity-sidebar-width", String(width)); } catch (_error) {}
+    try { localStorage.setItem("wavefinity-sidebar-width", String(width)); } catch (_error) { toast("The sidebar width could not be remembered in this browser.", true); }
   });
   resizer.addEventListener("keydown", event => {
     if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
@@ -4670,7 +4843,7 @@ function wireSidebar() {
     const current = $(".controls").getBoundingClientRect().width;
     const width = Math.max(420, Math.min(window.innerWidth - 440, current + (event.key === "ArrowRight" ? 24 : -24)));
     shell.style.setProperty("--sidebar-width", `${width}px`);
-    try { localStorage.setItem("wavefinity-sidebar-width", String(Math.round(width))); } catch (_error) {}
+    try { localStorage.setItem("wavefinity-sidebar-width", String(Math.round(width))); } catch (_error) { toast("The sidebar width could not be remembered in this browser.", true); }
   });
 }
 
@@ -11532,7 +11705,8 @@ function wireSupportLayoutDialog() {
   $("#support-layout-dialog-open").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => {
     try { localStorage.setItem("wavefinity-3d-pick-help-dismissed",
-      $("#support-layout-remember").checked ? "1" : "0"); } catch (_error) {}
+      $("#support-layout-remember").checked ? "1" : "0"); }
+    catch (_error) { toast("Your choice could not be remembered in this browser.", true); }
   });
 }
 
@@ -13935,7 +14109,7 @@ async function generateParts(target) {
     if (target === "all" || target === "bin") {
       saveStage = "bin";
       setItemStatus("bin", "generating", "Saving…");
-      const binResult = await api("/api/generate", payload);
+      const binResult = await apiSideEffect("/api/generate", payload, { onStillFinishing: () => setItemStatus("bin", "generating", "Still finishing…") });
       if (designSpaceContext) DL.requireSpaceContext(designSpaceContext);
       saveOutput = binResult.output || saveOutput;
       const binFiles = await saveGeneratedFiles(binResult);
@@ -13949,7 +14123,7 @@ async function generateParts(target) {
         if (!names.length) throw new Error("No current bin files were saved.");
         const saved = await DL.inventoryCall("/api/drawer/design-source/status", {
           row_id: designRowId, action: "saved", file: names.join(", "), design: payload.design,
-        }, { context: designSpaceContext });
+        }, { context: designSpaceContext, sideEffect: true });
         DL.adopt(saved);
         DL.emit();
       }
@@ -13977,7 +14151,7 @@ async function generateParts(target) {
     if (target === "all" || target === "connector") {
       saveStage = "connector";
       setItemStatus("connector", "generating", "Saving…");
-      const connResult = await api("/api/connector", payload);
+      const connResult = await apiSideEffect("/api/connector", payload, { onStillFinishing: () => setItemStatus("connector", "generating", "Still finishing…") });
       saveOutput = connResult.output || saveOutput;
       if (connResult.connector_plan) {
         connectorPlan = connResult.connector_plan;
@@ -14133,7 +14307,7 @@ async function printModel(target = "bin", initiatingButton = null) {
         throw new Error(`The current design could not be saved to this Space, so nothing was sent: ${error.message}`);
       }
     }
-    const result = await api("/api/print", payload);
+    const result = await apiSideEffect("/api/print", payload, { onStillFinishing: () => { button.textContent = "Still finishing…"; } });
     if (result.partial) {
       // Bin/design files are a real side effect even though connectors or
       // the slicer step failed after them: never mark this row Printed, and
@@ -14150,7 +14324,7 @@ async function printModel(target = "bin", initiatingButton = null) {
             .filter(name => /\.3mf$/i.test(name)))];
           const saved = await DL.inventoryCall("/api/drawer/design-source/status", {
             row_id: designRowId, action: "saved", file: names.join(", "), design: payload.design,
-          }, { context: designSpaceContext });
+          }, { context: designSpaceContext, sideEffect: true });
           DL.adopt(saved);
           DL.emit();
         } catch (error) {
@@ -14178,7 +14352,7 @@ async function printModel(target = "bin", initiatingButton = null) {
           .filter(name => /\.3mf$/i.test(name)))];
         const printed = await DL.inventoryCall("/api/drawer/design-source/status", {
           row_id: designRowId, action: "printed", file: names.join(", "), design: payload.design,
-        }, { context: designSpaceContext });
+        }, { context: designSpaceContext, sideEffect: true });
         DL.adopt(printed);
         DL.emit();
       } catch (error) {

@@ -1835,6 +1835,9 @@ def drawer_routes(
         changes: dict[str, Any] = {
             "bin_updates": payload.get("bin_updates") or (),
             "new_bins": payload.get("new_bins") or (),
+            # Fix 096 A2: specs parallel to new_bins, attached atomically with
+            # their rows by _merge_inventory.
+            "new_bin_specs": payload.get("new_bin_specs") or (),
             "delete_ids": payload.get("delete_ids") or (),
         }
         if "layout" in payload and payload["layout"] is not None:
