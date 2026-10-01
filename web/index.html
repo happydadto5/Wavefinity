@@ -62,6 +62,11 @@
       <section class="control-section open" data-section="build">
         <div class="section-body">
           <div class="part-name-block">
+            <div id="design-bin-nav" class="design-bin-nav" role="group" aria-label="Switch bin" hidden>
+              <button type="button" id="design-bin-prev" class="button secondary dl-small" aria-label="Previous bin" title="Previous bin">‹</button>
+              <select id="design-bin-select" class="design-bin-select" aria-label="Current bin"></select>
+              <button type="button" id="design-bin-next" class="button secondary dl-small" aria-label="Next bin" title="Next bin">›</button>
+            </div>
             <label class="part-name-row"><span id="part-name-label">Bin Name</span>
               <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
             </label>
@@ -69,6 +74,7 @@
               <button type="button" id="designer-new-bin" class="button secondary major-action">New Bin</button>
               <button type="button" id="designer-duplicate" class="button secondary major-action">Duplicate Bin</button>
               <button type="button" id="ai-help-open" class="button secondary major-action">AI Design</button>
+              <button type="button" id="designer-delete-bin" class="button danger major-action" hidden>Delete Bin</button>
             </div>
             <span id="stack-note" class="stack-note" hidden></span>
           </div>

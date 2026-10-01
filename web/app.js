@@ -874,6 +874,7 @@ async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
       ? `Starting size: ${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm. Change Width and Depth to fit what you want to organize.`
       : "";
   }
+  if (typeof DP !== "undefined") { DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin(); }
 }
 
 // ------------------------------------------------------------ Fix 034 lifecycle
@@ -1107,6 +1108,7 @@ async function installLoadedDesignSource(rowId, spec, {
     state.cleanDesign = clone(spec);
     state.spaceStarterPreviewPending = false;
     state.designInventoryId = rowId;
+    if (typeof DP !== "undefined") { DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin(); }
     state.surfaceHeightPromptSkipped = false;
     state.drafts = {};
     state.binResizePending = false;

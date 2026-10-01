@@ -484,6 +484,103 @@ DP.editableSourceFor = one => {
     !(typeof isStructuralDesign === "function" && isStructuralDesign(spec));
 };
 
+// Shared stable ordering for the Design navigator and the post-delete handoff.
+// DL.bins order is the authority; editability comes from DP.editableSourceFor.
+DP.designNavRows = () => (DL.bins || []).slice();
+DP.designNavEditableRows = () => DP.designNavRows().filter(one => DP.editableSourceFor(one));
+
+// Coarse in-flight guard for Design navigation + Design delete. The
+// mode-switch "pending" indicator is visual only, so this flag (not just
+// state.designMutationBusy) serializes navigator moves and deletes.
+DP.designNavBusy = false;
+// Combined predicate: the extra nav/delete serialization PLUS the existing
+// Designer mutation state. Use this for all disabled states and handler
+// entry checks; never check DP.designNavBusy alone for those.
+DP.designNavBlocked = () => DP.designNavBusy || state.designMutationBusy;
+
+DP.refreshDesignBinNav = () => {
+  const host = $("#design-bin-nav"), select = $("#design-bin-select");
+  if (!host || !select) return;
+  const show = DP.mode === "design" && DL.active && DP.designNavRows().length > 0;
+  host.hidden = !show;
+  if (!show) return;
+  const currentId = state.designInventoryId;
+  select.innerHTML = "";
+  const unbound = new Option("New Bin", "");
+  if (!currentId) { unbound.selected = true; select.append(unbound); }
+  for (const one of DP.designNavRows()) {
+    const editable = DP.editableSourceFor(one);
+    const opt = new Option(DL.label(one), one.id);
+    opt.disabled = !editable;
+    if (one.id === currentId) opt.selected = true;
+    select.append(opt);
+  }
+  if (currentId && !DP.designNavRows().some(one => one.id === currentId)) {
+    const missing = new Option("New Bin", "");
+    missing.selected = true; select.prepend(missing);
+  }
+  const order = DP.designNavEditableRows().map(one => one.id);
+  const idx = order.indexOf(currentId);
+  $("#design-bin-prev").disabled = DP.designNavBlocked() || idx <= 0;
+  $("#design-bin-next").disabled = DP.designNavBlocked() || idx < 0 || idx >= order.length - 1;
+};
+
+DP.refreshDesignerDeleteBin = () => {
+  const btn = $("#designer-delete-bin");
+  if (!btn) return;
+  const one = state.designInventoryId && DL.bin(state.designInventoryId);
+  btn.hidden = !(DP.mode === "design" && one && DP.editableSourceFor(one));
+  btn.disabled = DP.designNavBlocked();
+};
+
+DP.stepDesignBin = async dir => {
+  if (DP.designNavBlocked() || DP.mode !== "design") return;
+  const order = DP.designNavEditableRows().map(one => one.id);
+  const idx = order.indexOf(state.designInventoryId);
+  if (idx < 0) return;
+  const target = order[idx + dir];
+  if (!target) return;
+  DP.designNavBusy = true;
+  DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+  try {
+    await DP.openInventoryRow(target);
+  } finally {
+    DP.designNavBusy = false;
+    DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+  }
+};
+
+$("#design-bin-prev").addEventListener("click", () => DP.stepDesignBin(-1));
+$("#design-bin-next").addEventListener("click", () => DP.stepDesignBin(1));
+$("#design-bin-select").addEventListener("change", async event => {
+  const id = event.target.value;
+  DP.refreshDesignBinNav();
+  if (!id || DP.designNavBlocked() || DP.mode !== "design") return;
+  const one = DL.bin(id);
+  if (!one || !DP.editableSourceFor(one)) return;
+  DP.designNavBusy = true;
+  DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+  try {
+    await DP.openInventoryRow(id);
+  } finally {
+    DP.designNavBusy = false;
+    DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+  }
+});
+$("#designer-delete-bin").addEventListener("click", async () => {
+  if (DP.designNavBlocked() || DP.mode !== "design") return;
+  const one = state.designInventoryId && DL.bin(state.designInventoryId);
+  if (!one || !DP.editableSourceFor(one)) return;
+  DP.designNavBusy = true;
+  DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+  try {
+    await DP.deleteRow(one, { fromDesign: true });
+  } finally {
+    DP.designNavBusy = false;
+    DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+  }
+});
+
 DP.openInventoryRow = async id => {
   const request = ++DP.modeRequest;
   const spaceContext = DL.spaceContext();
@@ -498,6 +595,7 @@ DP.openInventoryRow = async id => {
     DL.selectRow(id);
     DP.setMode("design");
     activatePreviewView(preferredDesignView());
+    DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
     return true;
   } finally {
     if (request === DP.modeRequest) DP.showPendingMode(null);
@@ -525,8 +623,10 @@ DP.duplicateRow = async one => {
 };
 
 // Every Delete button carries its row ID; never delete a stale selection.
-DP.deleteRow = async one => {
+DP.deleteRow = async (one, opts = {}) => {
   const context = DL.spaceContext();
+  const fromDesign = Boolean(opts.fromDesign);
+  const preDeleteOrder = fromDesign ? DP.designNavEditableRows().map(row => row.id) : null;
   const placed = DL.placedCount(one.id);
   // Only this explicit single-row confirmation uses the browser preference.
   const suppressed = DP.rowDeleteConfirmSuppressed();
@@ -553,8 +653,17 @@ DP.deleteRow = async one => {
     state.designInventoryId = null;
     state.cleanDesign = clone(state.design);
     if (typeof discardStaleFileRefreshRows === "function") discardStaleFileRefreshRows([one.id]);
-    DP.setMode("space");
-    activatePreviewView("drawer");
+    if (fromDesign && preDeleteOrder) {
+      // Stay in Design: next editable bin in pre-delete order, else previous,
+      // else a fresh New Bin. Never kick to Space from this path.
+      const remaining = preDeleteOrder.filter(id => id !== one.id && DL.bin(id) && DP.editableSourceFor(DL.bin(id)));
+      const nextId = remaining[Math.min(preDeleteOrder.indexOf(one.id), remaining.length - 1)];
+      if (nextId) await DP.openInventoryRow(nextId);
+      else await designerNewBin();
+    } else {
+      DP.setMode("space");
+      activatePreviewView("drawer");
+    }
   }
 };
 
@@ -1006,6 +1115,7 @@ DP.filteredBins = () => {
 };
 
 DP.renderInventory = (force = false) => {
+  if (DP.mode === "design") { DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin(); }
   DP.syncFilterSpace();
   const drawer = DL.drawer();
   const list = $("#dl-inv-list");
@@ -1168,6 +1278,7 @@ DP.setMode = mode => {
   if (!DL.active || (mode !== "space" && mode !== "design") || DP.mode === mode) return;
   DP.mode = mode;
   DP.applyMode();
+  DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
   if (mode === "space") DP.update();
 };
 
