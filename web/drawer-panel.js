@@ -866,11 +866,21 @@ DP.renderStats = () => {
   const warnings = [...DL.warnings, ...(DL.pegboardRefreshError
     ? [`Pegboard placement data could not be refreshed. ${DL.pegboardRefreshError}`]
     : [])].map(text => `<p class="dl-note dl-warning">${escapeHtml(text)}</p>`).join("");
-  if (!report) { box.innerHTML = warnings || `<p class="dl-note">Measuring…</p>`; return; }
+  if (!report) {
+    box.innerHTML = DL.reportError
+      ? `<p class="dl-note dl-warning">${escapeHtml(DL.reportError)}</p>
+         <button type="button" id="dl-report-retry" class="button secondary dl-small">Retry</button>
+         ${warnings}`
+      : warnings || '<p class="dl-note">Measuring…</p>';
+    $("#dl-report-retry")?.addEventListener("click", () => DL.requestReport());
+    return;
+  }
   // Only actionable problems and warnings stay in this panel.
   const problems = report.problems;
   box.innerHTML = `
-    ${problems.length ? `<ul class="dl-problems">${problems.slice(0, 8).map(p => `<li class="${DL.isAdvisoryProblem(p) ? "height" : ""}">${escapeHtml(p.message)}</li>`).join("")}${problems.length > 8 ? `<li>…and ${problems.length - 8} more</li>` : ""}</ul>` : ""}
+    ${problems.length ? `<ul class="dl-problems">${problems.map(p =>
+      `<li class="${DL.isAdvisoryProblem(p) ? "height" : ""}">${escapeHtml(p.message)}</li>`
+    ).join("")}</ul>` : ""}
     ${warnings}`;
   DP.updateSpacerHint();
 };

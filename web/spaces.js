@@ -29,14 +29,18 @@ const SP = {
 };
 const SP_KINDS = {
   // The internal kind stays "portable"; users only ever see "Storage Box".
-  portable: { icon: "🧰", label: "Storage Box" },
-  surface: { icon: "🔲", label: "Surface" },
-  drawer: { icon: "🗄️", label: "Drawer" },
-  storage_drawers: { icon: "🗃️", label: "Storage Drawers" },
-  pegboard: { icon: "🧱", label: "Pegboard" },
+  portable: { icon: "images/space-icon-storage-box-64.png", label: "Storage Box" },
+  surface: { icon: "images/space-icon-surface-64.png", label: "Surface" },
+  drawer: { icon: "images/space-icon-drawer-64.png", label: "Drawer" },
+  storage_drawers: { icon: "images/space-icon-storage-drawers-64.png", label: "Storage Drawers" },
+  pegboard: { icon: "images/space-icon-pegboard-64.png", label: "Pegboard" },
   // Legacy kind, readable for migration only - never a current Space type;
   // it presents as a Storage Box, its recovery destination.
-  box: { icon: "🧰", label: "Storage Box" },
+  box: { icon: "images/space-icon-storage-box-64.png", label: "Storage Box" },
+};
+SP.compactKindIcon = kind => {
+  const row = SP_KINDS[kind] || SP_KINDS.drawer;
+  return `<img class="space-kind-compact-icon" src="${escapeHtml(row.icon)}" alt="">`;
 };
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
@@ -1360,6 +1364,7 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   // itself is set inside SP.applyFolder(), never here.
   await WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null });
   await SP.applyFolder(info, { reset: false, browserFolder: folder });
+  await SP.rememberHostedRecent(folder, info);
   SP.close();
   if (openPreferredView && info.folder_mode === "space") {
     if (!(await SP.openTypedSpacePreferredView())) return null;
@@ -1507,12 +1512,15 @@ SP.renderRecent = () => {
     const kind = SP_KINDS[one.kind];
     const meta = [one.conflict ? "duplicate Space identity" : one.invalid ? "metadata unavailable" : space ? `${kind?.label || "Space"} · SPACE` : "Design folder", one.summary_text || SP.sizeText(one.size), one.missing ? "folder not found" : ""]
       .filter(Boolean).join(" · ");
-    const current = spSame(one.folder, state.output) ? " <em>current</em>" : "";
+    const current = state.runtime.hosted
+      ? (one.handle && state.browserFolder?.handle === one.handle ? " <em>current</em>" : "")
+      : (spSame(one.folder, state.output) ? " <em>current</em>" : "");
+    const folderLabel = state.runtime.hosted ? (one.folder_name || one.name) : one.folder;
     return `<li class="welcome-recent-item${unavailable ? " missing" : ""}">
-      <button type="button" class="welcome-recent-open" data-index="${index}" title="${escapeHtml(one.folder)}"${unavailable ? " disabled" : ""}>
-        <span class="welcome-recent-icon" aria-hidden="true">${space ? kind?.icon || "📦" : "📁"}</span>
+      <button type="button" class="welcome-recent-open" data-index="${index}" title="${escapeHtml(folderLabel)}"${unavailable ? " disabled" : ""}>
+        <span class="welcome-recent-icon" aria-hidden="true">${space ? SP.compactKindIcon(one.kind) : "📁"}</span>
         <span class="welcome-recent-text"><span><strong>${escapeHtml(one.name)}</strong>${current}</span>
-          <small>${escapeHtml(meta)}</small><small>${escapeHtml(one.folder)}</small></span>
+          <small>${escapeHtml(meta)}</small><small>${escapeHtml(folderLabel)}</small></span>
       </button>
       <button type="button" class="welcome-recent-forget" data-forget="${index}" title="Remove from this list" aria-label="Remove ${escapeHtml(one.name)} from recent folders">✕</button>
     </li>`;
@@ -1527,7 +1535,7 @@ SP.renderOtherSpaces = () => {
       const kind = SP_KINDS[one.kind];
       const meta = [kind?.label || "Space", one.summary_text || SP.sizeText(one.size)].filter(Boolean).join(" · ");
       return `<li class="welcome-recent-item"><button type="button" class="welcome-recent-open" data-other-index="${index}" title="${escapeHtml(one.folder)}">
-        <span class="welcome-recent-icon" aria-hidden="true">${kind?.icon || "📦"}</span>
+        <span class="welcome-recent-icon" aria-hidden="true">${SP.compactKindIcon(one.kind)}</span>
         <span class="welcome-recent-text"><strong>${escapeHtml(one.name)}</strong><small>${escapeHtml(meta)}</small></span>
       </button></li>`;
     }).join("");
@@ -1545,6 +1553,48 @@ SP.refreshOtherSpaces = async () => {
   }
 };
 
+SP.HOSTED_RECENT_KEY = "recent-folders-v1";
+
+SP.loadHostedRecent = async () => {
+  const rows = await WFFileSystem.load(SP.HOSTED_RECENT_KEY);
+  return Array.isArray(rows)
+    ? rows.filter(one => one?.handle && one.handle.kind === "directory").slice(0, 10)
+    : [];
+};
+
+SP.saveHostedRecent = async rows => {
+  await WFFileSystem.save(SP.HOSTED_RECENT_KEY, rows.slice(0, 10));
+};
+
+SP.sameHostedHandle = async (a, b) => {
+  if (a === b) return true;
+  if (!a || !b || typeof a.isSameEntry !== "function") return false;
+  try { return await a.isSameEntry(b); }
+  catch (_error) { return false; }
+};
+
+SP.rememberHostedRecent = async (folder, info) => {
+  if (!folder?.handle) return;
+  const prior = await SP.loadHostedRecent();
+  const kept = [];
+  for (const row of prior) {
+    if (!(await SP.sameHostedHandle(row.handle, folder.handle))) kept.push(row);
+  }
+  const space = info?.folder_mode === "space" ? info.space : null;
+  const row = {
+    handle: folder.handle,
+    name: space?.name || folder.name,
+    folder_name: folder.name,
+    folder_mode: info?.folder_mode || "design",
+    space_id: info?.space_id || null,
+    kind: space?.kind || null,
+    size: space ? [space.x, space.y, space.z] : null,
+    summary_text: info?.summary_text || "",
+  };
+  SP.recent = [row, ...kept].slice(0, 10);
+  await SP.saveHostedRecent(SP.recent);
+};
+
 SP.welcomeOtherSpaces = () => {
   SP.renderOtherSpaces();
   if (!SP.otherSpacesFresh) void SP.refreshOtherSpaces();
@@ -1556,7 +1606,7 @@ SP.showResume = info => {
   SP.showOnly("welcome-resume");
   const space = info.space || {};
   const kind = SP_KINDS[space.kind] || SP_KINDS.drawer;
-  $("#welcome-resume-icon").textContent = kind.icon;
+  $("#welcome-resume-icon").innerHTML = SP.compactKindIcon(space.kind);
   $("#welcome-resume-name").textContent = space.name || info.folder_name;
   $("#welcome-resume-meta").textContent = [kind.label, space.kind === "storage_drawers" ? SP.storageDrawersSummaryText(space) : SP.sizeText([space.x, space.y, space.z])].filter(Boolean).join(" · ");
   $("#welcome-resume-folder").textContent = info.folder;
@@ -2613,6 +2663,11 @@ SP.fail = (message, selector) => {
 // damaged/newer metadata itself - it only stops and explains.
 SP.launch = async () => {
   if (state.runtime.hosted) {
+    try {
+      SP.recent = await SP.loadHostedRecent();
+    } catch (_error) {
+      SP.recent = [];
+    }
     let saved = null;
     let hasPermission = false;
     try {
@@ -2821,10 +2876,23 @@ SP.wire = () => {
     const one = SP.recent[Number(forget ? forget.dataset.forget : open?.dataset.index)];
     if (!one) return;
     if (forget) SP.run(async () => {
-      SP.recent = (await api("/api/space/forget", { space_id: one.space_id || null, output: one.folder })).recent || [];
+      if (state.runtime.hosted) {
+        const kept = SP.recent.filter((_, index) =>
+          index !== Number(forget.dataset.forget));
+        SP.recent = kept;
+        await SP.saveHostedRecent(kept);
+      } else {
+        SP.recent = (await api("/api/space/forget", {
+          space_id: one.space_id || null, output: one.folder,
+        })).recent || [];
+      }
       SP.renderRecent();
     });
-    else SP.run(() => SP.afterPick(one.folder));
+    else SP.run(() => SP.afterPick(
+      state.runtime.hosted
+        ? { handle: one.handle, name: one.folder_name || one.name }
+        : one.folder
+    ));
   });
   document.querySelectorAll("[data-other-spaces-list]").forEach(list =>
     list.addEventListener("click", event => {

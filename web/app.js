@@ -145,6 +145,9 @@ const state = {
   layoutOrientation: "match3d",
   previewSupportPolygons: [],
   designMutationBusy: false,
+  designerHistory: [],
+  designerFuture: [],
+  designerHistoryRestoring: false,
   canGenerate: true,
   // Bin/Interior/Xray are independent on/off switches, not one exclusive
   // mode - each button flips only its own state (see setPreviewToggle()).
@@ -850,6 +853,7 @@ async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
   const design = freshDesignForCurrentFolder();
   if (overrideBox) Object.assign(design.box, overrideBox);
   state.design = design;
+  clearDesignerHistory();
   state.designInventoryId = null;
   state.lastOrdinaryDesign = clone(state.design);
   resetNestPhotoSession();
@@ -873,6 +877,8 @@ function applyDesignerLifecycleVisibility() {
   const hide = (selector, hidden) => { const el = $(selector); if (el) el.hidden = hidden; };
   hide("#designer-save-file", typed);
   hide("#designer-open-file-label", typed);
+  hide("#designer-history-actions", typeof DP !== "undefined" && DP.spaceEditing?.());
+  updateDesignerHistoryButtons();
 }
 
 function typedSpaceOrdinaryBin() {
@@ -1089,6 +1095,7 @@ async function installLoadedDesignSource(rowId, spec, {
     if (state.activeSpace !== sourceSpace || state.folderMode !== sourceFolder ||
         (acceptTransition && !acceptTransition())) return false;
     state.design = result.design;
+    clearDesignerHistory();
     state.lastOrdinaryDesign = clone(state.design);
     resetNestPhotoSession();
     state.cleanDesign = clone(spec);
@@ -1844,7 +1851,17 @@ async function designerNewBin(acceptTransition = null) {
   return withDeferredDraftSwitch(async () => {
   if (acceptTransition && !acceptTransition()) return false;
   if (state.folderMode === "space") {
-    if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
+    if (typedSpaceOrdinaryBin() &&
+        !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) {
+      const discard = await appConfirmAction({
+        title: "Discard Invalid Changes?",
+        message: "This bin has invalid changes that cannot be saved. Discard those changes and start a new bin?",
+        actionLabel: "Discard & Start New Bin",
+        cancelLabel: "Keep Editing",
+        danger: true,
+      });
+      if (!discard) return false;
+    }
     if (acceptTransition && !acceptTransition()) return false;
   } else if (designHasChanges() && !(await appConfirmAction({
     title: "Start a new bin?",
@@ -1993,11 +2010,119 @@ function pinDraftAxis(axis) {
   state.pinnedZone[axis] = true;
 }
 
+function designerHistorySnapshot(design = state.design) {
+  return {
+    design: clone(design),
+    selected: Number.isInteger(state.selected) ? state.selected : null,
+    draftSourceIndex: Number.isInteger(state.draftSourceIndex) ? state.draftSourceIndex : null,
+    modifierEditing: state.modifierEditing || null,
+    lastDesignView: state.lastDesignView,
+  };
+}
+
+function clearDesignerHistory() {
+  state.designerHistory = [];
+  state.designerFuture = [];
+  updateDesignerHistoryButtons();
+}
+
+function updateDesignerHistoryButtons() {
+  const undo = $("#designer-undo");
+  const redo = $("#designer-redo");
+  if (undo) undo.disabled = state.designerHistoryRestoring || !state.designerHistory.length;
+  if (redo) redo.disabled = state.designerHistoryRestoring || !state.designerFuture.length;
+}
+
 function noteCommittedDesignChange(before = null) {
-  if (before && JSON.stringify(before) === JSON.stringify(state.design)) return false;
+  if (!before || JSON.stringify(before) === JSON.stringify(state.design)) return false;
+  if (!state.designerHistoryRestoring) {
+    state.designerHistory.push(designerHistorySnapshot(before));
+    if (state.designerHistory.length > 100) state.designerHistory.shift();
+    state.designerFuture = [];
+    updateDesignerHistoryButtons();
+  }
   state.spaceStarterPreviewPending = false;
   return true;
 }
+
+async function restoreDesignerHistory(redo = false) {
+  if (state.designerHistoryRestoring || state.designMutationBusy) return;
+  if (typeof DP !== "undefined" && DP.spaceEditing?.()) return;
+  const from = redo ? state.designerFuture : state.designerHistory;
+  const to = redo ? state.designerHistory : state.designerFuture;
+  if (!from.length) return;
+
+  const target = from.pop();
+  to.push(designerHistorySnapshot());
+  state.designerHistoryRestoring = true;
+  updateDesignerHistoryButtons();
+  cancelChangedDesignDebounce();
+  pendingDesignHistory = null;
+  cancelPendingDraftWork();
+  invalidatePendingPreview();
+
+  try {
+    state.design = clone(target.design);
+    state.lastOrdinaryDesign = clone(state.design);
+    state.selected = null;
+    state.draft = null;
+    state.draftKind = null;
+    state.draftSourceIndex = null;
+    state.draftIsNew = false;
+    state.draftTouched = false;
+    state.draftAutoCommit = false;
+    state.modifierEditing = null;
+    state.edgeMountEditing = false;
+    bindLidMemoryForDesign();
+    syncForm();
+    clearDraftSelection(false);
+
+    if (target.modifierEditing && modifierIsActive(target.modifierEditing)) {
+      await openModifier(target.modifierEditing, true);
+    } else {
+      const index = Number.isInteger(target.draftSourceIndex)
+        ? target.draftSourceIndex
+        : target.selected;
+      if (Number.isInteger(index) && state.design.layout.features[index]) {
+        state.selected = index;
+        state.draftSourceIndex = index;
+        state.draftKind = state.design.layout.features[index].kind;
+        state.draft = clone(state.design.layout.features[index]);
+        state.draftAutoCommit = true;
+        state.draftIsNew = false;
+        state.draftTouched = false;
+        renderDraftFields();
+      }
+    }
+
+    state.canGenerate = false;
+    updateGenerateAvailability();
+    renderPlaced();
+    updateSelectionButtons();
+    activatePreviewView(target.lastDesignView === "2d" ? "2d" : "3d");
+    await refreshPreview();
+
+    if (typedSpaceOrdinaryBin()) {
+      const priorClean = clone(state.cleanDesign);
+      await persistSpaceDesignSource(priorClean, false);
+      await settleStaleFileRefresh();
+    }
+  } catch (error) {
+    const rollback = to.pop();
+    if (rollback?.design) state.design = clone(rollback.design);
+    from.push(target);
+    syncForm();
+    renderPlaced();
+    updateSelectionButtons();
+    toast(`Could not ${redo ? "redo" : "undo"} that Designer change: ${error.message}`, true, 7000);
+  } finally {
+    state.designerHistoryRestoring = false;
+    updateDesignerHistoryButtons();
+  }
+}
+
+const designerUndo = () => restoreDesignerHistory(false);
+const designerRedo = () => restoreDesignerHistory(true);
 
 function updateGenerateAvailability() {
   const binButton = $("#generate-bin");
@@ -4872,6 +4997,7 @@ const commitNudge = debounce(async request => {
     && state.draft === draft
     && JSON.stringify(draft) === snapshot;
   try {
+    const previousDesign = clone(state.design);
     const result = await api("/api/feature/apply", {
       design: state.design,
       feature: draft,
@@ -4880,7 +5006,7 @@ const commitNudge = debounce(async request => {
     if (!ownsRequest()) return;
     state.design = result.design;
     pendingNudgeDraft = null;
-    noteCommittedDesignChange();
+    noteCommittedDesignChange(previousDesign);
     if (request !== state.draftRequest) return;
     state.selected = result.selected;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
@@ -4961,18 +5087,6 @@ function formatHeightField() {
   input.value = `${fmt(val)}mm`;
 }
 
-function setSidebarCollapsed(collapsed) {
-  const shell = $("#app-shell");
-  const button = $("#sidebar-toggle");
-  shell.classList.toggle("sidebar-collapsed", collapsed);
-  if (button) {
-    button.setAttribute("aria-expanded", String(!collapsed));
-    button.title = collapsed ? "Show controls" : "Hide controls";
-    $("span", button).textContent = collapsed ? "Show controls" : "Hide controls";
-  }
-  try { localStorage.setItem("wavefinity-sidebar-collapsed", collapsed ? "1" : "0"); } catch (_error) {}
-  requestAnimationFrame(() => { renderPreview3D(); renderLayout2D(); });
-}
 
 function wireSidebar() {
   const shell = $("#app-shell");
@@ -4980,12 +5094,11 @@ function wireSidebar() {
   let drag = null;
   try {
     const savedWidth = Number(localStorage.getItem("wavefinity-sidebar-width"));
-    if (Number.isFinite(savedWidth) && savedWidth >= 420) shell.style.setProperty("--sidebar-width", `${savedWidth}px`);
-    setSidebarCollapsed(localStorage.getItem("wavefinity-sidebar-collapsed") === "1");
-  } catch (_error) {
-    setSidebarCollapsed(false);
-  }
-  $("#sidebar-toggle")?.addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
+    if (Number.isFinite(savedWidth) && savedWidth >= 420) {
+      shell.style.setProperty("--sidebar-width", `${savedWidth}px`);
+    }
+    localStorage.removeItem("wavefinity-sidebar-collapsed");
+  } catch (_error) {}
   resizer.addEventListener("pointerdown", event => {
     drag = { startX: event.clientX, width: $(".controls").getBoundingClientRect().width };
     resizer.classList.add("dragging");
@@ -5490,6 +5603,8 @@ function wireControls() {
   // New Bin/Duplicate/Save/Load live at the bottom of the Designer.
   $("#designer-new-bin").addEventListener("click", designerNewBin);
   $("#designer-duplicate").addEventListener("click", designerDuplicate);
+  $("#designer-undo")?.addEventListener("click", () => designerUndo());
+  $("#designer-redo")?.addEventListener("click", () => designerRedo());
   aiWireHelp();
   $("#designer-save-file").addEventListener("click", saveDesign);
   $("#designer-open-file").addEventListener("change", openDesign);
@@ -10082,7 +10197,11 @@ function placedRowsMarkup(rows, { actions = false } = {}) {
     return `<div class="placed-item ${row.selected ? "selected" : ""} ${statusClass}" data-support-kind="${escapeHtml(row.kind)}">
       <div class="placed-item-content">
         <span class="placed-item-icon">${iconFor(row.kind)}</span>
-        <span class="placed-item-copy"><strong>${title}</strong><span class="placed-item-detail">${escapeHtml(row.detail)}</span></span>
+        <span class="placed-item-copy">
+          <strong>${title}</strong>
+          <span class="placed-item-detail">${escapeHtml(row.detail)}</span>
+          ${row.editing ? '<span class="placed-editing-status">Currently editing</span>' : ""}
+        </span>
       </div>
       ${rowActions}
     </div>`;
@@ -10095,10 +10214,15 @@ function wirePlacedRows(container) {
     row.style.setProperty("--support-color", kindColor(row.dataset.supportKind));
   });
   $$(".placed-item-edit[data-index]", container).forEach(button => button.addEventListener("click", async () => {
-    await selectedFeature(Number(button.dataset.index));
+    const index = Number(button.dataset.index);
+    if (Number.isInteger(index) && index === draftCommitIndex()) return;
+    await selectedFeature(index);
   }));
   $$(".placed-item-edit[data-kind]", container).forEach(button =>
-    button.addEventListener("click", () => openModifier(button.dataset.kind, true)));
+    button.addEventListener("click", () => {
+      if (state.modifierEditing === button.dataset.kind) return;
+      openModifier(button.dataset.kind, true);
+    }));
   $$(".placed-item-edit[data-draft]", container).forEach(button => button.addEventListener("click", () => {
     if (state.draft) selectKind(state.draft.kind);
   }));
@@ -10136,10 +10260,10 @@ function renderPlaced() {
   const rows = placedRowData();
   const activeRow = rows.find(row => row.editing) || null;
   renderActiveOptionRow(activeRow);
-  const siblingRows = rows.filter(row => !row.editing);
   const added = $("#added-parts-list");
   if (added) {
-    added.innerHTML = placedRowsMarkup(siblingRows, { actions: true }) || '<div class="placed-empty">Nothing added yet.</div>';
+    added.innerHTML = placedRowsMarkup(rows, { actions: true }) ||
+      '<div class="placed-empty">Nothing added yet.</div>';
     wirePlacedRows(added);
   }
   const total = placedPartCount();
@@ -10258,9 +10382,9 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
     ? (result.message || result.feature_errors[0] || result.draft_error
       || "The current settings cannot build a valid design.")
     : "");
-  $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
+  $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "";
   $("#preview-state").classList.toggle("status-error", Boolean(previewHasErrors));
-  $("#preview-state").classList.toggle("status-ok", !previewHasErrors);
+  $("#preview-state").classList.remove("status-ok");
   formatDimField("x");
   formatDimField("y");
   formatHeightField();
@@ -13992,6 +14116,7 @@ async function openDesign(event) {
       throw new Error("A Storage Box or Base Trim is saved from its Space, not opened in the Designer.");
     }
     state.design = result.design;
+    clearDesignerHistory();
     resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
     state.spaceStarterPreviewPending = false;
@@ -14022,14 +14147,13 @@ async function newDesign() {
     danger: true,
   }))) return;
   if (!beginDesignMutation()) return;
-  const previousDesign = clone(state.design);
   state.design = freshDesignForCurrentFolder();
+  clearDesignerHistory();
   state.surfaceHeightPromptSkipped = false;
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
   state.binResizePending = false;
   state.binFootprintResizePending = false;
-  noteCommittedDesignChange(previousDesign);
   state.drafts = {};
   bindLidMemoryForDesign();
   syncForm();

@@ -110,6 +110,22 @@ DV.clampPan = drawer => {
 // A perspective camera standing in front of and above the drawer, aimed at
 // its middle. At zoom 1 it stands just far enough back to frame the whole
 // drawer; zooming walks it in, never below the drawer's rim.
+DV.safeFrame = (width, height) => {
+  const canvas = $("#drawer-canvas");
+  const controls = $('.canvas-wrap[data-canvas="drawer"] .dl-view-controls');
+  const canvasBox = canvas?.getBoundingClientRect();
+  const controlBox = controls && !controls.hidden ? controls.getBoundingClientRect() : null;
+  const top = canvasBox && controlBox
+    ? Math.max(0, Math.min(height - 80, controlBox.bottom - canvasBox.top + 12))
+    : 0;
+  const bottom = 30;
+  return {
+    top,
+    bottom,
+    height: Math.max(80, height - top - bottom),
+    cy: top + Math.max(80, height - top - bottom) / 2,
+  };
+};
 DV.camera = (width, height, drawer, view = DV.view) => {
   const W = drawer.width;
   const D = drawer.depth;
@@ -117,13 +133,13 @@ DV.camera = (width, height, drawer, view = DV.view) => {
   const tilt = view.tilt * Math.PI / 180;
   const turn = view.turn * Math.PI / 180;
   const away = [Math.sin(turn) * Math.cos(tilt), -Math.cos(turn) * Math.cos(tilt), Math.sin(tilt)];
-  const focal = (height / 2) / Math.tan(17 * Math.PI / 180);   // a 34° field of view
+  const frame = DV.safeFrame(width, height);
+  const focal = (frame.height / 2) / Math.tan(17 * Math.PI / 180); // a 34° field of view
   const margin = 36;
-  const footer = 30;
   const halfW = Math.max(40, width / 2 - margin);
-  const halfH = Math.max(40, (height - footer) / 2 - margin);
+  const halfH = Math.max(40, frame.height / 2 - margin);
   const cx = width / 2;
-  const cy = (height - footer) / 2;
+  const cy = frame.cy;
   const basis = (target, dist) => {
     const f = V3.scale(away, -1);
     const r = V3.norm(V3.cross(f, [0, 0, 1]));
@@ -168,9 +184,13 @@ DV.camera = (width, height, drawer, view = DV.view) => {
 
 DV.pegboardCamera = (width, height, drawer) => {
   const pad = 34;
-  const scale = Math.max(0.05, Math.min((width - 2 * pad) / drawer.width, (height - 2 * pad) / drawer.depth) * DV.view.zoom);
+  const frame = DV.safeFrame(width, height);
+  const scale = Math.max(
+    0.05,
+    Math.min((width - 2 * pad) / drawer.width, (frame.height - 2 * pad) / drawer.depth) * DV.view.zoom,
+  );
   const left = (width - drawer.width * scale) / 2 - DV.view.panX * scale;
-  const top = (height - drawer.depth * scale) / 2 + DV.view.panY * scale;
+  const top = frame.cy - (drawer.depth * scale) / 2 + DV.view.panY * scale;
   return {
     W: drawer.width, D: drawer.depth, H: 0, eye: [drawer.width / 2, -1, drawer.depth / 2],
     project: point => [left + point[0] * scale, top + (drawer.depth - point[1]) * scale],
