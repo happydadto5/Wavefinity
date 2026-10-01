@@ -409,7 +409,8 @@ def check_layout(
                        "Only one Text is allowed on the base; change its Style or remove a duplicate")
             raise ValueError(message)
         text_destinations.add(destination)
-    for one in features:
+    bore_tool_paths: dict[int, Zone | None] = {}
+    for feature_index, one in enumerate(features):
         if one.kind not in FEATURE_BUILDERS:
             raise ValueError(
                 f"unknown holder {one.kind!r}; have "
@@ -442,9 +443,12 @@ def check_layout(
                 f"{whole.width:.1f} x {whole.depth:.1f} mm"
             )
         # A bore block may fit while the cylinder it holds intersects a side
-        # wall above it. Project the cylinder's axis to infinity; only the
-        # mouth-to-rim section can meet the finite-height bin wall.
+        # wall above it. Resolve this authoritative tool envelope once per Bore;
+        # the same rectangle is reused below for neighboring Divider/Post
+        # collisions instead of re-deriving any lean geometry.
         tool_path = bore_tool_clearance_zone(box, one, base_z) if one.kind == "bore" else None
+        if one.kind == "bore":
+            bore_tool_paths[feature_index] = tool_path
         if tool_path is not None and (
             tool_path.x0 < whole.x0 - 1e-6 or tool_path.x1 > whole.x1 + 1e-6
             or tool_path.y0 < whole.y0 - 1e-6 or tool_path.y1 > whole.y1 + 1e-6
@@ -454,15 +458,31 @@ def check_layout(
                 "grow the bin or reduce its angle"
             )
     # Zones may legitimately overlap once the parts inside them do not, so
-    # neighbours are judged on the floor each one actually covers.
+    # neighbours are judged on the floor each one actually covers. The extra
+    # Bore tool-path check is above-floor physical collision only and therefore
+    # uses the other part's real footprint with no floor-spacing inflation.
     occupied = occupied_zones(box, features, base_z, mode)
+    physical = [feature_footprint(box, one, base_z) for one in features]
     for index, one in enumerate(features):
         if is_text(one) and one.options.get("level") == "rim":
             continue
         for offset, other in enumerate(features[index + 1:], index + 1):
             if is_text(other) and other.options.get("level") == "rim":
                 continue
-            if mode == "fused" and (is_text(one) or is_text(other)):
+            tool_overlap = (
+                one.kind == "bore"
+                and other.kind in ("divider", "post")
+                and bore_tool_paths.get(index) is not None
+                and bore_tool_paths[index].overlaps(physical[offset])
+            ) or (
+                other.kind == "bore"
+                and one.kind in ("divider", "post")
+                and bore_tool_paths.get(offset) is not None
+                and bore_tool_paths[offset].overlaps(physical[index])
+            )
+            if tool_overlap:
+                overlaps = True
+            elif mode == "fused" and (is_text(one) or is_text(other)):
                 first = text_placed_outline(one) if is_text(one) else occupied[index].polygon
                 second = text_placed_outline(other) if is_text(other) else occupied[offset].polygon
                 overlaps = first.distance(second) < MIN_FEATURE_GAP

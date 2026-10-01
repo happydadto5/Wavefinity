@@ -703,6 +703,10 @@ def stack_summary(box: BoxSpec) -> dict:
         "body_z_mm": round(eff.z, 3),
         "lid_rise_mm": round(stack_lid_rise(box), 3),
         "lid_thickness_mm": lid_thickness_options(box),
+        "lid_label_backing_mm": (
+            round(lid_label_backing(eff), 3) if lid_enabled(box) else None
+        ),
+        "lid_label_min_backing_mm": LID_LABEL_MIN_BACKING,
         "lid_fit_mm": round(lid_fit_mm(box), 3) if lid_enabled(box) else None,
         "lid_above_top_mm": round(lid_above_top_height(box), 3),
         "wall_mm": round(eff.wall, 3),

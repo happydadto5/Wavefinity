@@ -50,6 +50,13 @@ SD_DETENT_CHANNEL_CLEAR_MM = 0.3
 SD_DETENT_RIB_WALL_MM = 1.2
 SD_REAR_PANEL_INSET_MM = 0.1
 # The plate ribs stop short of the side panel's top/bottom face: the panel bar
+SD_KEYHOLE_SHANK_MM = 5.2
+SD_KEYHOLE_HEAD_MM = 10.0
+SD_KEYHOLE_CAPTURE_TRAVEL_MM = 7.0
+SD_KEYHOLE_REINFORCEMENT_MM = 4.0
+SD_KEYHOLE_EDGE_MARGIN_MM = 4.0
+SD_KEYHOLE_ROW_SEPARATION_MM = 16.0
+SD_KEYHOLE_DRAWER_CLEARANCE_MM = 0.5
 # stands 0.25 mm past the dovetail root, plus 0.3 mm of clearance.
 SD_RIB_SEAT_GAP_MM = 0.55
 SD_LOW_RAIL_CLEAR_MM = 0.3
@@ -74,6 +81,7 @@ class StorageDrawersPlan:
     effective_top_mm: float
     resolved_frame_width_mm: float
     drawer_pitches_mm: tuple[float, ...]
+    usable_heights_mm: tuple[float, ...]
     components: tuple[StorageDrawerComponent, ...]
     warnings: tuple[str, ...]
 
@@ -99,6 +107,7 @@ class _Datum:
     top: float
     pitches: tuple[float, ...]
     floors: tuple[float, ...]
+    usable_heights: tuple[float, ...]
     fascia_bottoms: tuple[float, ...]
     fascia_tops: tuple[float, ...]
     fronts: tuple[_FrontPlan, ...]
@@ -138,6 +147,112 @@ def _catch_bump(x0, x1, y0, y1, z0, height):
     wedge = _extrude_polygon(ridge, x1 - x0)
     wedge.apply_transform(np.array([[0,0,1,x0],[1,0,0,0],[0,1,0,0],[0,0,0,1]], float))
     return wedge
+
+
+def _wall_mount_plan(block: dict, datum: _Datum) -> dict | None:
+    if block["wall_mounting"] == "off":
+        return None
+    if block["wall_mounting"] != "keyholes":
+        raise ValueError("Wall mounting must be Off or Keyholes")
+    count = int(block["wall_mount_keyholes_per_drawer"])
+    if count not in (2, 4):
+        raise ValueError("Keyholes per drawer level must be 2 or 4")
+
+    rear_lo = datum.track_reach + SD_REAR_PANEL_INSET_MM
+    rear_hi = datum.outer_x - datum.track_reach - SD_REAR_PANEL_INSET_MM
+    head_r = SD_KEYHOLE_HEAD_MM / 2.0
+    shank_r = SD_KEYHOLE_SHANK_MM / 2.0
+    left = rear_lo + head_r + SD_KEYHOLE_EDGE_MARGIN_MM
+    right = rear_hi - head_r - SD_KEYHOLE_EDGE_MARGIN_MM
+    if right - left < SD_KEYHOLE_HEAD_MM + 2.0 * SD_KEYHOLE_EDGE_MARGIN_MM:
+        raise ValueError(
+            "This cabinet is too narrow for safe wall-mount keyholes. "
+            "Increase X size or turn Wall mounting Off."
+        )
+    if datum.rear - SD_KEYHOLE_REINFORCEMENT_MM < datum.field_y + SD_KEYHOLE_DRAWER_CLEARANCE_MM:
+        raise ValueError(
+            "Wall-mount reinforcement would enter drawer travel. "
+            "Increase cabinet depth or turn Wall mounting Off."
+        )
+
+    holes = []
+    bridge_rows = []
+    for ordinal, (z0, z1) in enumerate(zip(datum.fascia_bottoms, datum.fascia_tops), 1):
+        low = z0 + head_r + SD_KEYHOLE_EDGE_MARGIN_MM
+        high = z1 - (
+            SD_KEYHOLE_CAPTURE_TRAVEL_MM + shank_r + SD_KEYHOLE_EDGE_MARGIN_MM
+        )
+        if high < low:
+            raise ValueError(
+                f"Drawer {ordinal} is too short for wall-mount keyholes. "
+                "Increase its height or turn Wall mounting Off."
+            )
+        if count == 2:
+            rows = ((low + high) / 2.0,)
+        else:
+            if high - low < SD_KEYHOLE_ROW_SEPARATION_MM:
+                raise ValueError(
+                    f"Drawer {ordinal} is too short for 4 keyholes. "
+                    "Use 2 keyholes or increase its height."
+                )
+            rows = (low, high)
+        for z in rows:
+            bridge_rows.append(z)
+            holes.extend(((left, z), (right, z)))
+    return {"holes": tuple(holes), "bridge_rows": tuple(bridge_rows)}
+
+
+def _rear_keyhole_cutter(x: float, z: float, datum: _Datum) -> trimesh.Trimesh:
+    y0 = datum.rear - SD_KEYHOLE_REINFORCEMENT_MM - 0.2
+    y1 = datum.rear + 0.2
+    depth = y1 - y0
+
+    def cylinder(radius: float, centre_z: float) -> trimesh.Trimesh:
+        mesh = trimesh.creation.cylinder(radius=radius, height=depth, sections=48)
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2.0, (1, 0, 0)))
+        mesh.apply_translation((x, (y0 + y1) / 2.0, centre_z))
+        return mesh
+
+    head = cylinder(SD_KEYHOLE_HEAD_MM / 2.0, z)
+    slot = _box(
+        x - SD_KEYHOLE_SHANK_MM / 2.0, y0, z,
+        x + SD_KEYHOLE_SHANK_MM / 2.0, y1,
+        z + SD_KEYHOLE_CAPTURE_TRAVEL_MM,
+    )
+    capture = cylinder(
+        SD_KEYHOLE_SHANK_MM / 2.0,
+        z + SD_KEYHOLE_CAPTURE_TRAVEL_MM,
+    )
+    return union([head, slot, capture])
+
+
+def _wall_mount_reinforcement(
+    plan: dict | None, datum: _Datum, *, cross: bool,
+) -> list[trimesh.Trimesh]:
+    if plan is None:
+        return []
+    head_r = SD_KEYHOLE_HEAD_MM / 2.0
+    shank_r = SD_KEYHOLE_SHANK_MM / 2.0
+    rear_lo = datum.track_reach + SD_REAR_PANEL_INSET_MM
+    rear_hi = datum.outer_x - datum.track_reach - SD_REAR_PANEL_INSET_MM
+    y0 = datum.rear - SD_KEYHOLE_REINFORCEMENT_MM
+    pieces = []
+    for x, z in plan["holes"]:
+        pieces.append(_box(
+            x - head_r - SD_KEYHOLE_EDGE_MARGIN_MM, y0,
+            z - head_r - SD_KEYHOLE_EDGE_MARGIN_MM,
+            x + head_r + SD_KEYHOLE_EDGE_MARGIN_MM, datum.rear,
+            z + SD_KEYHOLE_CAPTURE_TRAVEL_MM + shank_r + SD_KEYHOLE_EDGE_MARGIN_MM,
+        ))
+    if cross:
+        half = (SD_KEYHOLE_HEAD_MM + 2.0 * SD_KEYHOLE_EDGE_MARGIN_MM) / 2.0
+        for z in sorted(set(plan["bridge_rows"])):
+            pieces.append(_box(
+                rear_lo, y0, z - half,
+                rear_hi, datum.rear,
+                z + SD_KEYHOLE_CAPTURE_TRAVEL_MM + shank_r + SD_KEYHOLE_EDGE_MARGIN_MM,
+            ))
+    return pieces
 
 
 def _sliding_dovetail(center_x, y0, y1, root_z, direction, land, *, female=False):
@@ -239,6 +354,11 @@ def _make_datum(space):
     frame = (max(block["open_frame_width_mm"], structural_frame)
              if block["cabinet_style"] == "open" else structural_frame)
     floors = tuple(floors)
+    # Fix 096 B5: physical bin clearance is measured from each flat drawer
+    # floor to the underside of the structure above it. The pitch already
+    # contains drawer_base + fit, so after removing the structure thickness
+    # the real usable height is the requested clear height plus fit.
+    usable_heights = tuple(row["height_mm"] + fit for row in block["drawers"])
     # The lower sliding dovetail reaches down to the base plate's top face.
     side_bottom_z = min(base,
                         *(floor-SD_RAIL_LEDGE_MM-fit for floor in floors))
@@ -247,9 +367,15 @@ def _make_datum(space):
     fascia_tops = tuple(floor + row["height_mm"] for floor, row in zip(floors, block["drawers"]))
     return _Datum(x, y, panel, joint_land, track_reach, drawer_wall, block["drawer_base_mm"], fit,
                   SD_RAIL_LEDGE_MM, front, projection, rear, body_depth, outer_x, outer_y,
-                  base, top, pitches, floors, fascia_bottoms, fascia_tops, fronts,
+                  base, top, pitches, floors, usable_heights, fascia_bottoms, fascia_tops, fronts,
                   side_bottom_z, lowest_z,
                   base + lift + sum(pitches) + top, frame)
+
+
+def storage_drawers_usable_heights(space: dict) -> tuple[float, ...]:
+    """Physical floor-to-ceiling clearance for each drawer, in descriptor order."""
+    canonical = normalise_storage_drawers_definition(space)
+    return _make_datum(canonical).usable_heights
 
 
 def _front_plan(block, width, row, ordinal):
@@ -562,6 +688,7 @@ def _datum_components(space, datum):
     # Body edges sit a hair inside the side rail faces; only the tabs enter the grooves.
     rear_lo = datum.track_reach+SD_REAR_PANEL_INSET_MM
     rear_hi = datum.outer_x-datum.track_reach-SD_REAR_PANEL_INSET_MM
+    wall_mount = _wall_mount_plan(block, datum)
     def rear_keys():
         tabs = []
         for x0 in (datum.track_reach-rear_t/2, datum.outer_x-datum.track_reach-rear_t/2):
@@ -574,7 +701,16 @@ def _datum_components(space, datum):
         def rear_mesh():
             panel = _box(rear_lo, datum.rear-rear_t, datum.base,
                          rear_hi, datum.rear, datum.outer_z-datum.top)
-            return union([panel, *rear_keys()])
+            body = union([
+                panel, *rear_keys(),
+                *_wall_mount_reinforcement(wall_mount, datum, cross=False),
+            ])
+            if wall_mount is not None:
+                body = difference([
+                    body,
+                    *(_rear_keyhole_cutter(x, z, datum) for x, z in wall_mount["holes"]),
+                ])
+            return body
         add("rear_solid", "Rear Solid Back",
             (datum.outer_x-2*datum.track_reach+rear_t, rear_t,
              datum.outer_z-datum.top-datum.base/2), rear_mesh,
@@ -594,7 +730,16 @@ def _datum_components(space, datum):
             poly = poly.simplify(1e-6)
             mesh = _extrude_polygon(poly, rear_t)
             mesh.apply_transform(np.array([[1,0,0,0],[0,0,1,datum.rear-rear_t],[0,1,0,0],[0,0,0,1]], float))
-            return union([mesh, *rear_keys()])
+            body = union([
+                mesh, *rear_keys(),
+                *_wall_mount_reinforcement(wall_mount, datum, cross=True),
+            ])
+            if wall_mount is not None:
+                body = difference([
+                    body,
+                    *(_rear_keyhole_cutter(x, z, datum) for x, z in wall_mount["holes"]),
+                ])
+            return body
         add("rear_cross", "Rear Cross Brace",
             (datum.outer_x-2*datum.track_reach+rear_t, rear_t,
              datum.outer_z-datum.top-datum.base/2), rear_mesh,
@@ -704,7 +849,7 @@ def resolve_storage_drawers_plan(space: dict, *, build_meshes: bool = True) -> S
     return StorageDrawersPlan(canonical, (datum.outer_x, datum.outer_y,
                                          datum.outer_z-datum.lowest_z+stack_projection),
                               datum.base, datum.top, datum.frame, datum.pitches,
-                              tuple(components), tuple(warnings))
+                              datum.usable_heights, tuple(components), tuple(warnings))
 
 
 _FIT_ADVICE = {
@@ -751,7 +896,10 @@ def storage_drawers_summary(space: dict, printer_profile: dict | None = None) ->
             "drawer_count": len(plan.drawer_pitches_mm),
             "cabinet_style": block["cabinet_style"],
             "printer_mm": [profile["x_mm"], profile["y_mm"], profile["z_mm"]],
-            "drawers": [{"id": row["id"], "name": f"Drawer {i}", "height_mm": row["height_mm"], "pitch_mm": plan.drawer_pitches_mm[i-1]}
+            "drawers": [{"id": row["id"], "name": f"Drawer {i}",
+                         "height_mm": row["height_mm"],
+                         "usable_height_mm": plan.usable_heights_mm[i-1],
+                         "pitch_mm": plan.drawer_pitches_mm[i-1]}
                         for i, row in enumerate(block["drawers"], 1)],
             "effective_material": {"base_mm": plan.effective_base_mm, "top_mm": plan.effective_top_mm,
                                    "frame_width_mm": plan.resolved_frame_width_mm if block["cabinet_style"] == "open" else None},

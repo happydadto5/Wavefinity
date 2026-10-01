@@ -344,6 +344,15 @@ DL.edgeMountEnvelope = one => {
 DL.envelopeExt = (one, drawer = DL.drawer()) => {
   const ex = { l: 0, t: 0, r: 0, b: 0 };
   if (DL.isPegboard(drawer)) return ex;
+  const measured = DL.report?.physical_envelopes?.[one.id];
+  if (measured && ["l", "t", "r", "b"].every(side => Number.isFinite(Number(measured[side])))) {
+    return Object.fromEntries(["l", "t", "r", "b"].map(side => [
+      side, Math.max(0, Math.ceil(Number(measured[side]))),
+    ]));
+  }
+  // Startup/error fallback preserves the pre-B2 Edge Mount behavior. A leaned
+  // Bore is not placeable until the authoritative report has arrived; see
+  // DL.fitsAt below.
   const envelope = DL.edgeMountEnvelope(one);
   if (!envelope) return ex;
   const grid = DL.grid(drawer);
@@ -351,6 +360,9 @@ DL.envelopeExt = (one, drawer = DL.drawer()) => {
   ex[{ front: "t", back: "b", left: "l", right: "r" }[envelope.side]] = Math.ceil(envelope.projection_mm / axisStep);
   return ex;
 };
+DL.needsMeasuredBoreEnvelope = one => (
+  DL.layout?.design_specs?.[one.id]?.layout?.features || []
+).some(feature => feature?.kind === "bore" && Number(feature?.options?.angle || 0) > 0);
 DL.envelopeExtForBins = (bins, drawer = DL.drawer()) => bins.reduce((total, one) => {
   const ex = DL.envelopeExt(one, drawer);
   for (const side of ["l", "t", "r", "b"]) total[side] = Math.max(total[side], ex[side]);
@@ -528,6 +540,11 @@ DL.findPlacement = key => {
 DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set(), { skipHeight = false } = {}) => {
   if (DL.isPegboard(drawer) && DL.pegboardRefreshError) {
     return { ok: false, reason: "Pegboard placement data is unavailable. Select Space again to retry the refresh." };
+  }
+  if (!DL.isPegboard(drawer) &&
+      DL.bins.some(one => DL.needsMeasuredBoreEnvelope(one)) &&
+      !DL.report?.physical_envelopes) {
+    return { ok: false, reason: "Physical placement data is still loading. Try the placement again." };
   }
   const grid = DL.grid(drawer);
   const [w, d] = DL.cells(bins[0], drawer);
@@ -750,6 +767,9 @@ DL.adopt = data => {
   if (data.storage_box_headroom_default_mm !== undefined) DL.storageBoxHeadroomDefault = data.storage_box_headroom_default_mm;
   if (DL.layout && data.layout && Object.hasOwn(data.layout, "design_specs")) {
     DL.layout.design_specs = DL.cleanTextConsent(data.layout.design_specs);
+    // Any saved-design change can alter a leaned Bore's reference envelope.
+    // Refuse to reuse the old report until requestReport() returns the new map.
+    DL.report = null;
   }
 };
 

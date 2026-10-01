@@ -39,7 +39,7 @@
     const recovery = el("section", "sd-recovery", ""); recovery.hidden = true;
     const recoveryTitle = el("h3", "", "Cabinet settings need repair");
     const recoveryMessage = el("p", "sd-recovery-message", "");
-    const recoveryNote = el("p", "sd-help", "Your Inventory and bin designs are untouched. Resetting keeps every drawer that is still valid and replaces only what is damaged with current defaults.");
+    const recoveryNote = el("p", "sd-help", "Your Inventory and bin designs are untouched. Resetting keeps each usable drawer identity and restores only damaged cabinet or drawer fields to current defaults.");
     const reset = el("button", "button primary", "Reset cabinet settings"); reset.type = "button";
     reset.addEventListener("click", () => callbacks.resetCabinet?.());
     recovery.append(recoveryTitle, recoveryMessage, recoveryNote, reset);

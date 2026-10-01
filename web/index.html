@@ -105,6 +105,7 @@
               <div class="setting-group"><span class="setting-group-label">Planning</span>
                 <div class="field-grid two">
                   <label title="The object's full physical height or length. Wavefinity uses it only to plan this Surface.">Object height <span class="unit">mm</span><input id="surface-object-height" type="number" min="0.1" step="0.1" placeholder="Not set"></label>
+                  <p id="surface-object-height-inline-error" class="field-error" hidden></p>
                   <span id="surface-planning-height" class="muted"></span>
                 </div>
                 <p class="muted surface-bin-help">Planning only — does not change the bin.</p>
@@ -312,7 +313,7 @@
                       <input id="edge-mount-label-projection-mm" type="number" min="5" max="200" step="0.1">
                     </label>
                     <label class="edge-mount-compact-number">Thickness <span class="unit">mm</span>
-                      <input id="edge-mount-label-thickness-mm" type="number" min="0.8" max="4" step="0.1">
+                      <input id="edge-mount-label-thickness-mm" type="number" min="0.8" max="6" step="0.1">
                     </label>
                   </div>
 
@@ -361,6 +362,7 @@
                     </label>
                     <label class="inline-select edge-mount-compact-select">Access
                       <select id="edge-mount-access-diameter">
+                        <option value="auto">Auto</option>
                         <option value="6">Small (6 mm)</option>
                         <option value="8">Default (8 mm)</option>
                         <option value="10">Large (10 mm)</option>

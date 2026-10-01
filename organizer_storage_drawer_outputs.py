@@ -18,8 +18,8 @@ from organizer_storage_drawers import normalise_storage_drawers_definition
 from organizer_storage_drawer_geometry import resolve_storage_drawers_plan
 
 STRUCTURAL_OUTPUT_KEY = "storage_drawers"
-# Version 2: real printable meshes, exported in the orientation the fit check chose.
-STRUCTURAL_GENERATOR_VERSION = 2
+# Version 3: Fix 096 wall-mount settings participate in structural currentness.
+STRUCTURAL_GENERATOR_VERSION = 3
 # The exact app-owned namespace for temp files and rollback backups in a Space folder.
 CABINET_DEBRIS_PREFIX = ".wavefinity-cabinet-"
 # (Fix 096 A7) The local transaction namespace: only files under this prefix
@@ -46,6 +46,8 @@ def effective_structural_state(space: dict) -> dict:
                      **({"label_text": row["label_text"]} if block["drawer_labels_enabled"] and row["label_text"] else {})}
                     for row in block["drawers"]],
         "cabinet_style": block["cabinet_style"], "rear_support": block["rear_support"],
+        "wall_mounting": block["wall_mounting"],
+        "wall_mount_keyholes_per_drawer": block["wall_mount_keyholes_per_drawer"],
         "drawer_fit_mm": block["drawer_fit_mm"], "drawer_handles": block["drawer_handles"],
         "stacking": block["stacking"], "unit_label_enabled": block["unit_label_enabled"],
         "drawer_labels_enabled": block["drawer_labels_enabled"],
