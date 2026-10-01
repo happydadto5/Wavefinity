@@ -133,7 +133,7 @@ from organizer_stack import (
     validate_stack_design,
 )
 from organizer_inventory import append_bin
-from organizer_inserts._bore import bore_reference_meshes
+from organizer_inserts._bore import bore_reference_meshes, bore_tool_clearance_zone
 from organizer_inserts._cradle import cradle_reference_meshes
 from organizer_inserts import (
     CRADLE_FLOOR_GAP,
@@ -896,6 +896,30 @@ def _reference_preview_meshes(box: BoxSpec, one: Feature, base_z: float) -> list
     return [mesh]
 
 
+def bore_reference_envelope_extensions(
+    box: BoxSpec, layout: Layout,
+) -> dict[str, float]:
+    """Millimetres a leaned Bore's stored-object reference reaches past the bin.
+
+    This deliberately measures the same `bore_reference_meshes()` that Preview
+    draws. No angle, segment, or item geometry is re-derived here.
+    """
+    base_z = base_height(box, layout.mode)
+    half_x, half_y = box.x / 2.0, box.y / 2.0
+    result = {"l": 0.0, "t": 0.0, "r": 0.0, "b": 0.0}
+    for one in layout.features:
+        if one.kind != "bore" or one.item is None:
+            continue
+        for mesh in bore_reference_meshes(box, one, base_z):
+            minx, miny = float(mesh.bounds[0][0]), float(mesh.bounds[0][1])
+            maxx, maxy = float(mesh.bounds[1][0]), float(mesh.bounds[1][1])
+            result["l"] = max(result["l"], -half_x - minx)
+            result["t"] = max(result["t"], -half_y - miny)
+            result["r"] = max(result["r"], maxx - half_x)
+            result["b"] = max(result["b"], maxy - half_y)
+    return {side: max(0.0, value) for side, value in result.items()}
+
+
 def _customization_zones(
     box: BoxSpec,
     label: str = "",
@@ -1360,7 +1384,29 @@ def preview_geometry(
         None if (is_text(one) and one.options.get("level") == "rim") else zone
         for one, zone in zip(features, occupied_zones(box, features, base_z, mode))
     ]
+    preview_bore_tool_paths: dict[int, Zone | None] = {}
+
+    def preview_bore_tool_path(one: Feature) -> Zone | None:
+        if one.kind != "bore":
+            return None
+        key = id(one)
+        if key not in preview_bore_tool_paths:
+            preview_bore_tool_paths[key] = bore_tool_clearance_zone(box, one, base_z)
+        return preview_bore_tool_paths[key]
+
     def floor_overlap(a: Feature, a_zone: Zone, b: Feature, b_zone: Zone) -> bool:
+        if (
+            a.kind == "bore"
+            and b.kind in ("divider", "post")
+            and preview_bore_tool_path(a) is not None
+            and preview_bore_tool_path(a).overlaps(feature_footprint(box, b, base_z))
+        ) or (
+            b.kind == "bore"
+            and a.kind in ("divider", "post")
+            and preview_bore_tool_path(b) is not None
+            and preview_bore_tool_path(b).overlaps(feature_footprint(box, a, base_z))
+        ):
+            return True
         if mode == "fused" and (is_text(a) or is_text(b)):
             a_shape = text_placed_outline(a) if is_text(a) else a_zone.polygon
             b_shape = text_placed_outline(b) if is_text(b) else b_zone.polygon
@@ -1759,10 +1805,7 @@ def preview_geometry(
             separate_label = make_edge_mount_label_part(box)
             if separate_label is not None:
                 geometry.extend(_mesh_preview_geometry(separate_label, "edge_mount"))
-        try:
-            edge_text = edge_mount_text_object(box)
-        except ValueError:
-            edge_text = None
+        edge_text = edge_mount_text_object(box)
         if edge_text is not None:
             _edge_label, edge_mesh, _edge_raised = edge_text
             geometry.extend(_mesh_preview_geometry(edge_mesh, "label"))

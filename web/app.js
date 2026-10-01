@@ -89,6 +89,7 @@ const state = {
   // whenever a different design is bound to the editor - see syncForm().
   lidMemory: null,
   lidThicknessReport: null,
+  lidLabelBackingReport: null,
   lidThicknessEpoch: 0,
   lidThicknessFormKey: null,
   // Set while a user-driven Width/Length edit waits for grow-only minimum
@@ -708,7 +709,7 @@ function ordinaryBinMinimumHeight() {
   return number(
     state.catalog?.drawer_rules?.ordinary_bin_min_height_mm,
     Math.ceil(
-      number(state.catalog?.base_rules?.default_mm, 0.6)
+      number(state.catalog?.base_rules?.default_mm, 0.8)
       + number(state.catalog?.min_height_above_base_mm, 5),
     ),
   );
@@ -2309,6 +2310,39 @@ function setDesignInvalidOverlay(message = "") {
   });
 }
 
+const TEXT_DEPTH_NAMES = new Map([
+  ["0.2", "Thin"], ["0.4", "Default"], ["0.6", "Thick"], ["0.8", "Thickest"],
+]);
+
+function textDepthChoices(info = partInfo("text")) {
+  const depth = (info?.options || []).find(option => option.key === "depth");
+  return (depth?.choices || []).map(choice => {
+    const value = Number(choice.value);
+    const name = TEXT_DEPTH_NAMES.get(String(value));
+    return {
+      value,
+      label: name ? `${name} ${value} mm` : (choice.label || `${value} mm`),
+    };
+  }).filter(choice => Number.isFinite(choice.value));
+}
+
+function textBackingRules() {
+  return state.catalog?.text_depth_rules || {};
+}
+
+function baseTextReceivingThickness(design = state.design) {
+  const base = number(design?.box?.base_thickness, NaN);
+  if (!Number.isFinite(base)) return NaN;
+  if ((design?.layout?.mode || "fused") === "fused") return base;
+  return base + number(textBackingRules().removable_base_plate_mm, 0);
+}
+
+function inlayDepthLegal(depth, receivingThickness, minimumBacking) {
+  return Number.isFinite(depth) && Number.isFinite(receivingThickness) &&
+    Number.isFinite(minimumBacking) &&
+    depth <= receivingThickness - minimumBacking + 1e-9;
+}
+
 function partInfo(kind = state.draftKind) {
   return state.catalog.parts.find(part => part.kind === kind);
 }
@@ -2541,7 +2575,7 @@ function readEdgeMountForm(design) {
   const thicknessWasEdited = thicknessRaw !== (thicknessInput?.dataset.storedValue ?? thicknessRaw);
   let thickness = current.label_thickness_mm;
   if (thicknessWasEdited) {
-    const clamped = Math.min(4, Math.max(0.8, number(thicknessRaw, current.label_thickness_mm)));
+    const clamped = Math.min(6, Math.max(0.8, number(thicknessRaw, current.label_thickness_mm)));
     thickness = Math.round((clamped + Number.EPSILON) * 10) / 10;
     if (thicknessInput && thicknessRaw !== "") {
       thicknessInput.value = fmt(thickness);
@@ -2560,6 +2594,26 @@ function readEdgeMountForm(design) {
   const labelRaised = labelType === "separate"
     ? false
     : labelMode === "none" ? current.label_raised : $("#edge-mount-label-style")?.value === "raised";
+  const requestedTextDepth = number(
+    $("#edge-mount-label-depth")?.value, current.label_text_depth_mm,
+  );
+  const labelTextDepth = labelRaised
+    ? requestedTextDepth
+    : Math.min(requestedTextDepth, edgeMountLegalInlayDepth({
+        ...current,
+        label_thickness_mm: thickness,
+        label_type: labelType,
+        label_raised: labelRaised,
+      }));
+  if ($("#edge-mount-label-depth") && !labelRaised) {
+    $("#edge-mount-label-depth").max = String(edgeMountLegalInlayDepth({
+      ...current,
+      label_thickness_mm: thickness,
+      label_type: labelType,
+      label_raised: labelRaised,
+    }));
+  }
+  const accessChoice = $("#edge-mount-access-diameter")?.value || "auto";
   design.box.edge_mount = {
     side: $("#edge-mount-side")?.value || "front",
     label_enabled: labelEnabled,
@@ -2569,7 +2623,7 @@ function readEdgeMountForm(design) {
     label_length_mode: $("#edge-mount-label-length-mode")?.value || "full",
     label_thickness_mm: thickness,
     label_raised: labelRaised,
-    label_text_depth_mm: number($("#edge-mount-label-depth")?.value, current.label_text_depth_mm),
+    label_text_depth_mm: labelTextDepth,
     label_flip: Boolean($("#edge-mount-label-flip")?.checked),
     standoff_ribs_enabled: Boolean($("#edge-mount-standoff-ribs-enabled")?.checked),
     standoff_rib_count: ribCountMode === "manual"
@@ -2579,10 +2633,9 @@ function readEdgeMountForm(design) {
     hole_count: number($("#edge-mount-hole-count")?.value, current.hole_count),
     hole_orientation: $("#edge-mount-hole-orientation")?.value || "horizontal",
     screw_diameter_mm: number($("#edge-mount-screw-diameter")?.value, current.screw_diameter_mm),
-    access_diameter_mm: number(
-      $("#edge-mount-access-diameter")?.value,
-      resolvedEdgeMountAccessDiameter(current),
-    ),
+    access_diameter_mm: accessChoice === "auto"
+      ? null
+      : number(accessChoice, resolvedEdgeMountAccessDiameter(current)),
     top_offset_mm: number($("#edge-mount-top-offset")?.value, current.top_offset_mm),
     hole_spacing_mm: spacingMode === "custom"
       ? number($("#edge-mount-spacing-mm")?.value, current.hole_spacing_mm || EDGE_MOUNT_DEFAULTS.top_offset_mm)
@@ -2599,6 +2652,39 @@ function resolvedEdgeMountAccessDiameter(edgeMount) {
   return Math.max(8, number(edgeMount.screw_diameter_mm, 4) * 2);
 }
 
+function edgeMountLegalInlayDepth(edgeMount) {
+  const rules = state.catalog?.edge_mount || {};
+  const backing = number(textBackingRules().min_backing_mm, 0.2);
+  return Math.max(
+    number(rules.min_text_depth_mm, 0.2),
+    Math.min(
+      number(rules.max_text_depth_mm, 2),
+      number(edgeMount.label_thickness_mm, 2) - backing,
+    ),
+  );
+}
+
+function syncEdgeMountDepthLimit(edgeMount) {
+  const input = $("#edge-mount-label-depth");
+  if (!input) return;
+  const raised = edgeMount.label_type === "integrated" && edgeMount.label_raised;
+  input.max = String(raised
+    ? number(state.catalog?.edge_mount?.max_text_depth_mm, 2)
+    : edgeMountLegalInlayDepth(edgeMount));
+}
+
+function syncEdgeMountAutoAccessFromForm() {
+  const select = $("#edge-mount-access-diameter");
+  if (!select || select.value !== "auto") return;
+  const auto = [...select.options].find(option => option.value === "auto");
+  if (!auto) return;
+  const screw = number(
+    $("#edge-mount-screw-diameter")?.value,
+    state.design?.box?.edge_mount?.screw_diameter_mm ?? EDGE_MOUNT_DEFAULTS.screw_diameter_mm,
+  );
+  auto.textContent = `Auto (${fmt(Math.max(8, screw * 2))} mm)`;
+}
+
 function syncEdgeMountControls() {
   const edgeMount = { ...EDGE_MOUNT_DEFAULTS, ...(state.design?.box?.edge_mount || {}) };
   if ($("#edge-mount-side")) $("#edge-mount-side").value = edgeMount.side;
@@ -2608,6 +2694,7 @@ function syncEdgeMountControls() {
   if ($("#edge-mount-label-length-mode")) $("#edge-mount-label-length-mode").value = edgeMount.label_length_mode;
   if ($("#edge-mount-label-style")) $("#edge-mount-label-style").value = edgeMount.label_raised ? "raised" : "flush";
   if ($("#edge-mount-label-depth")) $("#edge-mount-label-depth").value = fmt(edgeMount.label_text_depth_mm);
+  syncEdgeMountDepthLimit(edgeMount);
   if ($("#edge-mount-label-flip")) $("#edge-mount-label-flip").checked = edgeMount.label_flip;
   if ($("#edge-mount-standoff-ribs-enabled")) {
     $("#edge-mount-standoff-ribs-enabled").checked = edgeMount.standoff_ribs_enabled;
@@ -2637,14 +2724,21 @@ function syncEdgeMountControls() {
   const accessSelect = $("#edge-mount-access-diameter");
   if (accessSelect) {
     $("option[data-legacy]", accessSelect)?.remove();
-    const access = resolvedEdgeMountAccessDiameter(edgeMount);
-    const standard = [6, 8, 10].some(value => Math.abs(value - access) < 1e-9);
-    if (!standard) {
-      const option = new Option(`Existing — ${fmt(access)} mm`, fmt(access));
-      option.dataset.legacy = "true";
-      accessSelect.appendChild(option);
+    const resolved = resolvedEdgeMountAccessDiameter(edgeMount);
+    const auto = [...accessSelect.options].find(option => option.value === "auto");
+    if (auto) auto.textContent = `Auto (${fmt(resolved)} mm)`;
+    if (edgeMount.access_diameter_mm === null || edgeMount.access_diameter_mm === undefined) {
+      accessSelect.value = "auto";
+    } else {
+      const explicit = number(edgeMount.access_diameter_mm, resolved);
+      const standard = [6, 8, 10].some(value => Math.abs(value - explicit) < 1e-9);
+      if (!standard) {
+        const option = new Option(`Existing — ${fmt(explicit)} mm`, fmt(explicit));
+        option.dataset.legacy = "true";
+        accessSelect.appendChild(option);
+      }
+      accessSelect.value = fmt(explicit);
     }
-    accessSelect.value = fmt(access);
   }
   const spacingMode = edgeMount.hole_spacing_mm === null || edgeMount.hole_spacing_mm === undefined ? "auto" : "custom";
   if ($("#edge-mount-spacing-mode")) $("#edge-mount-spacing-mode").value = spacingMode;
@@ -3269,11 +3363,11 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
   const requiredLabel = baseRequiredLabel(box);
   const needsRequiredOption = Number.isFinite(modeMin) && requiredLabel
     && !choices.some(choice => Math.abs(number(choice.value) - modeMin) < 1e-9);
-  const base = number(box?.base_thickness, rules.default_mm ?? 0.6);
+  const base = number(box?.base_thickness, rules.default_mm ?? 0.8);
   const value = fmt(base);
   const verticalStack = (box?.stack?.mode || "none") === "direct" || Boolean(box?.lid?.enabled && box.lid.stackable);
   const standard = box?.standard_base !== false && !isB4B && !verticalStack;
-  const ordinaryDefaultValue = fmt(ordinaryRules.default_mm ?? 0.6);
+  const ordinaryDefaultValue = fmt(ordinaryRules.default_mm ?? 0.8);
   const numericChoices = isB4B
     ? choices
     : choices.filter(choice => fmt(choice.value) !== ordinaryDefaultValue);
@@ -3714,10 +3808,42 @@ function surfaceStackingBlocked(design = state.design) {
   return design?.box?.stack?.mode === "direct" || Boolean(design?.box?.lid?.enabled && design.box.lid.stackable);
 }
 
+function readInlineSurfaceObjectHeight() {
+  const input = $("#surface-object-height");
+  const error = $("#surface-object-height-inline-error");
+  const text = String(input?.value ?? "").trim();
+  const fail = message => {
+    if (error) {
+      error.textContent = message;
+      error.hidden = false;
+    }
+    return { ok: false, value: null };
+  };
+  if (text === "") {
+    if (error) {
+      error.textContent = "";
+      error.hidden = true;
+    }
+    return { ok: true, value: null };
+  }
+  const value = Number(text);
+  if (!Number.isFinite(value) || value <= 0) {
+    return fail("Enter a positive Object height, or leave it blank.");
+  }
+  if (error) {
+    error.textContent = "";
+    error.hidden = true;
+  }
+  return { ok: true, value };
+}
+
 function resolveSurfaceBase(design, { fromForm = false } = {}) {
   if (!isSurfaceBinDesign(design)) return;
   design.layout ||= {};
-  const oldBase = number(design.box.base_thickness, 0.6);
+  const oldBase = number(
+    design.box.base_thickness,
+    state.catalog?.base_rules?.default_mm ?? 0.8,
+  );
   const oldZ = number(design.box.z, oldBase + 5);
   const minimum = number(state.catalog?.min_height_above_base_mm, 5);
   const mode = fromForm ? $("#surface-base-mode").value : (design.layout.surface_base_mode || "custom");
@@ -3734,11 +3860,13 @@ function resolveSurfaceBase(design, { fromForm = false } = {}) {
       : Math.max(oldZ, base + minimum);
   }
   if (fromForm) {
-    const objectText = $("#surface-object-height").value.trim();
-    design.layout.object_height_mm = objectText ? Number(objectText) : null;
+    const objectHeight = readInlineSurfaceObjectHeight();
+    if (!objectHeight.ok) return false;
+    design.layout.object_height_mm = objectHeight.value;
     design.layout.surface_lightweight_base = !surfaceStackingBlocked(design)
       && $("#surface-lightweight-base").checked;
   }
+  return true;
 }
 
 function syncSurfaceControls() {
@@ -3772,10 +3900,14 @@ function syncSurfaceControls() {
 }
 
 const LIFT_GRABBER_DEFAULTS = { enabled: false, size: "medium", location: "sides" };
-// Fix 058 Correction 1, C1.4D: 0.6 mm is Edge Mount's own default text depth
-// for a new/missing value - this never changes the global text-depth default
-// used by other label/text systems (floor labels, lid labels, ...).
-const EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM = 0.6;
+// Edge Mount owns a separate text-depth default. The backend catalog is the
+// authority; 0.6 is only the stale-catalog fallback for an older server.
+function edgeMountTextDepthDefault() {
+  return number(
+    state.catalog?.edge_mount?.defaults?.label_text_depth_mm,
+    0.6,
+  );
+}
 const EDGE_MOUNT_DEFAULTS = {
   side: "front",
   label_enabled: false,
@@ -3785,7 +3917,7 @@ const EDGE_MOUNT_DEFAULTS = {
   label_length_mode: "full",
   label_thickness_mm: 2,
   label_raised: false,
-  label_text_depth_mm: EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM,
+  label_text_depth_mm: edgeMountTextDepthDefault(),
   label_flip: false,
   standoff_ribs_enabled: true,
   standoff_rib_count: null,
@@ -3986,6 +4118,29 @@ function lidLabelDepthShown(lid) {
     : Number(rules.default_label_relief_mm ?? 0.4);
 }
 
+function renderLidLabelDepthLegality() {
+  const select = $("#lid-label-depth");
+  if (!select) return;
+  const handled = lidConfiguration() === "handled_lid";
+  const raised = handled && $("#lid-label-style")?.value === "raised";
+  const report = state.lidLabelBackingReport;
+  const fresh = report && report.epoch === state.lidThicknessEpoch &&
+    report.key === lidThicknessKey(state.design);
+  for (const option of select.options) {
+    option.disabled = false;
+    const baseLabel = option.dataset.baseLabel || option.textContent;
+    option.dataset.baseLabel = baseLabel;
+    option.textContent = baseLabel;
+    if (raised || !fresh) continue;
+    const depth = Number(option.value);
+    if (Number.isFinite(depth) &&
+        !inlayDepthLegal(depth, report.backing, report.minimumBacking)) {
+      option.disabled = true;
+      option.textContent = `${baseLabel} (lid too thin)`;
+    }
+  }
+}
+
 function lidState(design = state.design) {
   const boxLid = design?.box?.lid;
   // Fix 060 Correction 1: fall back to the remembered Lid/Handle/Label values
@@ -4165,13 +4320,24 @@ function applyLidThicknessReport(result, epochAtRequest) {
   state.lidThicknessReport = result.stack?.lid_thickness_mm
     ? { key: lidThicknessKey(result.design), epoch: epochAtRequest,
         values: result.stack.lid_thickness_mm } : null;
+  state.lidLabelBackingReport = result.stack?.lid_label_backing_mm != null
+    ? {
+        key: lidThicknessKey(result.design),
+        epoch: epochAtRequest,
+        backing: Number(result.stack.lid_label_backing_mm),
+        minimumBacking: Number(result.stack.lid_label_min_backing_mm),
+      }
+    : null;
   renderLidThicknessOptions();
+  renderLidLabelDepthLegality();
 }
 
 // A failed replacement preview never leaves the old bin's millimetres shown.
 function clearLidThicknessReport() {
   state.lidThicknessReport = null;
+  state.lidLabelBackingReport = null;
   renderLidThicknessOptions();
+  renderLidLabelDepthLegality();
 }
 
 function syncLidForm() {
@@ -4229,6 +4395,7 @@ function syncLidForm() {
       ? "How far the lid lettering projects above the lid top."
       : "How deeply the lid lettering is cut into the lid; the lid keeps material under it.";
   }
+  renderLidLabelDepthLegality();
   const raised = [...$("#lid-label-style").options].find(option => option.value === "raised");
   if (raised) raised.disabled = config === "stackable_lid";
   if (config === "stackable_lid" && $("#lid-label-style").value === "raised") {
@@ -4409,7 +4576,7 @@ function normalizeBinDimension(axis, requestedValue, fallback, design = state.de
   if (axis === "z") {
     const base = number(
       design?.box?.base_thickness,
-      state.catalog?.base_rules?.default_mm ?? 0.6
+      state.catalog?.base_rules?.default_mm ?? 0.8
     );
     const minimum = base + number(state.catalog.min_height_above_base_mm, 5);
     return isSurfaceBinDesign(design)
@@ -4501,7 +4668,7 @@ function updateDesignFromForm() {
   design.box.standard_base = !isSurfaceBinDesign(design) && !b4bOn && currentStackMode === "none" && baseChoice === "standard";
   const defaultBase = b4bOn
     ? number(b4bRules.default_base_mm, 1.6)
-    : number(state.catalog?.base_rules?.default_mm, 0.6);
+    : number(state.catalog?.base_rules?.default_mm, 0.8);
   if (!isSurfaceBinDesign(design)) design.box.base_thickness = design.box.standard_base
     ? defaultBase
     : number(baseChoice, design.box.base_thickness ?? defaultBase);
@@ -5037,7 +5204,8 @@ function wireControls() {
   ["#surface-base-mode", "#surface-base-custom", "#surface-lightweight-base", "#surface-object-height"]
     .forEach(selector => $(selector)?.addEventListener(selector === "#surface-base-mode" ? "change" : "input", () => {
       if (!isSurfaceBinDesign()) return;
-      resolveSurfaceBase(state.design, { fromForm: true });
+      const resolved = resolveSurfaceBase(state.design, { fromForm: true });
+      if (resolved === false) return;
       if (selector === "#surface-base-mode" || selector === "#surface-base-custom") {
         $("#z").value = fmt(state.design.box.z);
         state.binResizePending = true;
@@ -5100,6 +5268,7 @@ function wireControls() {
   ];
   edgeMountInputIds.forEach(selector => $(selector)?.addEventListener("input", () => {
     syncEdgeMountEditorVisibility();
+    if (selector === "#edge-mount-screw-diameter") syncEdgeMountAutoAccessFromForm();
     changedDesign();
   }));
 
@@ -5547,9 +5716,7 @@ async function addModifier(kind) {
       label_type: "separate",
       standoff_ribs_enabled: true,
       label_projection_mm: projection,
-      access_diameter_mm: resolvedEdgeMountAccessDiameter(
-        state.design.box.edge_mount || EDGE_MOUNT_DEFAULTS,
-      ),
+      access_diameter_mm: null,
       ...seed,
       ...(Number.isFinite(seededProjection) ? {
         label_projection_mm: Math.min(
@@ -6553,10 +6720,19 @@ function renderDraftFields() {
       ? "How far the letters project above their receiving surface."
       : "How deeply the letters are embedded or cut into their receiving surface.";
     textGroup += field("Letter height", "option:cap_height", String(Math.floor(number(capShown, 15))), { unit: "mm", step: "1" });
+    const depthChoices = textDepthChoices(info);
+    const minimumBacking = number(textBackingRules().min_backing_mm, NaN);
+    const receiving = textLevel === "base" ? baseTextReceivingThickness() : NaN;
+    const disableBaseInlay = textLevel === "base" && one.options?.raised !== true;
+    const knownDepth = depthChoices.some(choice => Math.abs(choice.value - depthShown) < 1e-6);
     textGroup += `<label title="${depthTip}">${depthLabel}<select data-draft="option:depth">
-      ${[[0.2, "Thin"], [0.4, "Default"], [0.6, "Thick"], [0.8, "Thickest"]]
-        .map(([value, name]) => `<option value="${value}" ${Math.abs(depthShown - value) < 1e-6 ? "selected" : ""}>${name} ${value} mm</option>`).join("")}
-      ${[0.2, 0.4, 0.6, 0.8].includes(depthShown) ? "" : `<option value="${depthShown}" selected>${depthShown} mm · Existing</option>`}
+      ${depthChoices.map(choice => {
+        const tooThin = disableBaseInlay &&
+          !inlayDepthLegal(choice.value, receiving, minimumBacking);
+        const suffix = tooThin ? " (base too thin)" : "";
+        return `<option value="${choice.value}" ${Math.abs(depthShown - choice.value) < 1e-6 ? "selected" : ""} ${tooThin ? "disabled" : ""}>${choice.label}${suffix}</option>`;
+      }).join("")}
+      ${knownDepth ? "" : `<option value="${depthShown}" selected>${depthShown} mm · Existing</option>`}
       </select></label>`;
     if (textLevel === "rim") {
       textGroup += `<label>Rim side<select data-draft="option:rim_side">${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]]
@@ -10220,6 +10396,7 @@ async function refreshPreview({ persistResume = true } = {}) {
     $("#preview-state").classList.remove("status-ok");
     $("#preview-state").classList.add("status-error");
     setDesignInvalidOverlay(error.message);
+    setError(error.message);
     state.canGenerate = false;
     updateGenerateAvailability();
     // A hard preview failure with supports present is usually a footprint that
@@ -13748,8 +13925,11 @@ function visibleDesignSnapshot() {
   visibleDesign.box.x = normalizeBinDimension("x", $("#x-size").value, visibleDesign.box.x);
   visibleDesign.box.y = normalizeBinDimension("y", $("#y-size").value, visibleDesign.box.y);
   visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
-  if (isSurfaceBinDesign(visibleDesign)) resolveSurfaceBase(visibleDesign, { fromForm: true });
-  const defaultBase = number(state.catalog?.base_rules?.default_mm, 0.6);
+  if (isSurfaceBinDesign(visibleDesign) &&
+      resolveSurfaceBase(visibleDesign, { fromForm: true }) === false) {
+    throw new Error("Enter a positive Object height, or leave it blank.");
+  }
+  const defaultBase = number(state.catalog?.base_rules?.default_mm, 0.8);
   if (!isSurfaceBinDesign(visibleDesign)) {
     visibleDesign.box.standard_base = $("#base-thickness").value === "standard";
     visibleDesign.box.base_thickness = visibleDesign.box.standard_base

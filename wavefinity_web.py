@@ -61,6 +61,7 @@ from organizer_engine import (
     DIFFERING_MIN_DROP,
     DIFFERING_WEB_RUN_CLEARANCE,
     DIFFERING_WEB_THICKNESS,
+    EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM,
     LOCKED_CONNECTOR_HEIGHT,
     LOCKED_CONNECTOR_LENGTH,
     LOCKED_TOLERANCE,
@@ -98,6 +99,7 @@ from organizer_engine import (
     wavy_cavity_polygon,
 )
 from organizer_inserts import (
+    BASE_PLATE,
     CARTRIDGE_PITCH,
     EDITOR_SNAP,
     FEATURE_DEFINITIONS,
@@ -1225,6 +1227,10 @@ def catalog_payload() -> dict[str, Any]:
             "bore_clearance_mm": BORE_CLEARANCE,
             "hex_bit": HEX_BIT_FIXED,
         },
+        "text_depth_rules": {
+            "min_backing_mm": TEXT_MIN_BACKING,
+            "removable_base_plate_mm": BASE_PLATE,
+        },
         "modes": [
             {"value": "fused", "label": "Fused into box"},
             {"value": "separate", "label": "Removable insert"},
@@ -1389,7 +1395,7 @@ def catalog_payload() -> dict[str, Any]:
                 "label_length_mode": "full",
                 "label_thickness_mm": EDGE_LABEL_DEFAULT_THICKNESS,
                 "label_raised": False,
-                "label_text_depth_mm": TEXT_DEPTH,
+                "label_text_depth_mm": EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM,
                 "label_flip": False,
                 "holes_enabled": False,
                 "hole_count": 2,

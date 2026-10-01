@@ -80,6 +80,7 @@ def storage_drawers_defaults(drawer_count: int = 3) -> dict:
     return {
         "drawers": [new_drawer_descriptor() for _ in range(drawer_count)],
         "cabinet_style": "full", "rear_support": "cross", "open_frame_width_mm": 14.0,
+        "wall_mounting": "off", "wall_mount_keyholes_per_drawer": 2,
         "drawer_fit_mm": 0.40, "drawer_handles": True, "drawer_handle_size": "auto",
         "stacking": False, "unit_label_enabled": False, "unit_label_text": "",
         "drawer_labels_enabled": False, "drawer_label_style": "inlaid",
@@ -109,6 +110,8 @@ def normalise_storage_drawers_block(raw: object) -> dict:
     result = {"drawers": drawers}
     result["cabinet_style"] = _choice(raw.get("cabinet_style", defaults["cabinet_style"]), ("full", "open"), "cabinet style")
     result["rear_support"] = _choice(raw.get("rear_support", defaults["rear_support"]), ("cross", "solid"), "rear support")
+    result["wall_mounting"] = _choice(raw.get("wall_mounting", defaults["wall_mounting"]), ("off", "keyholes"), "wall mounting")
+    result["wall_mount_keyholes_per_drawer"] = _choice(raw.get("wall_mount_keyholes_per_drawer", defaults["wall_mount_keyholes_per_drawer"]), (2, 4), "keyholes per drawer level")
     result["open_frame_width_mm"] = _choice(raw.get("open_frame_width_mm", defaults["open_frame_width_mm"]), STORAGE_DRAWER_FRAME_WIDTH_CHOICES, "frame width")
     result["drawer_fit_mm"] = _choice(raw.get("drawer_fit_mm", defaults["drawer_fit_mm"]), STORAGE_DRAWER_FIT_CHOICES, "drawer fit")
     for key in ("drawer_handles", "stacking", "unit_label_enabled", "drawer_labels_enabled"):
@@ -177,9 +180,10 @@ def _attempt(check, *args):
 def reset_storage_drawers_definition(raw: object) -> dict:
     """A valid current Storage Drawers Space rebuilt from what can still be trusted.
 
-    Only the cabinet definition is repaired. A drawer descriptor that is valid
-    (unique UUID, legal height, label) is kept exactly; an invalid one is replaced
-    by a fresh current default. Every other invalid setting takes its default.
+    Only the cabinet definition is repaired. Drawer repair is field-local: a usable
+    drawer UUID is always kept, a damaged height or label takes its default alone,
+    and a new UUID is minted only for a missing, invalid, or duplicate ID.
+    Every other invalid setting takes its default.
     """
     source = raw if isinstance(raw, dict) else {}
     base = {key: copy.deepcopy(value) for key, value in source.items() if key != "storage_drawers"}
@@ -196,6 +200,8 @@ def reset_storage_drawers_definition(raw: object) -> dict:
     defaults = storage_drawers_defaults(1)
     block = {}
     for key, choices in (("cabinet_style", ("full", "open")), ("rear_support", ("cross", "solid")),
+                         ("wall_mounting", ("off", "keyholes")),
+                         ("wall_mount_keyholes_per_drawer", (2, 4)),
                          ("open_frame_width_mm", STORAGE_DRAWER_FRAME_WIDTH_CHOICES),
                          ("drawer_fit_mm", STORAGE_DRAWER_FIT_CHOICES),
                          ("drawer_handle_size", ("auto", "small", "medium", "large")),
@@ -216,18 +222,28 @@ def reset_storage_drawers_definition(raw: object) -> dict:
     rows = block_in.get("drawers")
     kept, seen = [], set()
     for row in (rows if isinstance(rows, list) else [])[:STORAGE_DRAWERS_MAX_DRAWERS]:
-        good = None
-        if isinstance(row, dict):
-            drawer_id = _attempt(_uuid, row.get("id"))
-            height = _attempt(_number, row.get("height_mm"), "Drawer height", ORDINARY_BIN_MIN_HEIGHT_MM)
-            label = _attempt(_label, row.get("label_text", ""), "Drawer label")
-            if drawer_id and drawer_id not in seen and height is not None and label is not None:
-                seen.add(drawer_id)
-                good = {"id": drawer_id, "height_mm": height, "label_text": label}
-        if good is None:
-            good = new_drawer_descriptor()
-            seen.add(good["id"])
-        kept.append(good)
+        source = row if isinstance(row, dict) else {}
+        drawer_id = _attempt(_uuid, source.get("id"))
+        if not drawer_id or drawer_id in seen:
+            drawer_id = new_drawer_descriptor()["id"]
+        seen.add(drawer_id)
+
+        height = _attempt(
+            _number, source.get("height_mm"), "Drawer height",
+            ORDINARY_BIN_MIN_HEIGHT_MM,
+        )
+        if height is None:
+            height = STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
+
+        label = _attempt(_label, source.get("label_text", ""), "Drawer label")
+        if label is None:
+            label = ""
+
+        kept.append({
+            "id": drawer_id,
+            "height_mm": height,
+            "label_text": label,
+        })
     block["drawers"] = kept or storage_drawers_defaults(3)["drawers"]
     base["storage_drawers"] = block
     return normalise_storage_drawers_definition(base)
@@ -245,8 +261,12 @@ def storage_drawers_unit_counts(space: dict) -> tuple[int, int]:
 def storage_drawers_active_limits(space: dict, drawer_id: str | None) -> dict:
     canonical = normalise_storage_drawers_definition(space)
     rows = canonical["storage_drawers"]["drawers"]
-    row = next((one for one in rows if one["id"] == drawer_id), rows[0])
-    return {"x": canonical["x"], "y": canonical["y"], "z": row["height_mm"], "drawer_id": row["id"]}
+    index = next((i for i, one in enumerate(rows) if one["id"] == drawer_id), 0)
+    # Local import avoids the storage_drawers <-> geometry module import cycle.
+    from organizer_storage_drawer_geometry import storage_drawers_usable_heights
+    usable = storage_drawers_usable_heights(canonical)
+    row = rows[index]
+    return {"x": canonical["x"], "y": canonical["y"], "z": usable[index], "drawer_id": row["id"]}
 
 
 def storage_drawers_recent_summary(space: dict) -> str:
@@ -257,7 +277,9 @@ def storage_drawers_recent_summary(space: dict) -> str:
 
 def storage_drawers_projection(space: dict) -> list[dict]:
     canonical = normalise_storage_drawers_definition(space)
-    return [{"id": row["id"], "name": f"Drawer {i}", "width": canonical["x"], "depth": canonical["y"], "height": row["height_mm"], "clearance": 0.0, "boundary": "mating", "placements": []} for i, row in enumerate(canonical["storage_drawers"]["drawers"], 1)]
+    from organizer_storage_drawer_geometry import storage_drawers_usable_heights
+    usable = storage_drawers_usable_heights(canonical)
+    return [{"id": row["id"], "name": f"Drawer {i}", "width": canonical["x"], "depth": canonical["y"], "height": usable[i-1], "clearance": 0.0, "boundary": "mating", "placements": []} for i, row in enumerate(canonical["storage_drawers"]["drawers"], 1)]
 
 
 def reconcile_storage_drawers_layout(layout: dict, space: dict) -> dict:
@@ -344,12 +366,15 @@ def plan_reconfigure(space: dict, layout: dict, proposed_space: dict, bins: list
     if old_ids != new_ids:
         raise ValueError("Use Add Drawer or Delete Drawer to change drawer identities")
     updated = reconcile_storage_drawers_layout(current, proposed)
-    from organizer_drawer import drawer_report
+    from organizer_drawer import drawer_report, problem_blocks_print
     for i, drawer in enumerate(updated["drawers"], 1):
         if drawer["placements"]:
             problems = drawer_report(drawer, bins, layout=updated).get("problems", [])
-            if problems:
-                raise ValueError(f"Drawer {i}: {problems[0].get('message', 'placements no longer fit')}")
+            blocking = [problem for problem in problems if problem_blocks_print(problem)]
+            if blocking:
+                raise ValueError(
+                    f"Drawer {i}: {blocking[0].get('message', 'placements no longer fit')}"
+                )
     return proposed, updated
 
 

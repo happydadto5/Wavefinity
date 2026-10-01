@@ -37,6 +37,7 @@
     const defaults = () => ({
       drawers: Array.from({ length: 3 }, () => ({ temp_key: `temporary:${crypto.randomUUID()}`, height_mm: rules.defaultHeight, label_text: "" })),
       cabinet_style: "full", rear_support: "cross", open_frame_width_mm: rules.defaultFrame, drawer_fit_mm: rules.defaultFit,
+      wall_mounting: "off", wall_mount_keyholes_per_drawer: 2,
       drawer_handles: true, drawer_handle_size: "auto", stacking: false,
       unit_label_enabled: false, unit_label_text: "", drawer_labels_enabled: false, drawer_label_style: "inlaid",
       cabinet_wall_mm: 1.6, cabinet_base_mm: 1.6, cabinet_top_mm: 1.6, drawer_wall_mm: 1.6, drawer_base_mm: 1.6,
@@ -87,12 +88,20 @@
     const cabinet = group(form, "Cabinet");
     const style = select(block.cabinet_style, [["full", "Full"], ["open", "Open"]]);
     const rear = select(block.rear_support, [["cross", "Rear Cross"], ["solid", "Rear Solid"]]);
+    const wallMounting = select(block.wall_mounting, [["off", "Off"], ["keyholes", "Keyholes"]]);
+    const keyholeCount = select(String(block.wall_mount_keyholes_per_drawer), [["2", "2"], ["4", "4"]]);
+    const keyholeCountField = labeled(
+      "Keyholes per drawer level", keyholeCount,
+      "2 = left/right. 4 = left/right at upper and lower mounting rows."
+    );
     const stack = select(String(block.stacking), [["false", "Not stackable"], ["true", "Stackable"]]);
     const frame = select(block.open_frame_width_mm, NAMED(rules.frameChoices, ["Compact", "Standard", "Strong"]));
     const frameField = labeled("Open frame width", frame);
     cabinet.append(labeled("Cabinet style", style,
         "Full: enclosed side-panel cabinet around the drawer stack. Open: open-frame sides/rails with less panel material."),
       labeled("Rear support", rear, "Rear Cross: lighter cross-brace rear support. Rear Solid: full rear panel."),
+      labeled("Wall mounting", wallMounting, "Adds reinforced keyhole slots to the cabinet back at every drawer level."),
+      keyholeCountField,
       labeled("Stacking", stack, "Stackable adds top/bottom stacking interfaces and four separate stacking pegs."),
       frameField);
     const labels = group(form, "Labels");
@@ -115,6 +124,7 @@
     const summaryGroup = group(form, "Summary"); const summary = el("div", "sd-summary", "Checking cabinet…"); summaryGroup.append(summary);
     const syncVisibility = () => {
       frameField.hidden = style.value !== "open"; handleField.hidden = handles.value !== "true";
+      keyholeCountField.hidden = wallMounting.value !== "keyholes";
       unitTextField.hidden = unitEnabled.value !== "true"; styleField.hidden = drawerEnabled.value !== "true";
     };
     const renderRows = () => {
@@ -129,7 +139,11 @@
         label.id = `sd-label-${epoch}-${index}`;
         label.addEventListener("input", () => { row.label_text = label.value; }, { signal: events.signal });
         const labelField = labeled("Label text", label); labelField.hidden = drawerEnabled.value !== "true";
-        line.append(labeled("Usable height", height, "Usable height = clear inside height available for bins.", "mm"), labelField);
+        line.append(labeled(
+          "Drawer height", height,
+          "Physical usable bin height also includes the selected Drawer fit and is shown in Summary.",
+          "mm"
+        ), labelField);
         drawerRows.append(line);
       });
     };
@@ -137,6 +151,8 @@
       const next = copy(space), b = next.storage_drawers;
       next.name = name.value.trim(); next.x = Number(x.value) * baseUnit; next.y = Number(y.value) * baseUnit;
       b.drawers = copy(block.drawers); b.cabinet_style = style.value; b.rear_support = rear.value;
+      b.wall_mounting = wallMounting.value;
+      b.wall_mount_keyholes_per_drawer = Number(keyholeCount.value);
       b.open_frame_width_mm = Number(frame.value); b.drawer_fit_mm = Number(fit.value);
       b.stacking = stack.value === "true"; b.drawer_handles = handles.value === "true"; b.drawer_handle_size = handleSize.value;
       b.unit_label_enabled = unitEnabled.value === "true"; b.unit_label_text = unitText.value;
@@ -195,7 +211,7 @@
       const outside = (response.outside_xyz || []).map(v => Number(v.toFixed(1)));
       const [ux, uy] = response.field_units || [];
       const [fx, fy] = response.field_mm || [];
-      const heights = (response.drawers || []).map(row => row.height_mm).join(", ");
+      const heights = (response.drawers || []).map(row => row.usable_height_mm).join(", ");
       const material = response.effective_material || {};
       const printer = `${printerProfile.x_mm} × ${printerProfile.y_mm} × ${printerProfile.z_mm} mm`;
       const fitRow = el("p", `sd-fit-verdict ${response.fits_printer ? "ok" : "bad"}`,
@@ -264,7 +280,8 @@
     const snapshot = () => JSON.stringify([
       name.value.trim(), x.value, y.value, count.value,
       block.drawers.map(row => [row.id || "", row.height_mm, row.label_text]),
-      style.value, rear.value, stack.value, frame.value, fit.value, handles.value, handleSize.value,
+      style.value, rear.value, wallMounting.value, keyholeCount.value,
+      stack.value, frame.value, fit.value, handles.value, handleSize.value,
       unitEnabled.value, unitText.value, drawerEnabled.value, labelStyle.value,
       Object.values(materialFields).map(control => control.value)]);
     syncVisibility(); renderRows(); schedule();

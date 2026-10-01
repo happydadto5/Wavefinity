@@ -59,7 +59,7 @@ from shapely.geometry import box as shape_box
 from shapely.ops import unary_union
 import trimesh
 
-from organizer_app import connector_filename, design_from_dict, design_source_payload, design_to_dict, generate_side_file, object_height_plan
+from organizer_app import bore_reference_envelope_extensions, connector_filename, design_from_dict, design_source_payload, design_to_dict, generate_side_file, object_height_plan
 from organizer_stack import stack_summary
 from organizer_engine import (
     BASE_UNIT,
@@ -115,6 +115,7 @@ CREST = WAVE_AMPLITUDE - WAVE_MATING_GAP / 2.0
 # Total slack per axis a drawer needs just to take the crests at both walls.
 MIN_CLEARANCE = DRAWER_HARD_CLEARANCE_MM
 MIN_EDGE_SPACER = 1.2           # thinnest edge spacer worth printing, at a wave trough
+RIGID_SPACER_CLEARANCE_MM = 0.40
 MIN_SPACER_HEIGHT = 6.0         # a spacer frame still needs room for its lock bumps
 DEFAULT_SPACER_HEIGHT = 15.0
 SPACER_CONTACT_TARGET = 28.0    # target contact width of a back/right spacer, mm
@@ -432,9 +433,50 @@ def _chains(drawer: dict[str, Any], by_id: dict[str, dict]) -> tuple[list[list[d
     return chains, loose
 
 
+def _physical_envelopes(
+    layout: dict[str, Any] | None,
+    bins: list[dict[str, Any]],
+    drawer: dict[str, Any],
+) -> dict[str, dict[str, int]]:
+    """Per-bin physical XY extension in Space grid cells.
+
+    Edge Mount and leaned-Bore stored-object reach are combined here once. The
+    same returned map is used by backend report collision and the browser.
+    """
+    grid = drawer_grid(drawer)
+    step_x = grid.get("step_x", grid["step"])
+    step_y = grid.get("step_y", grid["step"])
+    specs = design_specs(layout)
+    result: dict[str, dict[str, int]] = {}
+    for one in bins:
+        millimetres = {"l": 0.0, "t": 0.0, "r": 0.0, "b": 0.0}
+        source = specs.get(one["id"])
+        if isinstance(source, dict):
+            box_source = source.get("box") if isinstance(source.get("box"), dict) else {}
+            edge = edge_mount_projection_envelope(box_source.get("edge_mount"))
+            if edge:
+                side = {"front": "t", "back": "b", "left": "l", "right": "r"}[edge["side"]]
+                millimetres[side] = max(millimetres[side], float(edge["projection_mm"]))
+            try:
+                box, source_layout, *_ = design_from_dict(source, validate_layout=False)
+                bore = bore_reference_envelope_extensions(box, source_layout)
+            except (ValueError, TypeError, KeyError, OverflowError):
+                bore = {}
+            for side in ("l", "t", "r", "b"):
+                millimetres[side] = max(millimetres[side], float(bore.get(side, 0.0)))
+        result[one["id"]] = {
+            "l": math.ceil(millimetres["l"] / step_x),
+            "t": math.ceil(millimetres["t"] / step_y),
+            "r": math.ceil(millimetres["r"] / step_x),
+            "b": math.ceil(millimetres["b"] / step_y),
+        }
+    return result
+
+
 def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict],
                 plans: dict[str, dict[str, Any]] | None = None,
                 specs: dict[str, Any] | None = None,
+                envelopes: dict[str, dict[str, int]] | None = None,
                 storage_box: bool = False,
                 surface: bool = False) -> dict[str, Any]:
     """One grid footprint: a single bin, or a stack of them.
@@ -449,16 +491,10 @@ def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict
     w, d = bin_cells(first, drawer)
     ex = {"l": 0, "t": 0, "r": 0, "b": 0}
     if drawer.get("boundary") != "pegboard":
-        grid = drawer_grid(drawer)
         for placement in chain:
-            spec = ((specs or {}).get(placement["bin"]) or {}).get("box") or {}
-            envelope = edge_mount_projection_envelope(spec.get("edge_mount"))
-            if envelope:
-                side = envelope["side"]
-                axis_step = (grid.get("step_y", grid["step"]) if side in ("front", "back")
-                             else grid.get("step_x", grid["step"]))
-                key = {"front": "t", "back": "b", "left": "l", "right": "r"}[side]
-                ex[key] = max(ex[key], math.ceil(envelope["projection_mm"] / axis_step))
+            envelope = (envelopes or {}).get(placement["bin"]) or {}
+            for side in ("l", "t", "r", "b"):
+                ex[side] = max(ex[side], int(envelope.get(side, 0)))
     layers, issues, notes, top, plan_top = [], [], [], 0.0, 0.0
     for index, placement in enumerate(chain):
         one = by_id[placement["bin"]]
@@ -863,6 +899,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     surface = is_surface_layout(layout)
     plans = space_stack_metrics(layout, bins) if storage_box else surface_planning_heights(layout, bins)
     specs = design_specs(layout)
+    physical_envelopes = _physical_envelopes(layout, bins, drawer)
     owner = np.full((rows, cols), -1, dtype=int)
     problems: list[dict[str, Any]] = []
     for placement in drawer["placements"]:
@@ -871,7 +908,12 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     chains, loose = _chains(drawer, by_id)
     for placement in loose:
         problems.append({"type": "floating", "keys": [_key(placement)], "message": f"{_label(by_id[placement['bin']])} is stacked on nothing"})
-    items = [_stack_item(chain, drawer, by_id, plans, specs, storage_box, surface) for chain in chains]
+    items = [
+        _stack_item(
+            chain, drawer, by_id, plans, specs, physical_envelopes, storage_box, surface
+        )
+        for chain in chains
+    ]
     per_unit = _per_unit(drawer)
     for index, item in enumerate(items):
         label = _label(by_id[item["bin"]])
@@ -944,6 +986,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         problem["severity"] = "advisory" if problem["type"] in ADVISORY_PROBLEM_TYPES else "hard"
     return {
         "grid": grid,
+        "physical_envelopes": physical_envelopes,
         "cells": {"total": usable, "used": used, "free": int(free.sum())},
         "fill": round(100.0 * used / usable, 1) if usable else 0.0,
         "free_mm2": round(float(free.sum()) * step * step),
@@ -1252,57 +1295,76 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
             "candidates": candidates, "selected": selected, "notes": notes,
             "run_count": run_count}
 
-def _serpentine_flexure(w, d, side, flexible=True):
+def _serpentine_flexure(
+    w, d, side, flexible=True, *, phase_x=0.0, phase_y=0.0,
+):
     web = 1.5
     pad_bin = 3.0
     pad_wall = 2.0
 
     if side == "left":
-        # Fix 090: the left wall mirrors the right wall - the bin is at +x
-        # and the wall at -x, so the wavy bin-pad belongs on the right and
-        # the solid wall-pad on the left. Mirror the right-wall geometry
-        # about its own vertical centreline so it stays exactly in place.
-        # (Falling through to the back-wall branch would build a flexure
-        # along the wrong axis with the pads on the wrong faces.)
-        mirrored = _serpentine_flexure(w, d, "right", flexible)
+        mirrored, built_flexible = _serpentine_flexure(
+            w, d, "right", flexible, phase_x=phase_x, phase_y=phase_y,
+        )
         minx, _miny, maxx, _maxy = mirrored.bounds
-        return affinity.scale(mirrored, -1, 1, origin=((minx + maxx) / 2, 0))
+        return affinity.scale(mirrored, -1, 1, origin=((minx + maxx) / 2, 0)), built_flexible
 
     if side == "right":
-        if flexible: w += 0.5
+        if flexible:
+            w += 0.5  # accepted flexible preload
         if not flexible or w < pad_bin + pad_wall + web * 3:
-            return shape_box(0, 0, w - (0.5 if flexible else 0), d)
-        
-        profile = wavy_rect_outer(10.0, d / 2.0)
-        profile = affinity.translate(profile, -profile.bounds[0], d / 2.0)
-        left_pad = profile.intersection(shape_box(0, 0, pad_bin, d))
-        right_pad = shape_box(w - pad_wall, 0, w, d)
-        
+            measured_w = w - (0.5 if flexible else 0.0)
+            relief = min(RIGID_SPACER_CLEARANCE_MM, max(0.0, measured_w - 0.2))
+            return shape_box(
+                relief / 2.0, 0,
+                measured_w - relief / 2.0, d,
+            ), False
+
+        # Bin-facing wave: preserve the accepted shape construction but phase
+        # it from this off-lattice spacer's actual Y centre.
+        bin_profile = wavy_rect_outer(10.0, d / 2.0, phase_y=phase_y)
+        bin_profile = affinity.translate(bin_profile, -bin_profile.bounds[0], d / 2.0)
+        left_pad = bin_profile.intersection(shape_box(0, 0, pad_bin, d))
+
+        # Drawer-wall pad uses the same canonical wave, aligned to the opposite
+        # side of this measured gap instead of remaining flat.
+        wall_profile = wavy_rect_outer(10.0, d / 2.0, phase_y=phase_y)
+        wall_profile = affinity.translate(wall_profile, w - wall_profile.bounds[2], d / 2.0)
+        right_pad = wall_profile.intersection(shape_box(w - pad_wall, 0, w, d))
+
         mid_y = d / 2.0
         top_web = shape_box(pad_bin, d - web, w - pad_wall, d)
         bot_web = shape_box(pad_bin, 0, w - pad_wall, web)
-        mid_web = shape_box(pad_bin, mid_y - web/2, w - pad_wall, mid_y + web/2)
+        mid_web = shape_box(pad_bin, mid_y - web / 2, w - pad_wall, mid_y + web / 2)
         vert1 = shape_box(pad_bin, web, pad_bin + web, mid_y)
         vert2 = shape_box(w - pad_wall - web, mid_y, w - pad_wall, d - web)
-        return unary_union([left_pad, right_pad, top_web, bot_web, mid_web, vert1, vert2])
-    else:
-        if flexible: d += 0.5
-        if not flexible or d < pad_bin + pad_wall + web * 3:
-            return shape_box(0, 0, w, d - (0.5 if flexible else 0))
-            
-        profile = wavy_rect_outer(w / 2.0, 10.0)
-        profile = affinity.translate(profile, w / 2.0, -profile.bounds[1])
-        bot_pad = profile.intersection(shape_box(0, 0, w, pad_bin))
-        top_pad = shape_box(0, d - pad_wall, w, d)
-        
-        mid_x = w / 2.0
-        left_web = shape_box(0, pad_bin, web, d - pad_wall)
-        right_web = shape_box(w - web, pad_bin, w, d - pad_wall)
-        mid_web = shape_box(mid_x - web/2, pad_bin, mid_x + web/2, d - pad_wall)
-        horiz1 = shape_box(web, pad_bin, mid_x, pad_bin + web)
-        horiz2 = shape_box(mid_x, d - pad_wall - web, w - web, d - pad_wall)
-        return unary_union([bot_pad, top_pad, left_web, right_web, mid_web, horiz1, horiz2])
+        return unary_union([left_pad, right_pad, top_web, bot_web, mid_web, vert1, vert2]), True
 
+    if flexible:
+        d += 0.5  # accepted flexible preload
+    if not flexible or d < pad_bin + pad_wall + web * 3:
+        measured_d = d - (0.5 if flexible else 0.0)
+        relief = min(RIGID_SPACER_CLEARANCE_MM, max(0.0, measured_d - 0.2))
+        return shape_box(
+            0, relief / 2.0,
+            w, measured_d - relief / 2.0,
+        ), False
+
+    bin_profile = wavy_rect_outer(w / 2.0, 10.0, phase_x=phase_x)
+    bin_profile = affinity.translate(bin_profile, w / 2.0, -bin_profile.bounds[1])
+    bot_pad = bin_profile.intersection(shape_box(0, 0, w, pad_bin))
+
+    wall_profile = wavy_rect_outer(w / 2.0, 10.0, phase_x=phase_x)
+    wall_profile = affinity.translate(wall_profile, w / 2.0, d - wall_profile.bounds[3])
+    top_pad = wall_profile.intersection(shape_box(0, d - pad_wall, w, d))
+
+    mid_x = w / 2.0
+    left_web = shape_box(0, pad_bin, web, d - pad_wall)
+    right_web = shape_box(w - web, pad_bin, w, d - pad_wall)
+    mid_web = shape_box(mid_x - web / 2, pad_bin, mid_x + web / 2, d - pad_wall)
+    horiz1 = shape_box(web, pad_bin, mid_x, pad_bin + web)
+    horiz2 = shape_box(mid_x, d - pad_wall - web, w - web, d - pad_wall)
+    return unary_union([bot_pad, top_pad, left_web, right_web, mid_web, horiz1, horiz2]), True
 def spacer_filename(side: str, w: float, d: float, height: float, flexible: bool) -> str:
     """Deterministic from the real, unsnapped geometry - two decimals so
     distinct gaps (12.1 vs 12.9 mm) never collide, and Flexible/Rigid never
@@ -1332,18 +1394,21 @@ def generate_spacers(request: dict[str, Any], output_dir: Path | str, generate_f
             gap_w = p["w"]
             gap_d = p["d"]
 
-            poly = _serpentine_flexure(gap_w, gap_d, side, flexible)
+            phase_x = p["x"] + gap_w / 2.0
+            phase_y = p["y"] + gap_d / 2.0
+            poly, built_flexible = _serpentine_flexure(
+                gap_w, gap_d, side, flexible,
+                phase_x=phase_x, phase_y=phase_y,
+            )
             # printed physical part size: the actual generated mesh target,
-            # including the flexible preload when a real flexure was built -
-            # never the same thing as the measured gap above.
+            # including the accepted 0.5 mm preload only for a true flexure.
             minx, miny, maxx, maxy = poly.bounds
             part_w, part_d = maxx - minx, maxy - miny
-            rigid_fallback = flexible and math.isclose(part_w, gap_w, abs_tol=1e-6) and math.isclose(part_d, gap_d, abs_tol=1e-6)
-            if rigid_fallback:
+            is_flexible = flexible and built_flexible
+            if flexible and not built_flexible:
                 notes.append(f"Gap too short for flexure; generated rigid spacer for {side}.")
 
             mesh = _extrude_polygon(poly, height)
-            is_flexible = flexible and not rigid_fallback
             file_name = spacer_filename(side, part_w, part_d, height, is_flexible)
             out_path = generate_file(file_name, mesh)
 

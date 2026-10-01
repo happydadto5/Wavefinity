@@ -122,7 +122,7 @@ B4B_WALL_PRESETS = B4B_MATERIAL_PRESETS
 B4B_BASE_PRESETS = B4B_MATERIAL_PRESETS
 B4B_DEFAULT_WALL = 1.6
 B4B_DEFAULT_BASE = 1.6
-DEFAULT_BASE_THICKNESS = 0.6
+DEFAULT_BASE_THICKNESS = 0.8
 # Base thickness presets, same reasoning as WALL_PRESETS: a short list of
 # choices that print differently, not a free numeric field.  A design saved
 # with any other base value still loads and regenerates unchanged; the UI

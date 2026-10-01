@@ -4112,7 +4112,7 @@ SP.resetCabinetSettings = async () => {
   const problem = state.cabinetRecovery?.message || "A cabinet setting is not valid.";
   const ok = await appConfirmAction({
     title: "Reset cabinet settings?",
-    message: `${problem}\n\nWavefinity keeps every drawer that is still valid and replaces only what is damaged with current defaults. Your Inventory and bin designs are not changed.`,
+    message: `${problem}\n\nWavefinity keeps each usable drawer identity and resets only damaged cabinet or drawer fields to current defaults. Your Inventory and bin designs are not changed.`,
     actionLabel: "Reset cabinet settings",
   });
   if (!ok) return;
