@@ -43,8 +43,8 @@
     const recovery = el("section", "sd-recovery", ""); recovery.hidden = true;
     const recoveryTitle = el("h3", "", "Cabinet settings need repair");
     const recoveryMessage = el("p", "sd-recovery-message", "");
-    const recoveryNote = el("p", "sd-help", "Your Inventory and bin designs are untouched. Resetting keeps each usable drawer identity and restores only damaged cabinet or drawer fields to current defaults.");
-    const reset = el("button", "button primary", "Reset cabinet settings"); reset.type = "button";
+    const recoveryNote = el("p", "sd-help", "Your Inventory and bin designs are untouched. Resetting keeps every drawer that is still valid and replaces only what is damaged with current defaults.");
+    const reset = el("button", "button primary", "Reset Cabinet Settings"); reset.type = "button";
     reset.addEventListener("click", () => callbacks.resetCabinet?.());
     recovery.append(recoveryTitle, recoveryMessage, recoveryNote, reset);
     host.append(panel, structural, recovery);
@@ -86,7 +86,7 @@
           event.preventDefault();
           selectors()[Math.max(0, Math.min(rows.length - 1, index + (event.key === "ArrowUp" ? -1 : 1)))]?.focus();
         });
-        const remove = el("button", "sd-drawer-delete", "Delete"); remove.type = "button";
+        const remove = el("button", "button danger sd-drawer-delete", "Delete"); remove.type = "button";
         remove.disabled = editing || rows.length <= 1; remove.setAttribute("aria-label", `Delete Drawer ${index + 1}`);
         if (rows.length <= 1) remove.title = "Keep at least one drawer";
         if (editing) remove.title = "Finish editing the current drawer first.";

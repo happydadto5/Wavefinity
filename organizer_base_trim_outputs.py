@@ -274,8 +274,8 @@ def materialize_base_trim(
                 final = folder / name
                 if final.exists() and (name not in owned or file_sha256(final) != owned[name]):
                     raise BaseTrimOwnershipError(
-                        f"{name} is already in this folder and was not made by this Base Trim, or it was "
-                        "changed outside Wavefinity. Rename or move it, then save again. Nothing was changed."
+                        f"{name} already exists and Wavefinity cannot safely replace it. "
+                        "Rename or move that file, then Save Base Trim again. Nothing was changed."
                     )
             for name in desired:
                 final = folder / name

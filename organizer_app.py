@@ -112,6 +112,7 @@ from organizer_pegboard import (
     apply_pegboard_mount_structure,
     make_board_adapters,
     normalise_mount_spec,
+    pegboard_standard,
     receiver_layout,
 )
 from organizer_b4b import (
@@ -526,7 +527,7 @@ def edge_mount_label_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf"
 
 
 def pegboard_adapter_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
-    name = f"Pegboard Adapters {box.pegboard.standard} {box.x:g} x {box.z:g}"
+    name = f"Pegboard Adapters {pegboard_standard(box.pegboard.standard).name} {box.x:g} x {box.z:g}"
     tidy = clean_label(part)
     return (f"{name} {tidy}" if tidy else name) + suffix
 
@@ -3288,7 +3289,6 @@ def design_to_dict(
             "lid": b4b.lid,
             "secure_lid": b4b.secure_lid,
             "latch_count": b4b.latch_count,
-            "latch_strength": b4b.latch_strength,
             "lid_headroom_mm": b4b.lid_headroom_mm,
             "label_enabled": b4b.label_enabled or bool(b4b.label_text.strip()),
             "label_text": b4b.label_text,

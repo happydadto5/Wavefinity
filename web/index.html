@@ -42,6 +42,7 @@
               <button id="space-head-edit" class="button secondary dl-small major-action" type="button">Edit Space</button>
               <button id="undo-design" class="button secondary dl-small" type="button" disabled>Undo</button>
               <button id="redo-design" class="button secondary dl-small" type="button" disabled>Redo</button>
+              <button id="space-head-printer-settings" class="button secondary dl-small" type="button">Printer Settings…</button>
               <button id="space-head-show" class="button secondary dl-small" type="button">Show Folder</button>
               <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
             </div>
@@ -76,11 +77,13 @@
             <label><span id="y-size-label">Depth</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
             <label><span id="z-size-label">Height</span> <span class="unit">mm</span><input id="z" type="text" inputmode="numeric"></label>
           </div>
+          <p id="design-first-size-help" class="inline-help" hidden></p>
+          <p id="bin-grid-help" class="inline-help">Width and Depth adjust in 8 mm units.</p>
           <div id="pegboard-mount-row" class="pegboard-mount-row" hidden>
             <strong>Pegboard Mount</strong>
             <span id="pegboard-mount-standard" class="ink"></span>
-            <label>Cleat Count X<select id="pegboard-cleat-x"><option value="auto">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
-            <label>Cleat Count Y<select id="pegboard-cleat-y"><option value="auto">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+            <label title="How many Pegboard attachment points to use across/up. Auto chooses for the bin size.">Cleat count X<select id="pegboard-cleat-x"><option value="auto">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
+            <label title="How many Pegboard attachment points to use across/up. Auto chooses for the bin size.">Cleat count Y<select id="pegboard-cleat-y"><option value="auto">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
             <span id="pegboard-mount-note" class="ink"></span>
           </div>
           <div class="mode-and-bin-options">
@@ -179,7 +182,7 @@
                     <label id="lid-label-orientation-row">Orientation<select id="lid-label-orientation">
                       <option value="horizontal">Horizontal</option><option value="vertical">Vertical</option>
                     </select></label>
-                    <label id="lid-label-style-row">Style<select id="lid-label-style">
+                    <label id="lid-label-style-row" title="Letters are recessed into the surface.">Style<select id="lid-label-style">
                       <option value="flush">Inlaid</option><option value="raised">Raised</option>
                     </select></label>
                     <label id="lid-label-depth-row"><span id="lid-label-depth-name">Inlay depth</span><select id="lid-label-depth">
@@ -301,7 +304,7 @@
                     <label class="edge-mount-compact-number">Text depth <span class="unit">mm</span>
                       <input id="edge-mount-label-depth" type="number" min="0.2" max="2" step="0.1">
                     </label>
-                    <label id="edge-mount-label-style-row" class="inline-select edge-mount-compact-select" hidden>Label style
+                    <label id="edge-mount-label-style-row" class="inline-select edge-mount-compact-select" title="Letters are recessed into the surface." hidden>Label style
                       <select id="edge-mount-label-style">
                         <option value="flush">Inlaid / flush</option>
                         <option value="raised">Raised</option>
@@ -312,7 +315,7 @@
                   <p id="edge-mount-integrated-support-warning" class="inline-help" hidden>Integrated labels usually need slicer supports.</p>
 
                   <div class="edge-mount-field-group edge-mount-plate-group">
-                    <label class="edge-mount-compact-number">Projection <span class="unit">mm</span>
+                    <label class="edge-mount-compact-number" title="How far the label plate extends beyond the bin.">Projection <span class="unit">mm</span>
                       <input id="edge-mount-label-projection-mm" type="number" min="5" max="200" step="0.1">
                     </label>
                     <label class="edge-mount-compact-number">Thickness <span class="unit">mm</span>
@@ -419,7 +422,7 @@
             <label>B height <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>
           </div>
           <div id="connector-settings" class="field-grid three" hidden>
-            <label>Tolerance <span class="unit">mm</span><input id="connector-tolerance" type="number" min="0" max="1" step="0.01"></label>
+                  <label title="Extra space around a connector fit.">Tolerance <span class="unit">mm</span><input id="connector-tolerance" type="number" min="0" max="1" step="0.01"></label>
             <label>Length <span class="unit">mm</span><input id="connector-length" type="number" min="2" step="0.1"></label>
             <label>Arm thickness <span class="unit">mm</span><input id="connector-arm-thickness" type="number" min="0.5" max="10" step="0.1"></label>
           </div>
@@ -456,7 +459,7 @@
             <button id="print-with-connectors" class="button primary print-button">Print with Connectors</button>
             <button id="print-without-connectors" class="button secondary print-button">Print without Connectors</button>
           </div>
-          <button type="button" id="slicer-picker-button" class="slicer-picker-button" title="Select custom Bambu Studio or OrcaSlicer executable">Change slicer</button>
+          <button type="button" id="slicer-picker-button" class="slicer-picker-button" title="Choose the slicer app Wavefinity sends print files to.">Change slicer</button>
         </div>
         <div class="button-row equal generate-actions">
           <button id="generate-all" class="button secondary">Save Bin + Connectors</button>
@@ -522,7 +525,7 @@
             <div id="ordinary-preview-modes" class="mode-controls" aria-label="Show">
               <button type="button" data-camera-toggle="bin" aria-pressed="true">Bin</button>
               <button type="button" data-camera-toggle="interior" aria-pressed="true">Interior</button>
-              <button type="button" data-camera-toggle="xray" aria-pressed="false">Xray</button>
+              <button type="button" data-camera-toggle="xray" aria-pressed="false" title="Hide the front-facing bin wall so you can see inside.">Xray</button>
             </div>
           </div>
         </div>
@@ -1094,7 +1097,7 @@
             <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="drawer-y" type="number" min="1" step="any"></label>
             <label class="space-field"><span>Usable height <span class="unit">mm</span></span><input id="drawer-z" type="number" min="1" step="any"></label>
           </div>
-          <p class="space-help">Width = left ↔ right. Depth = front ↔ back. Height = clear usable height with the drawer closed.</p>
+          <p class="space-help">Measure the clear inside width, depth, and height with the drawer closed. Width is left ↔ right; Depth is front ↔ back. Wavefinity handles its required wall clearance automatically.</p>
           <div id="drawer-readout" class="derived-readout" hidden>
              <dt>Physical Size</dt><dd id="drawer-size-readout"></dd>
              <dt>Wavefinity Capacity</dt><dd id="drawer-capacity-readout"></dd>

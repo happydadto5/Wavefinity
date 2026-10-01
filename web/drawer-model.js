@@ -554,11 +554,17 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set(), { skipHeight = false } = 
   const height = DL.stackHeight(bins);
   const cap = DL.heightCap(drawer);
   if (!skipHeight && !DL.isPegboard(drawer) && !DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
-  if (ax0 < 0 || ay0 < 0 || ax1 > grid.cols || ay1 > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the pegboard." : "That would stick out of the Space." };
+  if (ax0 < 0 || ay0 < 0 || ax1 > grid.cols || ay1 > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the Pegboard." : "That would stick out of the Space." };
   if (DL.isPegboard(drawer)) {
     const layout = DL.pegboardLayouts[bins[0].id] || bins[0].pegboard_layout;
     if (!layout || layout.error) return { ok: false, reason: layout?.error || "Mount layout is still loading." };
-    if (!layout.compatible) return { ok: false, reason: bins[0].pegboard_standard ? "This bin was generated for another pegboard standard." : "This bin has no pegboard receiver." };
+    if (!layout.compatible) {
+      if (bins[0].pegboard_standard) {
+        const standardName = state.catalog?.pegboard_rules?.standards?.find(row => row.id === bins[0].pegboard_standard)?.name || "another Pegboard standard";
+        return { ok: false, reason: `This bin was generated for the ${standardName} standard. Change the Space standard to match, or regenerate the bin for this Space's standard.` };
+      }
+      return { ok: false, reason: "This bin has no Pegboard receiver." };
+    }
     if (drawer.pegboard_standard === "skadis" && gy % 2) return { ok: false, reason: "SKÅDIS bins start on an aligned slot row." };
     if ((layout.mount_offsets || []).some(([mx, my]) => gx + mx < 0 || gx + mx >= grid.cols - 0.5 + 1e-9 || gy + my < 0 || gy + my >= grid.rows)) {
       return { ok: false, reason: "The bin cannot reach enough valid board openings there." };
@@ -720,7 +726,7 @@ DL.spaceContextCurrent = context =>
   context.spaceId === (state.activeSpaceId || null);
 
 DL.staleSpaceError = () => {
-  const error = new Error("This action belongs to the Space you just left.");
+  const error = new Error("This action belongs to the Space you just left. Reopen that Space and try again.");
   error.code = "STALE_SPACE_CONTEXT";
   return error;
 };
@@ -805,9 +811,9 @@ DL.refreshPegboardLayoutsSafe = async warningPrefix => {
   }
 };
 DL.refreshPegboardLayoutsAfterWrite = () => DL.refreshPegboardLayoutsSafe(
-  "Inventory saved, but pegboard placement data could not be refreshed.");
+  "Inventory saved, but Pegboard placement data could not be refreshed.");
 DL.refreshPegboardLayoutsAfterLoad = () => DL.refreshPegboardLayoutsSafe(
-  "Inventory loaded, but pegboard placement data could not be refreshed.");
+  "Inventory loaded, but Pegboard placement data could not be refreshed.");
 DL.retryPegboardLayouts = () => DL.refreshPegboardLayoutsSafe(
   "Pegboard placement data could not be refreshed.");
 
@@ -1587,7 +1593,7 @@ DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", as
 DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async context => {
   if (!(await DL.prepareBatch(Object.keys(selection || {}), { printing: true }))) return;
   if (!state.slicer || !state.slicer.available) {
-    toast("Bambu Studio was not found. Locate it with Change slicer in the bin view.", true, 7000);
+    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 7000);
     return;
   }
   const chosen = Object.fromEntries(Object.entries(selection || {}).filter(([, count]) => count > 0));

@@ -866,6 +866,14 @@ async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
   clearDraftSelection();
   activatePreviewView(preferredDesignView());
   await refreshPreview();
+  const starterHelp = $("#design-first-size-help");
+  if (starterHelp) {
+    const show = state.folderMode !== "space";
+    starterHelp.hidden = !show;
+    starterHelp.textContent = show
+      ? `Starting size: ${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm. Change Width and Depth to fit what you want to organize.`
+      : "";
+  }
 }
 
 // ------------------------------------------------------------ Fix 034 lifecycle
@@ -922,7 +930,7 @@ function discardStaleFileRefreshRows(ids) {
 function settleStaleFileRefresh({ materialize = false } = {}) {
   if (staleFileRefreshGate) return staleFileRefreshGate;
   const run = async () => {
-    if (state.runtime.hosted || !state.designInventoryId) return true;
+    if (!state.designInventoryId) return true;
     const context = DL.spaceContext();
     const entry = [...staleFileRefreshQueue.values()].find(one =>
       staleFileRefreshEntryCurrent(one) && one.rowId === state.designInventoryId);
@@ -1019,7 +1027,7 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
     } catch (error) {
       toast(`This bin was saved, but the Space's remembered settings were not: ${error.message}`, true, 6000);
     }
-    if (data.files_became_stale && !state.runtime.hosted) queueStaleFileRefresh(context, data.row_id, wasPrinted);
+    if (data.files_became_stale) queueStaleFileRefresh(context, data.row_id, wasPrinted);
     if (state.designInventoryId !== rowId) {
       return true;
     }
@@ -2684,16 +2692,6 @@ function syncLiftGrabberControls() {
   if ($("#lift-grabber-location-setting")) $("#lift-grabber-location-setting").hidden = !enabled;
 }
 
-function populateEdgeMountChoices() {
-  const rules = state.catalog?.edge_mount || {};
-  const projectionSelect = $("#edge-mount-label-projection");
-  if (projectionSelect && !projectionSelect.options.length) {
-    for (const choice of rules.projection_choices || []) {
-      projectionSelect.add(new Option(choice.label, choice.value));
-    }
-    projectionSelect.add(new Option("Custom", "custom"));
-  }
-}
 
 // Fix 058 Correction 1, C1.4B/G: the Label selector (None / Separate Part /
 // Integrated) is UI-only - it is derived from the existing label_enabled/
@@ -3610,7 +3608,6 @@ function syncForm() {
   $("#lift-grabber-size").value = box.lift_grabbers?.enabled ? (box.lift_grabbers?.size || "medium") : "no";
   $("#lift-grabber-location").value = box.lift_grabbers?.location || "sides";
   syncLiftGrabberControls();
-  populateEdgeMountChoices();
   if (editingEdgeMount()) syncEdgeMountControls();
   if (!state.design.part_name || !state.design.part_name.trim()) {
     const labelCandidate = state.design.label || state.design.b4b?.label_text || state.design.layout?.features?.find(f => f.kind === "text")?.options?.text;
@@ -3619,8 +3616,6 @@ function syncForm() {
     }
   }
   $("#part-name").value = state.design.part_name || "";
-  const scoopEl = $("#scoop");
-  if (scoopEl) scoopEl.checked = Boolean(state.design.scoop);
   $("#mode-select").value = layout.mode;
   $("#output-folder").value = state.runtime.hosted
     ? (state.browserFolder?.name || "Select a folder...")
@@ -4832,8 +4827,6 @@ function updateDesignFromForm() {
     design.box.base_thickness = Math.max(minBase, design.box.base_thickness);
   }
   design.part_name = $("#part-name").value;
-  const scoopEl = $("#scoop");
-  if (scoopEl) design.scoop = scoopEl.checked;
   readLiftGrabberForm(design);
   if (editingEdgeMount()) readEdgeMountForm(design);
   readSideOpeningForm(design);
@@ -4874,18 +4867,6 @@ const saveOutputPreference = debounce(output => {
   );
 }, 500);
 
-async function showLog() {
-  const button = $("#show-log-button");
-  if (button) button.disabled = true;
-  try {
-    const result = await api("/api/show-log", { output: state.output });
-    toast(`Opened log: ${result.file.split(/[\\\\/]/).pop()}`);
-  } catch (error) {
-    toast(error.message, true);
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
 
 function updateNudgeUI() {
   const el = $("#layout-help");
@@ -5098,7 +5079,11 @@ function formatDimField(axis) {
   if (!input || document.activeElement === input) return;
   const val = state.design?.box?.[axis];
   if (val == null) return;
-  const inside = getInsideDimension(axis, val);
+  const key = axis === "x" ? "inside_x" : "inside_y";
+  const previewCurrent =
+    state.previewDesignKey === JSON.stringify(state.design) &&
+    state.preview?.dimensions?.[key] != null;
+  const inside = previewCurrent ? state.preview.dimensions[key] : null;
   // Blurred state keeps the whole fit story short enough to stay in the field.
   // The unit count is the integer number of whole grid steps, from the
   // authoritative base unit.
@@ -5106,7 +5091,9 @@ function formatDimField(axis) {
   const units = Math.round(val / unit);
   // Fix 081 E: physical mm first, then usable-inside mm, then the spelled-out
   // unit count - never a count glued to a letter like "30X".
-  input.value = `${fmt(val)} mm (${fmt(inside)} mm inside) — ${units} unit${units === 1 ? "" : "s"}`;
+  input.value = inside == null
+    ? `${fmt(val)} mm (inside updating…) — ${units} unit${units === 1 ? "" : "s"}`
+    : `${fmt(val)} mm (${fmt(inside)} mm inside) — ${units} unit${units === 1 ? "" : "s"}`;
 }
 
 function formatHeightField() {
@@ -5315,12 +5302,12 @@ function wireControls() {
     button.setAttribute("aria-expanded", String(section.classList.contains("open")));
   }));
 
-  $("#advanced-settings")?.addEventListener("change", event => {
-    $("#advanced-build-settings").hidden = !event.target.checked;
-  });
-
   ["#x-size", "#y-size", "#z", "#base-thickness", "#wall-thickness", "#part-name"]
     .forEach(selector => $(selector).addEventListener("input", () => {
+      if (selector === "#x-size" || selector === "#y-size") {
+        const starterHelp = $("#design-first-size-help");
+        if (starterHelp) starterHelp.hidden = true;
+      }
       if (selector === "#wall-thickness") {
         const select = $(selector);
         select.dataset.customValue = select.value;
@@ -5557,17 +5544,6 @@ function wireControls() {
       changedDesign(previousDesign);
     }
   });
-  $("#scoop")?.addEventListener("change", () => {
-    const previousDesign = clone(state.design);
-    const previousCanGenerate = state.canGenerate;
-    if (!applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate)) {
-      return;
-    }
-
-    noteCommittedDesignChange(previousDesign);
-    if (state.draft) refreshDraft();
-    else refreshPreview();
-  });
   ["#output-folder", "#keep-log", "#connector-tolerance", "#connector-length",
     "#connector-arm-thickness", "#connector-bin-a-height", "#connector-bin-b-height"]
     .forEach(selector => $(selector)?.addEventListener("change", () => {
@@ -5610,7 +5586,6 @@ function wireControls() {
     SP.open();
   });
   $("#output-folder-picker")?.addEventListener("click", () => SP.open());
-  $("#show-log-button")?.addEventListener("click", showLog);
 
   const viewTabs = $$(".view-tab");
   const selectPreviewTab = view => activatePreviewView(view);
@@ -5815,7 +5790,6 @@ async function openModifier(kind, fromPlaced = false) {
   const info = partInfo(kind);
   syncDraftEditorIdentity(kind, info);
   if (kind === "edge_mount") {
-    populateEdgeMountChoices();
     syncEdgeMountControls();
   } else if (kind === "lid_stacking") {
     syncLidForm();
@@ -6862,7 +6836,7 @@ function renderDraftFields() {
     const depthLabel = one.options?.raised === true ? "Raised height" : "Inlay depth";
     const depthTip = one.options?.raised === true
       ? "How far the letters project above their receiving surface."
-      : "How deeply the letters are embedded or cut into their receiving surface.";
+      : "Letters are recessed into the surface by this depth.";
     const letterField = field("Letter height", "option:cap_height", String(Math.floor(number(capShown, 15))), { unit: "mm", step: "1" });
     const depthChoices = textDepthChoices(info);
     const minimumBacking = number(textBackingRules().min_backing_mm, NaN);
@@ -7196,7 +7170,10 @@ function renderDraftFields() {
       html += `<label>Shape<select data-draft="profile">
         ${profiles.map(([value, label]) => `<option value="${value}" ${item.profile === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>`;
-      html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), { unit: "mm" });
+      html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), {
+        unit: "mm",
+        tip: "Extra space around the object.",
+      });
     }
   }
   let bodyHtml = "";
@@ -7492,10 +7469,8 @@ function renderDraftFields() {
   // reasoning as Width/Depth above: reflect the floor back so a typed 0
   // doesn't keep showing while one is actually placed.
   const countField = $('[data-draft="count"]', $("#draft-fields"));
-  const countAutoHint = $("#count-auto-hint", $("#draft-fields"));
-  const syncCountAutoHint = () => { if (countAutoHint) countAutoHint.hidden = state.draft.count != null; };
+  const syncCountAutoHint = () => {};
   if (countField) {
-    countField.addEventListener("input", syncCountAutoHint);
     countField.addEventListener("blur", () => {
       if (state.draft.count != null && String(state.draft.count) !== countField.value) {
         countField.value = String(state.draft.count);
@@ -10312,10 +10287,6 @@ function renderPlaced() {
     wirePlacedRows(added);
   }
   const total = placedPartCount();
-  const summaryEl = $("#design-summary");
-  if (summaryEl) {
-    summaryEl.textContent = state.design.layout.mode;
-  }
 
   updateSelectionButtons();
   updateDividerEditBreadcrumb();
@@ -14118,8 +14089,6 @@ function visibleDesignSnapshot() {
   normalizeStackSettings(visibleDesign);
   if (isSurfaceBinDesign(visibleDesign) && surfaceStackingBlocked(visibleDesign))
     visibleDesign.layout.surface_lightweight_base = false;
-  const scoopEl = $("#scoop");
-  if (scoopEl) visibleDesign.scoop = scoopEl.checked;
   readLiftGrabberForm(visibleDesign);
   if (editingEdgeMount()) readEdgeMountForm(visibleDesign);
   readSideOpeningForm(visibleDesign);
@@ -14499,7 +14468,18 @@ async function generateParts(target) {
     if (target === "all" || target === "connector") {
       saveStage = "connector";
       setItemStatus("connector", "generating", "Saving…");
-      const connResult = await apiSideEffect("/api/connector", payload, { onStillFinishing: () => setItemStatus("connector", "generating", "Still finishing…") });
+      const connectorPayload = { ...payload, replace_existing_connectors: false };
+      let connResult = await apiSideEffect("/api/connector", connectorPayload, { onStillFinishing: () => setItemStatus("connector", "generating", "Still finishing…") });
+      if (connResult.requires_connector_replace) {
+        const names = connResult.conflict_files || [];
+        if (!(await confirmReplaceConnectorFiles(names))) {
+          throw new Error("Connector save cancelled. Nothing was replaced.");
+        }
+        connResult = await apiSideEffect("/api/connector", {
+          ...connectorPayload,
+          replace_existing_connectors: true,
+        }, { onStillFinishing: () => setItemStatus("connector", "generating", "Still finishing…") });
+      }
       saveOutput = connResult.output || saveOutput;
       if (connResult.connector_plan) {
         connectorPlan = connResult.connector_plan;
@@ -14612,7 +14592,7 @@ async function printModel(target = "bin", initiatingButton = null) {
   if (state.runtime.hosted) return generateParts(target === "all" ? "all" : "bin");
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
-    toast("A slicer was not found. Use Change slicer below the print buttons to locate Bambu Studio or OrcaSlicer.", true, 8000);
+    toast("A slicer prepares 3D-print files for your printer. Use Change Slicer below the print buttons to choose one.", true, 8000);
     return;
   }
   if (typedSpaceOrdinaryBin() &&

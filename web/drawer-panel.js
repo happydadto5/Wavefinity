@@ -454,7 +454,7 @@ DP.renderBatch = () => {
   button.textContent = DL.busy === "print-bins" ? "Opening Bambu Studio…"
     : scope.subset ? `Print Selected to Bambu Studio (${printCount})` : `Print All Not Printed (${printCount})`;
   button.disabled = !printCount || noSlicer || busy;
-  button.title = noSlicer ? "Bambu Studio was not found. Locate it with Change slicer in the bin view."
+  button.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."
     : !printCount ? "Every bin has already been printed." : "Make any missing files, then open them in Bambu Studio.";
 };
 
