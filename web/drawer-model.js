@@ -1172,14 +1172,14 @@ DL.removePlacement = key => {
 };
 
 DL.planSpacers = () => DL.busyWith("spacers", async context => {
-  const result = await api("/api/drawer/spacers", {
-    output: DL.output ?? DL.folder(), layout: DL.layout,
+  const result = await DL.inventoryCall("/api/drawer/spacers", {
+    layout: DL.layout,
     drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
-  });
+  }, { write: false, context });
   DL.requireSpaceContext(context);
   DL.spacerPlan = result.candidates || [];
   DL.spacerSelected = new Set((result.selected || []).map(c => c.id));
-  DL.spacerPlanSignature = DL.spacerSignature();
+  DL.spacerPlanSignature = result.plan_signature || null;
   DL.emit();
 });
 
@@ -1204,13 +1204,31 @@ DL.removeSpacerCandidate = id => {
 // selected planned candidate and places the resulting spacers. Assumes
 // DL.spacerPlan / DL.spacerSelected are current; callers plan first.
 DL.savePlannedSpacers = async context => {
-  if (!DL.spacerPlan) return;
+  if (!DL.spacerPlan) {
+    toast("No spacer plan to save. Click Create Spacers, choose spacers, then Save Selected Spacers.", true, 6000);
+    return;
+  }
   const before = DL.snapshot();
-  const result = await apiSideEffect("/api/drawer/spacers/generate", {
-    output: DL.output ?? DL.folder(), layout: DL.layout,
-    drawer_id: DL.layout.active, selected: Array.from(DL.spacerSelected),
-    options: DL.layout.settings.spacers,
-  });
+  // Fix 096 C12: the backend rejects the write when the plan went stale; the
+  // stale plan is discarded, never retried and never merged.
+  let result;
+  try {
+    result = await DL.inventoryCall("/api/drawer/spacers/generate", {
+      layout: DL.layout,
+      drawer_id: DL.layout.active, selected: Array.from(DL.spacerSelected),
+      options: DL.layout.settings.spacers,
+      plan_signature: DL.spacerPlanSignature,
+    }, { context, sideEffect: true });
+  } catch (error) {
+    if (String(error.message || "").startsWith("Spacers changed while you were planning")) {
+      DL.spacerPlan = null;
+      DL.spacerSelected = new Set();
+      DL.spacerPlanSignature = null;
+      toast(error.message, true, 9000);
+      return;
+    }
+    throw error;
+  }
   if (!DL.spaceContextCurrent(context)) {
     toast("Spacer saving finished in the Space you left. The current Space was not changed.");
     return;
@@ -1220,6 +1238,7 @@ DL.savePlannedSpacers = async context => {
   if (DL.snapshot() !== before) { DL.history.push(before); DL.future = []; }
   DL.spacerPlan = null;
   DL.spacerSelected = new Set();
+  DL.spacerPlanSignature = null;
   DL.dirty = false;
   DL.saveState = "saved";
   DL.savedAt = new Date();
@@ -1246,58 +1265,33 @@ DL.savePlannedSpacers = async context => {
 
 DL.generateSelectedSpacers = () => DL.busyWith("spacers", context => DL.savePlannedSpacers(context));
 
-// Fix 088 S88-4: one click re-plans with the current wall/height settings,
-// removes the old spacers, then saves and places the replacements.
-// No confirmation. Aborts - leaving everything as it was - when the
-// inventory deletion fails (the existing deletion already reported why,
-// under the Fix 087 printed-file policy).
-// Fix 090: planning happens FIRST and is read-only - existing spacers are
-// already excluded from spacer planning, so the plan is identical whether
-// or not the old spacers are still placed. If planning fails, nothing has
-// been deleted. Removal is scoped to the active drawer only: its spacer
-// placements are dropped from the layout, and an inventory row is deleted
-// only when no placement in ANY drawer still references it (one row can be
-// placed in more than one drawer).
 DL.refreshSpacers = () => DL.busyWith("spacers", async context => {
-  const result = await api("/api/drawer/spacers", {
-    output: DL.output ?? DL.folder(), layout: DL.layout,
-    drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
-  });
+  if (!(await DL.save())) return;
   DL.requireSpaceContext(context);
-  const activeId = DL.layout.active;
-  const doomed = new Set(
-    (DL.drawer().placements || [])
-      .map(placement => placement.bin)
-      .filter(id => DL.isSpacer(DL.bin(id)))
-  );
-  let removedCount = 0;
-  if (doomed.size) {
-    const drawers = DL.layout.drawers.map(drawer => drawer.id !== activeId ? drawer : {
-      ...drawer,
-      placements: (drawer.placements || []).filter(placement => !doomed.has(placement.bin)),
-    });
-    const stillUsed = new Set();
-    drawers.forEach(drawer => (drawer.placements || []).forEach(placement => stillUsed.add(placement.bin)));
-    const deleteIds = [...doomed].filter(id => !stillUsed.has(id));
-    removedCount = doomed.size;
-    const ok = await DL.editBins({ layout: { ...DL.layout, drawers }, delete_ids: deleteIds }, { context });
-    if (!ok) return;
-    if (!DL.spaceContextCurrent(context)) {
-      toast("Spacer deletion finished in the Space you left. The current Space was not changed.");
-      return;
-    }
-  }
-  DL.spacerPlan = result.candidates || [];
-  DL.spacerSelected = new Set((result.selected || []).map(c => c.id));
-  DL.spacerPlanSignature = DL.spacerSignature();
+  const result = await DL.inventoryCall("/api/drawer/spacers/refresh", {
+    drawer_id: DL.layout.active,
+    options: DL.layout.settings.spacers,
+  }, { context, sideEffect: true });
+  DL.requireSpaceContext(context);
+  DL.adopt(result);
+  DL.normaliseLayout(result.layout);
+  DL.spacerPlan = null;
+  DL.spacerSelected = new Set();
+  DL.spacerPlanSignature = null;
+  DL.dirty = false;
+  DL.saveState = "saved";
+  DL.savedAt = new Date();
   DL.emit();
-  if (!DL.spacerSelected.size) {
-    toast(removedCount
-      ? `Removed ${removedCount} stale spacer${removedCount === 1 ? "" : "s"} - no gaps need spacers right now.`
-      : "No gaps need spacers right now.");
-    return;
-  }
-  await DL.savePlannedSpacers(context);
+  DL.requestReport();
+  const made = result.generated?.length || 0;
+  const removed = Number(result.removed || 0);
+  toast([
+    made
+      ? `Refreshed ${made} spacer${made === 1 ? "" : "s"}.`
+      : "No spacer gaps were found for the current wall settings.",
+    ...(removed ? [`Replaced ${removed} old spacer${removed === 1 ? "" : "s"}.`] : []),
+    ...(result.notes || []),
+  ].join("\n"), false, 9000);
 });
 
 // Spacers are free, edge-facing placements (no gx) - DL.items()/DL.chains()
@@ -1433,12 +1427,18 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async context => {
   const groups = DL.spacerPrintGroups(stagedLayout);
   const updates = [];
 
+  const handedOff = new Set((result.files || []).map(p => String(p).split(/[\\/]/).pop()));
+  const omittedFiles = [];
   for (const [id, count] of Object.entries(selection)) {
     if (!(count > 0)) continue;
     const group = groups.find(
       candidate => candidate.members.some(member => member.id === id)
     );
     if (!group) continue;
+    if (!handedOff.has(String(group.bin.file || ""))) {
+      omittedFiles.push(String(group.bin.file || id));
+      continue;
+    }
     updates.push(...DL.promoteSpacerCopies(group, count, stagedLayout));
   }
 
@@ -1461,6 +1461,9 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async context => {
       return;
     }
   }
+  if (omittedFiles.length > 0) {
+    toast("These spacer files were missing and were not marked printed: " + [...new Set(omittedFiles)].join(", "), true, 10000);
+  }
   // The launch already repeats each file once per copy.
   const lines = Object.entries(result.counts || {}).map(([file, copyCount]) => `${copyCount} × ${file}`);
   toast(["Opened in Bambu Studio", ...lines].join("\n"), false, 9000);
@@ -1479,6 +1482,9 @@ DL.saveConnectorFiles = async (context = DL.spaceContext()) => {
     output: DL.output ?? DL.folder(), layout: DL.layout, bins: DL.bins, drawer_id: DL.layout.active,
   });
   DL.requireSpaceContext(context);
+  // Fix 096 C4: connector-only generation changes no Inventory, so the shared
+  // hosted file-set transaction is used directly (no post-commit write).
+  await SP.writeHostedFileSet(state.browserFolder?.handle ?? null, result.files_base64);
   return {
     lines: (result.connectors || []).map(one => `Print ${one.count} × ${one.file}`),
     notes: result.notes || [],
@@ -1501,11 +1507,13 @@ DL.adoptBatchResult = result => {
 
 // Shared start of a batch Save/Print: flush the visible Designer, then the
 // Space layout, so the server prepares the latest saved designs.
-DL.prepareBatch = async selection => {
+DL.prepareBatch = async (selection, { printing = false } = {}) => {
   if (typeof flushSpaceDesignAutosave === "function" &&
-      !(await flushSpaceDesignAutosave({ materialize: selection.includes(state.designInventoryId) }))) return false;
-  if (state.runtime.hosted) {
-    toast("Bulk saving and printing are available in local Wavefinity.", true);
+      !(await flushSpaceDesignAutosave({
+        materialize: selection.includes(state.designInventoryId),
+      }))) return false;
+  if (printing && state.runtime.hosted) {
+    toast("Hosted Wavefinity saves files to your folder instead of opening a local slicer.", true);
     return false;
   }
   return true;
@@ -1514,7 +1522,7 @@ DL.prepareBatch = async selection => {
 // Batch Save: make the chosen bins' files current (only rows without current
 // files are generated) and never open Bambu Studio or change Printed status.
 DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", async context => {
-  if (!(await DL.prepareBatch(rowIds || []))) return;
+  if (!(await DL.prepareBatch(rowIds || [], { printing: false }))) return;
   const chosen = [...new Set(rowIds || [])];
   if (!chosen.length) return;
   if (!(await DL.save())) return;
@@ -1555,7 +1563,7 @@ DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", as
 
 // The server re-reads saved Inventory; each selected row opens once in Bambu.
 DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async context => {
-  if (!(await DL.prepareBatch(Object.keys(selection || {})))) return;
+  if (!(await DL.prepareBatch(Object.keys(selection || {}), { printing: true }))) return;
   if (!state.slicer || !state.slicer.available) {
     toast("Bambu Studio was not found. Locate it with Change slicer in the bin view.", true, 7000);
     return;
@@ -1599,8 +1607,11 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
   ].join("\n"), false, 10000);
 });
 
-DL.printDrawer = () => DL.busyWith("print", async context => {
-  const result = await apiSideEffect("/api/drawer/print", {
+// (Fix 096 C11) One local complete Space handoff: every placed bin + every
+// placed spacer with a file + the Space's connectors, one preflight, one
+// slicer launch. Hosted is rejected by the backend with a plain message.
+DL.printCompleteSpace = () => DL.busyWith("print-complete", async context => {
+  const result = await api("/api/drawer/print-complete", {
     output: DL.output ?? DL.folder(), layout: DL.layout, bins: DL.bins,
     drawer_id: DL.layout.active, slicer_path: state.slicer?.path || null,
   });
@@ -1608,10 +1619,14 @@ DL.printDrawer = () => DL.busyWith("print", async context => {
     toast("Bambu Studio opened for the Space you left. The current Space was not changed.");
     return;
   }
-  const lines = Object.entries(result.counts || {}).map(([file, count]) => `${count} × ${file}`);
+  const parts = [
+    `${result.bin_copies ?? 0} bin ${(result.bin_copies ?? 0) === 1 ? "copy" : "copies"}`,
+    `${result.spacer_copies ?? 0} spacer ${(result.spacer_copies ?? 0) === 1 ? "copy" : "copies"}`,
+    ...(result.connector_copies ? [`${result.connector_copies} connector ${result.connector_copies === 1 ? "copy" : "copies"}`] : []),
+  ];
   if (result.partial) {
-    toast([result.error || "Bambu Studio did not open.", "Connector files were prepared and kept.", ...lines, ...(result.notes || [])].join("\n"), true, 10000);
+    toast([(result.error || "Bambu Studio did not open."), `Kept: ${parts.join(", ")}.`, ...(result.notes || [])].join("\n"), true, 10000);
     return;
   }
-  toast(["Opened in Bambu Studio", ...lines, ...(result.notes || [])].join("\n"), false, 10000);
+  toast([`Opened in Bambu Studio: ${parts.join(", ")}.`, ...(result.notes || [])].join("\n"), false, 10000);
 });

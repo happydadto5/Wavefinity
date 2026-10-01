@@ -149,8 +149,9 @@ from organizer_inserts._core import ITEM_CLEARANCE, ITEM_PROFILES, feature_touch
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from bambu_handoff import _validate_settings_safe, is_bambu_studio_executable, stage_bambu_inputs
 from organizer_drawer import (
-    blocking_problem_messages, drawer_report, drawer_routes, generate_connectors, inventory_row_files,
-    prepare_inventory_bins, stack_part_height,
+    blocking_problem_messages, blocking_problem_copy, drawer_report, drawer_routes, generate_connectors, inventory_row_files,
+    prepare_inventory_bins, selected_blocking_problems, stack_part_height,
+    _space_connectors,
 )
 from organizer_inventory import (
     append_bin, configure_space_text, design_specs, load_inventory, mark_printed_rows,
@@ -1623,6 +1624,14 @@ def detect_bambu_studio(custom_path: str | None = None) -> Path | None:
         return _find_bambu_studio_linux()
 
 
+# Fix 096 C8: how long a freshly spawned slicer GUI gets to prove it started.
+# Still running after this bound = accepted handoff (a GUI takes longer than a
+# second to show itself, but a broken launch fails fast). A nonzero quick exit
+# = launch failure. A zero quick exit = accepted handoff: single-instance GUI
+# launchers may exit at once after handing off to an already-running process.
+SLICER_HANDOFF_TIMEOUT_S = 1.0
+
+
 def launch_slicer(slicer_path: Path, files: list[Path]) -> Path | None:
     """Open ``files`` directly in the slicer.
 
@@ -1633,7 +1642,11 @@ def launch_slicer(slicer_path: Path, files: list[Path]) -> Path | None:
     ``--slice``, ``--load-settings`` or ``--load-filaments``, so Wavefinity
     can never introduce or select a printer/process/filament preset. Other
     slicers keep getting the files directly. Always returns ``None`` now:
-    there is no manufactured project path to report.
+    there is no manufactured project path to report. Fix 096 C8: the Popen
+    handle is retained for a one-second startup handshake — still running
+    after ``SLICER_HANDOFF_TIMEOUT_S`` is an accepted handoff, a nonzero
+    quick exit raises ``RuntimeError``, and a zero quick exit is accepted
+    (single-instance handoff to an already-running slicer).
     """
     if not slicer_path.is_file():
         raise FileNotFoundError(f"Slicer executable not found: {slicer_path}")
@@ -1644,13 +1657,25 @@ def launch_slicer(slicer_path: Path, files: list[Path]) -> Path | None:
         args = [str(slicer_path.resolve())] + [str(p) for p in staged]
     else:
         args = [str(slicer_path.resolve())] + [str(f.resolve()) for f in files]
-    subprocess.Popen(
+    process = subprocess.Popen(
         args,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         close_fds=True,
     )
+    try:
+        return_code = process.wait(timeout=SLICER_HANDOFF_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        # Still running after one second: the GUI accepted the handoff.
+        # (Do not kill it — it is the slicer the user asked for.)
+        return None
+    if return_code != 0:
+        raise RuntimeError(
+            f"The slicer exited immediately (code {return_code}) instead of opening. "
+            "Your files were kept.")
+    # Zero quick exit: a single-instance launcher handing off to the already
+    # running slicer. Accepted as a successful handoff.
     return None
 
 
@@ -3979,6 +4004,104 @@ def structural_generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def structural_print_combined_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Print Cabinet + Bins: the cabinet and every placed bin under one truthful
+    preflight and one slicer handoff. (Fix 096 C7.)
+
+    File-collection sequence is fixed:
+      1. Cabinet structural files via _materialize_local_cabinet.
+      2. Bin files via prepare_inventory_bins — only rows without current
+         files are generated from their design source.
+      3. The Space's required connectors via _space_connectors (every drawer,
+         once each).
+    Preflight is C6's selected_blocking_problems literally: any hard Space
+    problem touching a contained bin raises before any file is written.
+    Per-component Printed promotion (consistent with C1's single authority):
+    bin rows become Printed only after the single launch_slicer handoff
+    succeeds; the cabinet itself never logs an Inventory row and has no Printed
+    status; any failure before or during handoff leaves rows Saved (never
+    Printed) and returns a structured partial result.
+    """
+    if not _is_storage_drawers_request(payload):
+        raise ValueError("Print Cabinet + Bins is only available for a Storage Drawers Space.")
+    if HOSTED:
+        raise ValueError("Hosted Wavefinity saves generated files to your selected folder instead.")
+    slicer_path = detect_bambu_studio(payload.get("slicer_path"))
+    if slicer_path is None or not slicer_path.is_file():
+        raise ValueError(
+            "Bambu Studio was not found. Please locate your Bambu Studio executable in settings or install Bambu Studio.")
+    folder, space, space_id = _local_cabinet_folder(payload)
+    inventory = load_inventory(folder)
+    layout, bins = inventory["layout"], inventory["bins"]
+    by_id = {str(one["id"]): one for one in bins}
+    # Eligible contained bins: every bin placed in any cabinet drawer.
+    counts: dict[str, int] = {}
+    for drawer in layout.get("drawers") or []:
+        for placement in drawer.get("placements") or []:
+            one = by_id.get(str(placement.get("bin")))
+            if one is not None and one.get("kind") in ("bin", "b4b"):
+                counts[one["id"]] = counts.get(one["id"], 0) + 1
+    if not counts:
+        raise ValueError("The cabinet has no placed bins to print.")
+    # One truthful preflight — C6's predicate, literally.
+    blocked = selected_blocking_problems(layout, bins, counts)
+    if blocked:
+        raise ValueError(blocking_problem_copy(bins, blocked))
+    with GEOMETRY_LOCK:
+        cabinet = _materialize_local_cabinet(payload)
+        cabinet_files = [Path(one) for one in cabinet["files"]]
+        prepared = prepare_inventory_bins(folder, list(counts), _generate_bin_from_design_spec)
+        if prepared["failed"]:
+            return {
+                **cabinet, "partial": True, "partial_stage": "generate",
+                "error": "Cabinet files were saved, but the bins could not be prepared: "
+                         + _prepare_failure_text(prepared, slicer=True),
+            }
+        rows_files = prepared["files"]
+        specs = prepared["specs"]
+        inventory = prepared["inventory"]
+        try:
+            connector_counts, notes = _space_connectors(folder, inventory["layout"], inventory["bins"])
+        except Exception as error:
+            return {
+                **cabinet, "partial": True, "partial_stage": "connectors",
+                "error": f"Cabinet and bin files were saved, but the Space connectors could not be made: {error}. "
+                         "Bambu Studio was not opened.",
+            }
+        launch_files = list(cabinet_files)
+        for bin_id in counts:
+            launch_files.extend(rows_files[bin_id])
+        for name, count in connector_counts.items():
+            launch_files.extend([folder / name] * count)
+        result_counts = {
+            "selection": counts,
+            "bin_copies": sum(counts.values()),
+            "connector_counts": connector_counts,
+            "connector_copies": sum(connector_counts.values()),
+            "notes": notes,
+            "files": [str(one) for one in launch_files],
+        }
+        try:
+            project_path = launch_slicer(slicer_path, launch_files)
+        except Exception as error:
+            # Files above are kept; rows stay Saved (never Printed).
+            return {
+                **cabinet, "partial": True, "partial_stage": "slicer",
+                "error": f"Bambu Studio did not open: {error}. Any files made during this attempt were kept.",
+                **result_counts,
+            }
+        try:
+            # A row is one bin. Placement copy numbers are not print bookkeeping.
+            saved = mark_printed_rows(folder, counts, specs)
+        except Exception as error:
+            return {
+                **cabinet, "partial": True, "partial_stage": "status",
+                "error": f"Bambu Studio opened, but the printed status could not be recorded: {error}. "
+                         "Check the Inventory rows.",
+                **result_counts,
+            }
+        return {**cabinet, **saved, **result_counts,
+                "slicer": str(slicer_path), "project": str(project_path) if project_path else None}
 def structural_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Send a Space's Storage Box, Base Trim or cabinet to the slicer. Never logs an Inventory row.
 
@@ -5062,6 +5185,7 @@ POST_ROUTES = {
     "/api/space/structural-design": structural_design_payload,
     "/api/space/structural-generate": structural_generate_payload,
     "/api/space/structural-print": structural_print_payload,
+    "/api/space/structural-print-combined": structural_print_combined_payload,
     "/api/space/storage-box-print": storage_box_print_payload,
     "/api/space/surface-print": surface_print_payload,
     "/api/space/storage-drawers-summary": storage_drawers_summary_payload,
