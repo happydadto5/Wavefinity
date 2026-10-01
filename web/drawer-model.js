@@ -35,6 +35,7 @@ const DL = {
   selected: null,        // placement key "B3:0"
   selectedRow: null,     // Inventory row id the user last picked (placed or staged)
   report: null,
+  reportError: "",
   reportTicket: 0,
   spacerPlan: null,
   spacerSelected: new Set(),
@@ -997,13 +998,22 @@ DL.markNotPrinted = one => DL.setBinPrinted(one, false);
 DL.requestReport = debounce(async () => {
   if (!DL.active || !DL.layout) return;
   const ticket = ++DL.reportTicket;
+  DL.reportError = "";
   try {
     const report = await api("/api/drawer/report", {
       layout: DL.layout, bins: DL.bins, drawer_id: DL.layout.active,
     });
-    if (ticket === DL.reportTicket) { DL.report = report; DL.emit(); }
+    if (ticket === DL.reportTicket) {
+      DL.report = report;
+      DL.reportError = "";
+      DL.emit();
+    }
   } catch (_error) {
-    if (ticket === DL.reportTicket) { DL.report = null; DL.emit(); }
+    if (ticket === DL.reportTicket) {
+      DL.report = null;
+      DL.reportError = "Wavefinity could not measure this Space.";
+      DL.emit();
+    }
   }
 }, 120);
 
