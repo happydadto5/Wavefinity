@@ -323,13 +323,13 @@ async function acknowledgeSmallText() {
   const inSpace = state.folderMode === "space" && typeof DL !== "undefined" && DL.layout;
   const context = inSpace ? DL.spaceContext() : null;
   if (inSpace && DL.layout.settings?.text_small_size_ack === true) return true;
-  const choice = await appConfirm({
-    title: "Small text size",
-    message: "Text below 5mm isn't recommended",
+  await appConfirm({
+    title: "Small Text Size",
+    message: "Text height will be adjusted to smaller than the recommended 5 mm to accommodate your text.",
     primaryLabel: "OK",
-    cancelLabel: "Cancel",
+    cancelLabel: null,
+    dismissible: false,
   });
-  if (choice !== "primary") return false;
   if (inSpace) {
     if (!DL.spaceContextCurrent(context)) return false;
     DL.change(() => { DL.layout.settings.text_small_size_ack = true; }, { history: false });
@@ -355,7 +355,6 @@ async function allowSmallTextEdit(cap, request, draft) {
     : state.draftTouched);
   if (!changed) return true; // reopening an existing sub-5 Text is not an edit
   if (state.smallTextApprovedDraftRequest === request) return true;
-  if (state.smallTextConsentDeclined) return false;
   if (!state.smallTextConsentPromise) {
     const pending = acknowledgeSmallText();
     state.smallTextConsentPromise = pending;
@@ -367,7 +366,6 @@ async function allowSmallTextEdit(cap, request, draft) {
   const allowed = await state.smallTextConsentPromise;
   if (request !== state.draftRequest || state.draft !== draft) return false;
   if (allowed) state.smallTextApprovedDraftRequest = request;
-  else state.smallTextConsentDeclined = true;
   return allowed;
 }
 
@@ -5190,7 +5188,6 @@ function cancelPendingDraftWork() {
   state.nestTraceRequest += 1;
   state.nestRetraceRequest += 1;
   state.draftRequest += 1;
-  state.smallTextConsentDeclined = false;
   invalidatePendingPreview();
 }
 
@@ -8304,7 +8301,6 @@ function markDraftChanged(referenceOnly = false) {
   // which the older response can replace the newer edit.
   state.draftTouched = true;
   state.draftRequest += 1;
-  state.smallTextConsentDeclined = false;
   if (keepReferenceResolution) state.referenceResolutionRequest = state.draftRequest;
   updateReferenceAddAvailability();
   state.canGenerate = false;
@@ -8587,11 +8583,19 @@ function updateDraftFromFields(event) {
         (newLevel !== oldLevel || newRaised !== oldRaised)) ||
       (changed === "option:rim_side" && newLevel === "rim" &&
         newRimSide !== oldRimSide);
+    const recoveringFromSub5AutoFit =
+      letteringChanged &&
+      one.options?.text_v2 === true &&
+      Number.isFinite(Number(one.options?.cap_height)) &&
+      Number(one.options.cap_height) > 0 &&
+      Number(one.options.cap_height) < 5;
     if (sizingRelevant) {
       const remembered = spaceRememberedTextHeight();
-      if (remembered !== null) {
-        // Try the Space's remembered default first; the server clamps it to
-        // the largest height that fits.
+      if (recoveringFromSub5AutoFit) {
+        // Latest PM rule: a Text that had been auto-fitted below 5 mm may
+        // recover upward to 5 mm, but never automatically above 5 mm.
+        one.options.cap_height = 5;
+      } else if (remembered !== null) {
         one.options.cap_height = remembered;
       } else {
         delete one.options.cap_height;
@@ -8911,7 +8915,6 @@ async function refreshDraft() {
       return await refreshPreview();
     }
     if (request !== state.draftRequest) return;
-    state.smallTextConsentDeclined = false;
     state.draftResolvedOptions = result.resolved_options || {};
     state.referenceResolutionRequest = request;
     if (state.draft.kind === "text" && result.feature) {
@@ -9130,9 +9133,7 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
       throw new Error("The Text changed while it was being saved. Try again.");
     }
     const cap = Number(checked.resolved_options?.cap_height ?? checked.feature?.options?.cap_height);
-    if (!(await allowSmallTextEdit(cap, request, draftAtCheck))) {
-      throw new Error("Text needs approval below 5 mm before it can be saved.");
-    }
+    await allowSmallTextEdit(cap, request, draftAtCheck);
     if (request !== state.draftRequest || state.draft !== draftAtCheck) {
       throw new Error("The Text changed while it was being saved. Try again.");
     }
@@ -9308,6 +9309,7 @@ function appConfirm({
   title, message,
   primaryLabel = "OK", secondaryLabel = null, cancelLabel = "Cancel",
   danger = false, secondaryDanger = false, checkboxLabel = null,
+  dismissible = true,
 } = {}) {
   return new Promise(resolve => {
     const dialog = $("#app-confirm-dialog");
@@ -9343,9 +9345,12 @@ function appConfirm({
       if (dialog.open) dialog.close();
       resolve(choice);
     };
-    const onCancel = event => { event.preventDefault(); finish("cancel"); };
+    const onCancel = event => {
+      event.preventDefault();
+      if (dismissible) finish("cancel");
+    };
     const onBackdrop = event => {
-      if (event.target !== dialog) return;
+      if (!dismissible || event.target !== dialog) return;
       const bounds = dialog.getBoundingClientRect();
       if (event.clientX < bounds.left || event.clientX > bounds.right ||
           event.clientY < bounds.top || event.clientY > bounds.bottom) finish("cancel");
@@ -9358,7 +9363,8 @@ function appConfirm({
     primaryBtn.textContent = primaryLabel;
     primaryBtn.classList.toggle("danger", danger);
     primaryBtn.classList.toggle("primary", !danger);
-    cancelBtn.textContent = cancelLabel;
+    cancelBtn.hidden = cancelLabel === null;
+    cancelBtn.textContent = cancelLabel || "";
     if (secondaryLabel) {
       secondaryBtn.hidden = false;
       secondaryBtn.textContent = secondaryLabel;
@@ -9370,7 +9376,7 @@ function appConfirm({
 
     primaryBtn.onclick = () => finish("primary");
     secondaryBtn.onclick = () => finish("secondary");
-    cancelBtn.onclick = () => finish("cancel");
+    cancelBtn.onclick = cancelLabel === null ? null : () => finish("cancel");
 
     dialog.addEventListener("cancel", onCancel);
     dialog.addEventListener("click", onBackdrop);
@@ -9379,7 +9385,7 @@ function appConfirm({
     // Focus always stays on a safe default - the primary action, or Cancel
     // when the primary itself is the dangerous one - never on a danger-
     // styled secondary button (e.g. "Discard & Switch").
-    (danger ? cancelBtn : primaryBtn).focus();
+    (danger && cancelLabel !== null ? cancelBtn : primaryBtn).focus();
   });
 }
 
@@ -10025,8 +10031,7 @@ async function refreshPreview({ persistResume = true } = {}) {
   try {
     const payload = { design: state.design, client_id: previewClientId, generation: request,
       space: state.folderMode === "space" ? state.activeSpace : null };
-    if (state.draft && !state.smallTextConsentDeclined &&
-        !(state.draft.kind === "nest" && !state.draft.contour)) {
+    if (state.draft && !(state.draft.kind === "nest" && !state.draft.contour)) {
       payload.draft = state.draft;
       // A draft opened from a placed part replaces that part for preview
       // validation. Without its index, the server sees the saved bore and its
