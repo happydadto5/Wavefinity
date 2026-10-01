@@ -1917,7 +1917,7 @@ def text_report(box: BoxSpec, one: Feature, surface: float) -> dict[str, object]
         from organizer_inserts._text import rim_text_geometry
         _ledge, glyph, cap, receiving_z = rim_text_geometry(box, one)
         return {
-            "text": text_of(one), "text_type": "At rim — Raised" if text_is_raised(one) else "At rim — Inlaid",
+            "text": text_of(one), "text_type": "At rim — raised" if text_is_raised(one) else "At rim — inlaid",
             "rim_side": str(one.options.get("rim_side") or "back"),
             "cap_height_mm": round(cap, 3),
             "depth_mm": round(text_depth(one), 3),
@@ -1931,7 +1931,7 @@ def text_report(box: BoxSpec, one: Feature, surface: float) -> dict[str, object]
     centre_x, centre_y = one.zone.centre
     return {
         "text": text_of(one),
-        "text_type": "On base — Raised" if text_is_raised(one) else "On base — Inlaid",
+        "text_type": "On base — raised" if text_is_raised(one) else "On base — inlaid",
         "cap_height_mm": round(cap, 3),
         "quarter_turns": int(one.options.get("quarter_turns", 0) or 0) % 4,
         "auto": bool(one.options.get("auto")),
