@@ -500,11 +500,24 @@ def _write(path: Path, bins: list[dict[str, Any]], layout: dict | None, legacy: 
     temp.replace(path)
 
 
+def _unit_offset(value: Any) -> float | int:
+    """A stacked placement's saved offset in units; anything not finite is 0."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0
+    if not math.isfinite(number):
+        return 0
+    return int(number) if number.is_integer() else number
+
+
 def _prune_layout(layout: dict | None, bins: list[dict[str, Any]]) -> dict | None:
     """Drop placements and design sources whose bin row is gone.
 
-    A bin stacked on a dropped one takes its place, so a stack closes up
-    instead of floating.
+    A bin stacked directly on a dropped one takes its place, so a stack closes
+    up instead of floating: it moves up to the dropped bin's own support (or onto
+    the floor where a dropped floor bin stood), keeping its absolute spot, so the
+    two offsets add.
     """
     if not isinstance(layout, dict):
         return layout
@@ -517,10 +530,19 @@ def _prune_layout(layout: dict | None, bins: list[dict[str, Any]]) -> dict | Non
             key = f"{gone.get('bin')}:{int(gone.get('copy', 0))}"
             for above in placements:
                 if above.get("on") == key:
-                    above.pop("on", None)
-                    for field in ("on", "gx", "gy"):
-                        if field in gone:
-                            above[field] = gone[field]
+                    ox = _unit_offset(gone.get("ox")) + _unit_offset(above.get("ox"))
+                    oy = _unit_offset(gone.get("oy")) + _unit_offset(above.get("oy"))
+                    carries = any(field in item for item in (gone, above) for field in ("ox", "oy"))
+                    for field in ("on", "ox", "oy"):
+                        above.pop(field, None)
+                    if "on" in gone:
+                        above["on"] = gone["on"]
+                        if carries:
+                            above["ox"], above["oy"] = ox, oy
+                    else:
+                        for field, offset in (("gx", ox), ("gy", oy)):
+                            if field in gone:
+                                above[field] = gone[field] + offset
         drawer["placements"] = [one for one in placements if one.get("bin") in known]
     specs = layout.get("design_specs")
     if isinstance(specs, dict):

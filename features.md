@@ -74,6 +74,10 @@ Wavefinity can also be used **without a typed Space**, in which case the user ca
 - Unplaced bins remain in the **Unplaced bins** rail.
 - Dragging a placed bin out of the Space unplaces it.
 - Bins can be stacked when their mode, footprint, and wall mating geometry are compatible.
+  - Same-footprint stacking works for every stacking mode (lid, direct bin-on-bin, Storage Box).
+  - A **Stackable bin on lid** can also carry one or more smaller bins: each must be compatible, sit on the 8 mm grid, fit fully inside that lid, and not overlap another bin on the same lid. Covering only part of the lid is fine, and no advance arrangement planning, custom lid, or reprint is needed — for example, a 10×10 lid-stack bin printed today can later take four 5×5 lid-stack bins, one per quadrant.
+  - A bin stacked on a bin can itself carry bins, and moving or taking out a bin moves or removes only it and what stands on it, never its neighbours on the same lid.
+  - Direct bin-on-bin stacking still needs the same footprint.
 - Placement checks include:
   - overlap;
   - outside-the-Space placement;
@@ -716,7 +720,7 @@ One Lid & Stacking option can be active on a bin.
   - Direct bin-on-bin stacking.
   - No lid.
 - **Stackable bin on lid**
-  - Bin closes with a lid and keeps a top seat/recess for another bin with the same footprint and compatible stacking geometry.
+  - Bin closes with a lid and keeps a top seat/recess for another bin with compatible stacking geometry: one of the same footprint, or one or more smaller lid-stack bins that fit fully inside the lid (partial coverage is allowed).
 - **Lid with handle — non-stackable**
   - Removable handled lid.
   - Not stackable.

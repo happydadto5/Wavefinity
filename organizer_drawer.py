@@ -22,10 +22,16 @@ Placements
 * On the grid: ``gx``/``gy`` in 8 mm units from the grid's front-left corner.
   A drawer that snaps to 4 mm (``snap = 4``) allows half units: the wave
   repeats every 4 mm, so a bin shifted half a unit along a seam still nests.
-* Stacked: ``on`` names the placement directly below (``"B3:0"``).  Only a
-  stackable bin of the same footprint and the same stacking style can snap
-  onto another; each one adds its requested module height.  The exposed top
-  interlock remains part of the stack's physical drawer-height envelope.
+* Stacked: ``on`` names the one placement it stands on (``"B3:0"``) and
+  ``ox``/``oy`` are its offset in 8 mm units from that placement's front-left
+  corner (missing means 0, which is what older same-footprint stacks carry).
+  Only a stackable bin of the same stacking style can snap onto another; direct
+  and Storage Box stacking need the same footprint, while a snap-on lid can
+  carry any number of smaller bins that sit fully inside it and clear of each
+  other - partial coverage is normal.  A placement may carry several children
+  and a child may carry its own; each one adds its requested module height
+  above its direct parent.  The exposed top interlock remains part of the
+  stack's physical drawer-height envelope.
 * Free, for an edge-facing spacer: ``x``/``y``/``w``/``d`` in mm from the
   drawer's inside front-left corner, plus the ``side`` it lines.  Its width
   across the wall is the drawer's real leftover play, not rounded to a grid
@@ -327,13 +333,19 @@ def stack_compatibility_issue(upper: dict[str, Any], lower: dict[str, Any], spec
         return "Both bins must be printed for stacking"
     if upper.get("stack") != lower.get("stack"):
         return "Stacking modes must match"
-    if not (_close(upper["x"], lower["x"]) and _close(upper["y"], lower["y"])):
-        return "Bins need the same footprint to stack"
+    same_footprint = _close(upper["x"], lower["x"]) and _close(upper["y"], lower["y"])
+    # Only a lid carries a different footprint; whether the upper bin sits inside
+    # the lid and clear of its siblings is decided where the offset is known.
+    if not same_footprint and upper.get("stack") == "direct":
+        return "Direct stacking requires bins with the same footprint"
+    if not same_footprint and upper.get("stack") != "lid":
+        return "Storage Box stacking requires bins with the same footprint"
     top_wall, bottom_wall = stack_wall(upper, specs), stack_wall(lower, specs)
     if top_wall is None or bottom_wall is None:
         return "Stacking wall thickness is unknown; save both bin designs before stacking"
     if not _close(top_wall, bottom_wall):
-        return "Bins need the same footprint and compatible stacking wall thickness"
+        return ("Bins need the same footprint and compatible stacking wall thickness" if same_footprint
+                else "Bins need compatible stacking wall thickness")
     return None
 
 
@@ -408,31 +420,47 @@ def _overlaps(a: dict[str, float], b: dict[str, float]) -> bool:
     return a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"] and a["y"] < b["y"] + b["d"] and b["y"] < a["y"] + a["d"]
 
 
-def _chains(drawer: dict[str, Any], by_id: dict[str, dict]) -> tuple[list[list[dict]], list[dict]]:
-    """The drawer's grid placements grouped into stacks, bottom first, plus
-    any stacked placement whose support is missing."""
+def _offset(value: Any) -> float:
+    """A saved stacked-placement offset in units; anything that is not a finite
+    number reads as 0, so a malformed layout still opens and reports."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number if math.isfinite(number) else 0.0
+
+
+def _support_trees(drawer: dict[str, Any], by_id: dict[str, dict]) -> tuple[list[dict], list[dict]]:
+    """The drawer's grid placements as rooted support trees, plus any stacked
+    placement that no floor placement reaches (stacked on nothing, or in a
+    loop).  A root stands on the floor at its own ``gx``/``gy``; every other
+    placement names exactly one parent in ``on``, and a parent may carry any
+    number of children.  Each node is ``{"p", "key", "parent", "children"}``."""
     placements = [p for p in drawer["placements"] if p.get("bin") in by_id]
-    keyed = {_key(p): p for p in placements}
-    above: dict[str, dict] = {}
-    loose = []
-    for p in placements:
+    nodes = [{"p": p, "key": _key(p), "parent": None, "children": []} for p in placements]
+    by_key: dict[str, dict] = {}
+    for node in nodes:
+        by_key.setdefault(node["key"], node)
+    roots, loose = [], []
+    for node in nodes:
+        p = node["p"]
         if "on" in p:
-            if p["on"] in keyed and p["on"] not in above:
-                above[p["on"]] = p
+            parent = by_key.get(p["on"])
+            if parent is not None and parent is not node:
+                node["parent"] = parent
+                parent["children"].append(node)
             else:
                 loose.append(p)
-    chains, used = [], set()
-    for base in placements:
-        if "gx" not in base or "on" in base:
-            continue
-        chain = [base]
-        used.add(_key(base))
-        while _key(chain[-1]) in above and _key(above[_key(chain[-1])]) not in used:
-            chain.append(above[_key(chain[-1])])
-            used.add(_key(chain[-1]))
-        chains.append(chain)
-    loose += [p for p in placements if "on" in p and _key(p) not in used and p not in loose]
-    return chains, loose
+        elif "gx" in p:
+            roots.append(node)
+    reached: set[int] = set()
+    stack = list(roots)
+    while stack:
+        node = stack.pop()
+        reached.add(id(node))
+        stack.extend(node["children"])
+    loose += [n["p"] for n in nodes if "on" in n["p"] and id(n) not in reached and n["p"] not in loose]
+    return roots, loose
 
 
 def _physical_envelopes(
@@ -475,73 +503,129 @@ def _physical_envelopes(
     return result
 
 
-def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict],
+def _stack_item(root: dict, drawer: dict[str, Any], by_id: dict[str, dict],
                 plans: dict[str, dict[str, Any]] | None = None,
                 specs: dict[str, Any] | None = None,
                 envelopes: dict[str, dict[str, int]] | None = None,
                 storage_box: bool = False,
                 surface: bool = False) -> dict[str, Any]:
-    """One grid footprint: a single bin, or a stack of them.
+    """One grid footprint: a single bin, or a support tree of them.
 
-    ``storage_box`` / ``surface`` both read seating pitch and physical height
-    from ``plans`` (the shared canonical stack metrics); a Surface also checks
-    installed Object height against the next seating plane.
+    ``root`` is a ``_support_trees`` node.  Every layer carries its own absolute
+    footprint (a child sits at its parent's origin plus its offset) and seats on
+    its direct parent, never on a sibling.  ``storage_box`` / ``surface`` both
+    read seating pitch and physical height from ``plans`` (the shared canonical
+    stack metrics); a Surface also checks installed Object height against the
+    next seating plane.  ``layers`` is the flattened tree, parent first.
     """
     metrics = storage_box or surface
-    base = chain[0]
+    pegboard = drawer.get("boundary") == "pegboard"
+    per_unit = _per_unit(drawer)
+    base = root["p"]
     first = by_id[base["bin"]]
-    w, d = bin_cells(first, drawer)
-    ex = {"l": 0, "t": 0, "r": 0, "b": 0}
-    if drawer.get("boundary") != "pegboard":
-        for placement in chain:
-            envelope = (envelopes or {}).get(placement["bin"]) or {}
-            for side in ("l", "t", "r", "b"):
-                ex[side] = max(ex[side], int(envelope.get(side, 0)))
-    layers, issues, notes, top, plan_top = [], [], [], 0.0, 0.0
-    for index, placement in enumerate(chain):
+    layers: list[dict[str, Any]] = []
+    placements: list[dict[str, Any]] = []
+    issues: list[str] = []
+    notes: list[str] = []
+    seen: set[int] = set()
+
+    def visit(node: dict, parent: dict[str, Any] | None) -> None:
+        seen.add(id(node))
+        placement = node["p"]
         one = by_id[placement["bin"]]
-        bottom = 0.0
-        if index:
-            below = by_id[chain[index - 1]["bin"]]
+        w, d = bin_cells(one, drawer)
+        if parent is None:
+            gx, gy, bottom, depth = _cell(placement["gx"], drawer), _cell(placement["gy"], drawer), 0.0, 0
+        else:
+            below = by_id[parent["bin"]]
+            gx = parent["gx"] + _cell(_offset(placement.get("ox")), drawer)
+            gy = parent["gy"] + _cell(_offset(placement.get("oy")), drawer)
+            depth = parent["depth"] + 1
             issue = stack_compatibility_issue(one, below, specs or {})
             if issue:
                 issues.append(f"{_label(one)} cannot stack on {_label(below)}: {issue}")
+            if (gx < parent["gx"] or gy < parent["gy"]
+                    or gx + w > parent["gx"] + parent["w"] or gy + d > parent["gy"] + parent["d"]):
+                issues.append(f"{_label(one)} sticks out past the edge of {_label(below)}")
+            if per_unit == 1 and (_offset(placement.get("ox")) % 1 or _offset(placement.get("oy")) % 1):
+                issues.append(f"{_label(one)} sits off the 8 mm grid on {_label(below)}")
             below_plan = (plans or {}).get(below["id"], {})
             pitch = below_plan.get("pitch_mm", stack_pitch(below))
-            bottom = (layers[-1]["z0"] + pitch
-                      if metrics else top - STACK_STEPS.get(one.get("stack", "none"), 0.0))
+            bottom = (parent["z0"] + pitch
+                      if metrics else parent["z1"] - STACK_STEPS.get(one.get("stack", "none"), 0.0))
             if surface:
-                # The upper bin seats at z0 + pitch. A known installed object
-                # that rises past that plane blocks the stack; an unknown one
-                # is allowed but never called verified.
+                # The upper bin seats at z0 + pitch of its direct parent. A known
+                # installed object that rises past that plane blocks the stack; an
+                # unknown one is allowed but never called verified.
                 object_top = below_plan.get("object_top_mm")
                 if object_top is None:
-                    notes.append(f"Contents clearance not verified — Object height is not set for {_label(below)}.")
+                    note = f"Contents clearance not verified — Object height is not set for {_label(below)}."
+                    if note not in notes:
+                        notes.append(note)
                 elif float(object_top) > pitch + 1e-6:
-                    issues.append(f"The object in {_label(below)} reaches above the next stack seating plane.")
+                    issue = f"The object in {_label(below)} reaches above the next stack seating plane."
+                    if issue not in issues:
+                        issues.append(issue)
         physical = ((plans or {}).get(one["id"], {}).get("physical_mm", stack_part_height(one))
                     if metrics else stack_part_height(one))
-        top = bottom + physical
-        layer_plan_top = bottom + ((plans or {}).get(one["id"], {}).get("effective_mm", physical))
-        plan_top = max(plan_top, layer_plan_top)
-        layers.append({
-            "key": _key(placement), "bin": placement["bin"], "copy": int(placement.get("copy", 0)),
-            "z0": bottom, "z1": top, "plan_z1": layer_plan_top,
-        })
+        layer = {
+            "key": node["key"], "bin": placement["bin"], "copy": int(placement.get("copy", 0)),
+            "z0": bottom, "z1": bottom + physical,
+            "plan_z1": bottom + ((plans or {}).get(one["id"], {}).get("effective_mm", physical)),
+            "gx": gx, "gy": gy, "w": w, "d": d,
+            "parent": parent["key"] if parent else None, "depth": depth,
+        }
+        layers.append(layer)
+        placements.append(placement)
+        for child in node["children"]:
+            if id(child) not in seen:
+                visit(child, layer)
+
+    visit(root, None)
+    # Siblings on one support share its seating plane, so they may not overlap.
+    children: dict[str, list[dict[str, Any]]] = {}
+    for layer in layers:
+        if layer["parent"] is not None:
+            children.setdefault(layer["parent"], []).append(layer)
+    layer_by_key = {layer["key"]: layer for layer in layers}
+    for parent_key, group in children.items():
+        for index, a in enumerate(group):
+            for b in group[index + 1:]:
+                if (a["gx"] < b["gx"] + b["w"] and b["gx"] < a["gx"] + a["w"]
+                        and a["gy"] < b["gy"] + b["d"] and b["gy"] < a["gy"] + a["d"]):
+                    issues.append(
+                        f"{_label(by_id[a['bin']])} and {_label(by_id[b['bin']])} overlap on "
+                        f"{_label(by_id[layer_by_key[parent_key]['bin']])}")
+    ex = {"l": 0, "t": 0, "r": 0, "b": 0}
+    rect = [min(layer["gx"] for layer in layers), min(layer["gy"] for layer in layers),
+            max(layer["gx"] + layer["w"] for layer in layers), max(layer["gy"] + layer["d"] for layer in layers)]
+    if not pegboard:
+        # Each layer's physical reach is measured from its own footprint.
+        rect = [math.inf, math.inf, -math.inf, -math.inf]
+        for layer in layers:
+            envelope = (envelopes or {}).get(layer["bin"]) or {}
+            reach = {side: int(envelope.get(side, 0)) for side in ("l", "t", "r", "b")}
+            for side in ex:
+                ex[side] = max(ex[side], reach[side])
+            rect = [min(rect[0], layer["gx"] - reach["l"]), min(rect[1], layer["gy"] - reach["t"]),
+                    max(rect[2], layer["gx"] + layer["w"] + reach["r"]),
+                    max(rect[3], layer["gy"] + layer["d"] + reach["b"])]
+    top_layer = max(layers, key=lambda layer: layer["z1"])
     return {
-        "key": _key(base), "keys": [layer["key"] for layer in layers],
+        "key": root["key"], "keys": [layer["key"] for layer in layers],
         "bin": base["bin"], "copy": int(base.get("copy", 0)),
-        "gx": _cell(base["gx"], drawer), "gy": _cell(base["gy"], drawer),
-        "w": w, "d": d, "h": top, "plan_h": plan_top,
-        "ex": ex,
+        "gx": layers[0]["gx"], "gy": layers[0]["gy"],
+        "w": layers[0]["w"], "d": layers[0]["d"],
+        "h": top_layer["z1"], "plan_h": max(layer["plan_z1"] for layer in layers),
+        "ex": ex, "rect": rect,
         "kind": first.get("kind", "bin"), "name": first.get("name", ""),
-        "chain": chain, "layers": layers, "top": by_id[chain[-1]["bin"]], "issues": issues,
+        "chain": placements, "layers": layers, "top": by_id[top_layer["bin"]], "issues": issues,
         "notes": notes,
     }
 
 
 def _grid_items(drawer: dict[str, Any], by_id: dict[str, dict]) -> list[dict[str, Any]]:
-    return [_stack_item(chain, drawer, by_id) for chain in _chains(drawer, by_id)[0]]
+    return [_stack_item(root, drawer, by_id) for root in _support_trees(drawer, by_id)[0]]
 
 
 def _height_issues(items: list[dict[str, Any]], reach: str = "column") -> list[tuple[dict, dict]]:
@@ -639,7 +723,9 @@ def surface_fill_plan(inventory: dict[str, Any]) -> dict[str, Any]:
     ).encode("utf-8")).hexdigest()
     free = np.ones((grid["rows"], grid["cols"]), dtype=bool)
     for placement in drawer["placements"]:
-        if "gx" not in placement or placement.get("bin") not in by_id:
+        # Floor occupancy is the floor placements only; a stacked bin never
+        # takes floor of its own.
+        if "gx" not in placement or "on" in placement or placement.get("bin") not in by_id:
             continue
         gx, gy = _cell(placement["gx"], drawer), _cell(placement["gy"], drawer)
         w, d = bin_cells(by_id[placement["bin"]], drawer)
@@ -960,14 +1046,14 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     for placement in drawer["placements"]:
         if placement.get("bin") not in by_id:
             problems.append({"type": "missing", "keys": [_key(placement)], "message": f"{placement.get('bin')} is no longer in the inventory"})
-    chains, loose = _chains(drawer, by_id)
+    roots, loose = _support_trees(drawer, by_id)
     for placement in loose:
         problems.append({"type": "floating", "keys": [_key(placement)], "message": f"{_label(by_id[placement['bin']])} is stacked on nothing"})
     items = [
         _stack_item(
-            chain, drawer, by_id, plans, specs, physical_envelopes, storage_box, surface
+            root, drawer, by_id, plans, specs, physical_envelopes, storage_box, surface
         )
-        for chain in chains
+        for root in roots
     ]
     per_unit = _per_unit(drawer)
     for index, item in enumerate(items):
@@ -984,9 +1070,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         base = item["chain"][0]
         if per_unit == 1 and (float(base["gx"]) % 1 or float(base["gy"]) % 1):
             problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sits off the 8 mm grid - move it to snap it back"})
-        ex = item["ex"]
-        x0, y0 = item["gx"] - ex["l"], item["gy"] - ex["t"]
-        x1, y1 = item["gx"] + item["w"] + ex["r"], item["gy"] + item["d"] + ex["b"]
+        x0, y0, x1, y1 = item["rect"]
         if x0 < 0 or y0 < 0 or x1 > cols or y1 > rows:
             problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sticks out of the Surface" if surface else f"{label} sticks out of the drawer"})
         cx0, cy0, cx1, cy1 = max(0, x0), max(0, y0), min(cols, x1), min(rows, y1)
