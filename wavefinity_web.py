@@ -624,6 +624,114 @@ def save_preferences(update: dict[str, Any]) -> dict[str, Any]:
     return mutate_preferences(lambda current: current.update(update))
 
 
+CONNECTOR_SETTINGS_FILENAME = "connector_settings.json"
+
+
+def connector_settings_path(prefs: dict[str, Any] | None = None) -> Path | None:
+    """Where desktop connector settings live: inside the Wavefinity folder.
+
+    Returns None when hosted, when the configured storage parent is currently
+    unavailable, or when the Wavefinity root does not exist yet. Callers then
+    fall back to the legacy prefs location. Never create the Wavefinity folder
+    just for settings (Fix 058 K).
+    """
+    if HOSTED:
+        return None
+    current = load_preferences() if prefs is None else prefs
+    storage = storage_startup_state(current)
+    if storage["unavailable"]:
+        return None
+    root = Path(storage["root"])
+    return root / CONNECTOR_SETTINGS_FILENAME if root.is_dir() else None
+
+
+def _write_connector_settings_path(path: Path, settings: dict[str, Any]) -> None:
+    """Atomic JSON write that never creates the parent Wavefinity folder."""
+    if not path.parent.is_dir():
+        raise FileNotFoundError(path.parent)
+    temp_file = path.with_suffix(".tmp")
+    temp_file.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    temp_file.replace(path)
+
+
+def _drop_legacy_connector_settings(current: dict[str, Any]) -> None:
+    current.pop("connector_settings", None)
+
+
+def read_connector_settings_file(path: Path | None = None) -> dict[str, Any]:
+    """Read the canonical folder file. Missing/malformed/unreadable means {}."""
+    target = path if path is not None else connector_settings_path()
+    if target is None:
+        return {}
+    with PREFERENCES_LOCK:
+        return _read_preferences_file(target)
+
+
+def write_connector_settings_file(settings: dict[str, Any]) -> bool:
+    """Persist validated settings to the folder file when that root is usable.
+
+    Returns True once the canonical folder file was written. A successful
+    folder write also retires any legacy prefs copy. Returns False when there
+    is nowhere to write it or the folder write itself fails.
+    """
+    with PREFERENCES_LOCK:
+        prefs = load_preferences()
+        path = connector_settings_path(prefs)
+        if path is None:
+            return False
+        try:
+            _write_connector_settings_path(path, settings)
+        except OSError:
+            return False
+        if "connector_settings" in prefs:
+            cleaned = dict(prefs)
+            _drop_legacy_connector_settings(cleaned)
+            try:
+                _write_preferences_file(PREFERENCES_FILE, cleaned)
+            except OSError:
+                # The folder file is already canonical. served_preferences()
+                # retries legacy cleanup on the next catalog load.
+                pass
+        return True
+
+
+def served_preferences() -> dict[str, Any]:
+    """Preferences as served to the browser, with connector settings resolved.
+
+    One-time migration moves a legacy connector_settings object into the
+    Wavefinity-folder file. If the folder file already exists, it wins and any
+    stale legacy copy is retired. A malformed canonical file does not resurrect
+    stale legacy data.
+    """
+    with PREFERENCES_LOCK:
+        prefs = load_preferences()
+        path = connector_settings_path(prefs)
+        if path is None:
+            return prefs
+
+        legacy = prefs.get("connector_settings")
+        if not path.exists() and isinstance(legacy, dict):
+            try:
+                _write_connector_settings_path(path, legacy)
+            except OSError:
+                return prefs
+
+        if path.exists():
+            if "connector_settings" in prefs:
+                cleaned = dict(prefs)
+                _drop_legacy_connector_settings(cleaned)
+                try:
+                    _write_preferences_file(PREFERENCES_FILE, cleaned)
+                except OSError:
+                    pass
+                prefs = cleaned
+            file_settings = read_connector_settings_file(path)
+            prefs.pop("connector_settings", None)
+            if file_settings:
+                prefs["connector_settings"] = file_settings
+        return prefs
+
+
 def _json_value(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
@@ -1502,7 +1610,7 @@ def catalog_payload() -> dict[str, Any]:
             "wall_depth_factor": math.sqrt(1.0 + max_wave_slope() ** 2),
             "arm_thickness_floor_mm": connector_arm_thickness_floor(),
         },
-        "preferences": {} if HOSTED else load_preferences(),
+        "preferences": {} if HOSTED else served_preferences(),
         "slicer": {
             "available": False if HOSTED else (slicer_exe := detect_bambu_studio()) is not None,
             "path": None if HOSTED else str(slicer_exe) if slicer_exe else None,
@@ -1713,7 +1821,10 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(raw.get("different_heights"), bool):
             raise ValueError("Connector settings are incomplete.")
         settings["different_heights"] = raw["different_heights"]
-        update["connector_settings"] = settings
+        if not write_connector_settings_file(settings):
+            # No usable Wavefinity folder yet: keep the legacy prefs location
+            # rather than creating or redirecting a Wavefinity root for settings.
+            update["connector_settings"] = settings
     return {"preferences": save_preferences(update)}
 
 
