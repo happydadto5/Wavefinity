@@ -387,6 +387,26 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
     else ctx.arc(sx, sy, Math.max(1.5, Math.abs(rx - sx)), 0, Math.PI * 2);
     ctx.fillStyle = "#4e4638"; ctx.fill();
   }
+  for (const entry of DV.entries(drawer, grid)) {
+    if (entry.ghost) continue;
+    const one = entry.layers[entry.layers.length - 1].bin;
+    const layout = DL.pegboardRefreshError ? null : (DL.pegboardLayouts[one.id] || one.pegboard_layout);
+    if (!layout || layout.error || !Array.isArray(layout.mount_offsets)) continue;
+    const baseGx = Math.round((entry.x0 - grid.ox) / grid.stepX);
+    const baseGy = Math.round((entry.y0 - grid.oy) / grid.stepY);
+    for (const [mx, my] of layout.mount_offsets) {
+      const px = grid.ox + (baseGx + mx + 0.5) * grid.stepX;
+      const py = grid.oy + (baseGy + my + 0.5) * grid.stepY;
+      const [hx, hy] = cam.project([px, py, 0]);
+      ctx.beginPath();
+      ctx.arc(hx, hy, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 225, 107, 0.34)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(169, 116, 0, 0.72)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
   const hits = [];
   const problems = DV.problemKeys();
   for (const entry of DV.entries(drawer, grid)) {
@@ -862,6 +882,7 @@ DV.wire = () => {
         const gy = DL.toCell(chain[0].gy, drawer);
         DV.drag = {
           key: hit.key, keys: new Set(moving.map(DL.key)), bins: moving.map(p => DL.bin(p.bin)),
+          pointerId: event.pointerId,
           sx, sy, plane: hit.z, start, gx0: gx, gy0: gy, gx, gy, moved: false, valid: true, outside: false,
           target: null,
         };
@@ -992,6 +1013,20 @@ DV.wire = () => {
     if (!DP.spaceEditing() || !DL.layout) return;
     if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return;
     if (document.querySelector("dialog[open]")) return;
+    if (event.key === "Escape" && DV.drag) {
+      const pointerId = DV.drag.pointerId;
+      DV.drag = null;
+      DV.dragBin = null;
+      if (Number.isInteger(pointerId) && canvas.hasPointerCapture?.(pointerId)) {
+        canvas.releasePointerCapture(pointerId);
+      }
+      canvas.classList.remove("panning");
+      canvas.style.cursor = "";
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      DV.render();
+      return;
+    }
     const key = event.key.toLowerCase();
     const mod = event.ctrlKey || event.metaKey;
     const chain = DL.selected && DL.stackOf(DL.selected);

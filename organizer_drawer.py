@@ -891,7 +891,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         x0, y0 = item["gx"] - ex["l"], item["gy"] - ex["t"]
         x1, y1 = item["gx"] + item["w"] + ex["r"], item["gy"] + item["d"] + ex["b"]
         if x0 < 0 or y0 < 0 or x1 > cols or y1 > rows:
-            problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sticks out of the drawer"})
+            problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sticks out of the Surface" if surface else f"{label} sticks out of the drawer"})
         cx0, cy0, cx1, cy1 = max(0, x0), max(0, y0), min(cols, x1), min(rows, y1)
         if cx1 <= cx0 or cy1 <= cy0:
             continue
@@ -1104,6 +1104,8 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
     candidates = []
     selected = []
     run_count = 0
+    run_count_total = 0
+    proposal_cap_applied = False
 
     if rows and cols:
         if not any(walls.values()):
@@ -1209,11 +1211,35 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
             {"x": grid["ox"] + i["gx"] * step, "y": grid["oy"] + i["gy"] * step, "w": i["w"] * step, "d": i["d"] * step}
             for i in items
         ]
+        placed_spacer_boxes = []
+        for placement in drawer.get("placements") or []:
+            row = by_id.get(placement.get("bin"))
+            if not row or row.get("kind") not in SPACER_KINDS:
+                continue
+            if not all(key in placement for key in ("x", "y", "w", "d")):
+                continue
+            placed_spacer_boxes.append({
+                "side": str(placement.get("side") or ""),
+                "x": float(placement["x"]),
+                "y": float(placement["y"]),
+                "w": float(placement["w"]),
+                "d": float(placement["d"]),
+            })
+
+        def _candidate_already_satisfied(cand: dict[str, Any]) -> bool:
+            p = cand["placements"][0]
+            box = {"x": p["x"], "y": p["y"], "w": p["w"], "d": p["d"]}
+            return any(
+                placed["side"] == p.get("side") and _overlaps(box, placed)
+                for placed in placed_spacer_boxes
+            )
         valid_cands = []
         for cand in candidates:
             p = cand["placements"][0]
             edge = {"x": p["x"], "y": p["y"], "w": p["w"], "d": p["d"]}
             if any(_overlaps(edge, box) for box in item_boxes):
+                continue
+            if _candidate_already_satisfied(cand):
                 continue
             valid_cands.append(cand)
         candidates = valid_cands
@@ -1234,10 +1260,31 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
             key = (cand["comp"], cand["axis"])
             if key not in winning_edge:
                 winning_edge[key] = cand["edge"]
-        chosen = [
+        for comp_idx in range(len(components)):
+            left = any(
+                cand["comp"] == comp_idx and cand["axis"] == "x" and
+                cand["id"].startswith("left-")
+                for cand in candidates
+            )
+            right = any(
+                cand["comp"] == comp_idx and cand["axis"] == "x" and
+                cand["id"].startswith("right-")
+                for cand in candidates
+            )
+            if walls["left"] and walls["right"] and left and right:
+                chosen_edge = winning_edge.get((comp_idx, "x"))
+                if chosen_edge is not None:
+                    notes.append(
+                        "A bin group is braced against only one side wall; "
+                        "the opposite side is not braced."
+                    )
+        winning = [
             cand for cand in candidates
             if winning_edge.get((cand["comp"], cand["axis"])) == cand["edge"]
-        ][:SPACER_SELECTED_CAP]
+        ]
+        run_count_total = len({cand["run_id"] for cand in winning})
+        proposal_cap_applied = len(winning) > SPACER_SELECTED_CAP
+        chosen = winning[:SPACER_SELECTED_CAP]
         selected = [{"id": cand["id"]} for cand in chosen]
         run_count = len({cand["run_id"] for cand in chosen})
 

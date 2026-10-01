@@ -230,7 +230,7 @@ SP.resolvePegboard = () => {
     width = Number(document.getElementById("pegboard-x")?.value);
     height = Number(document.getElementById("pegboard-y")?.value);
     if (![width, height].every(value => Number.isFinite(value) && value > 0)) {
-      return { ok: false, error: "Enter the pegboard width and height in mm." };
+      return { ok: false, error: "Enter the Pegboard width and height in mm." };
     }
     holesX = Math.floor(width / standard.pitch_x_mm + 1e-9);
     holesY = Math.floor(height / standard.pitch_y_mm + 1e-9);
@@ -1780,6 +1780,7 @@ SP.clearSetupContext = () => {
   SP.isUpdate = false;
   SP.setupPrefillSpace = null;
   SP.setupPreserveIds = false;
+  SP.setupFormSnapshot = null;
 };
 
 // Only a committed type - current or explicit legacy metadata - may resume or
@@ -1847,6 +1848,20 @@ SP.setFormMode = edit => {
   $("#space-save-changes").hidden = !edit;
   $("#space-cancel-edit").hidden = !edit;
   $("#space-form-title").parentElement.hidden = edit;
+};
+
+SP.setupFormSnapshot = null;
+
+SP.captureOrdinarySetupSnapshot = () => {
+  const form = $("#space-form");
+  if (!form || SP.setupKind === "storage_drawers") return null;
+  const rows = [...form.querySelectorAll("input, select, textarea")]
+    .filter(node => !node.disabled && !node.closest("[hidden]"))
+    .map(node => [
+      node.id || node.name || node.type,
+      node.type === "checkbox" || node.type === "radio" ? Boolean(node.checked) : String(node.value),
+    ]);
+  return JSON.stringify(rows);
 };
 
 SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
@@ -1943,6 +1958,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById("pegboard-holes-y").value = prefillSpace?.pegboard_holes_y || "";
   }
   SP.updateReadouts();
+  SP.setupFormSnapshot = SP.captureOrdinarySetupSnapshot();
   if (update) {
     if (SP.renderSpaceInfo) SP.renderSpaceInfo();
     $("#space-name").focus();
@@ -2229,6 +2245,7 @@ SP.create = async () => {
   if (state.runtime.hosted) applyOptions.browserFolder = folder;
   await SP.applyFolder(info, applyOptions);
   SP.storageDrawersForm?.markPristine?.();
+  SP.setupFormSnapshot = null;
   SP.close();
 
   // The Designer always means an ordinary Bin. A Storage Box or Base Trim is
@@ -2463,6 +2480,7 @@ SP.useUntypedFolder = async () => {
         if (!(await SP.applyFolder(data.folder, { reset: false }))) return;
         SP.close();
         await loadFreshOrdinaryDesignForCurrentFolder();
+        toast(`Designs will save to ${data.folder?.folder || state.output}.`, false, 6500);
     }
 };
 
@@ -2796,7 +2814,7 @@ SP.updateReadouts = () => {
 // case settings on the Space setup/Edit form.
 
 SP.storageBoxDefaults = () => ({
-  secure_lid: true, latch_count: "auto", latch_strength: "standard", lid_headroom_mm: 1,
+  secure_lid: true, latch_count: "auto", lid_headroom_mm: 1,
   label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
   stacking: false, handle: false,
   wall_mm: Number(state.catalog?.b4b_rules?.default_wall_mm ?? 1.6),
@@ -2815,7 +2833,6 @@ SP.fillMaterialSelect = (id, choices, value) => {
 
 SP.fillStorageBoxForm = box => {
   const one = { ...SP.storageBoxDefaults(), ...(box || {}) };
-  SP.storageBoxStrength = one.latch_strength || "standard";
   const set = (id, value) => { const node = document.getElementById(id); if (node) node.value = String(value); };
   set("portable-lid-type", one.secure_lid === false ? "lid_only" : "latched");
   set("portable-lid-snugness", one.lid_headroom_mm);
@@ -2885,7 +2902,6 @@ SP.readStorageBoxForm = () => {
   return {
     secure_lid: latched,
     latch_count: latched ? (value("portable-latch-count") || "auto") : "auto",
-    latch_strength: SP.storageBoxStrength || "standard",
     lid_headroom_mm: parseFloat(value("portable-lid-snugness")) || 1,
     label_enabled: labelled,
     label_text: labelled ? String(value("portable-label-text") || "").trim() : "",
@@ -2915,6 +2931,7 @@ SP.structuralLabel = kind => kind === "storage_box" ? "Storage Box" : kind === "
 SP.structuralInfo = { key: "", data: null, error: "" };
 SP.structuralBusy = false;
 SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP = "Printing needs local Wavefinity with Bambu Studio. Use Save to put the files in your folder.";
+SP.HOSTED_SURFACE_PRINT_TOOLTIP = "Printing needs local Wavefinity. On hosted Wavefinity, use the Save Base Trim button to save the Base Trim files to your folder.";
 
 // The derived outside/capacity summary of a Storage Box, from the server.
 SP.refreshStructuralSummary = async () => {
@@ -2949,7 +2966,7 @@ SP.runStructural = async (mode, event) => {
   }
   const printing = mode === "print";
   if (printing && !state.slicer?.available) {
-    toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
+    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
     return;
   }
   // Fix 056 D: hidden maintainer shortcut restored at its new owner - local
@@ -3122,7 +3139,7 @@ SP.hostedBaseTrimSave = async (payload, context) => {
     if (existing === null) continue;
     // Only a file the prior manifest owns, still unchanged, may be replaced.
     if (owned.get(piece.filename) === undefined || owned.get(piece.filename) !== existing) {
-      throw new Error(`${piece.filename} is already in this folder and was not made by this Base Trim, or it was changed outside Wavefinity. Rename or move it, then save again. Nothing was changed.`);
+      throw new Error(`${piece.filename} already exists and Wavefinity cannot safely replace it. Rename or move that file, then Save Base Trim again. Nothing was changed.`);
     }
     const old = await WFFileSystem.readBlob(handle, piece.filename);
     if (old) previous.set(piece.filename, new Blob([await old.arrayBuffer()]));
@@ -3205,9 +3222,9 @@ SP.saveBaseTrim = async () => {
 // maintainer joint-fit sample (no bins, connectors or status changes).
 SP.printSurface = async event => {
   if (SP.structuralBusy || SP.structuralKind() !== "base_trim") return;
-  if (state.runtime.hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
+  if (state.runtime.hosted) { toast(SP.HOSTED_SURFACE_PRINT_TOOLTIP, true, 6000); return; }
   if (!state.slicer?.available) {
-    toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
+    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
     return;
   }
   if (event?.ctrlKey && event?.shiftKey) return SP.runStructural("print", event);
@@ -3251,7 +3268,7 @@ SP.printStorageBox = async () => {
   if (SP.structuralBusy || SP.structuralKind() !== "storage_box") return;
   if (state.runtime.hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
   if (!state.slicer?.available) {
-    toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
+    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
     return;
   }
   const context = DL.spaceContext();
@@ -3316,7 +3333,7 @@ SP.renderStructuralActions = () => {
   if (kind === "base_trim") SP.refreshBaseTrimSummary();
   save.disabled = SP.structuralBusy;
   print.disabled = SP.structuralBusy || hosted;
-  print.title = hosted ? SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP : "";
+  print.title = hosted ? (kind === "base_trim" ? SP.HOSTED_SURFACE_PRINT_TOOLTIP : SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP) : "";
   const makeInsideBin = document.getElementById("space-make-inside-bin");
   if (makeInsideBin) makeInsideBin.hidden = kind !== "storage_box";
 };
@@ -3482,6 +3499,8 @@ const wireInfoButtons = (prefix = "space-head") => {
     if (btnOpen) btnOpen.addEventListener("click", () => SP.run(SP.openExisting));
     const btnEdit = document.getElementById(prefix + "-edit");
     if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
+    const btnPrinterSettings = document.getElementById(prefix + "-printer-settings");
+    if (btnPrinterSettings) btnPrinterSettings.addEventListener("click", SP.openPrinterSettings);
     const btnShow = document.getElementById(prefix + "-show");
     if (btnShow) btnShow.addEventListener("click", SP.showFolder);
     const btnNew = document.getElementById(prefix + "-new-space");
@@ -3558,6 +3577,10 @@ SP.updateSpace = async () => {
     requireCurrent();
 
     if (state.runtime.hosted) {
+        // Hosted Space updates join the normal Inventory-write serialization
+        // chain (SP._inventoryWriteChain, owned by SP.inventoryRequest) so a
+        // concurrent hosted Inventory write cannot interleave with this one.
+        const hostedUpdateRun = async () => {
         // Mirror local update semantics: the inventory's own layout.space is
         // authoritative on reopen, so it must be updated together with
         // metadata, through the same backend validation as local Edit -
@@ -3594,6 +3617,10 @@ SP.updateSpace = async () => {
         requireCurrent();
         state.activeSpace = space;
         state.activeSpaceId = metadata.space_id || null;
+        };
+        const hostedUpdatePending = SP._inventoryWriteChain.then(hostedUpdateRun, hostedUpdateRun);
+        SP._inventoryWriteChain = hostedUpdatePending.catch(() => {});
+        await hostedUpdatePending;
     } else {
         const data = await api("/api/space/update", {
           output: state.output, name: name, x: x, y: y, z: z, ...extra,
@@ -3602,6 +3629,7 @@ SP.updateSpace = async () => {
         requireCurrent();
         state.activeSpace = data.folder.space;
     }
+    SP.setupFormSnapshot = null;
     SP.cancelInlineEdit();
     toast("Space updated.");
     
@@ -3734,15 +3762,24 @@ SP.closePrinterSettings = () => {
 
 // ---- dirty setup guard
 
-SP.setupIsDirty = () => Boolean(SP.storageDrawersForm?.isDirty?.());
+SP.setupIsDirty = () => {
+  if (SP.setupKind === "storage_drawers") {
+    return Boolean(SP.storageDrawersForm?.isDirty?.());
+  }
+  if (SP.setupFormSnapshot === null) return false;
+  return SP.captureOrdinarySetupSnapshot() !== SP.setupFormSnapshot;
+};
 
 SP.confirmDiscardSetup = async () => {
   if (!SP.setupIsDirty()) return true;
+  const cabinet = SP.setupKind === "storage_drawers";
   return appConfirmAction({
-    title: "Discard cabinet changes?",
-    message: "You changed this cabinet's settings and have not saved them. Discard the changes?",
-    actionLabel: "Discard",
-    cancelLabel: "Keep editing",
+    title: cabinet ? "Discard Cabinet Changes?" : "Discard Space Changes?",
+    message: cabinet
+      ? "You changed this cabinet's settings and have not saved them. Discard the changes?"
+      : "You changed this Space's setup and have not saved it. Discard the changes?",
+    actionLabel: "Discard Changes",
+    cancelLabel: "Keep Editing",
     danger: true,
   });
 };
@@ -3955,9 +3992,9 @@ SP.cabinetDelete = async drawerId => {
 SP.resetCabinetSettings = async () => {
   const problem = state.cabinetRecovery?.message || "A cabinet setting is not valid.";
   const ok = await appConfirmAction({
-    title: "Reset cabinet settings?",
+    title: "Reset Cabinet Settings?",
     message: `${problem}\n\nWavefinity keeps every drawer that is still valid and replaces only what is damaged with current defaults. Your Inventory and bin designs are not changed.`,
-    actionLabel: "Reset cabinet settings",
+    actionLabel: "Reset Cabinet Settings",
   });
   if (!ok) return;
   try {
@@ -4092,7 +4129,7 @@ SP.runCabinetStructural = async mode => {
   if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
   if (mode === "print" && hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
   if (mode === "print" && !state.slicer?.available) {
-    toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
+    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
     return;
   }
   const context = DL.spaceContext();

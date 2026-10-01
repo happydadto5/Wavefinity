@@ -260,7 +260,7 @@ def _front_plan(block, width, row, ordinal):
     sizes = ("large", "medium", "small") if choice == "auto" else (choice,)
     if not handles:
         sizes = (None,)
-    pull_failed = label_failed = False
+    pull_failed = label_failed = pull_too_narrow = False
     for size in sizes:
         try:
             try:
@@ -295,11 +295,12 @@ def _front_plan(block, width, row, ordinal):
                              0.4 if has_label and block["drawer_label_style"] == "raised" else 0.0)
             return _FrontPlan(pull, size or "", pull_z, label_outline,
                               label_center, projection)
-        except _PullFit:
+        except _PullFit as error:
             pull_failed = True
+            pull_too_narrow = (str(error) == "Pull needs a wider fascia")
         except _LabelFit:
             label_failed = True
-    raise ValueError(_front_plan_message(ordinal, choice, handles, pull_failed, label_failed, has_label))
+    raise ValueError(_front_plan_message(ordinal, choice, handles, pull_failed, label_failed, has_label, pull_too_narrow))
 
 
 class _PullFit(ValueError):
@@ -310,7 +311,7 @@ class _LabelFit(ValueError):
     """The drawer label cannot fit beside the pull."""
 
 
-def _front_plan_message(ordinal, choice, handles, pull_failed, label_failed, has_label):
+def _front_plan_message(ordinal, choice, handles, pull_failed, label_failed, has_label, pull_too_narrow):
     """Direct guidance that matches the actual settings - never suggests Auto
     when Auto is already selected, and blames the label only when it contributed."""
     name = f"Drawer {ordinal}"
@@ -325,6 +326,16 @@ def _front_plan_message(ordinal, choice, handles, pull_failed, label_failed, has
                 fixes.append("choose a smaller pull or Auto")
             fixes.append("turn Handles off")
         return f"{name}'s pull and label do not both fit. " + _join_fixes(fixes)
+    if pull_too_narrow:
+        if choice == "auto":
+            return f"{name} is too narrow for a pull. Increase its width or turn Handles off."
+        fixes = ["increase its width"]
+        if choice != "small":
+            fixes.append("choose a smaller pull or Auto")
+        fixes.append("turn Handles off")
+        if label_failed and has_label:
+            fixes.insert(1, "shorten the label")
+        return f"{name} is too narrow for the {choice} pull. " + _join_fixes(fixes)
     if choice == "auto":
         return f"{name} is too short for a pull. Increase its height or turn Handles off."
     fixes = ["increase its height"]
