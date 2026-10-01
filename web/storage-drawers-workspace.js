@@ -29,11 +29,13 @@
     const printerButton = el("button", "link-button", "Printer Settings…"); printerButton.type = "button";
     printerButton.addEventListener("click", () => callbacks.openPrinterSettings?.());
     const save = el("button", "button sd-save", "Save Cabinet"), print = el("button", "button sd-print", "Print Cabinet");
-    save.type = print.type = "button";
+    const printBoth = el("button", "button sd-print-both", "Print Cabinet + Bins");
+    save.type = print.type = printBoth.type = "button";
     save.addEventListener("click", () => callbacks.saveCabinet?.());
     print.addEventListener("click", event => callbacks.printCabinet?.(event));
+    printBoth.addEventListener("click", event => callbacks.printCabinetAndBins?.(event));
     const guide = el("a", "sd-guide-link", "Assembly & print guide"); guide.href = GUIDE_URL; guide.target = "_blank"; guide.rel = "noopener";
-    structural.append(status, fit, printerRow, save, print, guide);
+    structural.append(status, fit, printerRow, save, print, printBoth, guide);
     // Damaged known cabinet settings: Inventory and designs stay usable, cabinet
     // output stays off, and one button repairs only the cabinet definition.
     const recovery = el("section", "sd-recovery", ""); recovery.hidden = true;

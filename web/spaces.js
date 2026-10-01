@@ -942,7 +942,67 @@ SP.readInventoryFor = async (folder, { migrate = false } = {}) => {
 };
 
 SP._inventoryWriteChain = Promise.resolve();
-SP.inventoryRequest = async (path, extra = {}, { write = true, context = null } = {}) => {
+SP.writeHostedFileSet = async (handle, filesBase64 = {}) => {
+  const names = Object.keys(filesBase64 || {});
+  if (!names.length) return { rollback: async () => {} };
+
+  const prior = new Map();
+  const written = [];
+
+  const restore = async () => {
+    const failed = [];
+    for (const name of [...written].reverse()) {
+      try {
+        const old = prior.get(name);
+        if (old) await WFFileSystem.writeBlob(handle, name, old);
+        else await WFFileSystem.removeFile(handle, name);
+      } catch (error) {
+        failed.push(`${name}: ${error?.message || "restore failed"}`);
+      }
+    }
+    if (failed.length) {
+      throw new Error(
+        "Some generated files could not be restored; check the Space folder. "
+        + failed.join("; ")
+      );
+    }
+  };
+
+  try {
+    for (const name of names) {
+      prior.set(name, await WFFileSystem.readBlob(handle, name));
+      const bytes = Uint8Array.from(atob(filesBase64[name]), c => c.charCodeAt(0));
+      await WFFileSystem.writeBlob(
+        handle,
+        name,
+        new Blob([bytes], { type: "model/3mf" }),
+      );
+      written.push(name);
+    }
+  } catch (error) {
+    try {
+      await restore();
+    } catch (rollbackError) {
+      throw new Error(
+        `${error?.message || "Generated-file write failed."} ${rollbackError.message}`
+      );
+    }
+    throw error;
+  }
+
+  return { rollback: restore };
+};
+SP.inventoryRequest = async (
+  path,
+  extra = {},
+  {
+    write = true,
+    context = null,
+    sideEffect = false,
+    onStillFinishing = null,
+    ...requestOptions
+  } = {},
+) => {
   const folder = state.browserFolder;
   const handle = folder?.handle;
   if (!handle) throw new Error("Keeping an inventory needs folder access so Wavefinity can save it with your designs.");
@@ -955,29 +1015,70 @@ SP.inventoryRequest = async (path, extra = {}, { write = true, context = null } 
       throw DL.staleSpaceError();
     }
   };
+
   const run = async () => {
     requireContext();
-    const inventoryText = await SP.readInventoryFor({ ...folder, handle }, { migrate: write });
+    const inventoryText = await SP.readInventoryFor(
+      { ...folder, handle },
+      { migrate: write },
+    );
     const deleting = path === "/api/drawer/save" && Boolean(extra.delete_ids?.length);
-    const needsFilenameSnapshot = deleting || path === "/api/drawer/design-source/save";
+    const mayDeleteOwnedFiles =
+      deleting || path === "/api/drawer/spacers/refresh";
+    const needsFilenameSnapshot =
+      mayDeleteOwnedFiles || path === "/api/drawer/design-source/save";
+
     requireContext();
-    const availableFilenames = needsFilenameSnapshot ? await WFFileSystem.listFilenames(handle) : [];
+    const availableFilenames = needsFilenameSnapshot
+      ? await WFFileSystem.listFilenames(handle)
+      : [];
     requireContext();
-    const data = await api(path, {
+
+    const requestBody = {
       inventory_text: inventoryText,
       inventory_title: title,
       ...extra,
-      ...(needsFilenameSnapshot ? { available_filenames: availableFilenames } : {}),
-    });
+      ...(needsFilenameSnapshot
+        ? { available_filenames: availableFilenames }
+        : {}),
+    };
+    const data = sideEffect
+      ? await apiSideEffect(path, requestBody, { onStillFinishing })
+      : await api(path, requestBody, requestOptions);
+
     requireContext();
-    if (write && typeof data.inventory_text === "string") {
-      await WFFileSystem.writeText(handle, INVENTORY_FILENAME, data.inventory_text);
+    const fileTxn = await SP.writeHostedFileSet(
+      handle,
+      data.files_base64 || {},
+    );
+
+    try {
+      requireContext();
+      if (write && typeof data.inventory_text === "string") {
+        await WFFileSystem.writeText(
+          handle,
+          INVENTORY_FILENAME,
+          data.inventory_text,
+        );
+      }
+    } catch (error) {
+      try {
+        await fileTxn.rollback();
+      } catch (rollbackError) {
+        throw new Error(
+          `${error?.message || "Inventory write failed."} ${rollbackError.message}`
+        );
+      }
+      throw error;
     }
-    if (deleting && data.cleanup_files?.length) {
+
+    if (data.cleanup_files?.length) {
+      const generatedNames = new Set(Object.keys(data.files_base64 || {}));
       const failed = [];
       for (const name of data.cleanup_files) {
         requireContext();
-        if (!availableFilenames.includes(name)) continue;
+        if (generatedNames.has(name)) continue;
+        if (availableFilenames.length && !availableFilenames.includes(name)) continue;
         try {
           await WFFileSystem.removeFile(handle, name);
         } catch (error) {
@@ -986,8 +1087,10 @@ SP.inventoryRequest = async (path, extra = {}, { write = true, context = null } 
       }
       if (failed.length) data.cleanup_failed = failed;
     }
+
     return data;
   };
+
   const pending = SP._inventoryWriteChain.then(run, run);
   if (write) SP._inventoryWriteChain = pending.catch(() => {});
   return pending;
@@ -3984,6 +4087,7 @@ SP.cabinetCallbacks = () => ({
   openPrinterSettings: () => SP.openPrinterSettings(),
   saveCabinet: () => SP.runStructural("save"),
   printCabinet: event => SP.runStructural("print", event),
+  printCabinetAndBins: event => SP.printCabinetAndBins(event),
   setActiveDrawer: async id => {
     DL.change(() => { DL.layout.active = id; }, { history: false });
     DL.selected = null;
@@ -4086,6 +4190,51 @@ SP.hostedCabinetStatus = async (signature, orientations = null) => {
 
 // ---- structural Save / Print for the cabinet
 
+// (Fix 096 C7) Print Cabinet + Bins: the cabinet and every placed bin under
+// one truthful preflight (the backend runs C6's blocking predicate literally)
+// and one slicer handoff. Hosted stays unavailable: it has no local slicer.
+SP.printCabinetAndBins = async event => {
+  if (SP.structuralBusy) return;
+  const hosted = Boolean(state.runtime.hosted);
+  if (hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
+  if (!state.slicer?.available) {
+    toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
+    return;
+  }
+  const context = DL.spaceContext();
+  const savedName = state.activeSpace?.name || "the cabinet";
+  const savedWhere = state.output;
+  let wroteFiles = false;
+  const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\\\/]/).pop()))].join("\\n");
+  SP.structuralBusy = true;
+  SP.renderSpaceInfo();
+  try {
+    const result = await api("/api/space/structural-print-combined", {
+      space: clone(state.activeSpace),
+      output: state.output, space_id: state.activeSpaceId,
+      slicer_path: state.slicer?.path || null,
+    });
+    wroteFiles = true;
+    DL.requireSpaceContext(context);
+    if (result.partial) {
+      toast(result.error || "Cabinet + bins files were saved, but the slicer did not open.", true, 8000);
+    } else {
+      toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\\n${names(result.files)}`, false, 7000);
+    }
+  } catch (error) {
+    if (DL.isStaleSpaceError(error)) {
+      toast(wroteFiles
+        ? `Cabinet + bins files for "${savedName}" were saved to ${savedWhere}. The Space you switched to was not changed.`
+        : `You switched Spaces before "${savedName}" was saved, so nothing was written.`, false, 8000);
+    } else {
+      toast(error.message, true, 8000);
+    }
+  } finally {
+    SP.structuralBusy = false;
+    SP.cabinetInfo.commitSerial += 1;
+    SP.renderSpaceInfo();
+  }
+};
 SP.runCabinetStructural = async mode => {
   if (SP.structuralBusy) return;
   const hosted = Boolean(state.runtime.hosted);

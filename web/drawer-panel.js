@@ -140,6 +140,7 @@ DP.build = () => {
           <div class="dl-batch-actions">
             <button type="button" id="dl-batch-save" class="button secondary">Save Selected</button>
             <button type="button" id="dl-batch-print" class="button secondary">Print Selected to Bambu Studio</button>
+            <button type="button" id="dl-batch-print-complete" class="button secondary">Print Space (bins + spacers)</button>
           </div>
         </div>
         <div id="dl-inv-list" class="dl-inv-list"></div>
@@ -182,7 +183,8 @@ DP.build = () => {
         </fieldset>
         <div class="dl-action-grid">
           <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the chosen walls">Create Spacers</button>
-          <button type="button" id="dl-sp-generate" class="button secondary" title="Delete placed spacers, re-plan, and place replacements">Refresh Spacers</button>
+          <button type="button" id="dl-sp-generate" class="button secondary" title="Save the selected spacer plan">Save Selected Spacers</button>
+          <button type="button" id="dl-sp-refresh" class="button secondary" title="Delete placed spacers, re-plan, and place replacements">Refresh Spacers</button>
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
         </div>
       </div>
@@ -199,11 +201,11 @@ DP.build = () => {
   // DP.renderStats() below, not only here - this first pass just avoids a
   // flash of enabled buttons before the first render.
   if (state.runtime.hosted) {
-    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print"].forEach(selector => {
+    ["#dl-sp-print"].forEach(selector => {
       const button = $(selector);
       if (button) {
         button.disabled = true;
-        button.title = DP.HOSTED_UNSUPPORTED_TOOLTIP;
+        button.title = DP.HOSTED_SLICER_TOOLTIP;
       }
     });
   }
@@ -214,6 +216,9 @@ DP.build = () => {
 // /api/drawer/print outright, so the remaining spacer actions stay unavailable in hosted mode
 // on every render, not just once at build time.
 DP.HOSTED_UNSUPPORTED_TOOLTIP = "Hosted Wavefinity uses the normal Design save-to-folder workflow instead of local Space spacer/slicer operations.";
+// Fix 096 C4: spacer file generation now works hosted; only opening a local
+// slicer stays unavailable.
+DP.HOSTED_SLICER_TOOLTIP = "Hosted Wavefinity saves files to your folder instead of opening a local slicer.";
 
 // ------------------------------------------------------------------ wiring
 
@@ -296,6 +301,8 @@ DP.wire = () => {
     DL.saveSelectedBins(DP.batchSaveIds(), true));
   $("#dl-batch-print").addEventListener("click", () =>
     DL.printSelectedBins(DP.printSelectionPayload(), true));
+  $("#dl-batch-print-complete").addEventListener("click", () =>
+    DL.printCompleteSpace());
   // Empty-state buttons (canvas overlay and Inventory list) share these.
   const emptyAction = event => {
     const act = event.target.closest("[data-empty-act]")?.dataset.emptyAct;
@@ -314,7 +321,8 @@ DP.wire = () => {
     });
   }
   $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
-  $("#dl-sp-generate").addEventListener("click", () => DL.refreshSpacers());
+  $("#dl-sp-generate").addEventListener("click", () => DL.generateSelectedSpacers());
+  $("#dl-sp-refresh").addEventListener("click", () => DL.refreshSpacers());
   $("#dl-sp-print").addEventListener("click", () => DP.openSpacerPrintDialog());
   $("#spacer-print-cancel").addEventListener("click", () => $("#spacer-print-dialog").close());
   $("#spacer-print-dialog").addEventListener("click", event => {
@@ -407,10 +415,10 @@ DP.renderBatch = () => {
   const hosted = Boolean(state.runtime.hosted);
   const tools = $("#dl-batch-tools");
   if (!tools) return;
-  $("#dl-batch-save").hidden = hosted;
+  $("#dl-batch-save").hidden = false;
   $("#dl-batch-print").hidden = hosted;
   const scope = DP.batchScope();
-  const connectorNote = hosted ? "" : " · Space connectors included";
+  const connectorNote = " · Space connectors included";
   const needFiles = scope.subset ? scope.picked.filter(one => DL.saveNeeded(one)).length : scope.save.length;
   let summary;
   if (scope.subset) {
@@ -615,7 +623,7 @@ DP.openSpacerPrintDialog = () => {
         <tr data-group="${index}">
           <td><input type="checkbox" data-sp-check ${g.toPrint > 0 ? "checked" : ""}></td>
           <td>${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm</td>
-          <td>${/^Spacer Flex /.test(String(g.bin.file || "")) ? "Flexible" : "Rigid"}</td>
+          <td>${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible" : "Rigid"}</td>
           <td>${g.qty}</td>
           <td>${g.printed}</td>
           <td><input type="number" data-sp-qty min="1" max="${g.qty}" value="${Math.max(1, g.toPrint || g.qty)}" ${g.toPrint > 0 ? "" : "disabled"}></td>
@@ -807,10 +815,11 @@ DP.renderStats = () => {
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
   label("#dl-sp-plan", "Create Spacers", "Planning…", "spacers");
   label("#dl-sp-generate", "Save Selected Spacers", "Saving…", "spacers");
+  label("#dl-sp-refresh", "Refresh Spacers", "Refreshing…", "spacers");
   // Nothing placed yet: these have nothing to work on, so say why instead of
   // letting the click end in an error.
   const nothingPlaced = DL.loaded && !DL.drawer().placements.length;
-  ["#dl-sp-plan", "#dl-sp-generate"].forEach(selector => {
+  ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-refresh"].forEach(selector => {
     const node = $(selector);
     if (!nothingPlaced) return;
     node.disabled = true;
@@ -820,8 +829,8 @@ DP.renderStats = () => {
   // them, so it needs something to refresh - placed spacers - or a fresh
   // selection waiting to be saved. Otherwise it stays disabled with the
   // reason (Fix 019 Item 4: never an enabled silent no-op).
-  const refreshNode = $("#dl-sp-generate");
-  if (refreshNode && !hosted && !nothingPlaced) {
+  const refreshNode = $("#dl-sp-refresh");
+  if (refreshNode && !nothingPlaced) {
     const hasPlacedSpacers = DL.bins.some(DL.isSpacer);
     const hasSelection = Boolean(DL.spacerPlan) && DL.spacerSelected && DL.spacerSelected.size > 0;
     if (!hasPlacedSpacers && !hasSelection) {
@@ -840,15 +849,17 @@ DP.renderStats = () => {
   label("#dl-sp-print", "Print Spacers", "Printing…", "print");
   if (spacerPrint) spacerPrint.disabled = busy || !hasPlacedSpacers;
 
-  // Hosted: spacer generation and slicer actions stay unavailable on every render - see
-  // DP.HOSTED_UNSUPPORTED_TOOLTIP (Fix 019 Item 3).
+  // Hosted: only opening a local slicer stays unavailable on every render -
+  // see DP.HOSTED_SLICER_TOOLTIP (Fix 019 Item 3, narrowed by Fix 096 C4).
   if (hosted) {
-    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print"].forEach(selector => {
-      const node = $(selector);
-      if (!node) return;
+    const node = $("#dl-sp-print");
+    if (node) {
       node.disabled = true;
-      node.title = DP.HOSTED_UNSUPPORTED_TOOLTIP;
-    });
+      node.title = DP.HOSTED_SLICER_TOOLTIP;
+    }
+    if (!spacerReasonCurrent()) {
+      spacerReason(DP.HOSTED_SLICER_TOOLTIP);
+    }
   }
 
   const report = DL.report;
@@ -875,7 +886,7 @@ DP.updateSpacerHint = () => {
   const hint = $("#dl-sp-hint");
   const section = $("#dl-spacers");
   if (!hint || !section) return;
-  const usable = !state.runtime.hosted && !section.open && !DL.spacerPlan &&
+  const usable = !section.open && !DL.spacerPlan &&
     DL.loaded && DL.drawer().placements.length > 0;
   if (!usable) {
     if (DP.spacerHintTimer) { clearTimeout(DP.spacerHintTimer); DP.spacerHintTimer = null; }
@@ -887,32 +898,44 @@ DP.updateSpacerHint = () => {
   // Space or changing them recomputes.
   const signature = JSON.stringify([DL.spaceContext(), DL.spacerSignature(), DL.layout.settings.spacers]);
   if (DP.spacerHintCache?.signature === signature) {
-    const count = DP.spacerHintCache.count;
-    hint.textContent = count > 0 ? `${count} gap${count === 1 ? "" : "s"} could use spacers` : "";
-    hint.hidden = count === 0;
+    hint.textContent = DP.spacerHintCache.text;
+    hint.hidden = !DP.spacerHintCache.text;
     return;
   }
   if (DP.spacerHintTimer) clearTimeout(DP.spacerHintTimer);
   DP.spacerHintTimer = setTimeout(async () => {
     DP.spacerHintTimer = null;
-    let count = 0;
+    let text = "";
     try {
-      const result = await api("/api/drawer/spacers", {
-        output: DL.output ?? DL.folder(), layout: DL.layout,
+      const result = await DL.inventoryCall("/api/drawer/spacers", {
+        layout: DL.layout,
         drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
-      });
-      // Fix 090: count logical runs (one long gap plans several spacer
-      // candidates but is still one gap).
-      count = result.run_count ?? (result.selected || []).length;
-    } catch (error) { count = 0; /* a hint must never fail visibly */ }
+      }, { write: false });
+      // Fix 096 C10: three truthful hint states. run_count counts only the
+      // cap-limited selection; run_count_total is the winning-edge total
+      // before the cap (same basis as run_count); placed_spacer_count
+      // identifies the satisfied case.
+      const runs = result.run_count ?? (result.selected || []).length;
+      const totalRuns = result.run_count_total ?? runs;
+      const placed = result.placed_spacer_count ?? 0;
+      const wallsOff = (result.notes || []).some(note => String(note).includes("All spacer walls are off."));
+      if (runs > 0 && totalRuns > runs) {
+        const more = totalRuns - runs;
+        text = `${runs} gap${runs === 1 ? "" : "s"} could use spacers — ${more} more gap${more === 1 ? "" : "s"} need${more === 1 ? "s" : ""} spacers too`;
+      } else if (runs > 0) {
+        text = `${runs} gap${runs === 1 ? "" : "s"} could use spacers`;
+      } else if (placed > 0 && !wallsOff) {
+        text = "All gaps have spacers";
+      }
+    } catch (error) { text = ""; /* a hint must never fail visibly */ }
     // Publish only if the world hasn't moved on while planning.
     const now = JSON.stringify([DL.spaceContext(), DL.spacerSignature(), DL.layout.settings.spacers]);
-    const stillUsable = !state.runtime.hosted && !$("#dl-spacers")?.open && !DL.spacerPlan &&
+    const stillUsable = !$("#dl-spacers")?.open && !DL.spacerPlan &&
       DL.loaded && DL.drawer().placements.length > 0;
     if (now !== signature || !stillUsable) return;
-    DP.spacerHintCache = { signature, count };
-    hint.textContent = count > 0 ? `${count} gap${count === 1 ? "" : "s"} could use spacers` : "";
-    hint.hidden = count === 0;
+    DP.spacerHintCache = { signature, text };
+    hint.textContent = text;
+    hint.hidden = !text;
   }, 800);
 };
 

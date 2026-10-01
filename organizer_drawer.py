@@ -82,6 +82,7 @@ from organizer_engine import (
 )
 from organizer_geometry import _extrude_polygon
 from organizer_inventory import (
+    INVENTORY_FILENAME,
     INVENTORY_LOCK,
     design_specs,
     duplicate_design_source as _duplicate_design_source_row,
@@ -649,15 +650,15 @@ def _top_wall(item: dict[str, Any]) -> float:
     return STACK_MIN_WALL if item["top"].get("stack", "none") != "none" else DEFAULT_WALL
 
 
-def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str, Any]], int]:
+def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str, Any]], int, int]:
     """One connector per shared seam long enough to seat one, grouped by the
     two rim heights and wall thickness it joins.  Stacks join at their top
-    bins.  Returns the groups and how many seams join incompatible bins -
-    different wall thicknesses, or a seam too short for the reinforced
-    connector a height difference requires - which no printed connector
-    fits."""
+    bins.  Returns the groups, how many seams join incompatible bins -
+    different wall thicknesses, which no printed connector fits - and how
+    many shared seams are too short for even the smallest connector."""
     counts: dict[tuple[float, float, float], int] = {}
     mismatched = 0
+    short_seams = 0
     need = math.ceil(MIN_CONNECTOR_SEAM / step - 1e-9)
     for index, a in enumerate(items):
         for b in items[index + 1:]:
@@ -680,6 +681,7 @@ def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str
                 BoxSpec(2 * UNIT, 6 * UNIT, max(a["h"], b["h"]), wall=wall_a),
             )
             if overlap * step + 1e-9 < max(MIN_CONNECTOR_SEAM, plan["length_mm"]):
+                short_seams += 1
                 continue
             key = (*sorted((round(a["h"], 2), round(b["h"], 2)), reverse=True), wall_a)
             counts[key] = counts.get(key, 0) + 1
@@ -687,7 +689,7 @@ def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str
         {"heights": [key[0], key[1]], "wall": key[2], "count": count}
         for key, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
     ]
-    return groups, mismatched
+    return groups, mismatched, short_seams
 
 
 def _pegboard_report(drawer: dict[str, Any], bins: list[dict[str, Any]]) -> dict[str, Any]:
@@ -801,6 +803,58 @@ def problem_blocks_print(problem: dict[str, Any]) -> bool:
 
 def blocking_problem_messages(report: dict[str, Any]) -> list[str]:
     return [problem["message"] for problem in report.get("problems") or [] if problem_blocks_print(problem)]
+
+
+def selected_blocking_problems(
+    layout: dict[str, Any],
+    bins: list[dict[str, Any]],
+    selected_ids: Iterable[str],
+) -> list[dict[str, Any]]:
+    """Hard Space problems whose keys touch at least one selected placed bin."""
+    selected = {str(one) for one in selected_ids}
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[str, tuple[str, ...], str]] = set()
+    if not selected:
+        return found
+    for drawer in (layout or {}).get("drawers") or []:
+        report = drawer_report(drawer, bins, layout=layout)
+        for problem in report.get("problems") or []:
+            if not problem_blocks_print(problem):
+                continue
+            affected = {
+                str(key).rsplit(":", 1)[0]
+                for key in problem.get("keys") or []
+            }
+            if not (affected & selected):
+                continue
+            identity = (
+                str(problem.get("type") or ""),
+                tuple(sorted(str(key) for key in problem.get("keys") or [])),
+                str(problem.get("message") or ""),
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            found.append(problem)
+    return found
+
+
+def blocking_problem_copy(
+    bins: list[dict[str, Any]],
+    problems: list[dict[str, Any]],
+) -> str:
+    by_id = {str(one["id"]): one for one in bins}
+    lines = []
+    for problem in problems:
+        ids = []
+        for key in problem.get("keys") or []:
+            row_id = str(key).rsplit(":", 1)[0]
+            if row_id in by_id and row_id not in ids:
+                ids.append(row_id)
+        labels = ", ".join(_label(by_id[row_id]) for row_id in ids)
+        prefix = f"{labels}: " if labels else ""
+        lines.append(f"• {prefix}{problem.get('message') or 'Space problem'}")
+    return "Bulk print blocked — these Space problems affect the selected bins:\n" + "\n".join(lines)
 
 
 def _interior_components(items: list[dict[str, Any]], cols: int, rows: int) -> list[list[str]]:
@@ -936,7 +990,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         float(p.get("w", 0)) * float(p.get("d", 0))
         for p in drawer["placements"] if "gx" not in p and "on" not in p and p.get("bin") in by_id
     )
-    connectors, mismatched = _connectors(items, step)
+    connectors, mismatched, short_seams = _connectors(items, step)
     if surface:
         for component in _interior_components(items, cols, rows):
             problems.append({"type": "restraint", "keys": component, "message": INTERIOR_COMPONENT_MESSAGE})
@@ -958,6 +1012,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         "connectors": connectors,
         "connector_total": sum(one["count"] for one in connectors),
         "connector_mismatched": mismatched,
+        "connector_short_seams": short_seams,
         "problems": problems,
         "height_issues": len(issues),
         "placed": sum(len(item["layers"]) for item in items),
@@ -1067,6 +1122,49 @@ def _exposed_segments(comp: list[dict[str, Any]], side: str) -> list[tuple[int, 
     return segments
 
 
+_SPACER_PLAN_BIN_FIELDS = (
+    "id", "kind", "x", "y", "z", "wall", "object_height_mm", "stack",
+)
+
+
+def spacer_plan_signature(
+    raw_drawer: dict[str, Any],
+    bins: list[dict[str, Any]],
+    options: dict[str, Any] | None = None,
+) -> str:
+    """CAS token for exactly the durable state that can change a spacer plan.
+
+    Print status, Qty and generated filenames are intentionally excluded:
+    they do not change the physical gaps. Any drawer geometry/placement change,
+    any relevant placed-row geometry change, or any requested spacer setting
+    change changes the token.
+    """
+    drawer = copy.deepcopy(raw_drawer or {})
+    placed_ids = {
+        str(one.get("bin"))
+        for one in drawer.get("placements") or []
+        if isinstance(one, dict) and one.get("bin") is not None
+    }
+    rows = []
+    for one in bins or []:
+        if str(one.get("id")) not in placed_ids:
+            continue
+        rows.append({
+            key: one.get(key)
+            for key in _SPACER_PLAN_BIN_FIELDS
+        })
+    rows.sort(key=lambda one: str(one.get("id") or ""))
+    body = {
+        "drawer": drawer,
+        "bins": rows,
+        "options": copy.deepcopy(options or {}),
+    }
+    encoded = json.dumps(
+        body, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options: dict[str, Any] | None = None) -> dict[str, Any]:
     options = options or {}
     drawer = normalise_drawer(raw_drawer)
@@ -1074,6 +1172,9 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
     flexible = options.get("flexible", True)
     by_id = {one["id"]: one for one in bins}
+    placed_spacer_count = sum(
+        1 for placement in drawer.get("placements") or []
+        if (by_id.get(placement.get("bin")) or {}).get("kind") in SPACER_KINDS)
     # Fix 088 S88-2: Auto height is the default - half the tallest bin's
     # height, clamped like a manual height. A manual height is honoured only
     # when Auto is off.
@@ -1110,7 +1211,9 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
             notes.append("All spacer walls are off.")
             return {"drawer": drawer, "height": height, "resolved_height": height,
                     "candidates": [], "selected": [], "notes": notes,
-                    "run_count": 0}
+                    "run_count": 0, "run_count_total": 0,
+                    "proposal_cap_applied": False,
+                    "placed_spacer_count": placed_spacer_count}
         wall = drawer["clearance"] / 2.0
         
         items = [i for i in _grid_items(drawer, by_id) if i["kind"] not in SPACER_KINDS]
@@ -1250,7 +1353,9 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
 
     return {"drawer": drawer, "height": height, "resolved_height": height,
             "candidates": candidates, "selected": selected, "notes": notes,
-            "run_count": run_count}
+            "run_count": run_count, "run_count_total": run_count_total,
+            "proposal_cap_applied": proposal_cap_applied,
+            "placed_spacer_count": placed_spacer_count}
 
 def _serpentine_flexure(w, d, side, flexible=True):
     web = 1.5
@@ -1403,6 +1508,11 @@ def generate_connectors(
             f"{report['connector_mismatched']} seam(s) join bins with different wall "
             "thicknesses; no single connector fits both."
         )
+    if report["connector_short_seams"]:
+        notes.append(
+            f"{report['connector_short_seams']} shared seam(s) are too short for a connector; "
+            "those bins print without connectors."
+        )
     return {"connectors": made, "notes": notes}
 
 
@@ -1432,6 +1542,7 @@ def print_spacers_and_connectors(
     for made in connectors["connectors"]:
         counts[made["file"]] = counts.get(made["file"], 0) + made["count"]
     files = [output_dir / name for name in counts if (output_dir / name).is_file()]
+    omitted = sorted(name for name in counts if not (output_dir / name).is_file())
     if not files:
         raise ValueError("this drawer has no spacers or connectors to print yet")
     # Each file is repeated once per physical copy so the slicer project holds
@@ -1447,9 +1558,10 @@ def print_spacers_and_connectors(
             "error": f"Files were prepared, but Bambu Studio did not open: {error}",
             "files": [str(path) for path in files],
             "counts": counts,
+            "omitted": omitted,
             "notes": connectors["notes"],
         }
-    return {"files": [str(path) for path in files], "counts": counts, "notes": connectors["notes"]}
+    return {"files": [str(path) for path in files], "counts": counts, "omitted": omitted, "notes": connectors["notes"]}
 
 
 # ---------------------------------------------------------------- bulk bin print
@@ -1736,6 +1848,10 @@ def print_inventory_bins(
     if not counts:
         raise ValueError("Select at least one bin to print.")
 
+    blocked = selected_blocking_problems(layout, bins, counts)
+    if blocked:
+        raise ValueError(blocking_problem_copy(bins, blocked))
+
     prepared = prepare_inventory_bins(output_dir, list(counts), generate_from_design)
     if prepared["failed"]:
         return _batch_partial(
@@ -1790,6 +1906,74 @@ def print_inventory_bins(
 
 
 # ---------------------------------------------------------------- web routes
+
+
+def _rollback_spacer_stage(
+    root: Path,
+    backups: dict[str, Path | None],
+    installed: list[Path],
+) -> None:
+    import os
+
+    errors: list[str] = []
+    for final in reversed(installed):
+        try:
+            if final.exists():
+                final.unlink()
+        except OSError as error:
+            errors.append(f"{final.name}: {error}")
+    for name, backup in backups.items():
+        if backup is None or not backup.exists():
+            continue
+        try:
+            os.replace(backup, root / name)
+        except OSError as error:
+            errors.append(f"{name}: {error}")
+    if errors:
+        raise RuntimeError(
+            "Spacer rollback could not fully restore the previous files: "
+            + "; ".join(errors)
+        )
+
+
+def _promote_spacer_stage(
+    root: Path,
+    stage: Path,
+    names: list[str],
+) -> tuple[dict[str, Path | None], list[Path]]:
+    import os
+
+    root = root.expanduser().resolve()
+    stage = stage.expanduser().resolve()
+    if stage.parent != root:
+        raise ValueError("spacer stage must be inside the Space folder")
+
+    backups: dict[str, Path | None] = {}
+    installed: list[Path] = []
+
+    for name in names:
+        if Path(name).name != name or not name.lower().endswith(".3mf"):
+            raise ValueError(f"unsafe spacer file name {name!r}")
+        staged = (stage / name).resolve()
+        if staged.parent != stage or not staged.is_file() or staged.stat().st_size <= 0:
+            raise ValueError(f"Spacer file {name} was not generated correctly.")
+
+    try:
+        for index, name in enumerate(names):
+            staged = stage / name
+            final = root / name
+            backup: Path | None = None
+            if final.exists():
+                backup = stage / f".backup-{index:03d}-{name}"
+                os.replace(final, backup)
+            backups[name] = backup
+            os.replace(staged, final)
+            installed.append(final)
+    except Exception:
+        _rollback_spacer_stage(root, backups, installed)
+        raise
+
+    return backups, installed
 
 
 def drawer_routes(
@@ -1959,30 +2143,106 @@ def drawer_routes(
             return with_rules({**result, "created": [one["id"] for one in rows]})
 
     def spacers(payload):
-        if hosted:
-            raise ValueError("Hosted spacer files are not available yet.")
         with geometry_lock:
-            # Authoritative, like generation: the browser need not (and the
-            # normal UI does not) send inventory rows for planning.
-            inv = load_inventory(folder(payload))
-            return plan_spacers(
-                find_drawer(payload["layout"], payload.get("drawer_id")),
-                inv["bins"], payload.get("options"),
+            inv = (
+                load_inventory_text(
+                    payload.get("inventory_text") or "",
+                    title=str(payload.get("inventory_title") or "Wavefinity"),
+                )
+                if hosted else load_inventory(folder(payload))
             )
+            layout = inv["layout"]
+            drawer = find_drawer(layout, payload.get("drawer_id"))
+            options = payload.get("options") or {}
+            result = plan_spacers(drawer, inv["bins"], options)
+            result["plan_signature"] = spacer_plan_signature(
+                drawer, inv["bins"], options,
+            )
+            return result
 
     def spacers_generate(payload):
         if hosted:
-            raise ValueError("Hosted spacer files are not available yet.")
+            import base64
+            import tempfile
+            with geometry_lock, INVENTORY_LOCK:
+                inv = load_inventory_text(
+                    payload.get("inventory_text") or "",
+                    title=str(payload.get("inventory_title") or "Wavefinity"),
+                )
+                layout = copy.deepcopy(inv["layout"])
+                drawer = find_drawer(layout, payload.get("drawer_id"))
+                options = payload.get("options") or {}
+                current_signature = spacer_plan_signature(drawer, inv["bins"], options)
+                if current_signature != str(payload.get("plan_signature") or ""):
+                    raise ValueError(
+                        "Spacers changed while you were planning — refresh the Space and plan again. "
+                        "Your unsaved spacer plan was discarded; nothing was merged."
+                    )
+                request_for_gen = {
+                    "drawer": drawer,
+                    "bins": inv["bins"],
+                    "options": options,
+                    "selected": payload.get("selected", []),
+                }
+                with tempfile.TemporaryDirectory(prefix="wavefinity-hosted-spacers-") as tmp:
+                    tmpdir = Path(tmp)
+                    def generate_file(name, mesh):
+                        out = tmpdir / name
+                        mesh.export(str(out))
+                        return out
+                    result = generate_spacers(request_for_gen, tmpdir, generate_file)
+                    files_base64 = {}
+                    for gen in result.get("generated", []):
+                        files_base64[gen["file"]] = base64.b64encode(
+                            (tmpdir / gen["file"]).read_bytes()).decode("ascii")
+                new_bins: list[dict[str, Any]] = []
+                bins_so_far = list(inv["bins"])
+                for gen in result.get("generated", []):
+                    new_id = next_bin_id(bins_so_far)
+                    row = {
+                        "id": new_id,
+                        "kind": "spacer",
+                        "boundary": "edge",
+                        # Inventory x/y/z are physical mm, never Wavefinity unit counts.
+                        "name": "Flexible Spacer" if gen.get("flexible") else "Rigid Spacer",
+                        "x": gen["w"], "y": gen["d"], "z": gen["h"],
+                        "qty": 1,
+                        "file": gen["file"],
+                        "flexible": bool(gen.get("flexible")),
+                    }
+                    new_bins.append(row)
+                    bins_so_far.append(row)
+                    for p in gen["placements"]:
+                        p_copy = dict(p)
+                        p_copy["bin"] = new_id
+                        p_copy.setdefault("copy", 0)
+                        drawer.setdefault("placements", []).append(p_copy)
+                saved = save_inventory_text(
+                    payload.get("inventory_text") or "",
+                    title=str(payload.get("inventory_title") or "Wavefinity"),
+                    layout=layout, new_bins=new_bins,
+                )
+                result["layout"] = saved["layout"]
+                result["bins"] = saved["bins"]
+                result["inventory_text"] = saved["inventory_text"]
+                result["files_base64"] = files_base64
+                return result
         with geometry_lock, INVENTORY_LOCK:
             def generate_file(name, mesh):
                 out = folder(payload) / name
                 mesh.export(str(out))
                 return out
 
-            layout = payload["layout"]
-            drawer = find_drawer(layout, payload.get("drawer_id"))
             inv = load_inventory(folder(payload))
+            layout = copy.deepcopy(inv["layout"])
+            drawer = find_drawer(layout, payload.get("drawer_id"))
             options = payload.get("options") or {}
+            current_signature = spacer_plan_signature(drawer, inv["bins"], options)
+            if current_signature != str(payload.get("plan_signature") or ""):
+                raise ValueError(
+                    "Spacers changed while you were planning — refresh the Space and plan again. "
+                    "Your unsaved spacer plan was discarded; nothing was merged."
+                )
 
             request_for_gen = {
                 "drawer": drawer,
@@ -2005,6 +2265,7 @@ def drawer_routes(
                     "x": gen["w"], "y": gen["d"], "z": gen["h"],
                     "qty": 1,
                     "file": gen["file"],
+                    "flexible": bool(gen.get("flexible")),
                 }
                 new_bins.append(row)
                 bins_so_far.append(row)
@@ -2020,6 +2281,179 @@ def drawer_routes(
             result["bins"] = saved["bins"]
 
             return result
+
+    def spacers_refresh(payload):
+        """Replace the active drawer's spacer set in one Inventory commit."""
+        import base64
+        import tempfile
+
+        with geometry_lock, INVENTORY_LOCK:
+            if hosted:
+                inventory_text = payload.get("inventory_text") or ""
+                inventory_title = str(payload.get("inventory_title") or "Wavefinity")
+                inv = load_inventory_text(inventory_text, title=inventory_title)
+                root = None
+            else:
+                inventory_text = ""
+                inventory_title = "Wavefinity"
+                root = folder(payload)
+                inv = load_inventory(root)
+
+            layout = copy.deepcopy(inv["layout"])
+            bins = list(inv["bins"])
+            drawer = find_drawer(layout, payload.get("drawer_id"))
+            options = payload.get("options") or {}
+            plan = plan_spacers(drawer, bins, options)
+            selected_ids = [
+                str(one.get("id"))
+                for one in plan.get("selected") or []
+                if one.get("id") is not None
+            ]
+            request_for_gen = {
+                "drawer": drawer,
+                "bins": bins,
+                "options": options,
+                "selected": selected_ids,
+            }
+
+            active_id = str(drawer.get("id") or "")
+            by_id = {str(one["id"]): one for one in bins}
+            old_spacer_ids = {
+                str(placement.get("bin"))
+                for placement in drawer.get("placements") or []
+                if (
+                    str(placement.get("bin")) in by_id
+                    and by_id[str(placement.get("bin"))].get("kind") in SPACER_KINDS
+                )
+            }
+
+            if root is not None:
+                root.mkdir(parents=True, exist_ok=True)
+                stage_context = tempfile.TemporaryDirectory(
+                    prefix=".wavefinity-spacer-stage-",
+                    dir=root,
+                )
+            else:
+                stage_context = tempfile.TemporaryDirectory(
+                    prefix="wavefinity-hosted-spacer-refresh-",
+                )
+
+            with stage_context as tmp:
+                stage = Path(tmp).resolve()
+
+                def generate_file(name, mesh):
+                    out = stage / name
+                    mesh.export(str(out))
+                    return out
+
+                generated = generate_spacers(
+                    request_for_gen,
+                    stage,
+                    generate_file,
+                )
+
+                new_bins: list[dict[str, Any]] = []
+                bins_so_far = list(bins)
+                new_placements: list[dict[str, Any]] = []
+                for gen in generated.get("generated") or []:
+                    new_id = next_bin_id(bins_so_far)
+                    row = {
+                        "id": new_id,
+                        "kind": "spacer",
+                        "boundary": "edge",
+                        "name": "Flexible Spacer" if gen.get("flexible") else "Rigid Spacer",
+                        "x": gen["w"],
+                        "y": gen["d"],
+                        "z": gen["h"],
+                        "qty": 1,
+                        "file": gen["file"],
+                    }
+                    new_bins.append(row)
+                    bins_so_far.append(row)
+                    for placement in gen.get("placements") or []:
+                        placed = dict(placement)
+                        placed["bin"] = new_id
+                        placed.setdefault("copy", 0)
+                        new_placements.append(placed)
+
+                for one in layout.get("drawers") or []:
+                    if str(one.get("id") or "") != active_id:
+                        continue
+                    one["placements"] = [
+                        placement
+                        for placement in one.get("placements") or []
+                        if str(placement.get("bin")) not in old_spacer_ids
+                    ]
+                    one["placements"].extend(new_placements)
+                    break
+
+                still_used = {
+                    str(placement.get("bin"))
+                    for one in layout.get("drawers") or []
+                    for placement in one.get("placements") or []
+                }
+                delete_ids = sorted(old_spacer_ids - still_used)
+                new_names = list(dict.fromkeys(
+                    str(one["file"])
+                    for one in generated.get("generated") or []
+                ))
+
+                if hosted:
+                    files_base64 = {
+                        name: base64.b64encode((stage / name).read_bytes()).decode("ascii")
+                        for name in new_names
+                    }
+                    saved = save_inventory_text(
+                        inventory_text,
+                        title=inventory_title,
+                        layout=layout,
+                        new_bins=new_bins,
+                        delete_ids=delete_ids,
+                        available_filenames=payload.get("available_filenames") or (),
+                        protected_files=new_names,
+                    )
+                    return {
+                        **generated,
+                        "layout": saved["layout"],
+                        "bins": saved["bins"],
+                        "inventory_text": saved["inventory_text"],
+                        "cleanup_files": saved.get("cleanup_files", []),
+                        "files_base64": files_base64,
+                        "removed": len(old_spacer_ids),
+                    }
+
+                backups: dict[str, Path | None] = {}
+                installed: list[Path] = []
+                try:
+                    backups, installed = _promote_spacer_stage(
+                        root,
+                        stage,
+                        new_names,
+                    )
+                    saved = save_inventory(
+                        root,
+                        layout=layout,
+                        new_bins=new_bins,
+                        delete_ids=delete_ids,
+                        protected_files=new_names,
+                    )
+                except Exception as error:
+                    if installed or backups:
+                        try:
+                            _rollback_spacer_stage(root, backups, installed)
+                        except Exception as rollback_error:
+                            raise RuntimeError(
+                                f"{error} Spacer rollback also failed: {rollback_error}"
+                            ) from error
+                    raise
+
+                return {
+                    **generated,
+                    "layout": saved["layout"],
+                    "bins": saved["bins"],
+                    "cleanup_failed": saved.get("cleanup_failed", []),
+                    "removed": len(old_spacer_ids),
+                }
 
     def print_spacers_only(payload):
         if hosted:
@@ -2065,6 +2499,146 @@ def drawer_routes(
                 generate_from_design,
             ))
 
+    def print_complete(payload):
+        """One local complete Space handoff: bins + placed spacers + connectors
+        under one truthful preflight and ONE slicer launch. (Fix 096 C11.)
+
+        Sequence (fixed):
+          1. Slicer preflight — before any file is written.
+          2. One truthful preflight: C6's selected_blocking_problems over
+             every placed bin in the drawer.
+          3. Bin files via prepare_inventory_bins (only rows without current
+             files are generated from their design source).
+          4. Placed spacer files already on disk. The literal eligibility
+             predicate: a spacer-kind row referenced by a placement in this
+             drawer whose "file" names a real .3mf directly inside the Space
+             folder. Rows whose file is missing are named in notes and
+             skipped — they are NOT generated here.
+          5. The Space's required connectors via _space_connectors.
+          6. ONE launch_slicer call with every file.
+          7. Promotion (one authority, consistent with C1): every bin row and
+             every spacer row handed to the slicer becomes Printed via
+             mark_printed_rows. Anything not handed off stays as it was.
+        """
+        if hosted:
+            raise ValueError("Hosted Wavefinity saves files to your folder instead of opening a local slicer.")
+        if detect_slicer is None or launch_slicer is None:
+            raise ValueError("printing is not available here")
+        with geometry_lock:
+            out_dir = folder(payload)
+            inv = load_inventory(out_dir)
+            layout, bins = inv["layout"], inv["bins"]
+            drawer = find_drawer(layout, payload.get("drawer_id"))
+            # 1. Slicer preflight first.
+            slicer = detect_slicer(payload.get("slicer_path"))
+            if slicer is None or not Path(slicer).is_file():
+                raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
+            # 2. One truthful preflight over every placed bin in the drawer.
+            by_id = {one["id"]: one for one in bins}
+            counts: dict[str, int] = {}
+            for placement in drawer.get("placements") or []:
+                one = by_id.get(placement.get("bin"))
+                if one is not None and one.get("kind") in ("bin", "b4b"):
+                    counts[one["id"]] = counts.get(one["id"], 0) + 1
+            if not counts:
+                raise ValueError("This drawer has no placed bins to print.")
+            blocked = selected_blocking_problems(layout, bins, counts)
+            if blocked:
+                raise ValueError(blocking_problem_copy(bins, blocked))
+            # 3. Bin files.
+            prepared = prepare_inventory_bins(out_dir, list(counts), generate_from_design)
+            if prepared["failed"]:
+                raise ValueError(
+                    "The bins could not be prepared: "
+                    + _prepare_failure_text(prepared, slicer=True)
+                    + " Bambu Studio was not opened.")
+            rows_files = prepared["files"]
+            specs = prepared["specs"]
+            inventory = prepared["inventory"]
+            # 4. Placed spacer copies already on disk. One Inventory spacer
+            # row may have several physical placements; launch one file per
+            # placement while promoting the row identity only once.
+            current_drawer = find_drawer(
+                inventory["layout"],
+                payload.get("drawer_id"),
+            )
+            current_by_id = {
+                str(one["id"]): one
+                for one in inventory["bins"]
+            }
+            spacer_rows_printed: set[str] = set()
+            skipped_spacers: set[str] = set()
+            spacer_copies = 0
+            launch_files: list[Path] = []
+            for bin_id in counts:
+                launch_files.extend(rows_files[bin_id])
+            for placement in current_drawer.get("placements") or []:
+                row_id = str(placement.get("bin") or "")
+                one = current_by_id.get(row_id)
+                if one is None or one.get("kind") not in SPACER_KINDS:
+                    continue
+                safe = _safe_row_file(out_dir, one.get("file") or "")
+                if safe is None:
+                    skipped_spacers.add(_label(one))
+                    continue
+                launch_files.append(safe)
+                spacer_rows_printed.add(row_id)
+                spacer_copies += 1
+            # 5. Space connectors.
+            try:
+                connector_counts, notes = _space_connectors(out_dir, inventory["layout"], inventory["bins"])
+            except Exception as error:
+                return _batch_partial(
+                    prepared, "connectors",
+                    f"Bin and spacer files were prepared, but the Space connectors could not be made: {error}. "
+                    "Bambu Studio was not opened.",
+                    notes=[
+                        f"Spacer {name} has no file yet and was skipped — "
+                        "open Spacers and choose Generate to remake it."
+                        for name in sorted(skipped_spacers)
+                    ],
+                )
+            for name, count in connector_counts.items():
+                launch_files.extend([out_dir / name] * count)
+            if skipped_spacers:
+                notes.extend(
+                    f"Spacer {name} has no file yet and was skipped — "
+                    "open Spacers and choose Generate to remake it."
+                    for name in sorted(skipped_spacers)
+                )
+            # 6. One launch.
+            try:
+                project_path = launch_slicer(Path(slicer), launch_files)
+            except Exception as error:
+                return _batch_partial(
+                    prepared, "slicer",
+                    f"Files were prepared, but Bambu Studio did not open: {error}. The files were kept.",
+                    notes=notes)
+            # 7. One promotion authority (C1's rule): handed off == Printed.
+            try:
+                saved = mark_printed_rows(
+                    out_dir,
+                    [*counts, *sorted(spacer_rows_printed)],
+                    specs,
+                )
+            except Exception as error:
+                return _batch_partial(
+                    prepared, "status",
+                    f"Bambu Studio opened, but the printed status could not be recorded: {error}. "
+                    "Check the Inventory rows.",
+                    notes=notes)
+            return {
+                **saved,
+                "files": [str(path) for path in launch_files],
+                "bin_copies": sum(counts.values()),
+                "spacer_copies": spacer_copies,
+                "connector_counts": connector_counts,
+                "connector_copies": sum(connector_counts.values()),
+                "notes": notes,
+                "slicer": str(slicer),
+                "project": str(project_path) if project_path else None,
+            }
+
     def save_bins(payload):
         if hosted:
             raise ValueError("Saving bin files in bulk is available in local Wavefinity.")
@@ -2078,20 +2652,23 @@ def drawer_routes(
 
     def connectors(payload):
         if hosted:
-            raise ValueError("Hosted Space connectors are not available yet. Generate connectors from the normal designer.")
+            import base64
+            import tempfile
+            with geometry_lock, tempfile.TemporaryDirectory(prefix="wavefinity-hosted-connectors-") as tmp:
+                result = generate_connectors(
+                    Path(tmp), payload["layout"], payload.get("bins") or [],
+                    payload.get("drawer_id"))
+                files_base64 = {}
+                for one in result.get("connectors", []):
+                    files_base64[one["file"]] = base64.b64encode(
+                        (Path(tmp) / one["file"]).read_bytes()).decode("ascii")
+                result["files_base64"] = files_base64
+                return result
+        with geometry_lock:
+            return generate_connectors(folder(payload), payload["layout"], payload.get("bins") or [], payload.get("drawer_id"))
         with geometry_lock:
             return generate_connectors(folder(payload), payload["layout"], payload.get("bins") or [], payload.get("drawer_id"))
 
-    def send_to_slicer(payload):
-        if hosted:
-            raise ValueError("Hosted Wavefinity saves files to your folder instead of opening a local slicer.")
-        if detect_slicer is None or launch_slicer is None:
-            raise ValueError("printing is not available here")
-        with geometry_lock:
-            return print_spacers_and_connectors(
-                folder(payload), payload["layout"], payload.get("bins") or [], payload.get("drawer_id"),
-                detect_slicer, launch_slicer, payload.get("slicer_path"),
-            )
 
     return {
         "/api/drawer/load": load,
@@ -2104,8 +2681,9 @@ def drawer_routes(
         "/api/drawer/surface-fill/create": surface_fill_create,
         "/api/drawer/spacers": spacers,
         "/api/drawer/spacers/generate": spacers_generate,
+        "/api/drawer/spacers/refresh": spacers_refresh,
         "/api/drawer/connectors": connectors,
-        "/api/drawer/print": send_to_slicer,
+        "/api/drawer/print-complete": print_complete,
         "/api/drawer/print-spacers": print_spacers_only,
         "/api/drawer/print-bins": print_bins,
         "/api/drawer/save-bins": save_bins,

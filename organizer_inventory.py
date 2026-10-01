@@ -74,7 +74,7 @@ COLUMNS = (
     ("x", "X (mm)"), ("y", "Y (mm)"), ("z", "Z (mm)"), ("stack", "Stack"),
     ("wall", "Wall (mm)"), ("object_height_mm", "Object height (mm)"),
     ("qty", "Qty"), ("status", "Status"), ("file", "File"), ("label", "Label"), ("interior", "Interior Part(s)"),
-    ("boundary", "Boundary"),
+    ("boundary", "Boundary"), ("flexible", "Flexible"),
     ("pegboard_standard", "Pegboard"),
     ("cleat_x", "Cleat X"), ("cleat_y", "Cleat Y"),
 )
@@ -282,6 +282,10 @@ def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
         "file": file,
         "label": label,
         "interior": interior,
+        # Spacer print variant. Blank (legacy rows, non-spacer rows, or any
+        # other text) parses to None so the dialog can apply its filename
+        # fallback; only an explicit yes/no becomes a boolean.
+        "flexible": {"yes": True, "no": False}.get(_text(raw.get("flexible")).lower()),
         "pegboard_standard": _text(raw.get("pegboard_standard")).lower(),
         "cleat_x": _text(raw.get("cleat_x")).lower() or "auto",
         "cleat_y": _text(raw.get("cleat_y")).lower() or "auto",
@@ -434,6 +438,8 @@ def _row(one: dict[str, Any]) -> str:
         "wall": f"{float(wall):g}" if wall else "",
         "object_height_mm": (f"{float(one['object_height_mm']):g}"
                              if one.get("object_height_mm") is not None else ""),
+        "flexible": ("yes" if one.get("flexible") is True
+                     else "no" if one.get("flexible") is False else ""),
     }
     return "| " + " | ".join(_cell(values.get(key, "")) for key, _ in COLUMNS) + " |"
 
@@ -1118,6 +1124,7 @@ def save_inventory(
     bin_updates: Iterable[dict[str, Any]] = (),
     new_bins: Iterable[dict[str, Any]] = (),
     delete_ids: Iterable[str] = (),
+    protected_files: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Merge changes into the file on disk and return the fresh contents."""
     delete_ids = tuple(delete_ids or ())
@@ -1128,7 +1135,11 @@ def save_inventory(
         root = path.parent.resolve()
         available = [entry.name for entry in root.iterdir() if entry.is_file() and
                      entry.resolve().parent == root] if ids else []
-        cleanup = _deletion_file_names(current, ids, available) if ids else []
+        protected = {str(one) for one in protected_files or ()}
+        cleanup = [
+            name for name in (_deletion_file_names(current, ids, available) if ids else [])
+            if name not in protected
+        ]
         bins, chosen = _merge_inventory(
             current, layout=layout, bin_updates=bin_updates,
             new_bins=new_bins, delete_ids=delete_ids,
@@ -1159,6 +1170,7 @@ def save_inventory_text(
     new_bins: Iterable[dict[str, Any]] = (),
     delete_ids: Iterable[str] = (),
     available_filenames: Iterable[str] = (),
+    protected_files: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Merge changes into browser-owned text and return replacement text."""
     delete_ids = tuple(delete_ids or ())
@@ -1166,7 +1178,13 @@ def save_inventory_text(
     with INVENTORY_LOCK:
         current = parse_inventory(raw)
         ids = {str(one) for one in delete_ids or ()}
-        cleanup = _deletion_file_names(current, ids, available_filenames) if ids else []
+        protected = {str(one) for one in protected_files or ()}
+        cleanup = [
+            name for name in (
+                _deletion_file_names(current, ids, available_filenames) if ids else []
+            )
+            if name not in protected
+        ]
         bins, chosen = _merge_inventory(
             current, layout=layout, bin_updates=bin_updates,
             new_bins=new_bins, delete_ids=delete_ids,
