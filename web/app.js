@@ -929,7 +929,7 @@ function settleStaleFileRefresh({ materialize = false } = {}) {
       const choice = await appConfirm({
         title: "Update saved files?",
         message: `${DL.label(row)} ${entry.wasPrinted ? "was saved and printed" : "has saved files"}. Update the saved files to match your changes?`,
-        primaryLabel: "Update saved files", cancelLabel: "Not now",
+        primaryLabel: "Update Saved Files", cancelLabel: "Not Now",
         checkboxLabel: "Automatically update saved files after future edits in this Space. Once enabled, future eligible edits update those files automatically.",
       });
       if (!DL.spaceContextCurrent(context)) return false;
@@ -1528,7 +1528,7 @@ async function aiGeneratePrompt() {
     }, false);
     if (!done) aiSetStatus("Finish or discard the part you are editing, then generate the prompt again.", { error: true });
   } catch (error) {
-    aiSetStatus(error.message, { error: true });
+    aiSetStatus(friendlyError(error), { error: true });
   } finally {
     aiSetBusy(false);
   }
@@ -1549,7 +1549,7 @@ async function aiProveCandidate(envelope, session) {
   } catch (error) {
     // 400 means Wavefinity judged the answer invalid; anything else is Wavefinity failing.
     if (error.status === 400) throw new AiHelpError(error.message);
-    throw new AiHelpError(`Wavefinity could not check the answer just now (${error.message}). Nothing was changed; try again.`,
+    throw new AiHelpError(`Wavefinity could not check the answer just now (${friendlyError(error)}). Nothing was changed; try again.`,
       { operational: true });
   }
   aiCheckSession(envelope, session);
@@ -1646,8 +1646,8 @@ async function aiInstallCandidate(candidate, session, mode) {
       if (error instanceof AiHelpError) throw error;
       // The answer was valid; this is Wavefinity failing to apply or save it.
       throw new AiHelpError(installed
-        ? `The AI design is valid and is open in the Designer, but applying or saving it hit a problem: ${error.message}`
-        : `The AI design is valid, but Wavefinity could not apply it: ${error.message}. Nothing was changed.`,
+        ? `The AI design is valid and is open in the Designer, but applying or saving it hit a problem: ${friendlyError(error)}`
+        : `The AI design is valid, but Wavefinity could not apply it: ${friendlyError(error)}. Nothing was changed.`,
       { operational: true, applied: installed });
     } finally {
       finishDesignMutation();
@@ -1688,7 +1688,7 @@ async function aiProcessResponse(mode) {
     const repairable = known && !error.stale && !operational && Boolean(session);
     if (repairable) aiHelp.failure = { response: text, message: error.message, session };
     aiSetStatus(known ? error.message
-      : `Wavefinity hit a problem (${error.message}). Your answer is still here.`, { error: true, repair: repairable });
+      : `Wavefinity hit a problem (${friendlyError(error)}). Your answer is still here.`, { error: true, repair: repairable });
   } finally {
     aiSetBusy(false);
   }
@@ -1710,7 +1710,7 @@ async function aiMakeRepairPrompt() {
     aiShowPrompt(result.prompt);
     aiSetStatus("Repair prompt ready above. Copy it to your AI, then paste its new answer below.", { repair: true });
   } catch (error) {
-    aiSetStatus(error.message, { error: true, repair: true });
+    aiSetStatus(friendlyError(error), { error: true, repair: true });
   } finally {
     aiSetBusy(false);
   }
@@ -2053,6 +2053,30 @@ function debounce(fn, delay) {
   return wrapped;
 }
 
+// Fix 096 F7: one place where raw technical failures become plain language.
+// Every error shown to the user passes through here. Messages the backend
+// itself wrote (data.error) pass through untouched.
+function friendlyError(error) {
+  let text = "";
+  if (typeof error === "string") {
+    text = error.trim();
+  } else if (error && typeof error === "object") {
+    if (typeof error.message === "string") text = error.message.trim();
+    else if (typeof error.error === "string") text = error.error.trim();
+  }
+  if (!text) return "Wavefinity hit a problem. Try again.";
+  if (/Failed to fetch/i.test(text)) {
+    return "Wavefinity's local service isn't responding. Start (or restart) local Wavefinity and try again.";
+  }
+  if (/The local Wavefinity service returned \d+/i.test(text)) {
+    return "Wavefinity's local service had a problem. Try again.";
+  }
+  if (/^\[object Object\]$/i.test(text)) {
+    return "Wavefinity hit a problem. Try again.";
+  }
+  return text;
+}
+
 async function api(path, payload = null, { timeoutMs = 60000 } = {}) {
   // Every backend call is bounded: a stalled request must surface as an
   // error, never wedge the UI forever (e.g. the drawers configure form's
@@ -2088,11 +2112,19 @@ async function api(path, payload = null, { timeoutMs = 60000 } = {}) {
 }
 
 let toastTimer;
-function toast(message, error = false, hold = 3200, style = "") {
+function toast(message, error = false, hold = 3200) {
   const node = $("#toast");
+  // Fix 096 F6: toasts always appear above the current top layer. While a
+  // dialog is open the toast node lives inside the open dialog; otherwise it
+  // lives directly in the document body. No per-call-site changes needed.
+  const openDialog = document.querySelector("dialog[open]");
+  if (openDialog) {
+    openDialog.appendChild(node);
+  } else if (node.parentElement !== document.body) {
+    document.body.appendChild(node);
+  }
   node.textContent = message;
   node.classList.toggle("error", error);
-  node.classList.toggle("prominent", style === "prominent");
   node.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => node.classList.remove("show"), hold);
@@ -2461,7 +2493,7 @@ function syncEdgeMountControls() {
     const access = resolvedEdgeMountAccessDiameter(edgeMount);
     const standard = [6, 8, 10].some(value => Math.abs(value - access) < 1e-9);
     if (!standard) {
-      const option = new Option(`Existing — ${fmt(access)} mm`, fmt(access));
+      const option = new Option(`${fmt(access)} mm — Existing`, fmt(access));
       option.dataset.legacy = "true";
       accessSelect.appendChild(option);
     }
@@ -3007,7 +3039,7 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
     if (customValue) {
       // A saved design keeps whatever wall it was made with: the preset list is
       // what a *new* choice may be, not a migration of existing geometry.
-      select.add(new Option(`${customValue} mm — Existing custom`, customValue));
+      select.add(new Option(`${customValue} mm — Existing`, customValue));
     }
     select.dataset.choices = signature;
   }
@@ -3080,7 +3112,7 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
         { value: 0.4, label: "Very thin" },
         { value: 0.6, label: "Good" },
         { value: 0.8, label: "Default" },
-        { value: 1.0, label: "Extra Heavy" },
+        { value: 1.0, label: "Extra heavy" },
         { value: 1.2, label: "Maximum" },
       ];
   // A mode floor above the highest preset (B4B's 2.8, ordinary direct's 3.8)
@@ -3117,7 +3149,7 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
     if (customValue) {
       // A saved design keeps whatever base it was made with: the preset list
       // is what a *new* choice may be, not a migration of existing geometry.
-      select.add(new Option(`${customValue} mm — Existing custom`, customValue));
+      select.add(new Option(`${customValue} mm — Existing`, customValue));
     }
     select.dataset.choices = signature;
   }
@@ -4030,7 +4062,7 @@ function syncLidForm() {
   if (depthField) {
     const shown = lidLabelDepthShown(lid);
     if (![...depthField.options].some(option => Number(option.value) === shown)) {
-      depthField.append(new Option(`${fmt(shown)} mm \u00b7 Existing`, String(shown)));
+      depthField.append(new Option(`${fmt(shown)} mm — Existing`, String(shown)));
     }
     depthField.value = String(shown);
   }
@@ -4842,7 +4874,7 @@ function wireControls() {
         const select = $(selector);
         select.dataset.customValue = select.value;
         const legacyOption = [...select.options].find(option =>
-          option.textContent.endsWith("Existing custom")
+          option.textContent.endsWith("— Existing")
         );
         if (legacyOption && legacyOption.value !== select.value) {
           legacyOption.remove();
@@ -5637,7 +5669,7 @@ async function selectKind(kind, reset = false) {
     if (switchGuard) switchGuard.claimDraft(preview);
   } catch (error) {
     if (request !== state.kindRequest) return;
-    $("#draft-status").textContent = error.message;
+    $("#draft-status").textContent = friendlyError(error);
     toast(error.message, true);
   }
   } finally {
@@ -5822,7 +5854,7 @@ function dividerThicknessField(value, key = "option:thickness") {
   // A saved design keeps whatever thickness it was made with: the preset list
   // is what a *new* choice may be, not a migration of existing geometry.
   const customOption = isPreset ? ""
-    : `<option value="${current}" selected>${current} mm — Existing custom</option>`;
+    : `<option value="${current}" selected>${current} mm — Existing</option>`;
   return `<label><span class="field-label">Wall thickness</span>
     <select data-draft="${key}">${optionsHtml}${customOption}</select>
   </label>`;
@@ -5971,7 +6003,7 @@ function renderNestFields(one) {
       <label>Quantity<input type="number" min="1" max="20" step="1" data-draft="nest-count" value="${Math.max(1, Math.min(20, Math.round(number(one.count, 1))))}"></label>
       <label>Orientation<select data-draft="nest-orientation">
         ${standardRotation ? "" : `<option value="${escapeHtml(String(one.rotation))}" selected disabled>Current ${fmt(one.rotation)}° (existing)</option>`}
-        ${[[0, "As Scanned"], [90, "90°"], [180, "180°"], [270, "270°"]].map(([value, label]) => `<option value="${value}" ${standardRotation && shownRotation === value ? "selected" : ""}>${label}</option>`).join("")}
+        ${[[0, "As scanned"], [90, "90°"], [180, "180°"], [270, "270°"]].map(([value, label]) => `<option value="${value}" ${standardRotation && shownRotation === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>
     </div>
     ${plainCheckbox("nest-alternate", "Flip every other one", one.alternate_ends === true, { wide: true, help: "Turns every second copy 180° end-for-end." })}
@@ -5991,8 +6023,8 @@ function renderNestFields(one) {
   html += `<div class="editor-group"><span class="editor-group-label">Holder</span>
     <label>Nest type
       <select data-draft="option:holder_style">
-        <option value="recessed" ${selected("recessed", holderStyle)}>Recessed Cavity</option>
-        <option value="raised_wall" ${selected("raised_wall", holderStyle)}>Raised Wall</option>
+        <option value="recessed" ${selected("recessed", holderStyle)}>Recessed cavity</option>
+        <option value="raised_wall" ${selected("raised_wall", holderStyle)}>Raised wall</option>
       </select>
     </label>`;
 
@@ -6031,7 +6063,7 @@ function renderNestFields(one) {
       <span>${cavityMode === "manual"
         ? "Manual"
         : cavityUnavailable
-          ? "Needs Tool thickness"
+          ? "Needs tool thickness"
           : "Auto — 60%"}</span>
       <button type="button"
               class="button secondary"
@@ -6080,7 +6112,7 @@ function renderNestFields(one) {
       "Raises the tool on a shaped floor with one selected end low, for pressing the opposite end up. Replaces Finger access while on.",
       isPushOut);
     if (isPushOut) {
-      html += `<div class="pair">`;
+      html += `<div class="pair triple">`;
       html += `<label>Push at
         <select data-draft="option:push_position">
           <option value="right" ${selected("right", val("push_position", "right"))}>Right</option>
@@ -6115,7 +6147,7 @@ function renderNestFields(one) {
   html += `<div class="editor-group"><span class="editor-group-label">Bin</span>`;
   html += toggle("option:auto_size", "Automatically size footprint to tool",
     "Grows or shrinks the bin Width and Length to fit this Nest and keeps it centered. "
-    + "Bin Height stays at the height you set.",
+    + "Bin height stays at the height you set.",
     opt.auto_size === true, { wide: true });
   html += `</div>`;
 
@@ -6321,7 +6353,7 @@ async function commitReferenceEdit() {
     await refreshPreview();
   } catch (error) {
     if (request !== state.draftRequest) return;
-    $("#draft-status").textContent = error.message;
+    $("#draft-status").textContent = friendlyError(error);
     $("#draft-status").classList.add("error");
   }
 }
@@ -6367,8 +6399,8 @@ function renderDraftFields() {
     // choices are disabled once one rim Text already exists elsewhere.
     const hasOtherRimText = (state.design.layout?.features || []).some((feature, index) =>
       index !== state.selected && feature.kind === "text" && feature.options?.level === "rim");
-    textGroup += `<label>Style<select data-draft="option:text_type">
-      ${[["base_inlaid", "On base — Inlaid"], ["base_raised", "On base — Raised"], ["rim_inlaid", "At rim — Inlaid"], ["rim_raised", "At rim — Raised"]]
+    const styleLabel = `<label>Style<select data-draft="option:text_type">
+      ${[["base_inlaid", "On base — inlaid"], ["base_raised", "On base — raised"], ["rim_inlaid", "At rim — inlaid"], ["rim_raised", "At rim — raised"]]
         .map(([value, label]) => `<option value="${value}" ${value === textType ? "selected" : ""} ${hasOtherRimText && value.startsWith("rim_") ? "disabled" : ""}>${label}</option>`).join("")}
       </select></label>`;
     const capShown = textLevel === "rim"
@@ -6379,12 +6411,13 @@ function renderDraftFields() {
     const depthTip = one.options?.raised === true
       ? "How far the letters project above their receiving surface."
       : "How deeply the letters are embedded or cut into their receiving surface.";
-    textGroup += field("Letter height", "option:cap_height", String(Math.floor(number(capShown, 15))), { unit: "mm", step: "1" });
-    textGroup += `<label title="${depthTip}">${depthLabel}<select data-draft="option:depth">
+    const letterField = field("Letter height", "option:cap_height", String(Math.floor(number(capShown, 15))), { unit: "mm", step: "1" });
+    const depthSelectLabel = `<label title="${depthTip}">${depthLabel}<select data-draft="option:depth">
       ${[[0.2, "Thin"], [0.4, "Default"], [0.6, "Thick"], [0.8, "Thickest"]]
         .map(([value, name]) => `<option value="${value}" ${Math.abs(depthShown - value) < 1e-6 ? "selected" : ""}>${name} ${value} mm</option>`).join("")}
-      ${[0.2, 0.4, 0.6, 0.8].includes(depthShown) ? "" : `<option value="${depthShown}" selected>${depthShown} mm · Existing</option>`}
+      ${[0.2, 0.4, 0.6, 0.8].includes(depthShown) ? "" : `<option value="${depthShown}" selected>${depthShown} mm — Existing</option>`}
       </select></label>`;
+    textGroup += `<div class="pair triple">${styleLabel}${letterField}${depthSelectLabel}</div>`;
     if (textLevel === "rim") {
       textGroup += `<label>Rim side<select data-draft="option:rim_side">${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]]
         .map(([value, label]) => `<option value="${value}" ${(one.options?.rim_side || "back") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>`;
@@ -6484,7 +6517,7 @@ function renderDraftFields() {
             ${xySelect}
           </div>
           ${showXy
-            ? `<div class="bore-auto-row">
+            ? `<div class="bore-auto-row bore-auto-row-two">
                 ${field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" })}
                 ${field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
               </div>`
@@ -6493,7 +6526,7 @@ function renderDraftFields() {
             ${modeSelect("Set height", "height_size_mode", heightMode, [
               ["manual", "Manually"], ["bore_to_bin", "Auto size bore to bin"],
               ["bin_to_bore", "Auto size bin to bore"]])}
-            ${showHeight ? optionField("height", "Height", { unit: "mm", step: "0.5" }) : ""}
+            ${showHeight ? optionField("height", "Height", { unit: "mm", step: "0.5", min: "0.1" }) : ""}
           </div>
           <div class="bore-auto-row">
             ${gridField("columns", "X count")}${gridField("rows", "Y count")}
@@ -6521,13 +6554,12 @@ function renderDraftFields() {
         </label>`;
       };
       html += `<div class="bore-group wide">
-        <span class="bore-group-label">Hole</span>
         <div class="bore-group-fields bore-hole-fields">
           ${diameterField}
           ${shapeField}
           ${wallsOnly
-            ? optionField("walls_depth", "Depth", { unit: "mm", step: "0.5", tip: walllsOnlyDepthTip })
-            : optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
+            ? optionField("walls_depth", "Depth", { unit: "mm", step: "0.5", min: "0.1", tip: walllsOnlyDepthTip })
+            : optionField("depth", "Depth", { unit: "mm", step: "0.5", min: "0.1" })}
           ${wallsOnly ? dividerThicknessField(boreWallShown, "option:wall") : ""}
           ${hexBit || boreStyle !== "base_straight" ? "" : boreAngleField()}
           ${hexBit || boreStyle !== "base_straight" || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Angle towards</span><select data-draft="option:angle_towards">
@@ -6551,18 +6583,18 @@ function renderDraftFields() {
       };
       const wallStyleShown = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style
         ?? info.fields.find(f => f.key === "wall_style")?.default;
-      const wallField = fieldFor("wall", "Wall", isSlot ? { unit: "mm" } : { unit: "mm", min: "0.4" });
+      const wallField = fieldFor("wall", "Wall", isSlot ? { unit: "mm", min: "0.1" } : { unit: "mm", min: "0.4" });
       const wallsField = wallStyleSelect(wallStyleShown);
       const sizeFieldsHtml = field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" })
         + field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" })
         + (isSlot ? "" : fieldFor("depth", "Pocket depth", { unit: "mm", step: "0.5", min: "0.1" }))
-        + fieldFor("height", "Height", isSlot ? { unit: "mm" } : { unit: "mm", step: "0.5", min: "1.0" });
-      html += `<div class="editor-group"><span class="editor-group-label">${isSlot ? "Rack size" : "Pocket size"}</span><div class="draft-triple">${sizeFieldsHtml}</div></div>`;
+        + fieldFor("height", "Height", isSlot ? { unit: "mm", min: "0.1" } : { unit: "mm", step: "0.5", min: "1.0" });
+      html += `<div class="editor-group"><span class="editor-group-label">Size</span><div class="draft-triple">${sizeFieldsHtml}</div></div>`;
       if (isSlot) {
-        const geometryFieldsHtml = fieldFor("thickness", "Slot width", { unit: "mm" })
-          + fieldFor("depth", "Slot depth", { unit: "mm" })
-          + fieldFor("angle", "Tilt angle", { unit: "°" });
-        html += `<div class="editor-group"><span class="editor-group-label">Slot geometry</span><div class="draft-triple">${geometryFieldsHtml}</div></div>`;
+        const geometryFieldsHtml = fieldFor("thickness", "Slot width", { unit: "mm", min: "0.1" })
+          + fieldFor("depth", "Slot depth", { unit: "mm", min: "0.1" })
+          + fieldFor("angle", "Tilt angle", { unit: "°", min: "0", max: "45" });
+        html += `<div class="editor-group"><span class="editor-group-label">Geometry</span><div class="draft-triple">${geometryFieldsHtml}</div></div>`;
       }
       html += `<div class="editor-group"><span class="editor-group-label">Walls</span><div class="pair">${wallField}${wallsField}</div></div>`;
     } else {
@@ -6608,11 +6640,12 @@ function renderDraftFields() {
       const shownThickness = opt.thickness ?? state.draftResolvedOptions?.thickness ?? 1.6;
       const shownHeight = opt.height ?? state.draftResolvedOptions?.height ?? "";
       const wallStyle = opt.wall_style ?? state.draftResolvedOptions?.wall_style ?? "straight";
-      html += `<div class="editor-group divider-layout"><span class="editor-group-label">Divider layout</span><div class="pair">
+      html += `<div class="editor-group divider-layout"><span class="editor-group-label">Layout</span><div class="pair">
         ${field("X count", "option:count_x", shownGx, { min: "0", step: "1", tip: "Walls dividing the bin left to right. 0 for none." })}
         ${field("Y count", "option:count_y", shownGy, { min: "0", step: "1", tip: "Walls dividing the bin front to back. 0 for none." })}
+      </div><div class="pair triple">
         ${dividerThicknessField(shownThickness)}
-        ${field("Height", "option:height", shownHeight, { unit: "mm", step: "0.5" })}
+        ${field("Height", "option:height", shownHeight, { unit: "mm", step: "0.5", min: "0.1" })}
         ${wallStyleSelect(wallStyle)}
       </div></div>`;
     } else {
@@ -6633,7 +6666,7 @@ function renderDraftFields() {
         if (info.flags.qty) {
           const quantityLabel = info.kind === "steps" ? "Number of steps" : "Quantity";
           const autoState = info.kind !== "steps" && one.count == null;
-          html += `<div class="pair"><label><span class="field-label">${quantityLabel}${autoState ? '<span class="unit">Auto</span>' : ""}</span><div class="input-with-button">
+          html += `<div class="pair"><label><span class="field-label">${quantityLabel}${autoState ? " (Auto)" : ""}</span><div class="input-with-button">
             <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
             ${info.kind === "steps" ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
           </div></label>${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
@@ -6670,7 +6703,10 @@ function renderDraftFields() {
           const tip = alternating
             ? "Share of the run kept clear at each end. Larger pulls the alternating troughs toward the middle; smaller pushes them to the ends."
             : "Slides the trough along the bin from centre, as a share of the room to the wall. Positive one way, negative the other; 0 stays centred.";
-          html += field(label, `option:${key}`, fmt(shown), { unit: "%", step: "1", tip });
+          // Fix 096 F12: browser bounds follow the backend option authority -
+          // end_margin 0..45%, run_offset -100..100%.
+          html += field(label, `option:${key}`, fmt(shown), { unit: "%", step: "1", tip,
+            ...(alternating ? { min: "0", max: "45" } : { min: "-100", max: "100" }) });
         }
         html += `</div>`;
       }
@@ -6756,6 +6792,13 @@ function renderDraftFields() {
     const fieldOpts = {};
     if (stepFor[option.key]) fieldOpts.step = stepFor[option.key];
     if (info.kind === "cradle" && option.key === "spacing") fieldOpts.min = 0;
+    if (info.kind === "divider" && option.key === "spacing") fieldOpts.min = 0.1;
+    if (info.kind === "post" && option.key === "height") fieldOpts.min = 0.1;
+    if (info.kind === "post" && option.key === "diameter") fieldOpts.min = 0.1;
+    if (info.kind === "post" && option.key === "taper") fieldOpts.min = 0;
+    if (info.kind === "post" && option.key === "spacing") fieldOpts.min = 0;
+    if (info.kind === "steps" && option.key === "height") fieldOpts.min = 0.1;
+    if (info.kind === "steps" && option.key === "lip") fieldOpts.min = 0;
     if (info.kind === "pocket" && option.key === "rounding") fieldOpts.min = 0;
     if (info.kind === "pocket" && option.key === "wall") fieldOpts.min = 0.4;
     if (info.kind === "pocket" && option.key === "depth") fieldOpts.min = 0.1;
@@ -6772,9 +6815,9 @@ function renderDraftFields() {
   // Three-across for the kinds whose leftover body fields would otherwise leave
   // a half-empty row (matches the Width / Length / Height row at the top).
   if (info.kind === "post") {
-    html += editorGroup("Post", `<div class="draft-triple">${bodyHtml}</div>`) + repeatsHtml;
+    html += `<div class="draft-triple">${bodyHtml}</div>` + repeatsHtml;
   } else if (info.kind === "steps") {
-    html += editorGroup("Steps size", `<div class="pair">${stepsSizeHtml}${bodyHtml}</div>`) + repeatsHtml;
+    html += editorGroup("Size", `<div class="pair">${stepsSizeHtml}${bodyHtml}</div>`) + repeatsHtml;
   } else if (bodyHtml) {
     html += ["pocket", "slot"].includes(info.kind)
       ? `<div class="draft-triple">${bodyHtml}</div>`
@@ -6790,7 +6833,7 @@ function renderDraftFields() {
 
     const bottomMode = scoopConfig ? "scoop" : hasSlope ? "slope" : "flat";
     html += `<div class="editor-group divider-bottom-group">`;
-    html += `<div class="divider-bottom-row"><label>Bottom Type<select data-draft="option:bottom_mode">
+    html += `<div class="divider-bottom-row"><label>Bottom type<select data-draft="option:bottom_mode">
       <option value="flat" ${bottomMode === "flat" ? "selected" : ""}>Flat</option>
       <option value="slope" ${bottomMode === "slope" ? "selected" : ""}>Sloped</option>
       <option value="scoop" ${bottomMode === "scoop" ? "selected" : ""}>Curved</option>
@@ -6802,14 +6845,14 @@ function renderDraftFields() {
         ? number(opt.bottom_angle, 45)
         : number(state.draftResolvedOptions?.bottom_angle, 20);
       const angleChoices = [10, 20, 30, 40, 45, 50, 60, 70, 80];
-      const legacyAngle = angleChoices.includes(angleVal) ? "" : `<option value="${escapeHtml(angleVal)}" selected>${escapeHtml(angleVal)}° · Existing</option>`;
+      const legacyAngle = angleChoices.includes(angleVal) ? "" : `<option value="${escapeHtml(angleVal)}" selected>${escapeHtml(angleVal)}° — Existing</option>`;
       html += `<label>Slope angle<select data-draft="option:bottom_angle">${angleChoices.map(angle =>
         `<option value="${angle}" ${angle === angleVal ? "selected" : ""}>${angle}°</option>`).join("")}${legacyAngle}</select></label>`;
     } else if (scoopConfig) {
       const scoopDepth = Object.prototype.hasOwnProperty.call(scoopConfig, "depth")
         ? number(scoopConfig.depth, 60) : number(state.draftResolvedOptions?.curved_default_depth, 60);
       const depthChoices = [10, 20, 30, 40, 50, 60, 70, 80, 90];
-      const legacyDepth = depthChoices.includes(scoopDepth) ? "" : `<option value="${escapeHtml(scoopDepth)}" selected>${escapeHtml(scoopDepth)}% · Existing</option>`;
+      const legacyDepth = depthChoices.includes(scoopDepth) ? "" : `<option value="${escapeHtml(scoopDepth)}" selected>${escapeHtml(scoopDepth)}% — Existing</option>`;
       html += `<label title="Every Divider compartment uses the same curved depth, starting at its front floor edge.">Curved depth<select data-divider-scoop-depth>${depthChoices.map(depth =>
         `<option value="${depth}" ${depth === scoopDepth ? "selected" : ""}>${depth}%</option>`).join("")}${legacyDepth}</select></label>`;
     } else {
@@ -6849,7 +6892,7 @@ function renderDraftFields() {
       const hasLabels = opt.label_divisions === true;
       const labelType = !hasLabels ? "none" : opt.division_level === "rim" ? "rim" : "base";
       html += `<div class="editor-group"><span class="editor-group-label">Labels</span>`;
-      html += `<label>Label Type<select data-draft="option:label_type">
+      html += `<label>Label type<select data-draft="option:label_type">
         <option value="none" ${labelType === "none" ? "selected" : ""}>No label</option>
         <option value="base" ${labelType === "base" ? "selected" : ""}>On base</option>
         <option value="rim" ${labelType === "rim" ? "selected" : ""}>Rim level</option>
@@ -6883,7 +6926,7 @@ function renderDraftFields() {
         for (const cell of topology.cells) {
           const idx = cell.row * nCols + cell.column;
           const val = escapeHtml(String(divLabels[idx] || ""));
-          html += `<input type="text" data-division-index="${idx}" data-grid-column="${cell.column + 1}" data-grid-column-span="${cell.columnSpan}" data-grid-row="${cell.row + 1}" data-grid-row-span="${cell.rowSpan}" value="${val}" placeholder="${cell.row + 1},${cell.column + 1}">`;
+          html += `<input type="text" data-division-index="${idx}" data-grid-column="${cell.column + 1}" data-grid-column-span="${cell.columnSpan}" data-grid-row="${cell.row + 1}" data-grid-row-span="${cell.rowSpan}" value="${val}" placeholder="Optional label">`;
         }
         html += `</div>`;
       }
@@ -6901,10 +6944,12 @@ function renderDraftFields() {
     const ready = one.kind !== "nest" || (one.contour && _nestMeasuredThickness(one.options) != null);
     let referenceFields = `<p class="inline-help">Reference only — does not resize this holder. Shown in 3D Preview.</p>`;
     if (one.reference_object) {
+      let axisFields = "";
       for (const [axis, title] of [["width", "Width (X)"], ["depth", "Depth (Y)"], ["height", "Height (Z)"]]) {
-        referenceFields += field(title, axis, String(one.reference_object[axis]),
+        axisFields += field(title, axis, String(one.reference_object[axis]),
           { unit: "mm", min: "0", step: "any", dataAttribute: "data-reference-axis" });
       }
+      referenceFields += `<div class="pair triple">${axisFields}</div>`;
       referenceFields += `<button type="button" class="button secondary" data-action="remove-reference">Remove reference</button>`;
     } else if (ready) {
       referenceFields += `<button type="button" class="button secondary" data-action="add-reference" ${referenceAddReady() ? "" : "hidden"}>Add object reference</button>`;
@@ -7726,7 +7771,7 @@ async function runNestTrace(paperCorners) {
     await finishPhotoNestIfReady();
   } catch (error) {
     if (request !== state.nestTraceRequest) return;
-    $("#draft-status").textContent = error.message;
+    $("#draft-status").textContent = friendlyError(error);
     $("#draft-status").classList.add("error");
     if (paperCorners) {
       // The user supplied four corners but Python still rejected them.
@@ -7742,7 +7787,7 @@ async function runNestTrace(paperCorners) {
       syncNest2DWorkspace();
       toast(
         "Automatic paper detection failed. Click the four paper corners in 2D.",
-        true, 8500, "prominent",
+        true, 8500,
       );
     } else {
       toast(error.message, true, 6500);
@@ -7793,7 +7838,7 @@ async function finishPhotoNestIfReady() {
     toast(`Photo Nest ready: ${fmt(trace.outline.width)} × ${fmt(trace.outline.depth)} mm outline.`);
     for (const warning of result.warnings || []) toast(warning, false, 6500);
   } catch (error) {
-    $("#draft-status").textContent = error.message;
+    $("#draft-status").textContent = friendlyError(error);
     $("#draft-status").classList.add("error");
     toast(error.message, true, 6500);
   } finally {
@@ -9010,7 +9055,7 @@ async function refreshDraft() {
       }
       return;
     }
-    $("#draft-status").textContent = error.message;
+    $("#draft-status").textContent = friendlyError(error);
     $("#draft-status").classList.add("error");
     state.fitError = true;
     updateAutoExpandButton();
@@ -9103,7 +9148,7 @@ async function autoCommitDraft(request) {
     return true;
   } catch (error) {
     if (request !== state.draftRequest) return;
-    $("#draft-status").textContent = error.message;
+    $("#draft-status").textContent = friendlyError(error);
     $("#draft-status").classList.add("error");
     return false;
   }
@@ -9279,7 +9324,7 @@ function promptDraftConflict(reason) {
     reasonEl.hidden = !reason;
     if (addBtn) addBtn.hidden = true;
 
-    titleEl.textContent = "Discard this change?";
+    titleEl.textContent = "Discard This Change?";
     msgEl.textContent = `Your last change to this ${title} can't be saved yet, so leaving it now will lose that change.`;
     discardBtn.textContent = "Discard change";
 
@@ -9300,8 +9345,9 @@ function promptDraftConflict(reason) {
 
 // ---- Reusable application confirmation dialog (Fix 019 Item 8). One shared
 // implementation instead of one-off native confirm()s or duplicated custom
-// dialogs. Resolves "primary" / "secondary" / "cancel" - Escape, the
-// backdrop, and the dialog's own close all behave as "cancel". Danger
+// dialogs. Resolves "primary" / "secondary" / "cancel" - Escape and the
+// dialog's own close behave as "cancel". Backdrop clicks are ignored: a
+// required decision must end in a button press, never a stray click. Danger
 // actions use the existing danger button styling and move focus to Cancel
 // (the safe default); ordinary actions move focus to the primary button.
 function appConfirm({
@@ -9338,18 +9384,11 @@ function appConfirm({
       appConfirm.checked = Boolean(checkboxLabel && checkBox?.checked);
       primaryBtn.onclick = secondaryBtn.onclick = cancelBtn.onclick = null;
       dialog.removeEventListener("cancel", onCancel);
-      dialog.removeEventListener("click", onBackdrop);
       dialog.removeEventListener("close", onClose);
       if (dialog.open) dialog.close();
       resolve(choice);
     };
     const onCancel = event => { event.preventDefault(); finish("cancel"); };
-    const onBackdrop = event => {
-      if (event.target !== dialog) return;
-      const bounds = dialog.getBoundingClientRect();
-      if (event.clientX < bounds.left || event.clientX > bounds.right ||
-          event.clientY < bounds.top || event.clientY > bounds.bottom) finish("cancel");
-    };
     // A close event from the previous confirmation may arrive after this one opens.
     const onClose = () => { if (!dialog.open) finish("cancel"); };
 
@@ -9373,7 +9412,6 @@ function appConfirm({
     cancelBtn.onclick = () => finish("cancel");
 
     dialog.addEventListener("cancel", onCancel);
-    dialog.addEventListener("click", onBackdrop);
     dialog.addEventListener("close", onClose);
     if (!dialog.open) dialog.showModal();
     // Focus always stays on a safe default - the primary action, or Cancel
@@ -9983,7 +10021,7 @@ function updateBoreCeilingWarning(warning) {
   if (!element) return;
   element.hidden = !warning;
   element.textContent = warning
-    ? `Object reaches ${warning.top_mm} mm; this ${warning.space_kind === "drawer" ? "Drawer" : "Storage Box"} is ${warning.cap_mm} mm high. The object may not fit when closed.`
+    ? `Object reaches ${fmt(warning.top_mm)} mm; this ${warning.space_kind === "drawer" ? "Drawer" : "Storage Box"} is ${fmt(warning.cap_mm)} mm high. The object may not fit when closed.`
     : "";
 }
 
@@ -10270,7 +10308,7 @@ async function sizeBinHeightToBore({ button = null, silent = false, guard = null
     return "done";
   } catch (error) {
     if (silent) {
-      $("#draft-status").textContent = error.message;
+      $("#draft-status").textContent = friendlyError(error);
       $("#draft-status").classList.add("error");
     } else {
       toast(error.message, true, 5000);
@@ -11038,7 +11076,7 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
 
   context.translate(mid[0], mid[1]);
   context.rotate(textAngle);
-  context.font = "600 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  context.font = '600 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
   context.textAlign = "center";
   context.textBaseline = "middle";
 
@@ -11519,7 +11557,7 @@ function drawFrontMarker(context, camera, project) {
   if (!Number.isFinite(frontY)) return;
   const point = project([0, frontY - 5, 0]);
   context.save();
-  context.font = "bold 13px 'Segoe UI', sans-serif";
+  context.font = 'bold 13px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillStyle = "#153f48";
@@ -12267,7 +12305,7 @@ function drawDimensionLine(context, start, end, label, vertical = false, handle 
   context.strokeStyle = active ? "#237fa6" : "#496873";
   context.fillStyle = "#496873";
   context.lineWidth = active ? 1.5 : 1;
-  context.font = "700 11px Segoe UI";
+  context.font = '700 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.beginPath();
@@ -12344,7 +12382,7 @@ function renderLayoutText(context, feature, toCanvas, scale, isDraft = false) {
   if (!text) {
     context.save();
     context.fillStyle = "rgba(20,36,42,.35)";
-    context.font = "italic 11px Segoe UI, sans-serif";
+    context.font = 'italic 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillText("Text", centerCanvas[0], centerCanvas[1]);
@@ -12739,7 +12777,7 @@ function renderLayout2D() {
     context.stroke(reservedPath);
     context.setLineDash([]);
     context.fillStyle = "#8f4540";
-    context.font = "11px Segoe UI";
+    context.font = '11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
     context.fillText(reserved.name, reservedCenter[0], reservedCenter[1]);
   }
   if (state.selected !== null) {
@@ -12921,7 +12959,7 @@ function renderLayout2D() {
           renderDividerDivisionLabels(context, activeFeature, toCanvas, scale);
         } else {
           context.fillStyle = "rgba(20,36,42,.82)";
-          context.font = "600 11px Segoe UI";
+          context.font = '600 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
           context.textAlign = "center";
           context.textBaseline = "middle";
           const [tx, ty] = coveredCenter || zoneCenter;
@@ -12929,7 +12967,7 @@ function renderLayout2D() {
         }
       } else {
         context.fillStyle = "rgba(20,36,42,.82)";
-        context.font = "600 11px Segoe UI";
+        context.font = '600 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
         context.textAlign = "center";
         context.textBaseline = "middle";
         const [tx, ty] = coveredCenter || zoneCenter;
@@ -13035,7 +13073,7 @@ function renderLayout2D() {
   context.textBaseline = "middle";
   if (state.nudgeFeedback) {
     const text = `Moved ${state.nudgeFeedback.amount}  (Arrow: 1 mm · Shift: 10 mm · Ctrl: 0.1 mm)`;
-    context.font = "600 11px Segoe UI, sans-serif";
+    context.font = '600 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
     const tw = context.measureText(text).width;
     context.fillStyle = "rgba(248, 250, 249, 0.94)";
     context.fillRect(width / 2 - tw / 2 - 8, hintY - 10, tw + 16, 20);
@@ -13046,7 +13084,7 @@ function renderLayout2D() {
     context.fillText(text, width / 2, hintY);
   } else {
     const text = "Use Arrow keys or drag to move";
-    context.font = "11px Segoe UI, sans-serif";
+    context.font = '11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
     const tw = context.measureText(text).width;
     context.fillStyle = "rgba(248, 250, 249, 0.88)";
     context.fillRect(width / 2 - tw / 2 - 8, hintY - 10, tw + 16, 20);
@@ -13793,15 +13831,15 @@ function confirmReplaceConnectorFiles(names) {
     const list = document.createElement("ul");
     for (const name of names) { const li = document.createElement("li"); li.textContent = name; list.append(li); }
     const actions = document.createElement("div");
-    actions.className = "dialog-actions";
+    actions.className = "button-row";
     const replace = document.createElement("button");
-    replace.type = "button"; replace.textContent = "Replace";
+    replace.type = "button"; replace.textContent = "Replace"; replace.className = "button danger";
     const cancel = document.createElement("button");
-    cancel.type = "button"; cancel.textContent = "Cancel";
+    cancel.type = "button"; cancel.textContent = "Cancel"; cancel.className = "button secondary";
     let answer = false;
     replace.addEventListener("click", () => { answer = true; dialog.close(); });
     cancel.addEventListener("click", () => dialog.close());
-    actions.append(replace, cancel);
+    actions.append(cancel, replace);
     dialog.append(title, body, list, actions);
     dialog.addEventListener("close", () => { dialog.remove(); resolve(answer); }, { once: true });
     document.body.append(dialog);
@@ -13991,7 +14029,7 @@ async function generateParts(target) {
         const savedList = [...new Set(allFiles)];
         const message = `${binSaved ? "The bin was saved. " : ""}Some connector files were saved, but not all.\n${connResult.error || ""}`
           + `${savedList.length ? `\nSaved to ${saveOutput}\n${savedList.join("\n")}` : ""}`;
-        if (dialogTitle) dialogTitle.textContent = binSaved ? "Bin saved; connectors partly saved" : "Connectors partly saved";
+        if (dialogTitle) dialogTitle.textContent = binSaved ? "Bin Saved; Connectors Partly Saved" : "Connectors Partly Saved";
         if (dialogSubtitle) dialogSubtitle.textContent = "Some connector files were saved before the remaining connector failed.";
         if (dialogError) {
           dialogError.textContent = message;
@@ -14009,7 +14047,7 @@ async function generateParts(target) {
     // unconditional "Complete!" - and the two outcomes get exactly one
     // toast each, not a success toast followed by a contradicting one.
     if (checkpointSaveFailed) {
-      if (dialogTitle) dialogTitle.textContent = "Saved — design save needs attention";
+      if (dialogTitle) dialogTitle.textContent = "Saved — Design Save Needs Attention";
       if (dialogSubtitle) dialogSubtitle.textContent = "Parts were saved, but the current design could not be saved to this Space.";
     } else {
       if (dialogTitle) dialogTitle.textContent = "Saved";
@@ -14057,7 +14095,7 @@ async function generateParts(target) {
       failureText = `The bin was saved, but the connectors could not be saved: ${error.message}`
         + `${savedList.length ? `\nSaved to ${saveOutput}\n${savedList.join("\n")}` : ""}`;
     }
-    if (dialogTitle) dialogTitle.textContent = connectorsFailedAfterBin ? "Bin saved; connectors failed" : "Saving Failed";
+    if (dialogTitle) dialogTitle.textContent = connectorsFailedAfterBin ? "Bin Saved; Connectors Failed" : "Saving Failed";
     if (dialogSubtitle) dialogSubtitle.textContent = connectorsFailedAfterBin
       ? "The bin file was saved. Only the connectors failed."
       : "An error occurred while saving parts.";
@@ -14103,7 +14141,7 @@ async function printModel(target = "bin", initiatingButton = null) {
   const old = button.textContent;
   const printButtons = [$("#print-with-connectors"), $("#print-without-connectors")].filter(Boolean);
   printButtons.forEach(one => { one.disabled = true; });
-  const slicerName = state.slicer?.name || "Bambu Studio";
+  const slicerName = state.slicer?.name || "the slicer";
   button.textContent = `Sending to ${slicerName}…`;
   setError();
   try {
@@ -14247,7 +14285,7 @@ function updatePrimaryPrintButtonLabel() {
     $("#slicer-picker-button").hidden = true;
     return;
   }
-  const name = state.slicer?.name || "Bambu Studio";
+  const name = state.slicer?.name || "the slicer";
   const missing = !state.slicer?.available;
   withButton.textContent = "Print with Connectors";
   withoutButton.textContent = "Print without Connectors";
@@ -14469,6 +14507,37 @@ function renderSimpleMarkdown(md) {
   return processed.join("\n");
 }
 
+// ---- Fix 096 F5: backdrop dismissal convention. Only these six dialogs
+// close when the backdrop is clicked: informational or single-action dialogs
+// where an accidental close loses nothing. Decision dialogs
+// (#app-confirm-dialog, #draft-switch-dialog, #surface-object-height-dialog,
+// #printer-settings-dialog), the busy #generation-dialog, and the Connector
+// Replace dialog never dismiss on backdrop click.
+const SAFE_BACKDROP_DIALOG_IDS = [
+  "support-layout-dialog",
+  "spacer-print-dialog",
+  "ai-help-dialog",
+  "bin-name-dialog",
+  "about-dialog",
+  "welcome-dialog",
+];
+function wireDialogBackdropDismiss(dialog) {
+  if (!dialog || dialog.dataset.backdropWired === "true") return;
+  dialog.dataset.backdropWired = "true";
+  dialog.addEventListener("click", event => {
+    if (event.target !== dialog) return;
+    const bounds = dialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right ||
+        event.clientY < bounds.top || event.clientY > bounds.bottom) {
+      dialog.close();
+    }
+  });
+}
+function wireSafeDialogBackdrops() {
+  for (const id of SAFE_BACKDROP_DIALOG_IDS) {
+    wireDialogBackdropDismiss(document.getElementById(id));
+  }
+}
 function wireAboutDialog() {
   const aboutBtn = $("#about-btn");
   const dialog = $("#about-dialog");
@@ -14507,6 +14576,7 @@ function wireBinNameDialog() {
 async function init() {
   wireAboutDialog();
   wireBinNameDialog();
+  wireSafeDialogBackdrops();
   try {
     const catalog = await api("/api/catalog");
     state.catalog = catalog;

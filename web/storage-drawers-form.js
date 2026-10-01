@@ -25,7 +25,7 @@
   const materialChoices = (catalog, kind, current) => {
     const rows = catalog?.b4b_rules?.[kind] || [];
     const options = rows.map(row => Array.isArray(row) ? [String(row[0]), String(row[1])] : [String(row.value ?? row.mm), String(row.label ?? row.name)]);
-    if (!options.some(row => Number(row[0]) === Number(current))) options.push([String(current), `${current} mm (custom)`]);
+    if (!options.some(row => Number(row[0]) === Number(current))) options.push([String(current), `${current} mm — Existing`]);
     return options;
   };
   const NAMED = (list, names, unit = "mm") => list.map((mm, index) => [String(mm),
@@ -80,29 +80,39 @@
     const handles = select(String(block.drawer_handles), [["true", "Pull handles"], ["false", "No handles"]]);
     const handleSize = select(block.drawer_handle_size, [["auto", "Auto"], ["small", "Small"], ["medium", "Medium"], ["large", "Large"]]);
     const handleField = labeled("Pull size", handleSize);
-    drawersGroup.append(countField,
-      labeled("Drawer fit", fit, "Changes drawer-to-cabinet clearance only. Cabinet joints keep their own fixed engineering clearance. Tight leaves the drawer catch almost no working margin — print your first cabinet on Standard."),
-      labeled("Handles", handles), handleField);
+    const drawersRowA = el("div", "sd-size-grid");
+    drawersRowA.append(countField,
+      labeled("Drawer fit", fit, "Changes drawer-to-cabinet clearance only. Cabinet joints keep their own fixed engineering clearance. Tight leaves the drawer catch almost no working margin — print your first cabinet on Standard."));
+    const drawersRowB = el("div", "sd-size-grid");
+    drawersRowB.append(labeled("Handles", handles), handleField);
+    drawersGroup.append(drawersRowA, drawersRowB);
     const drawerRows = el("div", "sd-drawer-rows"); drawersGroup.append(drawerRows);
     const cabinet = group(form, "Cabinet");
     const style = select(block.cabinet_style, [["full", "Full"], ["open", "Open"]]);
-    const rear = select(block.rear_support, [["cross", "Rear Cross"], ["solid", "Rear Solid"]]);
+    const rear = select(block.rear_support, [["cross", "Rear cross"], ["solid", "Rear solid"]]);
     const stack = select(String(block.stacking), [["false", "Not stackable"], ["true", "Stackable"]]);
     const frame = select(block.open_frame_width_mm, NAMED(rules.frameChoices, ["Compact", "Standard", "Strong"]));
     const frameField = labeled("Open frame width", frame);
-    cabinet.append(labeled("Cabinet style", style,
+    const cabinetRowA = el("div", "sd-size-grid");
+    cabinetRowA.append(labeled("Cabinet style", style,
         "Full: enclosed side-panel cabinet around the drawer stack. Open: open-frame sides/rails with less panel material."),
-      labeled("Rear support", rear, "Rear Cross: lighter cross-brace rear support. Rear Solid: full rear panel."),
-      labeled("Stacking", stack, "Stackable adds top/bottom stacking interfaces and four separate stacking pegs."),
+      labeled("Rear support", rear, "Rear Cross: lighter cross-brace rear support. Rear Solid: full rear panel."));
+    const cabinetRowB = el("div", "sd-size-grid");
+    cabinetRowB.append(labeled("Stacking", stack, "Stackable adds top/bottom stacking interfaces and four separate stacking pegs."),
       frameField);
+    cabinet.append(cabinetRowA, cabinetRowB);
     const labels = group(form, "Labels");
-    const unitEnabled = select(String(block.unit_label_enabled), [["false", "Unit label Off"], ["true", "Unit label On"]]);
+    const unitEnabled = select(String(block.unit_label_enabled), [["false", "Unit label off"], ["true", "Unit label on"]]);
     const unitText = input(block.unit_label_text); unitText.maxLength = labelLimit;
     unitText.id = `sd-unit-label-${epoch}`;
-    const drawerEnabled = select(String(block.drawer_labels_enabled), [["false", "Drawer labels Off"], ["true", "Drawer labels On"]]);
+    const drawerEnabled = select(String(block.drawer_labels_enabled), [["false", "Drawer labels off"], ["true", "Drawer labels on"]]);
     const labelStyle = select(block.drawer_label_style, [["inlaid", "Inlaid"], ["raised", "Raised"]]);
     const unitTextField = labeled("Unit label text", unitText), styleField = labeled("Drawer label style", labelStyle);
-    labels.append(labeled("Unit label", unitEnabled), unitTextField, labeled("Drawer labels", drawerEnabled), styleField);
+    const labelsRowA = el("div", "sd-size-grid");
+    labelsRowA.append(labeled("Unit label", unitEnabled), unitTextField);
+    const labelsRowB = el("div", "sd-size-grid");
+    labelsRowB.append(labeled("Drawer labels", drawerEnabled), styleField);
+    labels.append(labelsRowA, labelsRowB);
     const material = group(form, "Material"); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
     material.append(matA, matB);
     const materialFields = {};
@@ -192,23 +202,23 @@
     };
     const showSummary = response => {
       lastSummary = response;
-      const outside = (response.outside_xyz || []).map(v => Number(v.toFixed(1)));
+      const outside = (response.outside_xyz || []).map(v => fmt(v));
       const [ux, uy] = response.field_units || [];
-      const [fx, fy] = response.field_mm || [];
-      const heights = (response.drawers || []).map(row => row.height_mm).join(", ");
+      const [fx, fy] = (response.field_mm || []).map(v => fmt(v));
+      const heights = (response.drawers || []).map(row => fmt(row.height_mm)).join(", ");
       const material = response.effective_material || {};
-      const printer = `${printerProfile.x_mm} × ${printerProfile.y_mm} × ${printerProfile.z_mm} mm`;
+      const printer = `${fmt(printerProfile.x_mm)} × ${fmt(printerProfile.y_mm)} × ${fmt(printerProfile.z_mm)} mm`;
       const fitRow = el("p", `sd-fit-verdict ${response.fits_printer ? "ok" : "bad"}`,
         response.fits_printer ? "✓ Fits your printer" : `✗ ${response.first_fit_error || "Does not fit your printer"}`);
       const lines = [
         fitRow,
-        line("Finished outside:", `${outside.join(" × ")} mm`, "sd-summary-outside"),
-        line("Field size:", `${ux} × ${uy} units (${fx} × ${fy} mm) in each drawer`),
-        line("Drawers:", `${response.drawer_count} · usable heights ${heights} mm`),
-        line("Cabinet base / top:", `${material.base_mm} / ${material.top_mm} mm`),
+        line("Finished outside", `${outside.join(" × ")} mm`, "sd-summary-outside"),
+        line("Field size", `${ux} × ${uy} units (${fx} × ${fy} mm) in each drawer`),
+        line("Drawers", `${response.drawer_count} · usable height${response.drawer_count === 1 ? "" : "s"} ${heights} mm`),
+        line("Cabinet base / top", `${fmt(material.base_mm)} / ${fmt(material.top_mm)} mm`),
       ];
-      if (response.cabinet_style === "open" && material.frame_width_mm) lines.push(line("Open frame width:", `${material.frame_width_mm} mm`));
-      const printerRow = line("Printer build volume:", printer);
+      if (response.cabinet_style === "open" && material.frame_width_mm) lines.push(line("Open frame width", `${fmt(material.frame_width_mm)} mm`));
+      const printerRow = line("Printer build volume", printer);
       if (callbacks.openPrinterSettings) {
         const change = el("button", "link-button", "Printer Settings…"); change.type = "button";
         change.addEventListener("click", () => callbacks.openPrinterSettings(), { signal: events.signal });
@@ -240,7 +250,7 @@
           showSummary(response); summaryKey = key; summaryIdentity = identity; summaryState = "ok"; markSettled();
         } catch (error) {
           if (live && epoch === mountSerial && n === requestNumber && pEpoch === profileEpoch && identity === (callbacks.identity?.() ?? space.id ?? space.name) && key === window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) {
-            summaryError = error.message || "Cabinet is invalid"; showSummaryText(summaryError, true); summaryState = "error"; markSettled();
+            summaryError = friendlyError(error) || "Cabinet is invalid"; showSummaryText(summaryError, true); summaryState = "error"; markSettled();
           }
         }
       }, 250);

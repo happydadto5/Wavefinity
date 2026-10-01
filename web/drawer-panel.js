@@ -99,7 +99,7 @@ DP.build = () => {
       <details class="dl-details" id="dl-fit-details" hidden>
         <summary>Drawer details</summary>
         <div class="field-grid two">
-          <label id="dl-name-row">Name<input id="dl-name" type="text" maxlength="40"></label>
+          <label id="dl-name-row">Name<input id="dl-name" type="text" maxlength="80"></label>
         </div>
         <button type="button" id="dl-drawer-delete" class="button danger dl-small">Delete this drawer</button>
       </details>
@@ -185,6 +185,7 @@ DP.build = () => {
           <button type="button" id="dl-sp-generate" class="button secondary" title="Delete placed spacers, re-plan, and place replacements">Refresh Spacers</button>
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
         </div>
+        <p id="dl-sp-reason" class="dl-note" hidden></p>
       </div>
     </details>
 
@@ -511,7 +512,7 @@ DP.duplicateRow = async one => {
     DL.requestReport();
     toast(`Duplicated as ${DL.label(DL.bin(data.row_id) || one)}. It is waiting in Unplaced bins.`);
   } catch (error) {
-    if (!DL.isStaleSpaceError(error)) toast(`Could not duplicate bin: ${error.message}`, true, 6000);
+    if (!DL.isStaleSpaceError(error)) toast(`Could not duplicate bin: ${friendlyError(error)}`, true, 6000);
   }
 };
 
@@ -557,8 +558,8 @@ DP.deleteSelected = async () => {
   const placed = ids.filter(id => DL.placedCount(id)).length;
   const ok = await appConfirmAction({
     title: `Delete ${dlPlural(ids.length, "bin")}?`,
-    message: `Delete all ${ids.length} selected bins, including any hidden by Search or Filter?${placed ? ` ${placed} placed bin${placed === 1 ? "" : "s"} will also be removed from this Space.` : ""} Generated files owned only by these bins will also be deleted from the folder.`,
-    actionLabel: `Delete ${ids.length} bins`, danger: true,
+    message: `Delete ${dlPlural(ids.length, "selected bin")}, including any hidden by Search or Filter?${placed ? ` ${placed} placed bin${placed === 1 ? "" : "s"} will also be removed from this Space.` : ""} Generated files owned only by these bins will also be deleted from the folder.`,
+    actionLabel: `Delete ${dlPlural(ids.length, "bin")}`, danger: true,
   });
   if (!ok || !DL.spaceContextCurrent(context)) return;
   if (ids.includes(state.designInventoryId) &&
@@ -746,11 +747,24 @@ DP.renderDrawer = () => {
   dlSet("#dl-depth", fmt(drawer.depth));
   dlSet("#dl-height", fmt(drawer.height));
   dlSet("#dl-name", drawer.name);
-  $("#dl-drawer-delete").disabled = DL.layout.drawers.length < 2;
+  // Fix 096 F9: visible reason next to the disabled Delete button, not only a tooltip.
+  const deleteButton = $("#dl-drawer-delete");
+  const onlyDrawer = DL.layout.drawers.length < 2;
+  deleteButton.disabled = onlyDrawer;
+  deleteButton.title = onlyDrawer ? "A Space needs at least one drawer." : "";
+  let deleteReason = $("#dl-drawer-delete-reason");
+  if (!deleteReason) {
+    deleteReason = document.createElement("p");
+    deleteReason.id = "dl-drawer-delete-reason";
+    deleteReason.className = "dl-note";
+    deleteButton.after(deleteReason);
+  }
+  deleteReason.hidden = !onlyDrawer;
+  deleteReason.textContent = onlyDrawer ? "A Space needs at least one drawer, so the last drawer cannot be deleted." : "";
   const grid = DL.grid(drawer);
   if (pegboard) {
     const standard = state.catalog?.pegboard_rules?.standards?.find(row => row.id === drawer.pegboard_standard);
-    $("#dl-grid-note").textContent = `${standard?.name || "Pegboard"}: ${grid.cols} × ${grid.rows} mount positions (${fmt(grid.cols * grid.stepX)} × ${fmt(grid.rows * grid.stepY)} mm usable). Drag bins onto visible holes or slots; yellow dots show their exact mounts.`;
+    $("#dl-grid-note").textContent = `${standard?.name || "Pegboard"}: ${grid.cols} × ${grid.rows} mount position${grid.cols === 1 && grid.rows === 1 ? "" : "s"} (${fmt(grid.cols * grid.stepX)} × ${fmt(grid.rows * grid.stepY)} mm usable). Drag bins onto visible holes or slots; yellow dots show their exact mounts.`;
     return;
   }
   const wall = DL.slack(drawer) / 2;
@@ -785,7 +799,7 @@ DP.renderSurfaceFill = () => {
   const signature = JSON.stringify([DL.fillPlan, [...DL.fillSelected]]);
   if (!dlChanged("surface-fill", signature)) return;
   $("#dl-fill-candidates").innerHTML = !DL.fillPlan ? ""
-    : DL.fillPlan.length ? `<p class="dl-note">${DL.fillPlan.length} bins fit. Select the ones to create.</p>`
+    : DL.fillPlan.length ? `<p class="dl-note">${dlPlural(DL.fillPlan.length, "bin")} fit${DL.fillPlan.length === 1 ? "s" : ""}. Select the ones to create.</p>`
       + DL.fillPlan.map(one => `<label class="checkbox-row"><span>${fmt(one.x_mm)} × ${fmt(one.y_mm)} mm · cell ${one.gx + 1}, ${one.gy + 1}</span>`
         + `<input type="checkbox" data-fill-candidate="${escapeHtml(one.id)}"${DL.fillSelected.has(one.id) ? " checked" : ""}></label>`).join("")
       : '<p class="dl-note">No empty Surface cells remain.</p>';
@@ -804,6 +818,19 @@ DP.renderStats = () => {
 
   const busy = Boolean(DL.busy);
   const hosted = Boolean(state.runtime.hosted);
+  // Fix 096 F9: a visible reason next to disabled spacer actions (tooltips
+  // alone are not enough). The last branch to disable a button wins, same as
+  // the titles.
+  let spacerReasonText = "";
+  const spacerReason = (text) => {
+    const reason = $("#dl-sp-reason");
+    spacerReasonText = text || "";
+    if (!reason) return;
+    reason.hidden = !text;
+    reason.textContent = text || "";
+  };
+  const spacerReasonCurrent = () => spacerReasonText;
+  spacerReason("");
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
   label("#dl-sp-plan", "Create Spacers", "Planning…", "spacers");
   label("#dl-sp-generate", "Save Selected Spacers", "Saving…", "spacers");
@@ -815,6 +842,7 @@ DP.renderStats = () => {
     if (!nothingPlaced) return;
     node.disabled = true;
     node.title = "Place a bin in the Space first.";
+    spacerReason("Place a bin in the Space first.");
   });
   // Fix 088 S88-4: Refresh Spacers deletes placed spacers and re-adds
   // them, so it needs something to refresh - placed spacers - or a fresh
@@ -827,6 +855,7 @@ DP.renderStats = () => {
     if (!hasPlacedSpacers && !hasSelection) {
       refreshNode.disabled = true;
       refreshNode.title = "No spacers placed yet - plan spacers first.";
+      spacerReason("No spacers placed yet - plan spacers first.");
     } else {
       refreshNode.disabled = busy;
       refreshNode.title = "Delete placed spacers, re-plan, and place replacements";
@@ -853,7 +882,7 @@ DP.renderStats = () => {
 
   const report = DL.report;
   const warnings = [...DL.warnings, ...(DL.pegboardRefreshError
-    ? [`Pegboard placement data could not be refreshed. ${DL.pegboardRefreshError}`]
+    ? [`Pegboard placement data could not be refreshed. ${friendlyError(DL.pegboardRefreshError)}`]
     : [])].map(text => `<p class="dl-note dl-warning">${escapeHtml(text)}</p>`).join("");
   if (!report) { box.innerHTML = warnings || `<p class="dl-note">Measuring…</p>`; return; }
   // Only actionable problems and warnings stay in this panel.
@@ -1114,7 +1143,7 @@ DP.ensureInventoryLoaded = async (message = "Could not read the inventory") => {
     await DL.ensureLoaded();
     return true;
   } catch (error) {
-    toast(`${message}: ${error.message}`, true, 7000);
+    toast(`${message}: ${friendlyError(error)}`, true, 7000);
     DP.update();
     return false;
   }

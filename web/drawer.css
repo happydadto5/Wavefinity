@@ -22,7 +22,7 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-drawer-row { display: flex; gap: 8px; align-items: end; margin-bottom: 10px; }
 .dl-drawer-row label { flex: 1; font-size: 12px; font-weight: 700; color: var(--muted); }
 .dl-drawer-row select { font-size: 14px; font-weight: 650; color: var(--ink); }
-.button.dl-small { padding: 7px 10px; font-size: 12px; }
+.button.dl-small { padding: 7px 10px; font-size: var(--type-small-button); }
 .dl-note { margin: 8px 0 0; font-size: 11px; color: var(--muted); line-height: 1.45; }
 .dl-warning { color: #8a4e12; }
 .dl-details { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
@@ -63,10 +63,10 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 }
 .dl-bin-main { display: flex; flex-direction: column; min-width: 0; }
 .dl-bin-main strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dl-bin-main small { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-bin-main small { font-size: 11px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-bin-main .dl-flags { color: #8a4e12; font-weight: 650; }
 .dl-row-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; padding-left: 26px; }
-.dl-row-actions .button { padding: 4px 7px; font-size: 11px; }
+.dl-row-actions .button { padding: 4px 7px; font-size: var(--type-row-action); }
 .dl-bin-main .dl-status { color: var(--teal-dark); font-weight: 700; }
 .dl-bin.printed .dl-bin-main .dl-status { color: #1f6b45; }
 .dl-empty {
@@ -82,7 +82,7 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-savebar .save-location-row { margin-bottom: 8px; }
 .dl-save-row { display: flex; align-items: center; gap: 8px; }
 .dl-save-row .checkbox-row { margin: 0; }
-.dl-save-status { flex: 1; min-width: 0; font-size: 11px; color: var(--muted); }
+.dl-save-status { flex: 1; min-width: 0; font-size: 11px; color: var(--ink); }
 .dl-save-status.error { color: var(--danger); font-weight: 650; }
 .dl-save-status.dirty { color: #8a4e12; font-weight: 650; }
 
@@ -93,7 +93,7 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-batch-tools { display: grid; gap: 7px; margin: 0 0 8px; }
 .dl-batch-tools[hidden] { display: none; }
 .dl-batch-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.dl-batch-summary { font-size: 11px; color: var(--muted); flex: 1 1 100%; min-height: 14px; }
+.dl-batch-summary { font-size: 11px; color: var(--ink); flex: 1 1 100%; min-height: 14px; }
 .dl-batch-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .dl-batch-actions .button { min-width: 0; padding: 7px 6px; line-height: 1.25; }
 /* The drawer canvas and its floating controls. The staging rail (Unplaced
@@ -138,7 +138,7 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-view-controls .camera-controls-row { flex-wrap: wrap; }
 .dl-view-controls .camera-views { flex-wrap: wrap; }
 .dl-view-controls .camera-views-row { flex-wrap: wrap; }
-.dl-view-controls .camera-views button { flex: 0 0 auto; min-width: 0; padding: 10px 14px; font-size: 14px; white-space: nowrap; }
+.dl-view-controls .camera-views button { flex: 0 0 auto; min-width: 0; padding: 10px 14px; font-size: var(--type-camera-button); white-space: nowrap; }
 .dl-view-controls .zoom-controls button { flex: 0 0 auto; min-width: 40px; padding: 10px 12px; }
 
 

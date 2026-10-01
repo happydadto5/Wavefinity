@@ -35,7 +35,7 @@
 }
 
 /* Fix 086: help text, structured summary, recovery, printer dialog and guide */
-.sd-help { display: block; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.sd-help { display: block; color: var(--ink); opacity: .78; font-size: 11px; line-height: 1.35; }
 .sd-field-error { display: block; color: var(--danger, #b3261e); font-size: 12px; font-weight: 600; }
 .sd-field input[aria-invalid] { border-color: var(--danger, #b3261e); }
 .sd-summary-line { margin: 2px 0; }
@@ -59,5 +59,5 @@
 .sd-guide ol, .sd-guide ul { padding-left: 20px; }
 .sd-guide table { border-collapse: collapse; width: 100%; font-size: 13px; }
 .sd-guide th, .sd-guide td { border: 1px solid var(--line, #ccc); padding: 4px 8px; text-align: left; vertical-align: top; }
-.space-type-frame { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.space-type-frame { margin: 0 0 8px; color: var(--ink); opacity: .78; font-size: 13px; }
 .type-card[hidden] { display: none; }

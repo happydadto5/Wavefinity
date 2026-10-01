@@ -7,7 +7,7 @@
     const parts = [`Drawer ${index + 1}`];
     const label = (row.label_text || "").trim();
     if (label) parts.push(label);
-    parts.push(`${row.height_mm} mm`);
+    parts.push(`${fmt(row.height_mm)} mm`);
     if (bins > 0) parts.push(`${bins} ${bins === 1 ? "bin" : "bins"}`);
     return parts.join(" · ");
   };
@@ -16,7 +16,9 @@
     host.replaceChildren();
     const panel = el("section", "sd-navigator", ""); panel.setAttribute("aria-label", "Cabinet drawers");
     const title = el("h3", "", "Storage Drawers"); const list = el("div", "sd-navigator-list", "");
-    panel.append(title, list);
+    // Fix 096 F9: visible reason when drawer controls are disabled while editing.
+    const editNote = el("small", "sd-help", ""); editNote.id = "sd-edit-note"; editNote.hidden = true;
+    panel.append(title, editNote, list);
     const add = el("button", "button", "Add Drawer"); add.type = "button";
     add.addEventListener("click", () => { if (!editing) callbacks.addDrawer?.(); });
     const addNote = el("small", "sd-help", ""); addNote.id = "sd-add-note"; addNote.hidden = true;
@@ -48,7 +50,7 @@
     const render = () => {
       const damaged = Boolean(current.recovery);
       recovery.hidden = !damaged; panel.hidden = damaged; structural.hidden = damaged;
-      printerRow.replaceChildren(`Printer: ${current.printer ? `${current.printer.x_mm} × ${current.printer.y_mm} × ${current.printer.z_mm} mm` : "—"} `, printerButton);
+      printerRow.replaceChildren(`Printer: ${current.printer ? `${fmt(current.printer.x_mm)} × ${fmt(current.printer.y_mm)} × ${fmt(current.printer.z_mm)} mm` : "—"} `, printerButton);
       if (damaged) {
         recoveryMessage.textContent = current.recovery.message || "A cabinet setting is not valid.";
         list.replaceChildren();
@@ -64,6 +66,7 @@
         const placed = layout.drawers?.find(one => one.id === row.id)?.placements?.length || 0;
         const selector = el("button", "sd-drawer-select", drawerText(row, index, placed));
         selector.type = "button"; selector.disabled = editing;
+        if (editing) selector.title = "Finish editing the current drawer first.";
         selector.setAttribute("aria-pressed", String(layout.active === row.id));
         selector.setAttribute("aria-label", `Select Drawer ${index + 1}`);
         selector.dataset.size = String(Math.max(0, Math.min(4, Math.round(row.height_mm / maxHeight * 4))));
@@ -84,13 +87,21 @@
         const remove = el("button", "sd-drawer-delete", "Delete"); remove.type = "button";
         remove.disabled = editing || rows.length <= 1; remove.setAttribute("aria-label", `Delete Drawer ${index + 1}`);
         if (rows.length <= 1) remove.title = "Keep at least one drawer";
+        if (editing) remove.title = "Finish editing the current drawer first.";
+        // Fix 096 F9: visible reason for the single-drawer Delete disable.
+        const singleNote = el("small", "sd-help", "");
+        singleNote.hidden = rows.length > 1;
+        singleNote.textContent = rows.length > 1 ? "" : "Keep at least one drawer.";
         remove.addEventListener("click", () => { if (!editing) callbacks.deleteDrawer?.(row.id); });
-        item.append(selector, remove); list.append(item);
+        item.append(selector, remove, singleNote); list.append(item);
       });
       const atMax = rows.length >= maxDrawers;
       add.disabled = editing || atMax;
-      add.title = atMax ? `Maximum ${maxDrawers} drawers` : "";
+      add.title = atMax ? `Maximum ${maxDrawers} drawers` : editing ? "Finish editing the current drawer first." : "";
       addNote.hidden = !atMax; addNote.textContent = atMax ? `Maximum ${maxDrawers} drawers` : "";
+      // Fix 096 F9: one visible reason covering every drawer control disabled while editing.
+      editNote.hidden = !editing;
+      editNote.textContent = editing ? "Finish editing the current drawer to switch, add, or delete drawers." : "";
       const code = current.structuralStatus?.status || current.structuralStatus;
       status.textContent = code === "recovery_error" && current.structuralStatus.message
         ? current.structuralStatus.message

@@ -252,7 +252,8 @@ def storage_drawers_active_limits(space: dict, drawer_id: str | None) -> dict:
 def storage_drawers_recent_summary(space: dict) -> str:
     canonical = normalise_storage_drawers_definition(space)
     x, y = storage_drawers_unit_counts(canonical)
-    return f"{len(canonical['storage_drawers']['drawers'])} drawers · {x} × {y} units"
+    drawer_total = len(canonical["storage_drawers"]["drawers"])
+    return f"{drawer_total} {'drawer' if drawer_total == 1 else 'drawers'} · {x} × {y} units"
 
 
 def storage_drawers_projection(space: dict) -> list[dict]:

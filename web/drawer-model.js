@@ -251,7 +251,7 @@ DL.prune = () => {
 DL.drawer = () => DL.layout.drawers.find(one => one.id === DL.layout.active) || DL.layout.drawers[0];
 DL.bin = id => DL.bins.find(one => one.id === id);
 DL.key = p => `${p.bin}:${p.copy ?? 0}`;
-DL.label = one => one.name || `${fmt(one.x)} × ${fmt(one.y)}`;
+DL.label = one => one.name || `${fmt(one.x)} × ${fmt(one.y)} mm`;
 DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
 // The user-facing Wavefinity unit is always 8 mm - see the "8 mm size grid"
 // section of README.md. The one place this conversion belongs.
@@ -763,7 +763,7 @@ DL.refreshPegboardLayoutsSafe = async warningPrefix => {
     DL.pegboardLayouts = {};
     DL.pegboardRefreshError = String(error?.message || error);
     DL.emit();
-    if (warningPrefix) toast(`${warningPrefix} ${DL.pegboardRefreshError}`, true, 7000);
+    if (warningPrefix) toast(`${warningPrefix} ${friendlyError(DL.pegboardRefreshError)}`, true, 7000);
     return false;
   }
 };
@@ -885,7 +885,7 @@ DL._runSaveChain = async () => {
       if (!DL.isStaleSpaceError(error)) {
         DL.saveState = "error";
         DL.saveError = error.message;
-        toast(`Layout not saved: ${error.message}`, true, 6000);
+        toast(`Layout not saved: ${friendlyError(error)}`, true, 6000);
       }
     }
     // Only chain another serialized save when the previous one actually
@@ -954,7 +954,7 @@ DL.editBins = async (changes, {
     DL.saveState = "error";
     DL.saveError = error.message;
     DL.emit();
-    if (!customFailure) toast(error.message, true, 6000);
+    if (!customFailure) toast(friendlyError(error), true, 6000);
     return false;
   }
   await DL.refreshPegboardLayoutsAfterWrite();
@@ -985,7 +985,7 @@ DL.setBinPrinted = async (one, printed) => {
       DL.requestReport();
       return true;
     } catch (error) {
-      if (!DL.isStaleSpaceError(error)) toast(error.message, true, 6000);
+      if (!DL.isStaleSpaceError(error)) toast(friendlyError(error), true, 6000);
       return false;
     }
   }
@@ -1019,7 +1019,7 @@ DL.busyWith = async (what, work) => {
   try {
     return await work(context);
   } catch (error) {
-    if (!DL.isStaleSpaceError(error)) toast(error.message, true, 7000);
+    if (!DL.isStaleSpaceError(error)) toast(friendlyError(error), true, 7000);
     return null;
   } finally {
     if (ticket === DL.busyTicket && DL.spaceContextCurrent(context)) {
@@ -1095,7 +1095,8 @@ DL.createSelectedFillBins = () => DL.busyWith("fill", async context => {
   DL.savedAt = new Date();
   DL.requestReport();
   DL.emit();
-  toast(`${result.created?.length || 0} fill bins added to Surface.`);
+  const fillCount = result.created?.length || 0;
+  toast(`${fillCount} fill bin${fillCount === 1 ? "" : "s"} added to Surface.`);
 });
 
 // Move a placement, and everything stacked on it, to a cell or onto a stack.
@@ -1144,6 +1145,17 @@ DL.planSpacers = () => DL.busyWith("spacers", async context => {
   DL.spacerPlan = result.candidates || [];
   DL.spacerSelected = new Set((result.selected || []).map(c => c.id));
   DL.spacerPlanSignature = DL.spacerSignature();
+  if (!DL.spacerPlan.length) {
+    const allOff = (result.notes || []).some(note =>
+      /all spacer walls are off|no spacer walls are enabled/i.test(String(note))
+    );
+    toast(
+      allOff
+        ? "No spacer walls are enabled. Turn on a wall to plan spacers."
+        : "No spacer gaps were found for the current wall settings.",
+      false,
+    );
+  }
   DL.emit();
 });
 
@@ -1202,7 +1214,7 @@ DL.savePlannedSpacers = async context => {
       toast("Spacer saving finished in the Space you left. The current Space was not changed.");
       return;
     }
-    connectorLines = [`Connector files could not be saved: ${error.message}`];
+    connectorLines = [`Connector files could not be saved: ${friendlyError(error)}`];
   }
   toast([bits.join(", ") || "Nothing to fill", ...(result.notes || []), ...connectorLines].join("\n"), false, 9000);
   DL.requestReport();
@@ -1511,7 +1523,7 @@ DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", as
   toast([
     `Saved ${chosen.length} bin${chosen.length === 1 ? "" : "s"}`,
     ...(made ? [`${made} new`] : []),
-    ...(kept ? [`${kept} already had current files`] : []),
+    ...(kept ? [`${kept} ${kept === 1 ? "bin" : "bins"} already had current files`] : []),
     ...(result.connector_copies ? [`${result.connector_copies} connector ${result.connector_copies === 1 ? "copy" : "copies"}`] : []),
     ...(result.notes || []),
   ].join("\n"), false, 8000);

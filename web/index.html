@@ -35,7 +35,7 @@
       <section id="space-head" class="space-head" aria-label="Space" hidden>
         <div id="space-head-view" class="space-head-view">
           <div class="space-head-title"><strong id="space-head-name"></strong><span id="space-head-type" class="space-head-type"></span></div>
-          <div id="space-head-summary" class="muted"></div>
+          <div id="space-head-summary" class="ink"></div>
           <div id="space-actions" class="space-actions" role="group" aria-label="Space controls">
             <div class="button-row">
               <button id="space-head-open" class="button secondary dl-small major-action" type="button">Open Space…</button>
@@ -44,12 +44,13 @@
               <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
             </div>
             <div id="space-structural" class="space-structural" hidden>
-              <p id="space-structural-summary" class="muted space-structural-summary" role="status" hidden></p>
+              <p id="space-structural-summary" class="ink space-structural-summary" role="status" hidden></p>
               <div class="button-row">
                 <button id="space-structural-save" class="button secondary dl-small" type="button">Save Storage Box</button>
                 <button id="space-structural-print" class="button secondary dl-small" type="button">Print Storage Box + Bins</button>
                 <button id="space-make-inside-bin" class="button secondary dl-small" type="button" hidden>Make Inside Bin</button>
               </div>
+              <p id="space-structural-print-reason" class="dl-note" hidden></p>
             </div>
           </div>
         </div>
@@ -75,10 +76,10 @@
           </div>
           <div id="pegboard-mount-row" class="pegboard-mount-row" hidden>
             <strong>Pegboard Mount</strong>
-            <span id="pegboard-mount-standard" class="muted"></span>
+            <span id="pegboard-mount-standard" class="ink"></span>
             <label>Cleat Count X<select id="pegboard-cleat-x"><option value="auto">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
             <label>Cleat Count Y<select id="pegboard-cleat-y"><option value="auto">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
-            <span id="pegboard-mount-note" class="muted"></span>
+            <span id="pegboard-mount-note" class="ink"></span>
           </div>
           <div class="mode-and-bin-options">
             <label class="compact-select" title="Fused into box prints the interior parts as part of the bin. Removable insert prints all interior parts as a separate drop-in piece, so you can adjust or reprint the interior without reprinting the whole bin.">Interior print mode
@@ -97,7 +98,7 @@
                 <div class="field-grid two">
                   <label title="The platform under this Surface bin. Auto matches the Base Trim edge.">Base height<select id="surface-base-mode"><option value="edge">Auto — Match Surface edge</option><option value="custom">Custom</option></select></label>
                   <label id="surface-base-custom-row">Custom base <span class="unit">mm</span><input id="surface-base-custom" type="number" min="0.4" step="0.1"></label>
-                  <span id="surface-base-resolved" class="muted"></span>
+                  <span id="surface-base-resolved" class="ink"></span>
                   <label class="checkbox-row" title="Removes hidden material underneath with support-free 45° cavities."><span>Lightweight base</span><input id="surface-lightweight-base" type="checkbox"></label>
                 </div>
                 <p class="muted surface-bin-help">Auto matches the Base Trim edge. If you are not using the Base Trim, choose Custom.</p>
@@ -105,7 +106,7 @@
               <div class="setting-group"><span class="setting-group-label">Planning</span>
                 <div class="field-grid two">
                   <label title="The object's full physical height or length. Wavefinity uses it only to plan this Surface.">Object height <span class="unit">mm</span><input id="surface-object-height" type="number" min="0.1" step="0.1" placeholder="Not set"></label>
-                  <span id="surface-planning-height" class="muted"></span>
+                  <span id="surface-planning-height" class="ink"></span>
                 </div>
                 <p class="muted surface-bin-help">Planning only — does not change the bin.</p>
               </div>
@@ -164,7 +165,7 @@
               <div id="lid-group-label" class="b4b-card lid-option-group" hidden>
                 <h4 class="b4b-card-title">Label</h4>
                 <div class="field-grid three">
-                  <label>Label<select id="lid-label-enabled">
+                  <label>Enabled<select id="lid-label-enabled">
                     <option value="false">Off</option><option value="true">On</option>
                   </select></label>
                 </div>
@@ -273,10 +274,10 @@
               <div id="edge-mount-label-panel" class="b4b-card edge-mount-card">
                 <h4 class="b4b-card-title">Label</h4>
                 <div class="field-grid three">
-                  <label class="inline-select">Label
+                  <label class="inline-select">Mode
                     <select id="edge-mount-label-mode">
                       <option value="none">None</option>
-                      <option value="separate">Separate Part</option>
+                      <option value="separate">Separate part</option>
                       <option value="integrated">Integrated</option>
                     </select>
                   </label>
@@ -285,13 +286,13 @@
                 <div id="edge-mount-label-details" class="edge-mount-group-stack" hidden>
                   <div class="edge-mount-field-group edge-mount-text-group">
                     <label class="edge-mount-text-field">Label text
-                      <input id="edge-mount-label-text" type="text" maxlength="40" placeholder="e.g. PRUNER">
+                      <input id="edge-mount-label-text" type="text" maxlength="80" placeholder="e.g. PRUNER">
                     </label>
                     <label class="checkbox-row"><span>Flip text</span><input id="edge-mount-label-flip" type="checkbox"></label>
                     <label class="inline-select edge-mount-compact-select">Length
                       <select id="edge-mount-label-length-mode">
-                        <option value="full">Full Side</option>
-                        <option value="text">Text Length</option>
+                        <option value="full">Full side</option>
+                        <option value="text">Text length</option>
                       </select>
                     </label>
                     <label class="edge-mount-compact-number">Text depth <span class="unit">mm</span>
@@ -299,7 +300,7 @@
                     </label>
                     <label id="edge-mount-label-style-row" class="inline-select edge-mount-compact-select" hidden>Label style
                       <select id="edge-mount-label-style">
-                        <option value="flush">Inlaid / Flush</option>
+                        <option value="flush">Inlaid / flush</option>
                         <option value="raised">Raised</option>
                       </select>
                     </label>
@@ -436,7 +437,7 @@
             <label class="inventory-select-row" title="Add each generated bin and Storage Box to this folder's inventory file">
               <span class="sr-only">Inventory</span>
               <select id="folder-inventory-toggle">
-                <option value="true">Keep Inventory</option>
+                <option value="true">Keep inventory</option>
                 <option value="false">Don't keep inventory</option>
               </select>
             </label>
@@ -691,7 +692,7 @@
     <dialog id="spacer-print-dialog" class="support-layout-dialog" aria-labelledby="spacer-print-title">
       <h2 id="spacer-print-title">Print Spacers</h2>
       <div id="spacer-print-table-container"></div>
-      <div class="button-row dialog-actions-spaced">
+      <div class="button-row">
         <button id="spacer-print-cancel" type="button" class="button secondary">Cancel</button>
         <button id="spacer-print-confirm" type="button" class="button primary">Print Selected</button>
       </div>
@@ -761,7 +762,7 @@
     <p id="draft-switch-message"></p>
     <p id="draft-switch-reason" class="field-error" hidden></p>
     <div class="button-row">
-      <button id="draft-switch-keep" type="button" class="button secondary">Keep editing</button>
+      <button id="draft-switch-keep" type="button" class="button secondary">Keep Editing</button>
       <button id="draft-switch-discard" type="button" class="button danger">Discard change</button>
       <button id="draft-switch-add" type="button" class="button primary" hidden>Add as new</button>
     </div>
@@ -784,7 +785,7 @@
     <div id="about-dialog-content" class="about-dialog-content">
       Loading brochure…
     </div>
-    <div class="button-row dialog-actions-spaced">
+    <div class="button-row">
       <button id="about-dialog-close" type="button" class="button primary">Close</button>
     </div>
   </dialog>
@@ -1119,12 +1120,12 @@
              <dt id="portable-outside-label" hidden>Finished outside</dt><dd id="portable-outside-readout" hidden></dd>
           </div>
           <div id="portable-case" class="storage-box-case">
-            <h4 class="storage-box-title">Case settings</h4>
+            <h4 class="storage-box-title">Case Settings</h4>
             <div id="portable-case-lid-group" class="storage-box-group">
               <h5 class="storage-box-subtitle">Lid</h5>
               <div class="space-dimension-row">
                 <label class="space-field"><span>Lid type</span>
-                  <select id="portable-lid-type"><option value="latched" selected>Latched Lid</option><option value="lid_only">Lid Only</option></select>
+                  <select id="portable-lid-type"><option value="latched" selected>Latched lid</option><option value="lid_only">Lid only</option></select>
                 </label>
                 <label class="space-field"><span>Lid snugness</span>
                   <select id="portable-lid-snugness"><option value="0.5">0.5 mm — Tight</option><option value="1" selected>1.0 mm — Standard</option><option value="2">2.0 mm — Loose</option></select>
@@ -1135,7 +1136,7 @@
               </div>
             </div>
             <div id="portable-case-options-group" class="storage-box-group">
-              <h5 class="storage-box-subtitle">Case options</h5>
+              <h5 class="storage-box-subtitle">Case Options</h5>
               <div class="space-dimension-row">
                 <label class="space-field"><span>Case stacking</span>
                   <select id="portable-stacking"><option value="false" selected>Not stackable</option><option value="true">Stackable</option></select>
@@ -1148,7 +1149,7 @@
             <div id="portable-case-label-group" class="storage-box-group">
               <h5 class="storage-box-subtitle">Label</h5>
               <div class="space-dimension-row">
-                <label class="space-field"><span>Label</span>
+                <label class="space-field"><span>Location</span>
                   <select id="portable-label-location"><option value="none" selected>No label</option><option value="top">Top</option><option value="front">Front</option></select>
                 </label>
                 <label id="portable-label-text-row" class="space-field" hidden><span>Label text</span>
@@ -1219,7 +1220,7 @@
           <h2>Folder already configured</h2>
         </div>
         <p class="welcome-lead">This folder is already set up as a Wavefinity Space.</p>
-        <p id="space-collision-meta" class="muted"></p>
+        <p id="space-collision-meta" class="ink"></p>
         <div class="welcome-actions">
           <button id="space-collision-open" class="button primary" type="button">Open this Space</button>
           <button id="space-collision-choose" class="button secondary" type="button">Choose another folder</button>
@@ -1231,7 +1232,7 @@
           <h2>Existing Wavefinity folder selected</h2>
         </div>
         <p class="welcome-lead">This folder already has Wavefinity designs, but it isn't set up as a Space yet.</p>
-        <p id="space-existing-inventory-meta" class="muted"></p>
+        <p id="space-existing-inventory-meta" class="ink"></p>
         <div class="welcome-actions">
           <button id="space-existing-inventory-yes" class="button primary" type="button">Configure this existing folder as this Space</button>
           <button id="space-existing-inventory-no" class="button secondary" type="button">Choose another folder</button>
