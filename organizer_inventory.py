@@ -1045,6 +1045,7 @@ def _merge_inventory(
     layout: Any = _KEEP,
     bin_updates: Iterable[dict[str, Any]] = (),
     new_bins: Iterable[dict[str, Any]] = (),
+    new_bin_specs: Iterable[Any] = (),
     delete_ids: Iterable[str] = (),
 ) -> tuple[list[dict[str, Any]], dict | None]:
     if layout is not _KEEP and layout is not None and not isinstance(layout, dict):
@@ -1110,6 +1111,21 @@ def _merge_inventory(
         for row in bins:
             if row["id"] not in existing_ids and row["id"] in submitted_specs:
                 chosen["design_specs"][row["id"]] = submitted_specs[row["id"]]
+    # Fix 096 A2: specs supplied alongside new rows (parallel to new_bins)
+    # attach atomically here, and a new ordinary-bin or B4B row without its
+    # canonical editable source is an operation failure, not a silent gap.
+    # ("manual", "spacer" and other kinds never have a design source.)
+    supplied = list(new_bin_specs or ())
+    created = [row for row in bins if row["id"] not in existing_ids]
+    if isinstance(chosen, dict):
+        for row, spec in zip(created, supplied):
+            if isinstance(spec, dict):
+                chosen["design_specs"][row["id"]] = spec
+    final_specs = design_specs(chosen) if isinstance(chosen, dict) else {}
+    for row in created:
+        if row.get("kind") in ("bin", "b4b") and not isinstance(final_specs.get(row["id"]), dict):
+            raise ValueError(
+                f"new row {row['id']} needs its editable design source; nothing was recorded")
     return bins, _prune_layout(chosen, bins)
 
 
@@ -1117,6 +1133,7 @@ def save_inventory(
     output_dir: Path | str, *, layout: Any = _KEEP,
     bin_updates: Iterable[dict[str, Any]] = (),
     new_bins: Iterable[dict[str, Any]] = (),
+    new_bin_specs: Iterable[Any] = (),
     delete_ids: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Merge changes into the file on disk and return the fresh contents."""
@@ -1131,7 +1148,7 @@ def save_inventory(
         cleanup = _deletion_file_names(current, ids, available) if ids else []
         bins, chosen = _merge_inventory(
             current, layout=layout, bin_updates=bin_updates,
-            new_bins=new_bins, delete_ids=delete_ids,
+            new_bins=new_bins, new_bin_specs=new_bin_specs, delete_ids=delete_ids,
         )
         _write(path, bins, chosen, current["legacy"])
         failed = []
@@ -1157,6 +1174,7 @@ def save_inventory_text(
     text: str, *, title: str = "Wavefinity", layout: Any = _KEEP,
     bin_updates: Iterable[dict[str, Any]] = (),
     new_bins: Iterable[dict[str, Any]] = (),
+    new_bin_specs: Iterable[Any] = (),
     delete_ids: Iterable[str] = (),
     available_filenames: Iterable[str] = (),
 ) -> dict[str, Any]:
@@ -1169,7 +1187,7 @@ def save_inventory_text(
         cleanup = _deletion_file_names(current, ids, available_filenames) if ids else []
         bins, chosen = _merge_inventory(
             current, layout=layout, bin_updates=bin_updates,
-            new_bins=new_bins, delete_ids=delete_ids,
+            new_bins=new_bins, new_bin_specs=new_bin_specs, delete_ids=delete_ids,
         )
         rendered = render_inventory(str(title or "Wavefinity"), bins, chosen)
         result = _text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered))
@@ -1220,10 +1238,17 @@ def append_bin(
             if int(qty) > 0 and design_spec["layout"].get("surface_base_mode") == "edge":
                 design_spec["layout"]["surface_base_mode"] = "custom"
         new_id = next_bin_id(bins)
+        # Fix 096 A2: an ordinary bin or B4B row must never be recorded without
+        # its canonical editable source - a missing source is an operation
+        # failure, not a silent gap.
+        row_kind = kind if kind in KINDS else "bin"
+        if row_kind in ("bin", "b4b") and design_spec is None:
+            raise ValueError(
+                "a new bin row needs its editable design source; nothing was recorded")
         bins.append({
             "id": new_id,
             "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "kind": kind if kind in KINDS else "bin",
+            "kind": row_kind,
             "name": name,
             "x": float(x), "y": float(y), "z": float(z),
             "stack": stack if stack in STACK_MODES else "none",

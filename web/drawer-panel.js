@@ -22,7 +22,7 @@ DP.rowDeleteConfirmSuppressed = () => {
 };
 DP.suppressRowDeleteConfirm = () => {
   try { localStorage.setItem(INVENTORY_DELETE_CONFIRM_KEY, "1"); }
-  catch (_error) {}
+  catch (_error) { toast("Your choice could not be remembered in this browser.", true); }
 };
 
 try {
@@ -328,7 +328,7 @@ DP.wire = () => {
   $("#dl-inv-show").addEventListener("change", event => { DP.filter.show = event.target.value; DP.filtersBySpace.set(DP.filterSpace, DP.filter.show); filterChanged(); });
   $("#dl-inv-sort").addEventListener("change", event => {
     DP.filter.sort = event.target.value;
-    try { localStorage.setItem("wavefinity-drawer-filter", JSON.stringify({ sort: DP.filter.sort })); } catch (_error) {}
+    try { localStorage.setItem("wavefinity-drawer-filter", JSON.stringify({ sort: DP.filter.sort })); } catch (_error) { toast("The sort order could not be remembered in this browser.", true); }
     filterChanged();
   });
 
@@ -998,6 +998,9 @@ DP.renderInventory = (force = false) => {
     const designSource = ["bin", "b4b"].includes(one.kind) && Boolean(DL.layout?.design_specs?.[one.id]);
     // A Storage Box case saved by an older version is not a Designer object.
     const editable = DP.editableSourceFor(one);
+    // Fix 096 A2: a bin/b4b row whose editable source is missing keeps its row
+    // but gets a disabled Edit with the reason, never a silent omission.
+    const sourceMissing = ["bin", "b4b"].includes(one.kind) && !designSource;
     const printable = eligible && !state.runtime.hosted && Boolean(state.slicer?.available);
     const statusTracked = !spacer && ["bin", "b4b", "manual"].includes(one.kind);
     const printed = one.status === "printed";
@@ -1010,7 +1013,8 @@ DP.renderInventory = (force = false) => {
       ? `<small>${dlPlural(placed, "placement")} · ${one.qty} printed</small>`
       : `<small class="dl-status">${cabinet ? StorageDrawers.rowLocationText(DL.layout, one.id) : (placed ? "Placed" : "Unplaced")} · ${DL.statusLabel(one)}</small>`;
     const actions = spacer ? "" : `<div class="dl-row-actions">
-          ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>` : ""}
+          ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>`
+            : sourceMissing ? `<button type="button" class="button secondary dl-small" data-act="edit" disabled title="The original editable design for this row is unavailable, so it can't be edited.">Edit</button>` : ""}
           <button type="button" class="button danger dl-small" data-act="delete">Delete</button>
           ${designSource ? `<button type="button" class="button secondary dl-small" data-act="duplicate">Duplicate</button>` : ""}
           ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}

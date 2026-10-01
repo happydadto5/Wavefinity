@@ -22,6 +22,14 @@ STRUCTURAL_OUTPUT_KEY = "storage_drawers"
 STRUCTURAL_GENERATOR_VERSION = 2
 # The exact app-owned namespace for temp files and rollback backups in a Space folder.
 CABINET_DEBRIS_PREFIX = ".wavefinity-cabinet-"
+# (Fix 096 A7) The local transaction namespace: only files under this prefix
+# are ever written by the local save path, so only they may be swept. Hosted
+# recovery backups (".wavefinity-cabinet-backup-…") live under a different
+# prefix and can never match, even before the journal check below.
+CABINET_LOCAL_DEBRIS_PREFIX = ".wavefinity-cabinet-local-"
+# The hosted recovery journal filename (written by the browser; read here only
+# to protect live backups). Mirrors SP.CABINET_JOURNAL in web/spaces.js.
+HOSTED_CABINET_JOURNAL_NAME = ".wavefinity-cabinet-journal.json"
 # Held for a whole local save (stage, install, manifest commit, cleanup) so debris
 # sweeping can never remove files an active transaction still owns.
 _TRANSACTION_LOCK = threading.RLock()
@@ -143,20 +151,51 @@ def structural_status(space: dict, stored_manifest: dict | None, output_dir: Pat
     return {"status": "saved"}
 
 
+def _hosted_journal_backup_names(folder: Path) -> set[str]:
+    """Backup filenames a live hosted recovery journal still references.
+
+    (Fix 096 A7) The hosted save journal lives in the folder itself; a present
+    journal means an interrupted hosted save whose backups must survive until
+    the next hosted status/save settles it. Pattern matching alone is not
+    ownership: these names are positively identified from the journal.
+    """
+    try:
+        text = (folder / HOSTED_CABINET_JOURNAL_NAME).read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    try:
+        journal = json.loads(text)
+    except ValueError:
+        return set()
+    names: set[str] = set()
+    files = journal.get("files") if isinstance(journal, dict) else None
+    if isinstance(files, list):
+        for one in files:
+            if isinstance(one, dict) and isinstance(one.get("backup"), str):
+                names.add(one["backup"])
+    return names
+
+
 def sweep_cabinet_debris(folder: Path) -> list[str]:
     """Remove orphan app-owned temp/backup files from one Space folder.
 
-    Only ``.wavefinity-cabinet-*.3mf`` regular files directly inside the folder;
-    skipped entirely while any save transaction is active.
+    Only ``.wavefinity-cabinet-local-*.3mf`` regular files directly inside the
+    folder - the local transaction namespace (Fix 096 A7). Hosted recovery
+    backups use a different prefix and can never match; as a second ownership
+    check, any backup name referenced by a live hosted recovery journal is
+    never deleted. Skipped entirely while any save transaction is active.
     """
     folder = Path(folder)
     if not folder.is_dir() or not _TRANSACTION_LOCK.acquire(blocking=False):
         return []
     removed: list[str] = []
     try:
+        protected = _hosted_journal_backup_names(folder)
         for entry in folder.iterdir():
             name = entry.name
-            if (name.startswith(CABINET_DEBRIS_PREFIX) and name.lower().endswith(".3mf")
+            if name in protected:
+                continue
+            if (name.startswith(CABINET_LOCAL_DEBRIS_PREFIX) and name.lower().endswith(".3mf")
                     and entry.is_file() and not entry.is_symlink()):
                 try:
                     entry.unlink()
@@ -255,7 +294,7 @@ def _materialize(space, folder, printer_profile, previous_manifest, commit) -> d
     committed = False
     try:
         for component, item, fit in zip(plan.components, dry["components"], fits):
-            fd, name = tempfile.mkstemp(prefix=CABINET_DEBRIS_PREFIX, suffix=".3mf", dir=folder)
+            fd, name = tempfile.mkstemp(prefix=CABINET_LOCAL_DEBRIS_PREFIX, suffix=".3mf", dir=folder)
             os.close(fd)
             temp = Path(name)
             temporary[item["filename"]] = temp
@@ -272,7 +311,7 @@ def _materialize(space, folder, printer_profile, previous_manifest, commit) -> d
         for name in desired:
             final = _safe_path(folder, name)
             if final.exists():
-                fd, backup_name = tempfile.mkstemp(prefix=CABINET_DEBRIS_PREFIX + "backup-", suffix=".3mf", dir=folder)
+                fd, backup_name = tempfile.mkstemp(prefix=CABINET_LOCAL_DEBRIS_PREFIX + "backup-", suffix=".3mf", dir=folder)
                 os.close(fd)
                 backup = Path(backup_name)
                 backup.unlink()

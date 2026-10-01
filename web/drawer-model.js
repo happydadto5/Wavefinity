@@ -714,14 +714,30 @@ DL.requireSpaceContext = context => {
 };
 
 DL.inventoryCall = async (path, payload = {}, options = {}) => {
-  const { context = DL.spaceContext(), ...requestOptions } = options;
+  const {
+    context = DL.spaceContext(),
+    sideEffect = false,
+    onStillFinishing = null,
+    ...requestOptions
+  } = options;
   if (state.relocating && !/(load|read|list|get|inspect)/.test(path)) {
     throw new Error("Wavefinity is changing its folder. Try again in a moment.");
   }
   DL.requireSpaceContext(context);
+  // Fix 096 A5: apiSideEffect is the ONE browser owner of operation ids.
+  // DL.inventoryCall never mints an id itself. A retry of the same logical
+  // action therefore reuses apiSideEffect's fingerprinted id until terminal.
   const data = state.runtime.hosted
-    ? await SP.inventoryRequest(path, payload, { ...requestOptions, context })
-    : await api(path, { output: DL.output ?? DL.folder(), ...payload });
+    ? await SP.inventoryRequest(path, payload, {
+        ...requestOptions, context, sideEffect, onStillFinishing,
+      })
+    : sideEffect
+      ? await apiSideEffect(
+          path,
+          { output: DL.output ?? DL.folder(), ...payload },
+          { onStillFinishing },
+        )
+      : await api(path, { output: DL.output ?? DL.folder(), ...payload });
   DL.requireSpaceContext(context);
   return data;
 };
@@ -870,7 +886,7 @@ DL._runSaveChain = async () => {
     const context = DL.spaceContext();
     const cabinetEpoch = DL.cabinetMutationEpoch;
     try {
-      const data = await DL.inventoryCall("/api/drawer/save", { layout: DL.layout }, { context });
+      const data = await DL.inventoryCall("/api/drawer/save", { layout: DL.layout }, { context, sideEffect: true });
       if (cabinetEpoch !== DL.cabinetMutationEpoch) { ok = false; continue; }
       DL.adopt(data);
       DL.exists = true;
@@ -929,7 +945,7 @@ DL.editBins = async (changes, {
       Object.keys(update).every(key => key === "id" || key === "object_height_mm"));
   try {
     DL.requireSpaceContext(context);
-    const data = await DL.inventoryCall("/api/drawer/save", payload, { context });
+    const data = await DL.inventoryCall("/api/drawer/save", payload, { context, sideEffect: true });
     DL.adopt(data);
     if (data.cleanup_failed?.length) {
       toast(`Bin deleted from Inventory, but ${data.cleanup_failed.length} generated file${data.cleanup_failed.length === 1 ? "" : "s"} could not be removed from the folder.`, true, 8000);
@@ -979,7 +995,7 @@ DL.setBinPrinted = async (one, printed) => {
       }
       const data = await DL.inventoryCall("/api/drawer/design-source/status", {
         row_id: one.id, action,
-      }, { context });
+      }, { context, sideEffect: true });
       DL.adopt(data);
       DL.emit();
       DL.requestReport();
@@ -1083,7 +1099,7 @@ DL.createSelectedFillBins = () => DL.busyWith("fill", async context => {
   const before = DL.snapshot();
   const result = await DL.inventoryCall("/api/drawer/surface-fill/create", {
     signature: DL.fillSignature, selected: [...DL.fillSelected],
-  }, { context });
+  }, { context, sideEffect: true });
   DL.adopt(result);
   DL.normaliseLayout(result.layout);
   if (DL.snapshot() !== before) { DL.history.push(before); DL.future = []; }
@@ -1170,7 +1186,7 @@ DL.removeSpacerCandidate = id => {
 DL.savePlannedSpacers = async context => {
   if (!DL.spacerPlan) return;
   const before = DL.snapshot();
-  const result = await api("/api/drawer/spacers/generate", {
+  const result = await apiSideEffect("/api/drawer/spacers/generate", {
     output: DL.output ?? DL.folder(), layout: DL.layout,
     drawer_id: DL.layout.active, selected: Array.from(DL.spacerSelected),
     options: DL.layout.settings.spacers,
@@ -1381,7 +1397,7 @@ DL.promoteSpacerCopies = (group, requestedCount, layout = DL.layout) => {
 // never increase the logical quantity in the drawer.
 DL.printSelectedSpacers = (selection) => DL.busyWith("print", async context => {
   if (Object.keys(selection).length === 0) return;
-  const result = await api("/api/drawer/print-spacers", {
+  const result = await apiSideEffect("/api/drawer/print-spacers", {
     output: DL.output ?? DL.folder(),
     selection: selection,
     slicer_path: state.slicer?.path || null,
@@ -1439,7 +1455,7 @@ DL.removeSpacers = () => DL.change(() => {
 // saving spacers, not a separate Space setting.
 DL.saveConnectorFiles = async (context = DL.spaceContext()) => {
   DL.requireSpaceContext(context);
-  const result = await api("/api/drawer/connectors", {
+  const result = await apiSideEffect("/api/drawer/connectors", {
     output: DL.output ?? DL.folder(), layout: DL.layout, bins: DL.bins, drawer_id: DL.layout.active,
   });
   DL.requireSpaceContext(context);
@@ -1488,7 +1504,7 @@ DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", as
     result = await DL.inventoryCall("/api/drawer/save-bins", {
       selection: chosen,
       include_connectors: Boolean(includeConnectors),
-    }, { context });
+    }, { context, sideEffect: true });
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) throw error;
     toast("Files were saved for the Space you left. The current Space was not changed.");
@@ -1534,7 +1550,7 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
       selection: chosen,
       include_connectors: Boolean(includeConnectors),
       slicer_path: state.slicer?.path || null,
-    }, { context });
+    }, { context, sideEffect: true });
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) throw error;
     toast("Bambu Studio opened for the Space you left. The current Space was not changed.");
@@ -1564,7 +1580,7 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
 });
 
 DL.printDrawer = () => DL.busyWith("print", async context => {
-  const result = await api("/api/drawer/print", {
+  const result = await apiSideEffect("/api/drawer/print", {
     output: DL.output ?? DL.folder(), layout: DL.layout, bins: DL.bins,
     drawer_id: DL.layout.active, slicer_path: state.slicer?.path || null,
   });

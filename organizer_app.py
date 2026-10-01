@@ -7,9 +7,12 @@ from dataclasses import replace
 from datetime import datetime
 import json
 import math
+import os
 from pathlib import Path
 import re
+import shutil
 import sys
+import tempfile
 from typing import Iterable
 
 import numpy as np
@@ -2011,6 +2014,184 @@ def _b4b_log_note(summary: dict) -> str:
     return ", ".join(bits)
 
 
+# The exact app-owned namespace for staged ordinary-bin output files and
+# promotion backups. Staged files live in a BIN_STAGE_PREFIX* directory inside
+# the output folder; backups of replaced finals use BIN_BACKUP_PREFIX* names.
+# The transaction machinery below only ever removes names in these two
+# namespaces, plus the finals it just installed - unrelated user files are
+# never deleted.
+BIN_STAGE_PREFIX = ".wavefinity-bin-stage-"
+BIN_BACKUP_PREFIX = ".wavefinity-bin-backup-"
+
+
+def _validate_staged_file(path: Path) -> None:
+    """A staged candidate is only promotable as a real, non-empty 3MF file."""
+    if path.suffix.lower() != ".3mf" or not path.is_file():
+        raise RuntimeError(f"a generated file was not saved: {path.name}")
+    if path.stat().st_size == 0:
+        raise RuntimeError(f"a generated file is empty: {path.name}")
+
+
+def _promote_staged_set(output_dir: Path, staged: list[Path], *, auto_timestamp: bool,
+                        part_name: str) -> list[Path]:
+    """Promote a complete staged file set over the final names.
+
+    Every staged file is validated BEFORE any final is replaced. A final that
+    already exists is moved to an app-owned backup name first; if any promotion
+    step then fails, installed files are removed and every backup is put back,
+    leaving the folder exactly as it was. Only staged files, their backups,
+    and the finals this call installed are ever touched.
+    Returns the final paths in staged order.
+    """
+    output_dir = Path(output_dir)
+    for path in staged:
+        _validate_staged_file(path)
+    # auto_timestamp naming is decided against the real output directory here,
+    # exactly where _resolve_file inside generate_organizer_files would have
+    # decided it during a direct generation.
+    finals: list[Path] = []
+    seen: set[str] = set()
+    for path in staged:
+        final = output_dir / path.name
+        if auto_timestamp:
+            has_name = bool(clean_label(part_name))
+            if not has_name or final.exists() or final.name in seen:
+                stamp = datetime.now().strftime("%m%d%y%H%M%S")
+                final = output_dir / f"{final.stem} {stamp}{final.suffix}"
+        if final.name in seen:
+            raise RuntimeError(f"generated filenames collide: {final.name}")
+        seen.add(final.name)
+        finals.append(final)
+    backups: dict[str, Path] = {}
+    installed: list[Path] = []
+    try:
+        for staged_path, final in zip(staged, finals):
+            if final.exists():
+                if not final.is_file():
+                    raise RuntimeError(f"cannot replace {final.name}: not a regular file")
+                backup = output_dir / f"{BIN_BACKUP_PREFIX}{final.name}"
+                if backup.exists():
+                    backup.unlink()
+                os.replace(final, backup)
+                backups[final.name] = backup
+            os.replace(staged_path, final)
+            installed.append(final)
+    except Exception:
+        for final in reversed(installed):
+            if final.exists():
+                final.unlink()
+        for name, backup in list(backups.items()):
+            if backup.exists():
+                os.replace(backup, output_dir / name)
+            del backups[name]
+        raise
+    for backup in backups.values():
+        if backup.exists():
+            backup.unlink()
+    return finals
+
+
+def _rewrite_staged_paths(node, mapping: dict[str, str]):
+    """Rewrite staging-dir paths to their promoted finals inside a result value."""
+    if isinstance(node, dict):
+        return {key: _rewrite_staged_paths(value, mapping) for key, value in node.items()}
+    if isinstance(node, (list, tuple)):
+        return [_rewrite_staged_paths(value, mapping) for value in node]
+    if isinstance(node, Path):
+        hit = mapping.get(str(node))
+        return Path(hit) if hit is not None else node
+    if isinstance(node, str):
+        return mapping.get(node, node)
+    return node
+
+
+def generate_organizer_files_transactional(
+    box,
+    layout,
+    output_dir: Path,
+    label: str = "",
+    part_name: str = "",
+    label_location: str = "bottom",
+    scoop: bool = False,
+    auto_timestamp: bool = False,
+    keep_log: bool = False,
+) -> dict[str, object]:
+    """Build one ordinary-bin output set as a single install unit.
+
+    The whole set (body, insert/cartridge, separate Edge Mount label, pegboard
+    adapters, lid) is generated into an app-owned staging directory, validated
+    as complete, then promoted over the final names. A build failure leaves the
+    output folder untouched; a promotion failure rolls the folder back to
+    exactly its prior files. Returns the same result shape as
+    generate_organizer_files with every path rewritten to its final location.
+
+    B4B keeps its existing direct path (out of scope for M09). When keep_log
+    is true, the inventory row is recorded only AFTER the complete set
+    promoted - a row is never recorded for a partial set.
+    """
+    if box.b4b.enabled:
+        return generate_organizer_files(
+            box, layout, output_dir, label, part_name, label_location, scoop,
+            auto_timestamp=auto_timestamp, keep_log=keep_log,
+        )
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    # Canonicalize once here. The inner call re-runs _canonical_rim_label on
+    # these already-canonical values, which is a no-op, so generation and the
+    # logging below see identical values.
+    canon_layout, canon_label, canon_location = _canonical_rim_label(
+        box, layout, label, label_location)
+    staging = Path(tempfile.mkdtemp(prefix=BIN_STAGE_PREFIX, dir=output_dir))
+    try:
+        result = generate_organizer_files(
+            box, canon_layout, staging, canon_label, part_name, canon_location, scoop,
+            auto_timestamp=False, keep_log=False,
+        )
+        staged = sorted(
+            (one for one in staging.iterdir() if one.is_file() and one.suffix.lower() == ".3mf"),
+            key=lambda one: one.name,
+        )
+        if not staged:
+            raise RuntimeError("generating its files did not produce any")
+        finals = _promote_staged_set(
+            output_dir, staged, auto_timestamp=auto_timestamp, part_name=part_name)
+        mapping: dict[str, str] = {}
+        for staged_path, final in zip(staged, finals):
+            mapping[str(staged_path.resolve())] = str(final.resolve())
+            mapping[str(staged_path)] = str(final)
+        result = _rewrite_staged_paths(result, mapping)
+        if keep_log:
+            # Same inventory block generate_organizer_files runs, but against
+            # the promoted final paths, so the recorded row points at the
+            # files that are actually installed.
+            out_files: list[Path] = []
+            if "box" in result and isinstance(result["box"], dict) and "output" in result["box"]:
+                out_files.append(Path(str(result["box"]["output"])))
+            if "insert" in result and isinstance(result["insert"], dict) and "output" in result["insert"]:
+                out_files.append(Path(str(result["insert"]["output"])))
+            if "lid" in result and isinstance(result["lid"], dict) and "output" in result["lid"]:
+                out_files.append(Path(str(result["lid"]["output"])))
+            if "edge_mount_label" in result and isinstance(result["edge_mount_label"], dict) and "output" in result["edge_mount_label"]:
+                out_files.append(Path(str(result["edge_mount_label"]["output"])))
+            if "pegboard_adapters" in result and isinstance(result["pegboard_adapters"], dict) and "output" in result["pegboard_adapters"]:
+                out_files.append(Path(str(result["pegboard_adapters"]["output"])))
+            log_file = log_bin_to_folder(
+                output_dir,
+                box,
+                canon_layout,
+                generated_files=out_files,
+                label=canon_label,
+                part_name=part_name,
+                scoop=scoop,
+                # The editable design is the request, never the shortened effective body.
+                design_spec=design_to_dict(box, canon_layout, canon_label, part_name, canon_location, scoop),
+            )
+            result["log_file"] = str(log_file)
+        return result
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
 def generate_organizer_files(
     box: BoxSpec,
     layout: Layout,
@@ -2666,7 +2847,10 @@ def run_command(args: argparse.Namespace) -> dict[str, object]:
             )
             part = part or part_name_seed(label)
             label = ""
-        return generate_organizer_files(
+        # Fix 096 A1: CLI generation installs as one transactional unit too -
+        # staged, validated, then promoted; a build failure leaves the output
+        # folder untouched.
+        return generate_organizer_files_transactional(
             box,
             layout,
             args.output_dir,

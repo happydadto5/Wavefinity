@@ -79,7 +79,7 @@ class InventoryFileTests(unittest.TestCase):
 
             layout = _layout(200, 120, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
             save_inventory(folder, layout=layout, bin_updates=[{"id": "B1", "qty": 2}])
-            append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts")
+            append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts", design_spec={})
             text = inventory_path(folder).read_text(encoding="utf-8")
             self.assertIn("| ID | Date | Kind | Name |", text)
             self.assertTrue(inventory_path(folder).with_name("Wavefinity bins.md.bak").is_file())
@@ -106,7 +106,7 @@ class InventoryFileTests(unittest.TestCase):
             self.assertEqual(made["recent"][0]["name"], "Screw box")
             drawer = load_inventory(folder)["layout"]["drawers"][0]
             self.assertEqual((drawer["name"], drawer["width"], drawer["depth"], drawer["height"]), ("Screw box", 96.0, 48.0, 40.0))
-            append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20)
+            append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, design_spec={})
             self.assertTrue(inventory_path(folder).read_text(encoding="utf-8").startswith("# Screw box Bins"))
             with self.assertRaises(ValueError):
                 configure_space(folder, raw_def={"name": "Again", "kind": "drawer", "x": 1, "y": 1, "z": 1})
@@ -265,7 +265,7 @@ class SpacerTests(unittest.TestCase):
     def test_generated_edge_spacers_join_the_inventory_and_the_drawer(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Shop"
-            append_bin(folder, file="Box 16 x 16 x 40.3mf", x=16, y=16, z=40)
+            append_bin(folder, file="Box 16 x 16 x 40.3mf", x=16, y=16, z=40, design_spec={})
             layout = _layout(2 * 8 + 1 + 4.0, 2 * 8 + 1, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
             routes = drawer_routes(threading.RLock(), folder)
             planned = routes["/api/drawer/spacers"]({
@@ -370,7 +370,7 @@ class DesignSourceTests(unittest.TestCase):
         return {"kind": "bin", "name": name, "x": 16.0, "y": 16.0, "z": 20.0, "stack": "none", **extra}
 
     def test_old_inventory_without_specs_still_loads(self):
-        append_bin(self.folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts")
+        append_bin(self.folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts", design_spec={})
         loaded = load_inventory(self.folder)
         self.assertEqual(loaded["layout"], None)
         from organizer_inventory import design_specs
@@ -684,7 +684,7 @@ class BulkPrintTests(unittest.TestCase):
     def add(self, name, files, qty=None, **extra):
         for one in files.split(", "):
             (self.folder / one).write_bytes(b"3mf")
-        append_bin(self.folder, file=files, x=16, y=16, z=20, name=name, qty=qty, **extra)
+        append_bin(self.folder, file=files, x=16, y=16, z=20, name=name, qty=qty, design_spec={}, **extra)
 
     def launch(self, slicer, files):
         self.launched.append(list(files))
@@ -704,8 +704,8 @@ class BulkPrintTests(unittest.TestCase):
         self.add("A", "A.3mf")
         save_inventory(self.folder, layout={
             **_layout(200, 120), "settings": {"new_bins_printed": True}})
-        append_bin(self.folder, file="B.3mf", x=16, y=16, z=20, name="B")
-        append_bin(self.folder, file="C.3mf", x=16, y=16, z=20, name="C", qty=1)
+        append_bin(self.folder, file="B.3mf", x=16, y=16, z=20, name="B", design_spec={})
+        append_bin(self.folder, file="C.3mf", x=16, y=16, z=20, name="C", qty=1, design_spec={})
         qty = {b["name"]: b["qty"] for b in load_inventory(self.folder)["bins"]}
         self.assertEqual(qty, {"A": 0, "B": 0, "C": 1})
 

@@ -1167,6 +1167,23 @@ def space_routes(
             "recent": recent(prefs),
         }
 
+    def remember_or_warn(target: Path, action: str) -> dict[str, Any]:
+        """Fix 096 A3: a failed remember() is a different failure class from a
+        failed Space write. The Space files committed successfully, so the
+        valid Space is preserved and the failure is reported truthfully -
+        never as a failed create/update, and never by rolling back valid
+        Space files merely because the convenience pointer failed."""
+        try:
+            remember(target)
+        except Exception:
+            result = reply(target)
+            result["remember_warning"] = (
+                f"The Space was {action}, but it could not be remembered as "
+                "the current Space. Open it again from the Space list."
+            )
+            return result
+        return reply(target)
+
     def remember_prepared(target: Path, info: dict[str, Any]) -> None:
         """Advance the profile last: only after folder maintenance succeeded."""
         stamp = _utc_now()
@@ -1332,17 +1349,42 @@ def space_routes(
 
             # A preference/registry write failure must not delete an already-valid
             # Space folder; the folder remains authoritative and recoverable.
-            remember(target)
-            return reply(target)
+            # Fix 096 A3: report it truthfully, never as a failed create.
+            return remember_or_warn(target, "created")
 
         # Explicit-output callers keep the current create behavior.
         target = folder(payload)
         target.mkdir(parents=True, exist_ok=True)
-        result = configure_space(target, raw_def=raw_def, mode="create")
-        space = result["layout"]["space"]
-        _write_metadata(target, "space", space, keep_bin_defaults=True)
-        remember(target)
-        return reply(target)
+        # Fix 096 A3: the Inventory layout.space write and the metadata write
+        # are one logical commit - snapshot the prior Inventory so a metadata
+        # failure restores it (a brand-new folder is cleaned up instead),
+        # never leaving a half-applied new Space behind a reported failure.
+        with INVENTORY_LOCK:
+            inventory_path = resolve_inventory_path(target, migrate=True)
+            prior_inventory = inventory_path.read_bytes() if inventory_path.is_file() else None
+            try:
+                result = configure_space(target, raw_def=raw_def, mode="create")
+                space = result["layout"]["space"]
+                _write_metadata(target, "space", space, keep_bin_defaults=True)
+            except Exception:
+                if prior_inventory is not None:
+                    try:
+                        inventory_path.write_bytes(prior_inventory)
+                    except OSError as restore_error:
+                        # Fix 096 A3: a failed restore is a partial commit, not
+                        # a clean failure - say so explicitly instead of
+                        # reporting the original error while the new Inventory
+                        # may still be durable.
+                        raise RuntimeError(
+                            "The Space could not be created, and the previous "
+                            "Inventory could not be restored either. The "
+                            "Inventory may have changed - reopen the Space and "
+                            "check it before continuing."
+                        ) from restore_error
+                else:
+                    _cleanup_failed_auto_space(target)
+                raise
+        return remember_or_warn(target, "created")
 
     def configure_migrate(payload):
         # The user's explicit Configure Existing / migration choice for an
@@ -1371,16 +1413,38 @@ def space_routes(
             if key in payload:
                 raw_def[key] = payload[key]
 
-        result = configure_space(target, raw_def=raw_def, mode="update", allow_legacy=True)
-        space = result["layout"]["space"]
-        # This route owns the new Space definition (just written above by
-        # configure_space), but not keep_bin_defaults/bin_defaults/
-        # part_defaults - leaving those _UNSET lets _write_metadata() read
-        # the newest under-lock value instead of writing back this
-        # possibly-stale pre-lock copy (Fix 032 Correction 4, C4.1).
-        _write_metadata(target, "space", space, inventory)
-        remember(target)
-        return reply(target)
+        # Fix 096 A3: the Inventory layout.space write and the metadata write
+        # are one logical commit - snapshot the prior Inventory so a metadata
+        # failure restores it instead of leaving a half-applied migration.
+        with INVENTORY_LOCK:
+            inventory_path = resolve_inventory_path(target, migrate=True)
+            prior_inventory = inventory_path.read_bytes() if inventory_path.is_file() else None
+            try:
+                result = configure_space(target, raw_def=raw_def, mode="update", allow_legacy=True)
+                space = result["layout"]["space"]
+                # This route owns the new Space definition (just written above by
+                # configure_space), but not keep_bin_defaults/bin_defaults/
+                # part_defaults - leaving those _UNSET lets _write_metadata() read
+                # the newest under-lock value instead of writing back this
+                # possibly-stale pre-lock copy (Fix 032 Correction 4, C4.1).
+                _write_metadata(target, "space", space, inventory)
+            except Exception:
+                if prior_inventory is not None:
+                    try:
+                        inventory_path.write_bytes(prior_inventory)
+                    except OSError as restore_error:
+                        # Fix 096 A3: a failed restore is a partial commit, not
+                        # a clean failure - say so explicitly instead of
+                        # reporting the original error while the new Inventory
+                        # may still be durable.
+                        raise RuntimeError(
+                            "The Space could not be updated, and the previous "
+                            "Inventory could not be restored either. The "
+                            "Inventory may have changed - reopen the Space and "
+                            "check it before continuing."
+                        ) from restore_error
+                raise
+        return remember_or_warn(target, "updated")
 
     def update(payload):
         target = folder(payload)
@@ -1401,14 +1465,15 @@ def space_routes(
             if key in payload:
                 raw_def[key] = payload[key]
 
-        # Fix 095: a Surface edit is validated before either write (inside
+        # Fix 095/096 A3: an edit is validated before either write (inside
         # configure_space) and never left half applied: if the metadata write
-        # fails after the Inventory was replaced, the prior Inventory is put back.
+        # fails after the Inventory was replaced, the prior Inventory is put
+        # back. Applies to every Space kind, not just Surface.
         with INVENTORY_LOCK:
             inventory_path = resolve_inventory_path(target, migrate=True)
             prior_inventory = (
                 inventory_path.read_bytes()
-                if existing_space["kind"] == "surface" and inventory_path.is_file() else None
+                if inventory_path.is_file() else None
             )
             result = configure_space(target, raw_def=raw_def, mode="update")
             space = result["layout"]["space"]
@@ -1422,11 +1487,19 @@ def space_routes(
                 if prior_inventory is not None:
                     try:
                         inventory_path.write_bytes(prior_inventory)
-                    except OSError:
-                        pass
+                    except OSError as restore_error:
+                        # Fix 096 A3: a failed restore is a partial commit, not
+                        # a clean failure - say so explicitly instead of
+                        # reporting the original error while the new Inventory
+                        # may still be durable.
+                        raise RuntimeError(
+                            "The Space could not be updated, and the previous "
+                            "Inventory could not be restored either. The "
+                            "Inventory may have changed - reopen the Space and "
+                            "check it before continuing."
+                        ) from restore_error
                 raise
-        remember(target)
-        return reply(target)
+        return remember_or_warn(target, "updated")
 
     def set_inventory(payload):
         target = folder(payload)
