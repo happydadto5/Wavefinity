@@ -8,7 +8,8 @@
 // server by id, so a bin generated while this view is open is never lost.
 //
 // A placement is on the grid (gx/gy in 8 mm units, halves allowed on a 4 mm
-// drawer), stacked (`on` names the placement below), or a free edge-facing
+// drawer), stacked (`on` names the one placement it stands on; `ox`/`oy` are its
+// whole-unit offset from that placement's front-left corner, 0 when missing), or a free edge-facing
 // spacer (x/y/w/d mm). One ordinary Inventory row is one placement identity: it
 // is placed at most once, and a row with no placement is *unplaced* (it shows
 // in the staging rail). Only spacers, being repeated filler parts, may be
@@ -170,9 +171,22 @@ DL.normaliseLayout = raw => {
     // along snap to the nearest whole unit (the report flags any overlap that
     // makes). Legacy axis, anchor and clearance settings are no longer
     // choices, so they are put back to the canonical rules.
-    if (Number(one.snap) === 4) one.placements.filter(DL.onGrid).forEach(p => {
-      p.gx = Math.round(p.gx);
-      p.gy = Math.round(p.gy);
+    if (Number(one.snap) === 4) one.placements.forEach(p => {
+      if (DL.onGrid(p)) { p.gx = Math.round(p.gx); p.gy = Math.round(p.gy); }
+      else if (p.on !== undefined) {
+        if (p.ox !== undefined) p.ox = Math.round(DL.offsetOf(p.ox));
+        if (p.oy !== undefined) p.oy = Math.round(DL.offsetOf(p.oy));
+      }
+    });
+    // A stacked placement's offsets are whole units from its parent; missing
+    // means 0 and is left alone, a malformed one reads as 0 so the layout
+    // still opens and the report can speak about it.
+    one.placements.forEach(p => {
+      if (p.on === undefined) return;
+      for (const field of ["ox", "oy"]) {
+        if (p[field] !== undefined && !Number.isFinite(Number(p[field]))) p[field] = 0;
+        else if (p[field] !== undefined) p[field] = Number(p[field]);
+      }
     });
     Object.assign(one, DL.canonicalLayoutRules(one.boundary));
   });
@@ -399,109 +413,187 @@ DL.stackRefusal = (upper, lower) => {
   if (!DL.stackable(upper)) return `${DL.label(upper)} was not printed to stack.`;
   if (!DL.stackable(lower)) return `${DL.label(lower)} was not printed to stack.`;
   if (upper.stack !== lower.stack) return `A ${DL.stackName(upper.stack).toLowerCase()} bin cannot snap onto a ${DL.stackName(lower.stack).toLowerCase()} bin.`;
-  const sizeMatch = Math.abs(upper.x - lower.x) < 0.05 && Math.abs(upper.y - lower.y) < 0.05;
-  if (!sizeMatch) {
-    if (upper.stack !== "lid" || lower.stack !== "lid") return "Direct stacking requires bins with the same footprint.";
-  }
+  const sameFootprint = Math.abs(upper.x - lower.x) < 0.05 && Math.abs(upper.y - lower.y) < 0.05;
+  // Only a lid can carry a different footprint. Whether the upper bin actually
+  // fits on the lid (inside it, clear of its siblings) is decided where the
+  // placement offset is known.
+  if (!sameFootprint && upper.stack === "direct") return "Direct stacking requires bins with the same footprint.";
+  if (!sameFootprint && upper.stack === "b4b") return "Storage Box stacking requires bins with the same footprint.";
   const upperWall = DL.stackWall(upper), lowerWall = DL.stackWall(lower);
   if (upperWall === null || lowerWall === null) return "Stacking wall thickness is unknown. Save both bin designs before stacking.";
-  if (Math.abs(upperWall - lowerWall) >= 0.05) return "Bins need compatible stacking wall thickness.";
+  if (Math.abs(upperWall - lowerWall) >= 0.05) return sameFootprint
+    ? "Bins need the same footprint and compatible stacking wall thickness."
+    : "Bins need compatible stacking wall thickness.";
   return "";
 };
 
-// The drawer's grid placements as stacks, bottom first.
-DL.chains = (drawer = DL.drawer()) => {
-  const placed = drawer.placements.filter(p => DL.bin(p.bin));
-  const above = new Map();
-  placed.forEach(p => { if (p.on !== undefined && !above.has(p.on)) above.set(p.on, p); });
-  return placed.filter(DL.onGrid).map(base => {
-    const chain = [base];
-    const seen = new Set([DL.key(base)]);
-    while (above.has(DL.key(chain[chain.length - 1]))) {
-      const next = above.get(DL.key(chain[chain.length - 1]));
-      if (seen.has(DL.key(next))) break;
-      seen.add(DL.key(next));
-      chain.push(next);
-    }
-    return chain;
-  });
-};
+// ------------------------------------------------------------------ support tree
+//
+// Grid placements form a rooted support tree. A root stands on the floor at its
+// own gx/gy. Every other placement names exactly one parent in `on` and sits at
+// (ox, oy) - whole Wavefinity units from the parent's front-left nominal corner
+// (a missing offset is 0, which is what older same-footprint stacks carry).
+// One parent may carry several children; a child seats on its direct parent,
+// never on a sibling. Everything that needs parent/child, offset or height math
+// (items, fit checks, drag, report parity with organizer_drawer.py) reads it
+// from this one traversal.
 
+// A saved offset as a finite number of units; anything else reads as 0.
+DL.offsetOf = value => Number.isFinite(Number(value)) ? Number(value) : 0;
 
-// Tree-based placement model: support multiple children per parent with offsets
-DL._buildPlacementTree = (drawer = DL.drawer()) => {
-  const placed = drawer.placements.filter(p => DL.bin(p.bin));
-  const placements = new Map();
-  const children = new Map(); // parentKey -> [child placements]
-  const roots = [];
-  
-  placed.forEach(p => {
+DL.supportTree = (drawer = DL.drawer()) => {
+  const nodes = new Map();
+  for (const p of drawer.placements) {
+    const one = DL.bin(p.bin);
     const key = DL.key(p);
-    placements.set(key, p);
-    if (!p.on || p.on === undefined) {
-      if (DL.onGrid(p)) roots.push(p);
-    } else {
-      if (!children.has(p.on)) children.set(p.on, []);
-      children.get(p.on).push(p);
-    }
-  });
-  
-  return { placements, children, roots, allPlaced: placed };
-};
-
-DL._absoluteOriginForPlacement = (p, tree, drawer) => {
-  if (!p.on || p.on === undefined) return { x: p.gx, y: p.gy };
-  const parent = tree.placements.get(p.on);
-  if (!parent) return { x: NaN, y: NaN };
-  const parentOrigin = DL._absoluteOriginForPlacement(parent, tree, drawer);
-  const px = p.ox ?? 0;
-  const py = p.oy ?? 0;
-  return { x: parentOrigin.x + px * 8, y: parentOrigin.y + py * 8 };
-};
-
-DL._getPlacementSubtree = (key, tree) => {
-  const result = [tree.placements.get(key)].filter(p => p);
-  const seen = new Set([key]);
-  const queue = [key];
-  while (queue.length) {
-    const parentKey = queue.shift();
-    const children = tree.children.get(parentKey) || [];
-    children.forEach(child => {
-      const ckey = DL.key(child);
-      if (!seen.has(ckey)) {
-        seen.add(ckey);
-        result.push(child);
-        queue.push(ckey);
-      }
-    });
+    if (one && !nodes.has(key)) nodes.set(key, { key, p, bin: one, parent: null, children: [] });
   }
-  return result;
+  const roots = [];
+  for (const node of nodes.values()) {
+    if (node.p.on !== undefined) {
+      const parent = nodes.get(node.p.on);
+      if (parent && parent !== node) { node.parent = parent; parent.children.push(node); }
+    } else if (node.p.gx !== undefined) roots.push(node);
+  }
+  const metrics = DL.usesStackMetrics();
+  const reached = new Set();
+  const settle = node => {
+    reached.add(node.key);
+    const one = node.bin;
+    [node.w, node.d] = DL.cells(one, drawer);
+    if (!node.parent) {
+      node.gx = DL.toCell(node.p.gx, drawer);
+      node.gy = DL.toCell(node.p.gy, drawer);
+      node.z0 = 0;
+      node.depth = 0;
+    } else {
+      const parent = node.parent;
+      node.gx = parent.gx + DL.toCell(DL.offsetOf(node.p.ox), drawer);
+      node.gy = parent.gy + DL.toCell(DL.offsetOf(node.p.oy), drawer);
+      // Seating comes from the direct parent, never from sibling order.
+      node.z0 = metrics ? parent.z0 + DL.pitch(parent.bin)
+        : parent.z1 - (DL.stackSteps[one.stack] ?? 0);
+      node.depth = parent.depth + 1;
+    }
+    node.z1 = node.z0 + DL.partHeight(one);
+    node.order = [node];
+    for (const child of node.children) {
+      if (reached.has(child.key)) continue;
+      settle(child);
+      node.order.push(...child.order);
+    }
+  };
+  roots.forEach(settle);
+  // Stacked on nothing, or in a loop with no floor root: not reachable.
+  const floating = [...nodes.values()].filter(node => !reached.has(node.key) && node.p.on !== undefined);
+  return { nodes, roots, floating };
 };
 
-DL.stackOf = (key, drawer = DL.drawer()) => DL.chains(drawer).find(chain => chain.some(p => DL.key(p) === key)) || null;
+// A placement's subtree keys: the placement plus every descendant, parent
+// before descendants. Reads placements only, no geometry.
+DL.subtreeKeys = (key, drawer = DL.drawer()) => {
+  const below = new Map();
+  for (const p of drawer.placements) {
+    if (p.on === undefined) continue;
+    if (!below.has(p.on)) below.set(p.on, []);
+    below.get(p.on).push(DL.key(p));
+  }
+  const order = [key];
+  const seen = new Set(order);
+  for (let index = 0; index < order.length; index += 1) {
+    for (const child of below.get(order[index]) || []) {
+      if (!seen.has(child)) { seen.add(child); order.push(child); }
+    }
+  }
+  return order;
+};
 
-// One footprint: a single bin or a stack, with each layer's height band.
-DL.items = (drawer = DL.drawer()) => DL.chains(drawer).map(chain => {
-  const bins = chain.map(p => DL.bin(p.bin));
-  const [w, d] = DL.cells(bins[0], drawer);
-  let top = 0;
-  let previousBottom = 0;
-  const layers = chain.map((p, index) => {
-    const one = bins[index];
-    const bottom = index ? (DL.usesStackMetrics()
-      ? previousBottom + DL.pitch(bins[index - 1])
-      : top - (DL.stackSteps[one.stack] ?? 0)) : 0;
-    top = bottom + DL.partHeight(one);
-    previousBottom = bottom;
-    return { p, bin: one, key: DL.key(p), z0: bottom, z1: top };
-  });
+// One footprint: a single bin or a support tree, with each layer's height band
+// and its own absolute footprint. `layers` is the flattened tree, parent before
+// descendants.
+DL.items = (drawer = DL.drawer()) => DL.supportTree(drawer).roots.map(root => {
+  const layers = root.order.map(node => ({
+    p: node.p, bin: node.bin, key: node.key, z0: node.z0, z1: node.z1,
+    gx: node.gx, gy: node.gy, w: node.w, d: node.d,
+    parent: node.parent ? node.parent.key : null, depth: node.depth,
+  }));
+  const bins = layers.map(layer => layer.bin);
+  const h = Math.max(...layers.map(layer => layer.z1));
   return {
-    key: DL.key(chain[0]), keys: layers.map(layer => layer.key), chain, bins, layers,
-    gx: DL.toCell(chain[0].gx, drawer), gy: DL.toCell(chain[0].gy, drawer), w, d, h: top,
+    key: root.key, keys: layers.map(layer => layer.key), chain: layers.map(layer => layer.p),
+    bins, layers, gx: root.gx, gy: root.gy, w: root.w, d: root.d, h,
     ex: DL.envelopeExtForBins(bins, drawer),
-    plan_h: DL.isSurface() ? DL.stackPlanningHeight(layers) : top,
+    plan_h: DL.isSurface() ? DL.stackPlanningHeight(layers) : h,
   };
 });
+
+// The footprint (cells) a set of layers really occupies: each layer's own
+// rectangle grown by its own physical envelope, then enclosed.
+DL.layersRect = (layers, drawer = DL.drawer()) => {
+  const rect = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const layer of layers) {
+    const ex = DL.envelopeExt(layer.bin, drawer);
+    rect.x0 = Math.min(rect.x0, layer.gx - ex.l);
+    rect.y0 = Math.min(rect.y0, layer.gy - ex.t);
+    rect.x1 = Math.max(rect.x1, layer.gx + layer.w + ex.r);
+    rect.y1 = Math.max(rect.y1, layer.gy + layer.d + ex.b);
+  }
+  return rect;
+};
+
+// What is being moved or placed, as a subtree with geometry relative to its
+// own root: each node's cell offset (dx, dy), seat heights (rz0, rz1 with the
+// root seated at 0), and footprint. `height` is the subtree's top.
+DL.movingFromLayers = layers => {
+  const base = layers[0];
+  const at = new Map(layers.map((layer, index) => [layer.key, index]));
+  const nodes = layers.map(layer => ({
+    key: layer.key, bin: layer.bin, dx: layer.gx - base.gx, dy: layer.gy - base.gy,
+    rz0: layer.z0 - base.z0, rz1: layer.z1 - base.z0, w: layer.w, d: layer.d,
+    parent: at.has(layer.parent) ? at.get(layer.parent) : -1,
+  }));
+  return {
+    keys: new Set(nodes.map(node => node.key)), bins: nodes.map(node => node.bin), nodes,
+    height: Math.max(...nodes.map(node => node.rz1)),
+  };
+};
+
+// The footprint entry and layer for a placement key.
+DL.layerOf = (key, drawer = DL.drawer()) => {
+  for (const item of DL.items(drawer)) {
+    const layer = item.layers.find(one => one.key === key);
+    if (layer) return { item, layer };
+  }
+  return null;
+};
+
+// The subtree under a saved placement (the placement and everything it carries).
+DL.movingFor = (key, drawer = DL.drawer()) => {
+  for (const item of DL.items(drawer)) {
+    const at = item.layers.findIndex(layer => layer.key === key);
+    if (at < 0) continue;
+    const keep = new Set(DL.subtreeKeys(key, drawer));
+    return DL.movingFromLayers(item.layers.filter(layer => keep.has(layer.key)));
+  }
+  return null;
+};
+
+// One bin that is not placed yet, or any plain list of bins (bottom first,
+// each seated on the one below it, all at the same spot): the older call shape.
+DL.movingForBins = (bins, drawer = DL.drawer()) => {
+  const metrics = DL.usesStackMetrics();
+  let previous = null;
+  const layers = bins.map((one, index) => {
+    const [w, d] = DL.cells(one, drawer);
+    const z0 = !previous ? 0 : metrics ? previous.z0 + DL.pitch(previous.bin)
+      : previous.z1 - (DL.stackSteps[one.stack] ?? 0);
+    previous = { bin: one, z0, z1: z0 + DL.partHeight(one) };
+    return { key: `__new${index}`, bin: one, gx: 0, gy: 0, w, d, z0, z1: previous.z1,
+      parent: index ? `__new${index - 1}` : null };
+  });
+  return DL.movingFromLayers(layers);
+};
+DL.asMoving = (moving, drawer = DL.drawer()) => Array.isArray(moving) ? DL.movingForBins(moving, drawer) : moving;
 
 DL.placedCount = id => DL.layout.drawers.reduce(
   (sum, drawer) => sum + drawer.placements.filter(p => p.bin === id).length, 0);
@@ -589,26 +681,52 @@ DL.findPlacement = key => {
   return null;
 };
 
-// Can these bins (bottom first) stand as a footprint with its front-left cell
-// at (gx, gy)? `ignore` holds keys being moved. Used live while dragging, so
-// it answers in plain words.
-DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set(), { skipHeight = false } = {}) => {
+// Why placement data is not ready yet, or "".
+DL.placementDataBlock = drawer => {
   if (DL.isPegboard(drawer) && DL.pegboardRefreshError) {
-    return { ok: false, reason: "Pegboard placement data is unavailable. Select Space again to retry the refresh." };
+    return "Pegboard placement data is unavailable. Select Space again to retry the refresh.";
   }
   if (!DL.isPegboard(drawer) &&
       DL.bins.some(one => DL.needsMeasuredBoreEnvelope(one)) &&
       !DL.report?.physical_envelopes) {
-    return { ok: false, reason: "Physical placement data is still loading. Try the placement again." };
+    return "Physical placement data is still loading. Try the placement again.";
   }
+  return "";
+};
+
+// The rectangle (cells) a set of {bin, gx, gy, w, d} nodes physically takes.
+DL.nodesRect = (nodes, drawer = DL.drawer()) => DL.layersRect(nodes, drawer);
+
+// Does this rectangle hit any other footprint? `ignore` holds keys that are
+// being moved; `except` is an item key to skip (the footprint being built on).
+DL.rectConflict = (drawer, rect, ignore = new Set(), except = null) => {
+  for (const item of DL.items(drawer)) {
+    if (item.key === except) continue;
+    const remaining = item.layers.filter(layer => !ignore.has(layer.key));
+    if (!remaining.length) continue;
+    const other = DL.layersRect(remaining, drawer);
+    if (rect.x0 < other.x1 && other.x0 < rect.x1 && rect.y0 < other.y1 && other.y0 < rect.y1) {
+      return `That overlaps ${DL.label(remaining[0].bin)}.`;
+    }
+  }
+  return "";
+};
+
+// Can this subtree (a DL.movingFor()/DL.movingForBins() set, or a plain list of
+// bins bottom first) stand on the floor with its root's front-left cell at
+// (gx, gy)? `ignore` holds keys being moved. Used live while dragging, so it
+// answers in plain words.
+DL.fitsAt = (drawer, movingSet, gx, gy, ignore = new Set(), { skipHeight = false } = {}) => {
+  const moving = DL.asMoving(movingSet, drawer);
+  const blocked = DL.placementDataBlock(drawer);
+  if (blocked) return { ok: false, reason: blocked };
   const grid = DL.grid(drawer);
-  const [w, d] = DL.cells(bins[0], drawer);
-  const ex = DL.envelopeExtForBins(bins, drawer);
-  const ax0 = gx - ex.l, ay0 = gy - ex.t, ax1 = gx + w + ex.r, ay1 = gy + d + ex.b;
-  const height = DL.stackHeight(bins);
+  const bins = moving.bins;
+  const rect = DL.nodesRect(moving.nodes.map(node => ({ bin: node.bin, gx: gx + node.dx, gy: gy + node.dy, w: node.w, d: node.d })), drawer);
+  const height = moving.height;
   const cap = DL.heightCap(drawer);
   if (!skipHeight && !DL.isPegboard(drawer) && !DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
-  if (ax0 < 0 || ay0 < 0 || ax1 > grid.cols || ay1 > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the Pegboard." : "That would stick out of the Space." };
+  if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > grid.cols || rect.y1 > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the Pegboard." : "That would stick out of the Space." };
   if (DL.isPegboard(drawer)) {
     const layout = DL.pegboardLayouts[bins[0].id] || bins[0].pegboard_layout;
     if (!layout || layout.error) return { ok: false, reason: layout?.error || "Mount layout is still loading." };
@@ -635,25 +753,39 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set(), { skipHeight = false } = 
       occupied.add(hole);
     }
   }
-  for (const item of DL.items(drawer)) {
-    const remaining = item.layers.filter(layer => !ignore.has(layer.key));
-    if (!remaining.length) continue;
-    const otherEx = DL.envelopeExtForBins(remaining.map(layer => layer.bin), drawer);
-    const bx0 = item.gx - otherEx.l, by0 = item.gy - otherEx.t;
-    const bx1 = item.gx + item.w + otherEx.r, by1 = item.gy + item.d + otherEx.b;
-    if (ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1) {
-      return { ok: false, reason: `That overlaps ${DL.label(item.bins[0])}.` };
-    }
-  }
-  return { ok: true, reason: "" };
+  const conflict = DL.rectConflict(drawer, rect, ignore);
+  return conflict ? { ok: false, reason: conflict } : { ok: true, reason: "" };
 };
 
-// Can these bins snap onto the top of this stack?
-DL.fitsOn = (drawer, bins, target, movingKeys = new Set()) => {
+// Can this subtree seat on `target.layer` (a layer of a DL.items() entry) with
+// its root's front-left cell `target.cx, target.cy` cells in from the support's
+// front-left corner? A smaller lid bin may sit anywhere on a larger lid that it
+// fits inside and that no sibling already covers; partial coverage is normal.
+DL.fitsOn = (drawer, movingSet, target, movingKeys = null) => {
   if (DL.isPegboard(drawer)) return { ok: false, reason: "Pegboard bins mount directly to the board and cannot be stacked here." };
-  const lower = target.bins[target.bins.length - 1];
-  const refusal = DL.stackRefusal(bins[0], lower);
+  const moving = DL.asMoving(movingSet, drawer);
+  const keys = new Set([...moving.keys, ...(movingKeys || [])]);
+  const blocked = DL.placementDataBlock(drawer);
+  if (blocked) return { ok: false, reason: blocked };
+  const { item, layer: support } = target;
+  const lower = support.bin;
+  const root = moving.nodes[0];
+  if (keys.has(support.key)) return { ok: false, reason: "A bin cannot stack on itself or on something stacked on it." };
+  const refusal = DL.stackRefusal(root.bin, lower);
   if (refusal) return { ok: false, reason: refusal };
+  const { cx, cy } = target;
+  if (!Number.isInteger(cx) || !Number.isInteger(cy)) return { ok: false, reason: "Stacked bins sit on the 8 mm grid." };
+  if (cx < 0 || cy < 0 || cx + root.w > support.w || cy + root.d > support.d) {
+    return { ok: false, reason: `${DL.label(root.bin)} would stick out past the edge of ${DL.label(lower)}.` };
+  }
+  const originX = support.gx + cx, originY = support.gy + cy;
+  for (const sibling of item.layers) {
+    if (sibling.parent !== support.key || keys.has(sibling.key)) continue;
+    if (originX < sibling.gx + sibling.w && sibling.gx < originX + root.w &&
+        originY < sibling.gy + sibling.d && sibling.gy < originY + root.d) {
+      return { ok: false, reason: `That overlaps ${DL.label(sibling.bin)}, already stacked there.` };
+    }
+  }
   if (DL.isSurface()) {
     // The upper bin seats at z0 + pitch. A known installed object that reaches past
     // that plane blocks the stack; an unknown one is allowed (the report advises).
@@ -662,13 +794,22 @@ DL.fitsOn = (drawer, bins, target, movingKeys = new Set()) => {
       return { ok: false, reason: `The object in ${DL.label(lower)} reaches above the next stack seating plane.` };
     }
   }
-  const height = DL.isStorageBox()
-    ? target.layers[target.layers.length - 1].z0 + DL.pitch(lower) + DL.stackHeight(bins)
-    : target.h - (DL.stackSteps[bins[0].stack] ?? 0) + DL.stackHeight(bins);
+  const seat = DL.usesStackMetrics() ? support.z0 + DL.pitch(lower)
+    : support.z1 - (DL.stackSteps[root.bin.stack] ?? 0);
+  const height = seat + moving.height;
   const cap = DL.heightCap(drawer);
   if (!DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
-  return DL.fitsAt(drawer, [...target.bins, ...bins], target.gx, target.gy,
-    new Set([...target.keys, ...(movingKeys || [])]), { skipHeight: true });
+  // Physical reach: the footprint this tree would then take, at every node's
+  // real position, must stay inside the Space and clear of every other footprint.
+  const standing = item.layers.filter(one => !keys.has(one.key));
+  const rect = DL.nodesRect([
+    ...standing,
+    ...moving.nodes.map(node => ({ bin: node.bin, gx: originX + node.dx, gy: originY + node.dy, w: node.w, d: node.d })),
+  ], drawer);
+  const grid = DL.grid(drawer);
+  if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > grid.cols || rect.y1 > grid.rows) return { ok: false, reason: "That would stick out of the Space." };
+  const conflict = DL.rectConflict(drawer, rect, keys, item.key);
+  return conflict ? { ok: false, reason: conflict } : { ok: true, reason: "" };
 };
 
 // ------------------------------------------------------------------ changes and undo
@@ -753,13 +894,24 @@ DL.restore = redo => {
 DL.undo = () => DL.restore(false);
 DL.redo = () => DL.restore(true);
 
-// Lift a placement out of wherever it is; whatever stood on it closes the gap.
+// Lift a placement out of wherever it is; whatever stood directly on it closes
+// the gap, keeping its absolute spot: each direct child moves up to the lifted
+// placement's own parent (offsets add), or onto the floor where the lifted root
+// stood. Grandchildren stay on their own parent and need no change.
 DL.detach = (drawer, placement) => {
-  const above = drawer.placements.find(p => p.on === DL.key(placement));
-  if (above) {
-    delete above.on;
-    if (placement.on !== undefined) above.on = placement.on;
-    else Object.assign(above, { gx: placement.gx, gy: placement.gy });
+  const key = DL.key(placement);
+  const hasOffset = placement.ox !== undefined || placement.oy !== undefined;
+  for (const above of drawer.placements.filter(p => p.on === key)) {
+    const ox = DL.offsetOf(placement.ox) + DL.offsetOf(above.ox);
+    const oy = DL.offsetOf(placement.oy) + DL.offsetOf(above.oy);
+    const carriesOffset = hasOffset || above.ox !== undefined || above.oy !== undefined;
+    delete above.on; delete above.ox; delete above.oy;
+    if (placement.on !== undefined) {
+      above.on = placement.on;
+      if (carriesOffset) Object.assign(above, { ox, oy });
+    } else {
+      Object.assign(above, { gx: DL.offsetOf(placement.gx) + ox, gy: DL.offsetOf(placement.gy) + oy });
+    }
   }
 };
 
@@ -1137,8 +1289,10 @@ DL.busyWith = async (what, work) => {
 
 // ------------------------------------------------------------------ actions
 
-// Put one bin at a grid cell, or on top of a stack (`target` is a DL.items()
-// entry). An ordinary row is placed once; a spacer takes its next copy number.
+// Put one bin at a grid cell, or on a support (`target` is
+// { item, layer, cx, cy }: a DL.items() entry, the layer it stands on, and its
+// cell offset from that layer). An ordinary row is placed once; a spacer takes
+// its next copy number.
 DL.placeAt = (one, where) => {
   if (DL.isOrdinary(one) && DL.isPlaced(one.id)) {
     toast(`${DL.label(one)} is already placed in a Space.`, true);
@@ -1146,10 +1300,12 @@ DL.placeAt = (one, where) => {
   }
   const copy = DL.isSpacer(one) ? DL.nextSpacerCopy(one) : 0;
   const drawer = DL.drawer();
-  const fit = where.target ? DL.fitsOn(drawer, [one], where.target) : DL.fitsAt(drawer, [one], where.gx, where.gy);
+  const moving = DL.movingForBins([one], drawer);
+  const fit = where.target ? DL.fitsOn(drawer, moving, where.target) : DL.fitsAt(drawer, moving, where.gx, where.gy);
   if (!fit.ok) { toast(fit.reason, true); return false; }
   const placement = where.target
-    ? { bin: one.id, copy, on: where.target.keys[where.target.keys.length - 1] }
+    ? { bin: one.id, copy, on: where.target.layer.key,
+      ox: DL.toUnits(where.target.cx, drawer), oy: DL.toUnits(where.target.cy, drawer) }
     : { bin: one.id, copy, gx: DL.toUnits(where.gx, drawer), gy: DL.toUnits(where.gy, drawer) };
   DL.change(() => drawer.placements.push(placement));
   DL.selected = DL.key(placement);
@@ -1205,23 +1361,25 @@ DL.createSelectedFillBins = () => DL.busyWith("fill", async context => {
   toast(`${fillCount} fill bin${fillCount === 1 ? "" : "s"} added to Surface.`);
 });
 
-// Move a placement, and everything stacked on it, to a cell or onto a stack.
+// Move a placement, and everything stacked on it, to a cell or onto a support.
+// Descendants keep their own parent and offsets, so they travel with it; its
+// siblings and the bin it stood on are left as they were.
 DL.moveTo = (key, where) => DL.change(() => {
   const found = DL.findPlacement(key);
   if (!found) return;
   const { drawer, placement } = found;
-  // Whatever stood on the moved bin comes with it; the bin it stood on is
-  // left with nothing on top.
-  delete placement.on; delete placement.gx; delete placement.gy;
-  if (where.target) placement.on = where.target.keys[where.target.keys.length - 1];
-  else Object.assign(placement, { gx: DL.toUnits(where.gx, drawer), gy: DL.toUnits(where.gy, drawer) });
+  delete placement.on; delete placement.ox; delete placement.oy; delete placement.gx; delete placement.gy;
+  if (where.target) {
+    Object.assign(placement, { on: where.target.layer.key,
+      ox: DL.toUnits(where.target.cx, drawer), oy: DL.toUnits(where.target.cy, drawer) });
+  } else Object.assign(placement, { gx: DL.toUnits(where.gx, drawer), gy: DL.toUnits(where.gy, drawer) });
 });
 
-// Take a bin and everything stacked on it out of the Space. They are only
-// unplaced: each row stays in Inventory and returns to the staging rail.
+// Take a bin and everything stacked on it out of the Space - that subtree only,
+// never its siblings. They are only unplaced: each row stays in Inventory and
+// returns to the staging rail.
 DL.takeOut = key => {
-  const chain = DL.stackOf(key);
-  const drop = new Set(chain ? chain.slice(chain.findIndex(p => DL.key(p) === key)).map(DL.key) : [key]);
+  const drop = new Set(DL.subtreeKeys(key));
   DL.change(() => {
     const drawer = DL.drawer();
     drawer.placements = drawer.placements.filter(p => !drop.has(DL.key(p)));
@@ -1376,7 +1534,7 @@ DL.refreshSpacers = () => DL.busyWith("spacers", async context => {
   ].join("\n"), false, 9000);
 });
 
-// Spacers are free, edge-facing placements (no gx) - DL.items()/DL.chains()
+// Spacers are free, edge-facing placements (no gx) - DL.items()/DL.supportTree()
 // only cover the grid, so groups are built straight from the active
 // drawer's placements instead. Two inventory rows can share identical
 // geometry (same file/size) - a group carries every member row, not just

@@ -264,59 +264,52 @@ DV.fitText = (ctx, text, maxWidth) => {
 
 // ------------------------------------------------------------------ scene
 
-// Layers (bottom first) for bins standing on a stack or on the floor.
-DV.layersFor = (bins, keys, start) => {
-  // Storage Box and Surface advance from the prior layer's seating datum by its
-  // canonical pitch and stand at the canonical physical height; other Spaces keep
-  // the raw height / stack-step math.
-  const metrics = DL.usesStackMetrics();
-  let top = 0;
-  let previous = start;
-  return bins.map((one, index) => {
-    const bottom = !index ? start
-      : metrics ? previous + DL.pitch(bins[index - 1])
-        : top - (DL.stackSteps[one.stack] ?? 0);
-    top = bottom + (metrics ? DL.partHeight(one) : Number(one.z));
-    previous = bottom;
-    return { bin: one, key: keys[index], z0: bottom, z1: top };
-  });
-};
-
-// Everything standing in the drawer, as columns of boxes, with a drag or
-// drop shown where it would land.
+// Everything standing in the drawer, as footprints with their layers, with a
+// drag or drop shown where it would land. Every layer carries its own
+// footprint rectangle: a smaller bin on a larger lid covers only its part.
 DV.entries = (drawer, grid) => {
   const box = (gx, gy, w, d) => ({ x0: grid.ox + gx * grid.stepX, y0: grid.oy + gy * grid.stepY, x1: grid.ox + (gx + w) * grid.stepX, y1: grid.oy + (gy + d) * grid.stepY });
   const entries = [];
   const drag = DV.drag?.moved ? DV.drag : null;
   for (const item of DL.items(drawer)) {
-    const layers = item.layers.filter(layer => !drag?.keys.has(layer.key));
+    const layers = item.layers.filter(layer => !drag?.keys.has(layer.key))
+      .map(layer => ({ ...layer, ...box(layer.gx, layer.gy, layer.w, layer.d) }));
     if (layers.length) entries.push({ key: item.key, item,
       ex: DL.envelopeExtForBins(layers.map(layer => layer.bin), drawer),
       ...box(item.gx, item.gy, item.w, item.d), layers, mode: "" });
   }
   for (const p of drawer.placements.filter(DL.isEdgePlacement)) {
     const one = DL.bin(p.bin);
-    if (one) entries.push({ key: DL.key(p), x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.d, layers: [{ bin: one, key: DL.key(p), z0: 0, z1: Number(one.z) }], mode: "", edge: true });
+    if (one) entries.push({ key: DL.key(p), x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.d, layers: [{ bin: one, key: DL.key(p), z0: 0, z1: Number(one.z), x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.d }], mode: "", edge: true });
   }
   const ghost = drag || DV.drop;
   if (ghost) {
-    const bins = drag ? drag.bins : [DV.drop.bin];
-    const keys = drag ? [...drag.keys] : ["__drop"];
-    const [w, d] = DL.cells(bins[0], drawer);
+    const moving = ghost.moving;
+    const root = moving.nodes[0];
     const target = ghost.target;
-    // A stack-target ghost starts at the target's next seating datum.
-    const topLayer = target?.layers[target.layers.length - 1];
-    const start = !target ? 0
-      : DL.usesStackMetrics() ? topLayer.z0 + DL.pitch(target.bins[target.bins.length - 1])
-        : target.h - (DL.stackSteps[bins[0].stack] ?? 0);
-    const where = target ? box(target.gx, target.gy, target.w, target.d) : box(ghost.gx, ghost.gy, w, d);
+    // A stack-target ghost seats on its support's next seating datum, at the
+    // offset the pointer chose; a floor ghost stands at its own cell.
+    const originX = target ? target.layer.gx + target.cx : ghost.gx;
+    const originY = target ? target.layer.gy + target.cy : ghost.gy;
+    const seat = !target ? 0
+      : DL.usesStackMetrics() ? target.layer.z0 + DL.pitch(target.layer.bin)
+        : target.layer.z1 - (DL.stackSteps[root.bin.stack] ?? 0);
+    const layers = moving.nodes.map(node => ({
+      bin: node.bin, key: node.key, z0: seat + node.rz0, z1: seat + node.rz1,
+      gx: originX + node.dx, gy: originY + node.dy, w: node.w, d: node.d,
+      parent: node.parent >= 0 ? moving.nodes[node.parent].key : null,
+      ...box(originX + node.dx, originY + node.dy, node.w, node.d),
+    }));
     const mode = drag?.outside ? "leaving" : ghost.valid ? "ghost" : "invalid";
-    entries.push({ key: "__ghost", ...where,
-      ex: DL.envelopeExtForBins(target ? [...target.bins, ...bins] : bins, drawer),
-      layers: DV.layersFor(bins, keys, start), mode, ghost: true });
+    entries.push({ key: "__ghost", ...box(originX, originY, root.w, root.d),
+      ex: DL.envelopeExtForBins(moving.bins, drawer), layers, mode, ghost: true });
   }
   return entries;
 };
+
+// Layers of one footprint in painting order (far side first, a bin after the
+// one it stands on).
+DV.layerOrder = (layers, eye) => DV.paintOrder(layers.map(layer => ({ ...layer, lz: layer.z0 })), eye);
 
 // Which of two columns to paint first. Footprints never overlap, so a plane
 // between them always exists; the column on the far side of that plane from
@@ -326,6 +319,7 @@ DV.fartherFirst = (a, b, eye) => {
   if (b.x1 <= a.x0 + 1e-6) return eye[0] < a.x0;
   if (a.y1 <= b.y0 + 1e-6) return eye[1] > a.y1;
   if (b.y1 <= a.y0 + 1e-6) return eye[1] < a.y0;
+  if (a.lz !== undefined && b.lz !== undefined) return a.lz <= b.lz;   // one stands on the other: lower first
   if (a.ghost || b.ghost) return Boolean(b.ghost);    // a drag preview over a bin draws last
   return null;
 };
@@ -548,9 +542,9 @@ DV.paintScene = (ctx, drawer, cam) => {
   {
     const taken = new Set();
     entries.filter(entry => entry.item).forEach(entry => {
-      const { item, ex } = entry;
-      for (let r = item.gy - ex.t; r < item.gy + item.d + ex.b; r += 1) {
-        for (let c = item.gx - ex.l; c < item.gx + item.w + ex.r; c += 1) taken.add(`${c},${r}`);
+      const rect = DL.layersRect(entry.layers, drawer);
+      for (let r = rect.y0; r < rect.y1; r += 1) {
+        for (let c = rect.x0; c < rect.x1; c += 1) taken.add(`${c},${r}`);
       }
     });
     const inset = Math.min(0.6, step / 10);
@@ -592,16 +586,19 @@ DV.paintScene = (ctx, drawer, cam) => {
   const hits = [];
   const inset = 0.35;
   for (const entry of DV.paintOrder(entries, eye)) {
-    const x0 = entry.x0 + inset, x1 = entry.x1 - inset, y0 = entry.y0 + inset, y1 = entry.y1 - inset;
     const keys = entry.layers.map(layer => layer.key);
     const pick = entry.ghost ? null
       : DL.selected && keys.includes(DL.selected) ? DL.selected
         : DV.hover && keys.includes(DV.hover) ? DV.hover : null;
-    let topFace = null;
-    let topInk = "#17252d";
-    entry.layers.forEach((layer, index) => {
+    // A label goes on the top face of every layer with nothing stacked on it,
+    // naming the bin and how high its own stack is.
+    const labels = [];
+    const covered = new Set(entry.layers.map(layer => layer.parent));
+    const byKey = new Map(entry.layers.map(layer => [layer.key, layer]));
+    DV.layerOrder(entry.layers, eye).forEach(layer => {
       const one = layer.bin;
       const { z0, z1 } = layer;
+      const x0 = layer.x0 + inset, x1 = layer.x1 - inset, y0 = layer.y0 + inset, y1 = layer.y1 - inset;
       const problem = problems.get(layer.key);
       let color = DV.binColor(one, range);
       if (entry.mode === "invalid" || problem === "error") color = { ...color, hue: 5, sat: 62, light: 83, ink: "#5e1f1b" };
@@ -642,9 +639,11 @@ DV.paintScene = (ctx, drawer, cam) => {
         ctx.lineWidth = pick === DL.selected ? 2.6 : 1.8;
         screens.forEach(({ screen }) => { ctx.beginPath(); screen.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.stroke(); });
       }
-      if (index === entry.layers.length - 1) {
-        topFace = screens[screens.length - 1].screen;
-        topInk = color.light + DV.FACE_TONE.top < 60 ? "#ffffff" : color.ink;
+      if (!covered.has(layer.key)) {
+        const path = [];
+        for (let up = layer; up; up = byKey.get(up.parent)) path.unshift(up);
+        labels.push({ path, face: screens[screens.length - 1].screen,
+          ink: color.light + DV.FACE_TONE.top < 60 ? "#ffffff" : color.ink });
       }
       if (!entry.ghost) {
         hits.push({ key: layer.key, grid: !entry.edge, z: z1, polys: screens.map(s => s.screen) });
@@ -666,14 +665,34 @@ DV.paintScene = (ctx, drawer, cam) => {
         }
       }
     });
-    if (topFace) DV.drawLabel(ctx, entry, topFace, topInk);
+    labels.forEach(({ path, face: topFace, ink }) => DV.drawLabel(ctx, { layers: path }, topFace, ink));
     if (entry.ex && Object.values(entry.ex).some(Boolean)) {
-      const { l, t, r, b } = entry.ex;
+      // The projecting reach: only where a layer's own envelope goes past the
+      // footprint the layers cover.
+      const nominal = entry.layers.reduce((box, layer) => ({
+        x0: Math.min(box.x0, layer.x0), y0: Math.min(box.y0, layer.y0),
+        x1: Math.max(box.x1, layer.x1), y1: Math.max(box.y1, layer.y1),
+      }), { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity });
+      const reach = {};
+      const note = (side, edge, layer, beyond) => {
+        if (beyond && (!reach[side] || (side === "l" || side === "t" ? edge < reach[side].edge : edge > reach[side].edge))) {
+          reach[side] = { edge, x0: layer.x0, x1: layer.x1, y0: layer.y0, y1: layer.y1 };
+        }
+      };
+      for (const layer of entry.layers) {
+        const own = DL.envelopeExt(layer.bin, drawer);
+        const l = layer.x0 - own.l * grid.stepX, t = layer.y0 - own.t * grid.stepY;
+        const r = layer.x1 + own.r * grid.stepX, b = layer.y1 + own.b * grid.stepY;
+        note("l", l, layer, l < nominal.x0 - 1e-6);
+        note("t", t, layer, t < nominal.y0 - 1e-6);
+        note("r", r, layer, r > nominal.x1 + 1e-6);
+        note("b", b, layer, b > nominal.y1 + 1e-6);
+      }
       const bands = [];
-      if (l) bands.push(flat(entry.x0 - l * grid.stepX, entry.y0, entry.x0, entry.y1, 0.2));
-      if (t) bands.push(flat(entry.x0, entry.y0 - t * grid.stepY, entry.x1, entry.y0, 0.2));
-      if (r) bands.push(flat(entry.x1, entry.y0, entry.x1 + r * grid.stepX, entry.y1, 0.2));
-      if (b) bands.push(flat(entry.x0, entry.y1, entry.x1, entry.y1 + b * grid.stepY, 0.2));
+      if (reach.l) bands.push(flat(reach.l.edge, reach.l.y0, nominal.x0, reach.l.y1, 0.2));
+      if (reach.t) bands.push(flat(reach.t.x0, reach.t.edge, reach.t.x1, nominal.y0, 0.2));
+      if (reach.r) bands.push(flat(nominal.x1, reach.r.y0, reach.r.edge, reach.r.y1, 0.2));
+      if (reach.b) bands.push(flat(reach.b.x0, nominal.y1, reach.b.x1, reach.b.edge, 0.2));
       ctx.save();
       ctx.setLineDash([5, 4]);
       bands.forEach(band => face(band, entry.ghost ? "rgba(196,123,66,.25)" : null, "#c47b42", 1));
@@ -854,25 +873,40 @@ DV.point = event => {
   return [event.clientX - box.left, event.clientY - box.top];
 };
 
-// Where bins dropped at this screen point would stand, centred on the pointer.
-DV.cellUnder = (bins, sx, sy) => {
+// Where a moving subtree dropped at this screen point would stand on the
+// floor, centred on the pointer.
+DV.cellUnder = (moving, sx, sy) => {
   const drawer = DL.drawer();
   const grid = DL.grid(drawer);
-  const [w, d] = DL.cells(bins[0], drawer);
-  const point = DV.cam.onPlane(sx, sy, DL.stackHeight(bins)) || DV.cam.onPlane(sx, sy, 0);
+  const { w, d } = moving.nodes[0];
+  const point = DV.cam.onPlane(sx, sy, moving.height) || DV.cam.onPlane(sx, sy, 0);
   if (!point) return [-999, -999];
   return [Math.round((point[0] - grid.ox) / grid.stepX - w / 2), Math.round((point[1] - grid.oy) / grid.stepY - d / 2)];
 };
 
-// If the pointer is over a stack these bins can snap onto, that stack. The
-// sides snap: the bins take the stack's exact footprint.
-DV.stackTarget = (bins, sx, sy, skip) => {
+// If the pointer is over a support the moving subtree can seat on, that
+// support and where on it the subtree would stand. A bin with the support's own
+// footprint takes exactly that footprint; a smaller one stands centred on the
+// pointer, snapped to the grid. A position that would reach past the support is
+// refused, never nudged back inside.
+DV.stackTarget = (moving, sx, sy, skip) => {
   const hit = DV.hitAt(sx, sy, skip);
   if (!hit?.grid) return { target: null, refusal: "" };
-  const item = DL.items().find(one => one.keys.includes(hit.key));
-  if (!item || item.keys.some(key => skip?.has(key))) return { target: null, refusal: "" };
-  const fit = DL.fitsOn(DL.drawer(), bins, item, skip);
-  return fit.ok ? { target: item, refusal: "" } : { target: null, refusal: fit.reason };
+  const found = DL.layerOf(hit.key);
+  if (!found || skip?.has(found.layer.key)) return { target: null, refusal: "" };
+  const { item, layer } = found;
+  const root = moving.nodes[0];
+  let cx = 0, cy = 0;
+  if (root.w !== layer.w || root.d !== layer.d) {
+    const grid = DL.grid(DL.drawer());
+    const point = DV.cam.onPlane(sx, sy, hit.z);
+    if (!point) return { target: null, refusal: "" };
+    cx = Math.round((point[0] - grid.ox) / grid.stepX - root.w / 2) - layer.gx;
+    cy = Math.round((point[1] - grid.oy) / grid.stepY - root.d / 2) - layer.gy;
+  }
+  const target = { item, layer, cx, cy };
+  const fit = DL.fitsOn(DL.drawer(), moving, target, skip);
+  return fit.ok ? { target, refusal: "" } : { target: null, refusal: fit.reason };
 };
 
 // ------------------------------------------------------------------ input
@@ -894,15 +928,15 @@ DV.wire = () => {
     if (hit) {
       DL.selectPlacement(hit.key);
       DV.revealRow(DL.selectedRow);
-      const chain = hit.grid && DL.stackOf(hit.key);
+      // Dragging takes the clicked bin and whatever stands on it - never its
+      // siblings or the bin under it.
+      const found = hit.grid && DL.layerOf(hit.key);
+      const moving = found && DL.movingFor(hit.key);
       const start = DV.cam.onPlane(sx, sy, hit.z);
-      if (chain && start) {
-        const moving = chain.slice(chain.findIndex(p => DL.key(p) === hit.key));
-        const drawer = DL.drawer();
-        const gx = DL.toCell(chain[0].gx, drawer);
-        const gy = DL.toCell(chain[0].gy, drawer);
+      if (moving && start) {
+        const { gx, gy } = found.layer;
         DV.drag = {
-          key: hit.key, keys: new Set(moving.map(DL.key)), bins: moving.map(p => DL.bin(p.bin)),
+          key: hit.key, keys: moving.keys, bins: moving.bins, moving,
           pointerId: event.pointerId,
           sx, sy, plane: hit.z, start, gx0: gx, gy0: gy, gx, gy, moved: false, valid: true, outside: false,
           target: null,
@@ -931,11 +965,11 @@ DV.wire = () => {
       // never counts as throwing a bin away.
       drag.outside = !DV.hitAt(sx, sy, drag.keys)
         && (point[0] < -12 || point[1] < -12 || point[0] > DV.cam.W + 12 || point[1] > DV.cam.D + 12);
-      const { target, refusal } = DV.stackTarget(drag.bins, sx, sy, drag.keys);
+      const { target, refusal } = DV.stackTarget(drag.moving, sx, sy, drag.keys);
       drag.target = target;
       if (target) Object.assign(drag, { valid: true, reason: "" });
       else {
-        const fit = DL.fitsAt(DL.drawer(), drag.bins, drag.gx, drag.gy, drag.keys);
+        const fit = DL.fitsAt(DL.drawer(), drag.moving, drag.gx, drag.gy, drag.keys);
         Object.assign(drag, { valid: fit.ok, reason: fit.ok ? "" : refusal || fit.reason });
       }
       canvas.style.cursor = drag.outside ? "no-drop" : "grabbing";
@@ -955,8 +989,9 @@ DV.wire = () => {
         DV.hover = key;
         const found = key && DL.findPlacement(key);
         const one = found && DL.bin(found.placement.bin);
-        const chain = found ? DL.stackOf(key, found.drawer) : null;
-        const info = one ? DV.binLabelInfo(one, chain?.length || 1) : null;
+        const standing = found ? DL.layerOf(key, found.drawer) : null;
+        const levels = standing ? Math.max(...standing.item.layers.map(layer => layer.depth)) + 1 : 1;
+        const info = one ? DV.binLabelInfo(one, levels) : null;
         canvas.title = info ? `${info.name} — ${info.detailLine}` : "";
         DV.paint();
       }
@@ -1002,12 +1037,13 @@ DV.wire = () => {
     if (!DV.dragBin || !DV.cam) return;
     event.preventDefault();
     const [sx, sy] = DV.point(event);
-    const bins = [DV.dragBin];
-    const [gx, gy] = DV.cellUnder(bins, sx, sy);
-    const { target, refusal } = DV.stackTarget(bins, sx, sy, null);
-    const fit = target ? { ok: true } : DL.fitsAt(DL.drawer(), bins, gx, gy);
-    const next = { bin: DV.dragBin, gx, gy, target, valid: fit.ok, reason: fit.ok ? "" : refusal || fit.reason };
-    if (DV.drop?.gx !== next.gx || DV.drop?.gy !== next.gy || DV.drop?.target !== next.target) {
+    const moving = DL.movingForBins([DV.dragBin]);
+    const [gx, gy] = DV.cellUnder(moving, sx, sy);
+    const { target, refusal } = DV.stackTarget(moving, sx, sy, null);
+    const fit = target ? { ok: true } : DL.fitsAt(DL.drawer(), moving, gx, gy);
+    const next = { bin: DV.dragBin, moving, gx, gy, target, valid: fit.ok, reason: fit.ok ? "" : refusal || fit.reason };
+    const spot = one => one ? `${one.layer.key}@${one.cx},${one.cy}` : "";
+    if (DV.drop?.gx !== next.gx || DV.drop?.gy !== next.gy || spot(DV.drop?.target) !== spot(next.target)) {
       DV.drop = next;
       DV.paint();
     }
@@ -1050,20 +1086,30 @@ DV.wire = () => {
     }
     const key = event.key.toLowerCase();
     const mod = event.ctrlKey || event.metaKey;
-    const chain = DL.selected && DL.stackOf(DL.selected);
+    const standing = DL.selected && DL.layerOf(DL.selected);
     const moves = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, 1], arrowdown: [0, -1] };
     let handled = true;
     if (mod && key === "z") (event.shiftKey ? DL.redo : DL.undo)();
     else if (mod && key === "y") DL.redo();
     else if (mod && key === "s") DL.save();
     else if (mod || event.altKey) handled = false;
-    else if (moves[key] && chain) {
+    else if (moves[key] && standing) {
+      // Arrows nudge the selected bin and what stands on it one cell: on the
+      // floor for a floor bin, within its support for a stacked one.
       const drawer = DL.drawer();
       const [dx, dy] = moves[key];
-      const gx = DL.toCell(chain[0].gx, drawer) + dx;
-      const gy = DL.toCell(chain[0].gy, drawer) + dy;
-      const fit = DL.fitsAt(drawer, chain.map(p => DL.bin(p.bin)), gx, gy, new Set(chain.map(DL.key)));
-      if (fit.ok) DL.moveTo(DL.key(chain[0]), { gx, gy }); else toast(fit.reason, true);
+      const { item, layer } = standing;
+      const moving = DL.movingFor(layer.key);
+      const support = layer.parent && item.layers.find(one => one.key === layer.parent);
+      if (support) {
+        const target = { item, layer: support, cx: layer.gx - support.gx + dx, cy: layer.gy - support.gy + dy };
+        const fit = DL.fitsOn(drawer, moving, target);
+        if (fit.ok) DL.moveTo(layer.key, { target }); else toast(fit.reason, true);
+      } else {
+        const gx = layer.gx + dx, gy = layer.gy + dy;
+        const fit = DL.fitsAt(drawer, moving, gx, gy, moving.keys);
+        if (fit.ok) DL.moveTo(layer.key, { gx, gy }); else toast(fit.reason, true);
+      }
     } else if ((key === "delete" || key === "backspace") && DL.selected) DL.removePlacement(DL.selected);
     else if (key === "escape") DL.selectPlacement(null);
     else if (key === "f") DV.fit();
@@ -1170,7 +1216,7 @@ DV.buildOverlay = () => {
     </div>
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
     <div id="dl-empty-state" class="dl-empty-state" hidden></div>
-    <div class="layout-hint dl-hint">Drag bins to move · drop on a bin with the same footprint and compatible stacking geometry to stack · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>`);
+    <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>`);
   // The staging rail sits immediately beside the physical Space, before the canvas.
   wrap.insertAdjacentHTML("afterbegin", `
     <aside id="dl-staging" class="dl-staging" aria-label="Unplaced bins">
