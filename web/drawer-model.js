@@ -399,10 +399,13 @@ DL.stackRefusal = (upper, lower) => {
   if (!DL.stackable(upper)) return `${DL.label(upper)} was not printed to stack.`;
   if (!DL.stackable(lower)) return `${DL.label(lower)} was not printed to stack.`;
   if (upper.stack !== lower.stack) return `A ${DL.stackName(upper.stack).toLowerCase()} bin cannot snap onto a ${DL.stackName(lower.stack).toLowerCase()} bin.`;
-  if (Math.abs(upper.x - lower.x) >= 0.05 || Math.abs(upper.y - lower.y) >= 0.05) return "Only bins of the same size snap onto each other.";
+  const sizeMatch = Math.abs(upper.x - lower.x) < 0.05 && Math.abs(upper.y - lower.y) < 0.05;
+  if (!sizeMatch) {
+    if (upper.stack !== "lid" || lower.stack !== "lid") return "Direct stacking requires bins with the same footprint.";
+  }
   const upperWall = DL.stackWall(upper), lowerWall = DL.stackWall(lower);
   if (upperWall === null || lowerWall === null) return "Stacking wall thickness is unknown. Save both bin designs before stacking.";
-  if (Math.abs(upperWall - lowerWall) >= 0.05) return "Bins need the same footprint and compatible stacking wall thickness.";
+  if (Math.abs(upperWall - lowerWall) >= 0.05) return "Bins need compatible stacking wall thickness.";
   return "";
 };
 
@@ -422,6 +425,57 @@ DL.chains = (drawer = DL.drawer()) => {
     }
     return chain;
   });
+};
+
+
+// Tree-based placement model: support multiple children per parent with offsets
+DL._buildPlacementTree = (drawer = DL.drawer()) => {
+  const placed = drawer.placements.filter(p => DL.bin(p.bin));
+  const placements = new Map();
+  const children = new Map(); // parentKey -> [child placements]
+  const roots = [];
+  
+  placed.forEach(p => {
+    const key = DL.key(p);
+    placements.set(key, p);
+    if (!p.on || p.on === undefined) {
+      if (DL.onGrid(p)) roots.push(p);
+    } else {
+      if (!children.has(p.on)) children.set(p.on, []);
+      children.get(p.on).push(p);
+    }
+  });
+  
+  return { placements, children, roots, allPlaced: placed };
+};
+
+DL._absoluteOriginForPlacement = (p, tree, drawer) => {
+  if (!p.on || p.on === undefined) return { x: p.gx, y: p.gy };
+  const parent = tree.placements.get(p.on);
+  if (!parent) return { x: NaN, y: NaN };
+  const parentOrigin = DL._absoluteOriginForPlacement(parent, tree, drawer);
+  const px = p.ox ?? 0;
+  const py = p.oy ?? 0;
+  return { x: parentOrigin.x + px * 8, y: parentOrigin.y + py * 8 };
+};
+
+DL._getPlacementSubtree = (key, tree) => {
+  const result = [tree.placements.get(key)].filter(p => p);
+  const seen = new Set([key]);
+  const queue = [key];
+  while (queue.length) {
+    const parentKey = queue.shift();
+    const children = tree.children.get(parentKey) || [];
+    children.forEach(child => {
+      const ckey = DL.key(child);
+      if (!seen.has(ckey)) {
+        seen.add(ckey);
+        result.push(child);
+        queue.push(ckey);
+      }
+    });
+  }
+  return result;
 };
 
 DL.stackOf = (key, drawer = DL.drawer()) => DL.chains(drawer).find(chain => chain.some(p => DL.key(p) === key)) || null;
