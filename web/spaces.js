@@ -1657,6 +1657,14 @@ SP.openTypedSpacePreferredView = async () => {
     toast(`Could not read this Space's inventory: ${error.message}`, true, 7000);
     return false;
   }
+  // Fix 103 (Section F): a structural Space opens on its structural Design.
+  const structuralKind = DP.structuralTargetEnabled ? DP.structuralKindFor(state.activeSpace) : null;
+  if (structuralKind) {
+    if (!designTargetIsStructural()) {
+      DP.setDesignTarget({ kind: "structural", structural: true, structuralKind, rowId: null, drawerId: null });
+    }
+    return DP.enter("design", true);
+  }
   if (!(await DP.enter("space", true))) return false;
   const ordinary = DL.bins.filter(DL.isOrdinary);
   if (ordinary.length !== 1) return true;
@@ -2466,9 +2474,27 @@ SP.create = async () => {
   SP.setupFormSnapshot = null;
   SP.close();
 
-  // The Designer always means an ordinary Bin. A Storage Box or Base Trim is
-  // saved from the Space itself (Space Actions), never designed here.
-  await loadFreshOrdinaryDesignForCurrentFolder();
+  // Fix 103 (Section F): a structural Space lands on its structural Design
+  // (cabinet / case), never on an ordinary starter bin. No generic bin is
+  // created until the user explicitly chooses New Bin.
+  const createdStructural = DP.structuralTargetEnabled ? DP.structuralKindFor({ kind }) : null;
+  if (createdStructural) {
+    await SP.landOnStructuralDesign(createdStructural);
+  } else {
+    // The Designer always means an ordinary Bin. Base Trim is saved from the
+    // Space itself (Space Actions), never designed here.
+    await loadFreshOrdinaryDesignForCurrentFolder();
+  }
+};
+
+// Fix 103 (Section F): select the structural target for the active Space and
+// open Design on it. Leaves state.design / state.cleanDesign untouched.
+SP.landOnStructuralDesign = async structuralKind => {
+  SP.resetDesignSession();
+  DP.setDesignTarget({ kind: "structural", structural: true, structuralKind, rowId: null, drawerId: null });
+  if (!(await DP.enter("design", false))) return false;
+  activatePreviewView(preferredDesignView());
+  return true;
 };
 
 // ------------------------------------------------------------ design/session activation (Fix 019 Item 1/5)
@@ -2561,6 +2587,15 @@ SP.initializeDesignForActiveSpace = async () => {
     }
   }
 
+  // Fix 103 (Section F): structural Spaces activate the structural target, not
+  // an ordinary bin. The legacy row binding is cleared (the row, if any, stays
+  // in Inventory); no starter design, form sync or ordinary preview follows.
+  const structuralKind = DP.structuralTargetEnabled ? DP.structuralKindFor(state.activeSpace) : null;
+  if (structuralKind) {
+    state.designInventoryId = null;
+    DP.setDesignTarget({ kind: "structural", structural: true, structuralKind, rowId: null, drawerId: null });
+    return;
+  }
   if (!restored) await SP.installSpaceStarterDesign();
   // Fix 060 Correction 3: this is the one shared syncForm() call for every
   // way a typed Space activates/resumes a design (restored checkpoint or a

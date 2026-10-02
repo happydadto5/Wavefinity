@@ -512,8 +512,9 @@ DP.structuralKindFor = space => (space?.kind === "storage_drawers" ? "storage_dr
 // view is view/pan only. Space mode is the sole bin/spacer placement owner, so
 // this is false there even when a structural target is still selected.
 DP.structuralReadOnly2D = () => DP.mode === "design" && state.designTarget?.kind === "structural";
-// Fix 103: dormant until Packet F flips the global structural activation.
-DP.structuralTargetEnabled = false;
+// Fix 103 (Section F): ACTIVE. Create/Open/Switch for a structural Space now
+// lands on the cabinet/case, and the navigator offers the structural object.
+DP.structuralTargetEnabled = true;
 
 // Shared stable ordering for the Design navigator and the post-delete handoff.
 // DL.bins order is the authority; editability comes from DP.editableSourceFor.
@@ -536,7 +537,7 @@ DP.refreshDesignBinNav = () => {
   // state are dormant until Packet F flips DP.structuralTargetEnabled; with the
   // flag false this renders exactly as before.
   const target = DP.getDesignTarget();
-  const structuralSpace = typeof DL !== "undefined" && (DL.isStorageDrawers() || DL.isStorageBox());
+  const structuralSpace = typeof DL !== "undefined" && Boolean(DP.structuralKindFor(state.activeSpace));
   const structuralShown = structuralSpace && (DP.structuralTargetEnabled || target.kind === "structural");
   const structuralSelected = target.kind === "structural";
   const show = DP.mode === "design" && DL.active && (DP.designNavRows().length > 0 || structuralShown);
@@ -682,13 +683,12 @@ DP.openInventoryRow = async id => {
   }
 };
 
-// Fix 103: structural activation path. Dormant until Packet F (the enabled flag
-// is false, so this always returns false today). It never touches state.design
-// / state.cleanDesign: the structural preview owns its own data in later packets.
+// Fix 103: structural activation path. It never touches state.design /
+// state.cleanDesign: the structural preview owns its own data.
 DP.openStructuralTarget = async () => {
   if (!DP.structuralTargetEnabled) return false;
   if (DP.designNavBlocked() || DP.mode !== "design") return false;
-  if (typeof DL === "undefined" || (!DL.isStorageDrawers() && !DL.isStorageBox())) return false;
+  if (typeof DL === "undefined" || !DP.structuralKindFor(state.activeSpace)) return false;
   const outgoing = DP.getDesignTarget();
   // Only a real bound bin owns an autosave. An unbound New Bin starter must
   // never be materialized merely because the user switches to the structural
