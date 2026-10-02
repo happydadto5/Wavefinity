@@ -84,7 +84,16 @@
       if (resolved.ok) field.value = `${resolved.mm} mm inside — ${resolved.units} ${resolved.units === 1 ? "unit" : "units"}`;
     };
     for (const field of [x, y]) { field.inputMode = "decimal"; field.required = true; }
-    sizeGrid.append(labeled("Width", x), labeled("Depth", y));
+    // Fix 103 (R1): the full structural editor shows three-across Interior
+    // Width / Depth / Height. Height is the ACTIVE drawer's physical usable
+    // interior height; its value and edits go through the authoritative draft
+    // summary (see heightBasis below), never a copy of the server's formula.
+    const structural = scope === "full" && callbacks.structural === true;
+    const zField = input("", "number"); zField.id = `sd-z-${epoch}`; zField.step = "1"; zField.disabled = true;
+    const zHelp = help("");
+    const zLabel = labeled("Interior Height", zField, null, "mm"); zLabel.append(zHelp);
+    sizeGrid.append(labeled(structural ? "Interior Width" : "Width", x), labeled(structural ? "Interior Depth" : "Depth", y));
+    if (structural) { sizeGrid.classList.add("sd-size-grid-three"); sizeGrid.append(zLabel); }
     sizeGroup.append(help("Width = left ↔ right. Depth = front ↔ back. Wavefinity rounds to whole units."));
     // Fix 103 (Packet B): printer status lives beside Size, not in Summary.
     // Known oversize shows a warning here but does not block.
@@ -184,6 +193,23 @@
       drawerRows.replaceChildren();
       block.drawers.forEach((row, index) => {
         const line = el("div", `sd-drawer-row${drawerEnabled.value === "true" ? " sd-drawer-row-with-label" : ""}`); line.append(el("strong", "", `Drawer ${index + 1}`));
+        // Fix 103 (Section E): click a drawer row to make it the active drawer
+        // and highlight it in 3D. Rows without a stable saved id (temporary
+        // keys) have no server owner, so they never highlight.
+        if (structural && row.id && !String(row.id).startsWith("temporary:")) {
+          const owner = `drawer:${row.id}`;
+          line.classList.toggle("sd-drawer-row-active", row.id === activeDrawerId);
+          line.style.cursor = "pointer";
+          line.setAttribute("role", "group");
+          line.setAttribute("aria-label", `Drawer ${index + 1}. Click to highlight in 3D.`);
+          line.addEventListener("click", event => {
+            // Clicking into a field only selects the drawer; clicking the row
+            // itself toggles the highlight.
+            const inField = Boolean(event.target.closest?.("input, select, textarea, button"));
+            selectDrawer(row.id);
+            callbacks.onHighlightDrawer?.(owner, { ensure: inField });
+          }, { signal: events.signal });
+        }
         const height = input(row.height_mm, "number"); height.min = String(minDrawerHeight); height.step = "any"; height.required = true;
         height.disabled = disabled;
         height.id = `sd-height-${epoch}-${index}`;
@@ -197,6 +223,53 @@
       });
     };
     drawersGroup.append(help("Usable bin height is shown in Summary."));
+    // ---- Fix 103 (R1): Interior Width / Depth / Height editing ----
+    let activeDrawerId = block.drawers.find(row => row.id && !String(row.id).startsWith("temporary:"))?.id || null;
+    // { id, offset }: usable height minus the stored row height, read from the
+    // latest authoritative summary for the active drawer. Cleared whenever any
+    // other draft field changes, until the next summary lands.
+    let heightBasis = null;
+    const roundMm = value => Math.round(value * 1000) / 1000;
+    const activeRow = () => block.drawers.find(row => row.id === activeDrawerId) || null;
+    const syncHeightField = () => {
+      if (!structural) return;
+      const row = activeRow(), index = block.drawers.indexOf(row);
+      const ready = Boolean(row && heightBasis && heightBasis.id === row.id);
+      zField.disabled = disabled || !ready;
+      if (document.activeElement !== zField) zField.value = ready ? String(roundMm(row.height_mm + heightBasis.offset)) : "";
+      zHelp.textContent = !row ? "Select a drawer" : ready ? `Drawer ${index + 1} usable height, whole mm` : `Drawer ${index + 1}: checking…`;
+    };
+    const selectDrawer = id => {
+      if (!structural || id === activeDrawerId) return;
+      activeDrawerId = id;
+      renderRows(); syncHeightField();
+    };
+    // Typed input, arrow/wheel steps and the 3D handles all land here.
+    const setInterior = (axis, requested) => {
+      if (axis === "z") {
+        const row = activeRow();
+        if (!row || !heightBasis || heightBasis.id !== row.id) return NaN;
+        const wanted = Math.round(Number(requested));
+        if (!Number.isFinite(wanted)) return NaN;
+        const usable = Math.max(wanted, Math.ceil(heightBasis.offset + minDrawerHeight));
+        row.height_mm = roundMm(usable - heightBasis.offset);
+        renderRows(); syncHeightField(); schedule({ keepHeight: true });
+        return usable;
+      }
+      const units = Math.min(maxUnits, Math.max(minUnits, Math.round(Number(requested) / baseUnit)));
+      if (!Number.isFinite(units)) return NaN;
+      (axis === "x" ? x : y).value = `${units * baseUnit} mm inside — ${units} ${units === 1 ? "unit" : "units"}`;
+      schedule();
+      return units * baseUnit;
+    };
+    const getInterior = () => {
+      const row = activeRow();
+      return {
+        x: resolveMm(x).ok ? resolveMm(x).mm : NaN,
+        y: resolveMm(y).ok ? resolveMm(y).mm : NaN,
+        z: row && heightBasis && heightBasis.id === row.id ? roundMm(row.height_mm + heightBasis.offset) : NaN,
+      };
+    };
     const draft = () => {
       const next = copy(space), b = next.storage_drawers;
       const resolvedX = resolveMm(x), resolvedY = resolveMm(y);
@@ -281,10 +354,19 @@
       guide.append(link); lines.push(guide);
       summary.replaceChildren(...lines);
       updatePrinterRow();
+      if (structural) {
+        const one = (response.drawers || []).find(row => row.id === activeDrawerId);
+        heightBasis = one ? { id: one.id, offset: Number(one.usable_height_mm) - Number(one.height_mm) } : null;
+        syncHeightField();
+      }
+      callbacks.onSummary?.(response);
     };
     const showSummaryText = (text, bad = false) => { summary.replaceChildren(el("p", bad ? "sd-fit-verdict bad" : "sd-summary-line", text)); updatePrinterRow(); };
-    const schedule = () => {
+    const schedule = ({ keepHeight = false } = {}) => {
+      if (!keepHeight) heightBasis = null;
       summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…"); notifyReady();
+      syncHeightField();
+      callbacks.onChange?.();
       clearTimeout(timer); const n = ++requestNumber; const identity = callbacks.identity?.() ?? space.id ?? space.name;
       const pEpoch = profileEpoch; const checked = readFields();
       if (!checked.ok) { summaryState = "error"; summaryError = checked.message; showSummaryText(checked.message, true); notifyReady(); markSettled(); return; }
@@ -325,10 +407,27 @@
       }, { signal: events.signal });
       field.addEventListener("blur", () => { formatMm(field); schedule(); }, { signal: events.signal });
     }
-    form.addEventListener("input", event => { if (event.target !== count) schedule(); }, { signal: events.signal });
+    form.addEventListener("input", event => { if (event.target !== count && event.target !== zField) schedule(); }, { signal: events.signal });
     form.addEventListener("change", event => {
-      if (event.target !== count) { syncVisibility(); renderRows(); schedule(); }
+      if (event.target !== count && event.target !== zField) { syncVisibility(); renderRows(); schedule(); }
     }, { signal: events.signal });
+    if (structural) {
+      zField.addEventListener("change", () => { if (!Number.isFinite(setInterior("z", zField.value))) syncHeightField(); }, { signal: events.signal });
+      for (const [axis, field] of [["x", x], ["y", y], ["z", zField]]) {
+        const step = axis === "z" ? 1 : baseUnit;
+        const current = () => (axis === "z" ? Number(zField.value) : (resolveMm(field).ok ? resolveMm(field).mm : NaN));
+        field.addEventListener("keydown", event => {
+          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+          event.preventDefault();
+          if (Number.isFinite(current())) setInterior(axis, current() + (event.key === "ArrowUp" ? step : -step));
+        }, { signal: events.signal });
+        field.addEventListener("wheel", event => {
+          if (document.activeElement !== field) return;
+          event.preventDefault();
+          if (Number.isFinite(current())) setInterior(axis, current() + (event.deltaY < 0 ? step : -step));
+        }, { signal: events.signal, passive: false });
+      }
+    }
     const snapshotValue = field => {
       const resolved = resolveMm(field);
       return resolved.ok ? resolved.mm : `invalid:${field.value}`;
@@ -361,12 +460,20 @@
       },
       isDirty: () => snapshot() !== baseline,
       markPristine() { baseline = snapshot(); },
+      // Fix 103 (R2): the unsaved draft Space, available even while the live
+      // summary is still pending (the preview consumes this, never the
+      // accepted Space). Returns the same shape as read(), minus summary gating.
+      draft: () => readFields(),
+      currentSummary: () => (summaryState === "ok" ? lastSummary : null),
+      getInterior, setInterior, selectDrawer,
+      activeDrawerId: () => activeDrawerId,
       setPrinterProfile(next) { printerProfile = copy(next); profileEpoch += 1; schedule(); },
       refreshSummary() { schedule(); },
       setDisabled(value) {
         disabled = !!value;
         for (const control of form.querySelectorAll("input, select")) control.disabled = disabled;
         if (!disabled) count.disabled = mode === "edit";
+        syncHeightField();
       },
       destroy() { live = false; mountSerial += 1; clearTimeout(timer); events.abort(); host.replaceChildren(); }
     };

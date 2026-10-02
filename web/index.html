@@ -473,6 +473,10 @@
           <button id="generate-connector" class="button secondary">Save Connectors</button>
         </div>
       </section>
+      <!-- Fix 103 (Section C): structural editor host. Hidden unless a
+           structural target is selected; the mountable form (Box or Drawers)
+           is built here by syncStructuralEditor(). -->
+      <div id="structural-editor-host" class="structural-editor-host" hidden></div>
       <div id="drawer-panel" class="drawer-panel" hidden></div>
     </aside>
 
@@ -1272,6 +1276,7 @@
   <script src="/printer-profile.js" defer></script>
   <script src="/storage-drawers.js" defer></script>
   <script src="/storage-drawers-form.js" defer></script>
+  <script src="/storage-box-form.js" defer></script>
   <script src="/storage-drawers-workspace.js" defer></script>
   <script src="/spaces.js" defer></script>
 </body>
