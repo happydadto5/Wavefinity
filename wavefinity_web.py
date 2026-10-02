@@ -38,6 +38,7 @@ from urllib.request import urlopen
 import numpy as np
 
 from organizer_engine import (
+    TEXT_MIN_BACKING,
     connector_arm_thickness_floor,
     BASE_UNIT,
     BASE_PRESETS,
