@@ -50,7 +50,7 @@ Wavefinity currently has five typed Space types.
 | **Drawer** | Organize bins inside a drawer or enclosed area | Usable inside width, depth, height | 3D arrangement, placement validation, stacking, unplaced-bin rail |
 | **Surface** | Organize bins on an open shelf/counter/other surface | Maximum outside width/length, trim size | **Base Trim** plus Surface-specific bin base controls |
 | **Storage Box** | Put Wavefinity bins inside a printable carrying/storage case | Outside width/length, usable inside height, case settings | **Storage Box case** with lid/stacking/handle/label/material options |
-| **Storage Drawers** | A printable multi-drawer mini cabinet for Wavefinity bins | Whole-unit width/depth, drawer count, per-drawer usable height, cabinet/drawer material, fit, handles, labels, stacking | **Cabinet** structural files (frame, drawers, fronts, rails) saved/printed from the cabinet panel |
+| **Storage Drawers** | A printable multi-drawer mini cabinet for Wavefinity bins | Width/depth in millimeters, snapped to whole Wavefinity units; drawer count, per-drawer usable height, cabinet/drawer material, fit, handles, labels, stacking | **Cabinet** structural files (frame, drawers, fronts, rails) saved/printed from the cabinet panel |
 | **Pegboard** | Hang Wavefinity bins on a pegboard | Board standard, physical size or hole/slot count | Pegboard receivers/cleats on bins and board-grid-aware placement |
 
 Wavefinity can also be used **without a typed Space**, in which case the user can design ordinary bins in a regular folder without Space placement rules.
@@ -213,7 +213,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 ## 2.3a Storage Drawers Space
 
 - One shared Inventory and parking lot for the whole cabinet; every drawer is a physical drawer with its own stable identity and usable height.
-- Create/Edit options are grouped like Storage Box: Name, Size (whole Wavefinity units), Drawers, Cabinet, Labels, Material (cabinet wall/base/top and drawer wall/base), and a live Summary that checks fit against the printer volume.
+- Create/Edit options are grouped like Storage Box: Name, Size entered in millimeters and snapped to whole Wavefinity units, Drawers, Cabinet, Labels, Material (cabinet wall/base/top and drawer wall/base), and a live Summary that shows the resolved inside mm/unit count, finished outside size, and printer fit.
 - A right-side navigator lists the drawers proportionally, marks the active one, and offers Add Drawer, per-drawer Delete (only an empty drawer, and never the last), Save Cabinet and Print Cabinet. Switching drawers is not an undo step.
 - Inventory rows show where they are placed as `Placed · Drawer N`; choosing a row placed in another drawer switches to that drawer and keeps the row selected.
 - New bins are sized to the active drawer's usable X/Y/height.

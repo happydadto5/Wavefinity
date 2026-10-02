@@ -24,13 +24,18 @@
   const group = (host, title) => { const section = el("section", "sd-form-group"); section.append(el("h3", "", title)); host.append(section); return section; };
   const materialChoices = (catalog, kind, current) => {
     const rows = catalog?.b4b_rules?.[kind] || [];
-    const options = rows.map(row => Array.isArray(row) ? [String(row[0]), String(row[1])] : [String(row.value ?? row.mm), String(row.label ?? row.name)]);
+    const options = rows.map(row => {
+      const [value, label] = Array.isArray(row)
+        ? [String(row[0]), String(row[1])]
+        : [String(row.value ?? row.mm), String(row.label ?? row.name)];
+      return [value, /\bmm\b/i.test(label) ? label : `${label} — ${value} mm`];
+    });
     if (!options.some(row => Number(row[0]) === Number(current))) options.push([String(current), `${current} mm — Existing`]);
     return options;
   };
   const NAMED = (list, names, unit = "mm") => list.map((mm, index) => [String(mm),
     list.length === names.length ? `${names[index]} · ${mm.toFixed(2).replace(/\.?0+$/, "")} ${unit}` : `${mm} ${unit}`]);
-  const mount = ({ host, initialSpace, catalog, printerProfile, mode, callbacks = {} }) => {
+  const mount = ({ host, initialSpace, catalog, printerProfile, mode, callbacks = {}, onReadyChange = null }) => {
     const epoch = ++mountSerial;
     const rules = window.StorageDrawers.catalogRules(catalog);
     const { baseUnit, minDrawerHeight, minUnits, maxUnits, minDrawers, maxDrawers, labelLimit } = rules;
@@ -44,7 +49,7 @@
     });
     let live = true, timer = null, requestNumber = 0, profileEpoch = 0;
     const events = new AbortController();
-    let summaryState = "pending", summaryError = "", summaryKey = null, summaryIdentity = null, disabled = false, lastSummary = null;
+    let summaryState = "pending", summaryError = "", summaryKey = null, summaryIdentity = null, disabled = false, lastSummary = null, lastReady = null;
     // Waiters for the in-flight live validation (Create/Save clicked while
     // the cabinet check is pending): resolved when the check settles.
     let settleWaiters = [];
@@ -59,17 +64,29 @@
     const tail = [];
     host.replaceChildren();
     const form = el("div", "sd-form"); host.append(form);
-    const nameGroup = group(form, "Name");
+    const nameGroup = group(form, "Name"); nameGroup.classList.add("sd-name-group");
     const name = input(space.name); name.maxLength = 80; name.required = true;
     name.id = `sd-name-${epoch}`;
     nameGroup.append(labeled("Space name", name));
-    const sizeGroup = group(form, "Size"); const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
-    const x = input(space.x / baseUnit, "number"), y = input(space.y / baseUnit, "number");
+    const sizeGroup = group(form, "Size"); sizeGroup.classList.add("sd-size-group"); const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
+    const x = input(space.x), y = input(space.y);
     x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
-    for (const field of [x, y]) { field.min = String(minUnits); field.max = String(maxUnits); field.step = "1"; field.required = true; }
-    sizeGrid.append(labeled("X units", x, "X = left ↔ right."), labeled("Y units", y, "Y = front ↔ back."));
-    sizeGroup.append(help(`1 unit = ${baseUnit} mm. Measure the space you want inside each drawer, then divide by ${baseUnit}.`));
-    const drawersGroup = group(form, "Drawers");
+    const resolveMm = field => {
+      const raw = field.value.trim();
+      const requested = Number.parseFloat(raw);
+      if (!raw || !Number.isFinite(requested) || requested <= 0) return { ok: false };
+      const units = Math.round(requested / baseUnit);
+      if (units < minUnits || units > maxUnits) return { ok: false };
+      return { ok: true, units, mm: units * baseUnit };
+    };
+    const formatMm = field => {
+      const resolved = resolveMm(field);
+      if (resolved.ok) field.value = `${resolved.mm} mm inside — ${resolved.units} ${resolved.units === 1 ? "unit" : "units"}`;
+    };
+    for (const field of [x, y]) { field.inputMode = "decimal"; field.required = true; }
+    sizeGrid.append(labeled("Width", x), labeled("Depth", y));
+    sizeGroup.append(help("Width = left ↔ right. Depth = front ↔ back. Wavefinity rounds to whole units."));
+    const drawersGroup = group(form, "Drawers"); drawersGroup.classList.add("sd-drawers-group");
     const count = input(block.drawers.length, "number"); count.min = String(minDrawers); count.max = String(maxDrawers); count.step = "1";
     count.id = `sd-count-${epoch}`;
     count.disabled = mode === "edit";
@@ -83,12 +100,12 @@
     const handleField = labeled("Pull size", handleSize);
     const drawersRowA = el("div", "sd-size-grid");
     drawersRowA.append(countField,
-      labeled("Drawer fit", fit, "Changes drawer-to-cabinet clearance only. Cabinet joints keep their own fixed engineering clearance. Tight leaves the drawer catch almost no working margin — print your first cabinet on Standard."));
+      labeled("Drawer fit", fit, "Standard is recommended for the first print. Tight leaves very little working clearance."));
     const drawersRowB = el("div", "sd-size-grid");
     drawersRowB.append(labeled("Handles", handles), handleField);
     drawersGroup.append(drawersRowA, drawersRowB);
     const drawerRows = el("div", "sd-drawer-rows"); drawersGroup.append(drawerRows);
-    const cabinet = group(form, "Cabinet");
+    const cabinet = group(form, "Cabinet"); cabinet.classList.add("sd-cabinet-group");
     const style = select(block.cabinet_style, [["full", "Full"], ["open", "Open"]]);
     const rear = select(block.rear_support, [["cross", "Rear cross"], ["solid", "Rear solid"]]);
     const wallMounting = select(block.wall_mounting, [["off", "Off"], ["keyholes", "Keyholes"]]);
@@ -101,16 +118,15 @@
     const frame = select(block.open_frame_width_mm, NAMED(rules.frameChoices, ["Compact", "Standard", "Strong"]));
     const frameField = labeled("Open frame width", frame);
     const cabinetRowA = el("div", "sd-size-grid");
-    cabinetRowA.append(labeled("Cabinet style", style,
-        "Full: enclosed side-panel cabinet around the drawer stack. Open: open-frame sides/rails with less panel material."),
-      labeled("Rear support", rear, "Rear Cross: lighter cross-brace rear support. Rear Solid: full rear panel."),
-      labeled("Wall mounting", wallMounting, "Adds reinforced keyhole slots to the cabinet back at every drawer level."),
+    cabinetRowA.append(labeled("Cabinet style", style),
+      labeled("Rear support", rear),
+      labeled("Wall mounting", wallMounting),
       keyholeCountField);
     const cabinetRowB = el("div", "sd-size-grid");
-    cabinetRowB.append(labeled("Stacking", stack, "Stackable adds top/bottom stacking interfaces and four separate stacking pegs."),
+    cabinetRowB.append(labeled("Stacking", stack),
       frameField);
     cabinet.append(cabinetRowA, cabinetRowB);
-    const labels = group(form, "Labels");
+    const labels = group(form, "Labels"); labels.classList.add("sd-labels-group");
     const unitEnabled = select(String(block.unit_label_enabled), [["false", "Unit label off"], ["true", "Unit label on"]]);
     const unitText = input(block.unit_label_text); unitText.maxLength = labelLimit;
     unitText.id = `sd-unit-label-${epoch}`;
@@ -122,7 +138,7 @@
     const labelsRowB = el("div", "sd-size-grid");
     labelsRowB.append(labeled("Drawer labels", drawerEnabled), styleField);
     labels.append(labelsRowA, labelsRowB);
-    const material = group(form, "Material"); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
+    const material = group(form, "Material"); material.classList.add("sd-material-group"); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
     material.append(matA, matB);
     const materialFields = {};
     for (const [key, title, row, kind] of [
@@ -131,7 +147,7 @@
       ["drawer_base_mm", "Drawer base thickness", matB, "base_choices"]]) {
       const control = select(block[key], materialChoices(catalog, kind, block[key])); materialFields[key] = control; row.append(labeled(title, control));
     }
-    const summaryGroup = group(form, "Summary"); const summary = el("div", "sd-summary", "Checking cabinet…"); summaryGroup.append(summary);
+    const summaryGroup = group(form, "Summary"); summaryGroup.classList.add("sd-summary-group"); const summary = el("div", "sd-summary", "Checking cabinet…"); summaryGroup.append(summary);
     const syncVisibility = () => {
       frameField.hidden = style.value !== "open"; handleField.hidden = handles.value !== "true";
       keyholeCountField.hidden = wallMounting.value !== "keyholes";
@@ -140,7 +156,7 @@
     const renderRows = () => {
       drawerRows.replaceChildren();
       block.drawers.forEach((row, index) => {
-        const line = el("div", "sd-drawer-row"); line.append(el("strong", "", `Drawer ${index + 1}`));
+        const line = el("div", `sd-drawer-row${drawerEnabled.value === "true" ? " sd-drawer-row-with-label" : ""}`); line.append(el("strong", "", `Drawer ${index + 1}`));
         const height = input(row.height_mm, "number"); height.min = String(minDrawerHeight); height.step = "any"; height.required = true;
         height.disabled = disabled;
         height.id = `sd-height-${epoch}-${index}`;
@@ -149,17 +165,15 @@
         label.id = `sd-label-${epoch}-${index}`;
         label.addEventListener("input", () => { row.label_text = label.value; }, { signal: events.signal });
         const labelField = labeled("Label text", label); labelField.hidden = drawerEnabled.value !== "true";
-        line.append(labeled(
-          "Drawer height", height,
-          "Physical usable bin height also includes the selected Drawer fit and is shown in Summary.",
-          "mm"
-        ), labelField);
+        line.append(labeled("Height", height, null, "mm"), labelField);
         drawerRows.append(line);
       });
     };
+    drawersGroup.append(help("Usable bin height is shown in Summary."));
     const draft = () => {
       const next = copy(space), b = next.storage_drawers;
-      next.name = name.value.trim(); next.x = Number(x.value) * baseUnit; next.y = Number(y.value) * baseUnit;
+      const resolvedX = resolveMm(x), resolvedY = resolveMm(y);
+      next.name = name.value.trim(); next.x = resolvedX.mm; next.y = resolvedY.mm;
       b.drawers = copy(block.drawers); b.cabinet_style = style.value; b.rear_support = rear.value;
       b.wall_mounting = wallMounting.value;
       b.wall_mount_keyholes_per_drawer = Number(keyholeCount.value);
@@ -178,9 +192,8 @@
     const readFields = () => {
       const fail = (message, focusId) => ({ ok: false, message, focusId });
       if (!name.value.trim()) return fail("Enter a Space name", name.id);
-      for (const [field, axis] of [[x, "X"], [y, "Y"]]) {
-        const units = Number(field.value);
-        if (field.value.trim() === "" || !Number.isInteger(units) || units < minUnits || units > maxUnits) return fail(`${axis} must be ${minUnits}–${maxUnits} whole units`, field.id);
+      for (const [field, axis] of [[x, "Width"], [y, "Depth"]]) {
+        if (!resolveMm(field).ok) return fail(`${axis} must round to ${minUnits}–${maxUnits} whole units.`, field.id);
       }
       if (countProblem()) return fail(`Number of drawers: ${countProblem().toLowerCase()}`, count.id);
       for (let i = 0; i < block.drawers.length; i++) {
@@ -212,6 +225,13 @@
       }
       return fields;
     };
+    const notifyReady = () => {
+      const fields = readFields();
+      const identity = callbacks.identity?.() ?? space.id ?? space.name;
+      const ready = Boolean(fields.ok && summaryState === "ok" && summaryIdentity === identity &&
+        summaryKey === window.StorageDrawers.structuralDraftKey(fields.spaceDraft, printerProfile) && lastSummary?.fits_printer === true);
+      if (ready !== lastReady) { lastReady = ready; onReadyChange?.(ready); }
+    };
     const line = (label, value, className = "") => {
       const row = el("p", `sd-summary-line ${className}`.trim());
       row.append(el("span", "sd-summary-label", label), " ", el("span", "sd-summary-value", value)); return row;
@@ -229,7 +249,7 @@
       const lines = [
         fitRow,
         line("Finished outside", `${outside.join(" × ")} mm`, "sd-summary-outside"),
-        line("Field size", `${ux} × ${uy} units (${fx} × ${fy} mm) in each drawer`),
+        line("Inside each drawer", `${fx} × ${fy} mm · ${ux} × ${uy} units`),
         line("Drawers", `${response.drawer_count} · usable height${response.drawer_count === 1 ? "" : "s"} ${heights} mm`),
         line("Cabinet base / top", `${fmt(material.base_mm)} / ${fmt(material.top_mm)} mm`),
       ];
@@ -249,10 +269,10 @@
     };
     const showSummaryText = (text, bad = false) => { summary.replaceChildren(el("p", bad ? "sd-fit-verdict bad" : "sd-summary-line", text)); };
     const schedule = () => {
-      summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…");
+      summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…"); notifyReady();
       clearTimeout(timer); const n = ++requestNumber; const identity = callbacks.identity?.() ?? space.id ?? space.name;
       const pEpoch = profileEpoch; const checked = readFields();
-      if (!checked.ok) { summaryState = "error"; summaryError = checked.message; showSummaryText(checked.message, true); markSettled(); return; }
+      if (!checked.ok) { summaryState = "error"; summaryError = checked.message; showSummaryText(checked.message, true); notifyReady(); markSettled(); return; }
       const next = checked.spaceDraft;
       const key = window.StorageDrawers.structuralDraftKey(next, printerProfile);
       timer = setTimeout(async () => {
@@ -263,10 +283,10 @@
           }
           const response = await callbacks.requestSummary({ space: preview, printer_profile: printerProfile });
           if (!live || epoch !== mountSerial || n !== requestNumber || pEpoch !== profileEpoch || identity !== (callbacks.identity?.() ?? space.id ?? space.name) || key !== window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) return;
-          showSummary(response); summaryKey = key; summaryIdentity = identity; summaryState = "ok"; markSettled();
+          showSummary(response); summaryKey = key; summaryIdentity = identity; summaryState = "ok"; notifyReady(); markSettled();
         } catch (error) {
           if (live && epoch === mountSerial && n === requestNumber && pEpoch === profileEpoch && identity === (callbacks.identity?.() ?? space.id ?? space.name) && key === window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) {
-            summaryError = friendlyError(error) || "Cabinet is invalid"; showSummaryText(summaryError, true); summaryState = "error"; markSettled();
+            summaryError = friendlyError(error) || "Cabinet is invalid"; showSummaryText(summaryError, true); summaryState = "error"; notifyReady(); markSettled();
           }
         }
       }, 250);
@@ -283,12 +303,24 @@
       renderRows(); schedule();
     };
     count.addEventListener("input", applyCount, { signal: events.signal });
+    for (const field of [x, y]) {
+      field.addEventListener("focus", () => {
+        const resolved = resolveMm(field);
+        if (resolved.ok) { field.value = String(resolved.mm); field.select(); }
+      }, { signal: events.signal });
+      field.addEventListener("blur", () => { formatMm(field); schedule(); }, { signal: events.signal });
+    }
     form.addEventListener("input", event => { if (event.target !== count) schedule(); }, { signal: events.signal });
     form.addEventListener("change", event => {
       if (event.target !== count) { syncVisibility(); renderRows(); schedule(); }
     }, { signal: events.signal });
+    const snapshotValue = field => {
+      const resolved = resolveMm(field);
+      return resolved.ok ? resolved.mm : `invalid:${field.value}`;
+    };
+    formatMm(x); formatMm(y);
     const snapshot = () => JSON.stringify([
-      name.value.trim(), x.value, y.value, count.value,
+      name.value.trim(), snapshotValue(x), snapshotValue(y), count.value,
       block.drawers.map(row => [row.id || "", row.height_mm, row.label_text]),
       style.value, rear.value, wallMounting.value, keyholeCount.value,
       stack.value, frame.value, fit.value, handles.value, handleSize.value,

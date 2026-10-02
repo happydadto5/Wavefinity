@@ -62,10 +62,12 @@ const spSame = (a, b) => {
 SP.dialog = () => $("#welcome-dialog");
 SP.close = () => {
   SP.destroyStorageDrawersForm?.();
+  SP.dialog().classList.remove("storage-drawers-config");
   if (SP.dialog().open) SP.dialog().close();
 };
 SP.showOnly = id => {
   SP.cancelInlineEdit();
+  if (id !== "space-form") SP.dialog().classList.remove("storage-drawers-config");
   ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-tutorial", "space-form", "space-configure-prompt", "space-collision-prompt", "space-existing-inventory-prompt", "space-storage-change"]
     .forEach(one => { $("#" + one).hidden = one !== id; });
 };
@@ -2026,6 +2028,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   // Fix 004 Correction 6.F.
   SP.isUpdate = update;
   SP.setupKind = kind;
+  SP.dialog().classList.toggle("storage-drawers-config", kind === "storage_drawers" && !update);
   const typeLabel = SP_KINDS[kind]?.label || kind;
   const typeLine = document.getElementById("space-form-type");
   if (typeLine) {
@@ -4070,6 +4073,10 @@ SP.initPrinterProfile = async () => {
 SP.destroyStorageDrawersForm = () => {
   SP.storageDrawersForm?.destroy();
   SP.storageDrawersForm = null;
+  for (const id of ["space-create", "space-save-changes"]) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = false;
+  }
 };
 
 // ---- Printer Settings dialog: the one PrinterProfile authority, reachable from
@@ -4116,6 +4123,8 @@ SP.requestClose = async () => {
 
 SP.mountStorageDrawersForm = (prefill, update) => {
   SP.destroyStorageDrawersForm();
+  const primaryButton = document.getElementById(update ? "space-save-changes" : "space-create");
+  if (primaryButton) primaryButton.disabled = true;
   const host = document.getElementById("space-fields-storage_drawers");
   try {
     SP.ensureStorageDrawersRules();
@@ -4150,6 +4159,7 @@ SP.mountStorageDrawersForm = (prefill, update) => {
         space, ...(state.runtime.hosted ? { printer_profile } : {}),
       }, { timeoutMs: 15000 }),
     },
+    onReadyChange: ready => { if (primaryButton) primaryButton.disabled = !ready; },
   });
 };
 
