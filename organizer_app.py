@@ -2987,9 +2987,11 @@ def default_feature(
             along = "x"
         run = bounds.width if along == "x" else bounds.depth
         if required_length > run:
-            raise ValueError(
-                f"{item.name} needs {required_length:g} mm; enlarge the bin first"
-            )
+            # Fix 109 A2: never throw before an editable draft exists. Hand back
+            # a starter clamped to the container instead. It is not sizing
+            # authority - cradle_min_footprint() still decides the real minimum,
+            # and the client's auto-grow trial takes it from here.
+            required_length = max(math.floor((run + 1e-9) / pitch) * pitch, min(run, pitch))
         available_across = bounds.depth if along == "x" else bounds.width
         cradle_across = item.widest + _cradle_rib_thickness(item.widest)
         wanted_across = max(

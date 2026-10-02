@@ -1419,7 +1419,7 @@ DP.selectMode = async mode => {
           typeof flushVisibleDesignEditsBeforeModeSwitch === "function" &&
           !(await flushVisibleDesignEditsBeforeModeSwitch())) return false;
       if (typeof flushSpaceDesignAutosave === "function" &&
-          !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
+          !(await flushSpaceDesignAutosave({ deferDraftPreview: true, leavingDesign: true }))) return false;
     }
     if (request !== DP.modeRequest) return false;
     if (mode === "space") {

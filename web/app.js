@@ -1085,9 +1085,14 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
 }
 
 async function flushSpaceDesignAutosave({ visible = true, materialize = false,
-    deferDraftPreview = false, noDeferredPreview = false } = {}) {
+    deferDraftPreview = false, noDeferredPreview = false, leavingDesign = false } = {}) {
   if (designTargetIsStructural()) return true; // Fix 103
   if (!typedSpaceOrdinaryBin()) return true;
+  // Fix 109 A1: leaving Design for Space is where a first bin becomes durable.
+  // state.designInventoryId is the idempotency key - once the save below
+  // stores the returned row id, every later exit is an update, never a create.
+  if (leavingDesign && !state.designInventoryId &&
+      DP.getDesignTarget().kind === "new_bin") materialize = true;
   const originalDesign = state.design;
   const ownerAtStart = fullPreviewStarts;
   try {
@@ -6040,6 +6045,57 @@ function syncDraftEditorIdentity(kind, info) {
   $(".support-editor")?.classList.toggle("nest-editor", isNest);
 }
 
+// Fix 109 A3: a brand-new Cradle grows its bin to the minimum legal size.
+// The trial is read-only: nothing live is assigned until the Space rules
+// (aiSpaceViolation) accept it. Returns "adopted" (the expanded canonical design
+// is now live and already contains the Cradle), "blocked" (live design/bin/
+// Inventory untouched; only the uncommitted draft remains) or "stale".
+async function growBinForNewCradle(request) {
+  const designAtStart = state.design;
+  const source = state.designInventoryId, space = state.activeSpace;
+  const stale = () => request !== state.kindRequest || state.design !== designAtStart ||
+    source !== state.designInventoryId || space !== state.activeSpace;
+  // The engine's starter may be clamped to the container; the real minimum
+  // always comes from sizeCradleToItem (mirrors cradle_min_footprint).
+  sizeCradleToItem(state.draft);
+  const blocker = message => {
+    state.draftAutoCommit = false;
+    $("#draft-status").textContent = message;
+    $("#draft-status").classList.add("error");
+    renderDraftFields();
+    updateSelectionButtons();
+    return "blocked";
+  };
+  const features = [...designAtStart.layout.features, state.draft];
+  const design = { ...designAtStart, layout: { ...designAtStart.layout, features } };
+  let trial;
+  try {
+    trial = await api("/api/layout/expand", { design, anchor: features.length - 1, fit: false });
+  } catch (error) {
+    return stale() ? "stale" : blocker(friendlyError(error));
+  }
+  if (stale()) return "stale";
+  const violation = aiSpaceViolation(trial.design, designAtStart);
+  if (violation) return blocker(violation);
+  const previousDesign = clone(designAtStart);
+  const previousBox = { ...designAtStart.box };
+  state.design = trial.design;
+  noteCommittedDesignChange(previousDesign);
+  const at = features.length - 1;
+  state.selected = at;
+  state.draftIsNew = false;
+  state.draftTouched = false;
+  state.draftSourceIndex = at;
+  state.draft = clone(state.design.layout.features[at]);
+  syncForm();
+  renderDraftFields();
+  renderPlaced();
+  updateSelectionButtons();
+  if (trial.box.x !== previousBox.x) flashField($("#x-size"));
+  if (trial.box.y !== previousBox.y) flashField($("#y-size"));
+  return "adopted";
+}
+
 async function selectKind(kind, reset = false) {
   if (b4bEnabled() && !b4bPartAllowed(kind)) return;
   if (kind === "divider" && dividerLockedByLidLabels()) {
@@ -6112,7 +6168,13 @@ async function selectKind(kind, reset = false) {
     // not a design mutation - it stays an uncommitted armed draft (draftIsNew)
     // until real lettering is typed, at which point the normal edit pipeline
     // (refreshDraft -> autoCommitDraft) saves it for the first time.
-    if (kind !== "nest" && !isBlankTextDraft(state.draft)) {
+    let cradleGrown = false;
+    if (kind === "cradle" && !designTargetIsStructural()) {
+      const outcome = await growBinForNewCradle(request);
+      if (outcome !== "adopted") return;
+      cradleGrown = true;
+    }
+    if (kind !== "nest" && !cradleGrown && !isBlankTextDraft(state.draft)) {
       try {
         const applyResult = await api("/api/feature/apply", {
           design: state.design,
