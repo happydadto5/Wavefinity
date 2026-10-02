@@ -52,7 +52,7 @@
 .sd-summary-warning { margin: 2px 0; color: var(--warn, #8a5a00); }
 .sd-fit-verdict { margin: 0 0 4px; font-weight: 700; }
 .sd-fit-verdict.ok { color: var(--teal, #168a89); }
-.sd-fit-verdict.bad, .sd-printer-fit.bad { color: var(--danger, #b3261e); }
+.sd-fit-verdict.bad, .sd-printer-fit.bad, .sd-fit-warning { color: var(--danger, #b3261e); }
 .sd-recovery { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--danger, #b3261e); border-radius: 10px; background: var(--panel, white); box-shadow: 0 4px 16px #0002; }
 .sd-recovery h3, .sd-recovery p { margin: 0; }
 .sd-recovery-message { font-weight: 600; }

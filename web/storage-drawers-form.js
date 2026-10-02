@@ -35,7 +35,7 @@
   };
   const NAMED = (list, names, unit = "mm") => list.map((mm, index) => [String(mm),
     list.length === names.length ? `${names[index]} · ${mm.toFixed(2).replace(/\.?0+$/, "")} ${unit}` : `${mm} ${unit}`]);
-  const mount = ({ host, initialSpace, catalog, printerProfile, mode, callbacks = {}, onReadyChange = null }) => {
+  const mount = ({ host, initialSpace, catalog, printerProfile, mode, callbacks = {}, onReadyChange = null, scope = "full" }) => {
     const epoch = ++mountSerial;
     const rules = window.StorageDrawers.catalogRules(catalog);
     const { baseUnit, minDrawerHeight, minUnits, maxUnits, minDrawers, maxDrawers, labelLimit } = rules;
@@ -86,6 +86,24 @@
     for (const field of [x, y]) { field.inputMode = "decimal"; field.required = true; }
     sizeGrid.append(labeled("Width", x), labeled("Depth", y));
     sizeGroup.append(help("Width = left ↔ right. Depth = front ↔ back. Wavefinity rounds to whole units."));
+    // Fix 103 (Packet B): printer status lives beside Size, not in Summary.
+    // Known oversize shows a warning here but does not block.
+    const printerRow = el("p", "sd-printer-row");
+    sizeGroup.append(printerRow);
+    const updatePrinterRow = () => {
+      const vol = `${fmt(printerProfile.x_mm)} × ${fmt(printerProfile.y_mm)} × ${fmt(printerProfile.z_mm)} mm`;
+      printerRow.replaceChildren();
+      printerRow.append(el("span", "sd-summary-label", "Printer"), " ", el("span", "sd-summary-value", vol));
+      if (lastSummary && !lastSummary.fits_printer) {
+        printerRow.append(" ", el("span", "sd-fit-warning", ` — ${lastSummary.first_fit_error || "Does not fit your printer"}`));
+      }
+      if (callbacks.openPrinterSettings) {
+        const change = el("button", "link-button", "Change…"); change.type = "button";
+        change.addEventListener("click", () => callbacks.openPrinterSettings(), { signal: events.signal });
+        printerRow.append(" ", change);
+      }
+    };
+    updatePrinterRow();
     const drawersGroup = group(form, "Drawers"); drawersGroup.classList.add("sd-drawers-group");
     const count = input(block.drawers.length, "number"); count.min = String(minDrawers); count.max = String(maxDrawers); count.step = "1";
     count.id = `sd-count-${epoch}`;
@@ -152,6 +170,15 @@
       frameField.hidden = style.value !== "open"; handleField.hidden = handles.value !== "true";
       keyholeCountField.hidden = wallMounting.value !== "keyholes";
       unitTextField.hidden = unitEnabled.value !== "true"; styleField.hidden = drawerEnabled.value !== "true";
+      // Fix 103 (Packet B): Basic Setup shows only Name + Size + Drawers.
+      // Advanced controls are built but hidden, so draft() reads canonical
+      // defaults for them exactly as before.
+      if (scope === "basic") {
+        cabinet.hidden = true; labels.hidden = true; material.hidden = true;
+        fit.closest("label").hidden = true;
+        handles.closest("label").hidden = true;
+        handleField.hidden = true;
+      }
     };
     const renderRows = () => {
       drawerRows.replaceChildren();
@@ -218,18 +245,16 @@
           summaryKey !== window.StorageDrawers.structuralDraftKey(fields.spaceDraft, printerProfile)) {
         return { ok: false, message: "Checking cabinet…", focusId: null, pending: true };
       }
-      // The live summary is the printer-fit authority: a cabinet that cannot
-      // print on the current printer is stopped here, not at Save Cabinet.
-      if (lastSummary && !lastSummary.fits_printer) {
-        return { ok: false, message: lastSummary.first_fit_error || "This cabinet does not fit the printer.", focusId: null };
-      }
+      // Fix 103 (Packet B): known printer oversize is a non-blocking warning
+      // (shown beside the Printer row in Size). Only unknown / stale / error
+      // still blocks, via the summaryState checks above.
       return fields;
     };
     const notifyReady = () => {
       const fields = readFields();
       const identity = callbacks.identity?.() ?? space.id ?? space.name;
       const ready = Boolean(fields.ok && summaryState === "ok" && summaryIdentity === identity &&
-        summaryKey === window.StorageDrawers.structuralDraftKey(fields.spaceDraft, printerProfile) && lastSummary?.fits_printer === true);
+        summaryKey === window.StorageDrawers.structuralDraftKey(fields.spaceDraft, printerProfile));
       if (ready !== lastReady) { lastReady = ready; onReadyChange?.(ready); }
     };
     const line = (label, value, className = "") => {
@@ -243,31 +268,21 @@
       const [fx, fy] = (response.field_mm || []).map(v => fmt(v));
       const heights = (response.drawers || []).map(row => fmt(row.height_mm)).join(", ");
       const material = response.effective_material || {};
-      const printer = `${fmt(printerProfile.x_mm)} × ${fmt(printerProfile.y_mm)} × ${fmt(printerProfile.z_mm)} mm`;
-      const fitRow = el("p", `sd-fit-verdict ${response.fits_printer ? "ok" : "bad"}`,
-        response.fits_printer ? "✓ Fits your printer" : `✗ ${response.first_fit_error || "Does not fit your printer"}`);
       const lines = [
-        fitRow,
         line("Finished outside", `${outside.join(" × ")} mm`, "sd-summary-outside"),
         line("Inside each drawer", `${fx} × ${fy} mm · ${ux} × ${uy} units`),
         line("Drawers", `${response.drawer_count} · usable height${response.drawer_count === 1 ? "" : "s"} ${heights} mm`),
         line("Cabinet base / top", `${fmt(material.base_mm)} / ${fmt(material.top_mm)} mm`),
       ];
       if (response.cabinet_style === "open" && material.frame_width_mm) lines.push(line("Open frame width", `${fmt(material.frame_width_mm)} mm`));
-      const printerRow = line("Printer build volume", printer);
-      if (callbacks.openPrinterSettings) {
-        const change = el("button", "link-button", "Printer Settings…"); change.type = "button";
-        change.addEventListener("click", () => callbacks.openPrinterSettings(), { signal: events.signal });
-        printerRow.append(" ", change);
-      }
-      lines.push(printerRow);
       for (const warning of response.warnings || []) lines.push(el("p", "sd-summary-warning", `Note: ${warning}`));
       const guide = el("p", "sd-summary-line");
       const link = el("a", "", "Assembly & print guide"); link.href = GUIDE_URL; link.target = "_blank"; link.rel = "noopener";
       guide.append(link); lines.push(guide);
       summary.replaceChildren(...lines);
+      updatePrinterRow();
     };
-    const showSummaryText = (text, bad = false) => { summary.replaceChildren(el("p", bad ? "sd-fit-verdict bad" : "sd-summary-line", text)); };
+    const showSummaryText = (text, bad = false) => { summary.replaceChildren(el("p", bad ? "sd-fit-verdict bad" : "sd-summary-line", text)); updatePrinterRow(); };
     const schedule = () => {
       summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…"); notifyReady();
       clearTimeout(timer); const n = ++requestNumber; const identity = callbacks.identity?.() ?? space.id ?? space.name;
