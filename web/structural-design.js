@@ -549,7 +549,14 @@ function activateStructural2D() {
   state.lastDesignView = "2d";
   const wrap = $('.canvas-wrap[data-canvas="drawer"]');
   if (wrap && !wrap.querySelector(".structural-2d-badge")) {
-    wrap.append(structuralEl("div", "structural-2d-badge", "View only. Place and move bins in Space."));
+    const badge = structuralEl("div", "structural-2d-badge", "View only. Place and move bins in Space. ");
+    // The sole placement-edit handoff: the existing mode switch, which also
+    // settles an unsaved structural draft first.
+    const go = structuralEl("button", "structural-2d-go", "Go to Space");
+    go.type = "button";
+    go.addEventListener("click", () => { DP.selectMode("space"); });
+    badge.append(go);
+    wrap.append(badge);
   }
 }
 
