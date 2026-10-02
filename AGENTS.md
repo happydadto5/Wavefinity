@@ -9,3 +9,10 @@ All authoritative developer and AI coding instructions are centralized in [READM
 - **Testing:** For a Help Code task, the active cloud fix's testing disposition wins completely. Do not infer tests from the repository's generic Class A/B/C guidance when the active Fix says no tests. For explicitly non-Help-Code work, the README's generic testing guidance applies.
 - **Scope:** Implement the requested change, inspect the affected path and diff, use the cheapest useful verification, then commit and push. Avoid testing bureaucracy, verbose logs, and browser-driving unless the README policy says the risk justifies it.
 - **Project notes:** Three coding tools (Claude, Codex/ChatGPT, Gemini) work this project. Keep project/task notes in [README.md](README.md) whenever possible so all three tools and the human see the same record. Put something in this file only if it is specific to this particular tool.
+
+## Help Code coder wake-up (Codex)
+If the user's entire or near-entire message is `code chat`, `chat code`, or an obvious short near-match such as `hat code` or `check code`, treat it as the Help Code coder wake-up, not a generic request to inspect the current directory.
+
+Before judging the workspace, fetch/read `happydadto5/Wavefinity-Help-Code/CODER.md` and `happydadto5/Wavefinity-Help-Code/reviews/code-chat.md` fresh, then follow the Current instruction. If cwd is empty, wrong, unrelated, or stale, recover automatically by locating or creating a safe Wavefinity checkout/worktree.
+
+Do not answer “What code?” or “No code exists here” merely because the starting cwd is wrong or empty. Ask Andrew for a path only if authoritative repository access actually fails.
