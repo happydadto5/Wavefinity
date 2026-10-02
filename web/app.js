@@ -121,6 +121,12 @@ const state = {
   // there yet. Cleared on New Bin/Duplicate/folder switch; set by autosave,
   // Inventory Edit and on-demand source attach from Save/Print.
   designInventoryId: null,
+  // Fix 103: explicit Design target selection ({ kind: "structural" | "bin" |
+  // "new_bin", rowId, drawerId }). null means "derive from the legacy
+  // designInventoryId binding" (DP.getDesignTarget). Only the structural
+  // activation (Packet F) ever sets this; every bin/new-bin path below keeps
+  // it null so derivation stays exact.
+  designTarget: null,
   spaceStarterPreviewPending: false,
   // Whether this folder logs generated bins/B4Bs to its inventory file - the
   // default for any folder, independent of whether Space planning is on.
@@ -237,6 +243,7 @@ function setFolderState(
     state.spacePartDefaults = {};
     // No source row means anything outside a typed Space.
     state.designInventoryId = null;
+    state.designTarget = null; // Fix 103
     // No longer a typed Space: neither the Space workspace nor a stale
     // resume checkpoint from it has anything left to show.
     state.spaceResumeDesign = null;
@@ -853,6 +860,7 @@ async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
   state.design = design;
   clearDesignerHistory();
   state.designInventoryId = null;
+  state.designTarget = null; // Fix 103
   state.lastOrdinaryDesign = clone(state.design);
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
@@ -890,6 +898,12 @@ function applyDesignerLifecycleVisibility() {
 
 function typedSpaceOrdinaryBin() {
   return state.folderMode === "space" && typeof DL !== "undefined";
+}
+
+// Fix 103: the structural target never flows through the ordinary-bin
+// design-source autosave/dirty owners. Dormant until Packet F (false today).
+function designTargetIsStructural() {
+  return typeof DP !== "undefined" && DP.getDesignTarget && DP.getDesignTarget().kind === "structural";
 }
 
 // A Storage Box or Base Trim is a structural output of its Space (see
@@ -990,6 +1004,7 @@ async function settleDesignerWritesForRelocation() {
 }
 
 function queueSpaceDesignAutosave() {
+  if (designTargetIsStructural()) return; // Fix 103
   if (state.relocating || !typedSpaceOrdinaryBin()) return;
   const context = DL.spaceContext();
   clearTimeout(spaceAutosaveTimer);
@@ -1003,6 +1018,7 @@ function queueSpaceDesignAutosave() {
 
 function persistSpaceDesignSource(expectedContext = null, force = false) {
   const run = async () => {
+    if (designTargetIsStructural()) return true; // Fix 103
     if (!typedSpaceOrdinaryBin()) return true;
     const context = expectedContext || DL.spaceContext();
     DL.requireSpaceContext(context);
@@ -1055,6 +1071,7 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
 
 async function flushSpaceDesignAutosave({ visible = true, materialize = false,
     deferDraftPreview = false, noDeferredPreview = false } = {}) {
+  if (designTargetIsStructural()) return true; // Fix 103
   if (!typedSpaceOrdinaryBin()) return true;
   const originalDesign = state.design;
   const ownerAtStart = fullPreviewStarts;
@@ -1108,6 +1125,7 @@ async function installLoadedDesignSource(rowId, spec, {
     state.cleanDesign = clone(spec);
     state.spaceStarterPreviewPending = false;
     state.designInventoryId = rowId;
+    state.designTarget = null; // Fix 103
     if (typeof DP !== "undefined") { DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin(); }
     state.surfaceHeightPromptSkipped = false;
     state.drafts = {};
@@ -1504,6 +1522,10 @@ async function aiCopyText(text, area) {
 
 async function aiGeneratePrompt() {
   if (aiHelp.busy) return;
+  if (designTargetIsStructural()) { // Fix 103
+    aiSetStatus("AI Design designs ordinary bins only.", { error: true });
+    return;
+  }
   if (aiHelp.openIdentityKey && aiIdentityKey() !== aiHelp.openIdentityKey) {
     aiSetStatus("The open bin or Space changed. Close AI Design and open it again for the current bin.", { error: true });
     return;
@@ -1643,6 +1665,7 @@ async function aiInstallCandidate(candidate, session, mode) {
         // bin/part defaults exactly as the same edits made by hand would.
         state.cleanDesign = clone(freshDesignForCurrentFolder());
         state.designInventoryId = null;
+        state.designTarget = null; // Fix 103
       }
       state.spaceStarterPreviewPending = false;
       state.surfaceHeightPromptSkipped = false;
@@ -1995,6 +2018,7 @@ async function designerDuplicate() {
     state.lastOrdinaryDesign = clone(state.design);
     state.cleanDesign = clone(state.design);
     state.designInventoryId = null;
+    state.designTarget = null; // Fix 103
     state.surfaceHeightPromptSkipped = false;
     state.drafts = {};
     state.binResizePending = false;
@@ -14098,6 +14122,7 @@ function visibleDesignSnapshot() {
 }
 
 function designHasChanges() {
+  if (designTargetIsStructural()) return false; // Fix 103
   const visibleDesign = visibleDesignSnapshot();
   const index = draftCommitIndex();
   if (state.draft && state.draftAutoCommit && (
@@ -14136,6 +14161,7 @@ async function openDesign(event) {
     state.cleanDesign = clone(state.design);
     state.spaceStarterPreviewPending = false;
     if (state.folderMode === "space") state.designInventoryId = null;
+    state.designTarget = null; // Fix 103
     state.drafts = {};
     state.binResizePending = false;
     state.binFootprintResizePending = false;

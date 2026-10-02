@@ -484,6 +484,23 @@ DP.editableSourceFor = one => {
     !(typeof isStructuralDesign === "function" && isStructuralDesign(spec));
 };
 
+// Fix 103: the Design target model. kind is "structural" | "bin" | "new_bin".
+// state.designTarget is only ever set for the structural target (Packet F
+// activation); "bin" and "new_bin" always derive from the legacy
+// designInventoryId binding, so this packet changes no behavior.
+DP.getDesignTarget = () => {
+  const explicit = state.designTarget;
+  if (explicit && typeof explicit === "object" && typeof explicit.kind === "string") return explicit;
+  const rowId = state.designInventoryId || null;
+  return rowId
+    ? { kind: "bin", rowId, drawerId: null }
+    : { kind: "new_bin", rowId: null, drawerId: null };
+};
+DP.setDesignTarget = target => { state.designTarget = target; };
+DP.clearDesignTarget = () => { state.designTarget = null; };
+// Fix 103: dormant until Packet F flips the global structural activation.
+DP.structuralTargetEnabled = false;
+
 // Shared stable ordering for the Design navigator and the post-delete handoff.
 // DL.bins order is the authority; editability comes from DP.editableSourceFor.
 DP.designNavRows = () => (DL.bins || []).slice();
@@ -501,13 +518,26 @@ DP.designNavBlocked = () => DP.designNavBusy || state.designMutationBusy;
 DP.refreshDesignBinNav = () => {
   const host = $("#design-bin-nav"), select = $("#design-bin-select");
   if (!host || !select) return;
-  const show = DP.mode === "design" && DL.active && DP.designNavRows().length > 0;
+  // Fix 103: the Design target model. The structural option and its selection
+  // state are dormant until Packet F flips DP.structuralTargetEnabled; with the
+  // flag false this renders exactly as before.
+  const target = DP.getDesignTarget();
+  const structuralSpace = typeof DL !== "undefined" && (DL.isStorageDrawers() || DL.isStorageBox());
+  const structuralShown = structuralSpace && (DP.structuralTargetEnabled || target.kind === "structural");
+  const structuralSelected = target.kind === "structural";
+  const show = DP.mode === "design" && DL.active && (DP.designNavRows().length > 0 || structuralShown);
   host.hidden = !show;
   if (!show) return;
-  const currentId = state.designInventoryId;
+  const currentId = target.kind === "bin" ? target.rowId : null;
   select.innerHTML = "";
+  if (structuralShown) {
+    const opt = new Option(DL.isStorageDrawers() ? "Storage Drawers" : "Storage Box", "__structural__");
+    if (structuralSelected) opt.selected = true;
+    select.append(opt);
+  }
   const unbound = new Option("New Bin", "");
-  if (!currentId) { unbound.selected = true; select.append(unbound); }
+  if (!currentId && !structuralSelected) { unbound.selected = true; select.append(unbound); }
+  else if (structuralSelected) { select.append(unbound); }
   for (const one of DP.designNavRows()) {
     const editable = DP.editableSourceFor(one);
     const opt = new Option(DL.label(one), one.id);
@@ -521,20 +551,23 @@ DP.refreshDesignBinNav = () => {
   }
   const order = DP.designNavEditableRows().map(one => one.id);
   const idx = order.indexOf(currentId);
-  $("#design-bin-prev").disabled = DP.designNavBlocked() || idx <= 0;
-  $("#design-bin-next").disabled = DP.designNavBlocked() || idx < 0 || idx >= order.length - 1;
+  $("#design-bin-prev").disabled = DP.designNavBlocked() || structuralSelected || idx <= 0;
+  $("#design-bin-next").disabled = DP.designNavBlocked() || structuralSelected || idx < 0 || idx >= order.length - 1;
 };
 
 DP.refreshDesignerDeleteBin = () => {
   const btn = $("#designer-delete-bin");
   if (!btn) return;
-  const one = state.designInventoryId && DL.bin(state.designInventoryId);
+  // Fix 103: the structural target is never deletable; it has no Inventory row.
+  const target = DP.getDesignTarget();
+  const one = target.kind === "bin" && target.rowId ? DL.bin(target.rowId) : null;
   btn.hidden = !(DP.mode === "design" && one && DP.editableSourceFor(one));
   btn.disabled = DP.designNavBlocked();
 };
 
 DP.stepDesignBin = async dir => {
   if (DP.designNavBlocked() || DP.mode !== "design") return;
+  if (DP.getDesignTarget().kind === "structural") return; // Fix 103
   const order = DP.designNavEditableRows().map(one => one.id);
   const idx = order.indexOf(state.designInventoryId);
   if (idx < 0) return;
@@ -555,7 +588,36 @@ $("#design-bin-next").addEventListener("click", () => DP.stepDesignBin(1));
 $("#design-bin-select").addEventListener("change", async event => {
   const id = event.target.value;
   DP.refreshDesignBinNav();
-  if (!id || DP.designNavBlocked() || DP.mode !== "design") return;
+  if (DP.designNavBlocked() || DP.mode !== "design") return;
+  // Fix 103: structural activation path (dormant until Packet F).
+  if (id === "__structural__") {
+    DP.designNavBusy = true;
+    DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+    try {
+      await DP.openStructuralTarget();
+    } finally {
+      DP.designNavBusy = false;
+      DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+    }
+    return;
+  }
+  // Fix 103: structural Design exposes an explicit New Bin option. The
+  // option is dormant today because the structural target is dormant; when
+  // Packet F enables it, route through the existing New Bin owner rather than
+  // leaving a visible selector choice that does nothing.
+  if (!id) {
+    if (DP.getDesignTarget().kind === "structural") {
+      DP.designNavBusy = true;
+      DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+      try {
+        await designerNewBin();
+      } finally {
+        DP.designNavBusy = false;
+        DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+      }
+    }
+    return;
+  }
   const one = DL.bin(id);
   if (!one || !DP.editableSourceFor(one)) return;
   DP.designNavBusy = true;
@@ -592,6 +654,7 @@ DP.openInventoryRow = async id => {
     // the row selected.
     if (DL.isStorageDrawers()) await SP.cabinetJumpToRow(id);
     if (!(await designerEditInventoryRow(id, acceptTransition)) || !acceptTransition()) return false;
+    DP.clearDesignTarget(); // Fix 103
     DL.selectRow(id);
     DP.setMode("design");
     activatePreviewView(preferredDesignView());
@@ -600,6 +663,29 @@ DP.openInventoryRow = async id => {
   } finally {
     if (request === DP.modeRequest) DP.showPendingMode(null);
   }
+};
+
+// Fix 103: structural activation path. Dormant until Packet F (the enabled flag
+// is false, so this always returns false today). It never touches state.design
+// / state.cleanDesign: the structural preview owns its own data in later packets.
+DP.openStructuralTarget = async () => {
+  if (!DP.structuralTargetEnabled) return false;
+  if (DP.designNavBlocked() || DP.mode !== "design") return false;
+  if (typeof DL === "undefined" || (!DL.isStorageDrawers() && !DL.isStorageBox())) return false;
+  const outgoing = DP.getDesignTarget();
+  // Only a real bound bin owns an autosave. An unbound New Bin starter must
+  // never be materialized merely because the user switches to the structural
+  // object — that would recreate the phantom-bin defect this architecture fixes.
+  if (outgoing.kind === "bin" && typedSpaceOrdinaryBin() &&
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
+  // Structural selection has no Inventory row. Clear the legacy binding only
+  // after any outgoing ordinary bin is safely flushed; the row itself remains
+  // in Inventory and can be reopened from the navigator.
+  state.designInventoryId = null;
+  DP.setDesignTarget({ kind: "structural", rowId: null, drawerId: null });
+  DP.setMode("design");
+  DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+  return true;
 };
 
 // Duplicate a design-source row through the accepted atomic owner. The new

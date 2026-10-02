@@ -2442,6 +2442,7 @@ SP.create = async () => {
 // identity to another.
 SP.resetDesignSession = () => {
   state.designInventoryId = null;
+  state.designTarget = null; // Fix 103
   state.spaceStarterPreviewPending = false;
   state.lastOrdinaryDesign = null;
   state.drafts = {};
@@ -2508,6 +2509,7 @@ SP.initializeDesignForActiveSpace = async () => {
       .filter(([, design]) => JSON.stringify(design) === key);
     if (matches.length === 1) {
       state.designInventoryId = matches[0][0];
+      state.designTarget = null; // Fix 103
     } else if (matches.length === 0 && typeof freshDesignForCurrentFolder === "function" &&
                typeof persistSpaceDesignSource === "function") {
       // Fix 082 B: a resume checkpoint can represent real, meaningful work
