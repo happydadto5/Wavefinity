@@ -189,8 +189,10 @@
         handleField.hidden = true;
       }
     };
+    const heightInputs = new Map();
     const renderRows = () => {
       drawerRows.replaceChildren();
+      heightInputs.clear();
       block.drawers.forEach((row, index) => {
         const line = el("div", `sd-drawer-row${drawerEnabled.value === "true" ? " sd-drawer-row-with-label" : ""}`); line.append(el("strong", "", `Drawer ${index + 1}`));
         // Fix 103 (Section E): click a drawer row to make it the active drawer
@@ -198,6 +200,7 @@
         // keys) have no server owner, so they never highlight.
         if (structural && row.id && !String(row.id).startsWith("temporary:")) {
           const owner = `drawer:${row.id}`;
+          line.dataset.drawerId = row.id;
           line.classList.toggle("sd-drawer-row-active", row.id === activeDrawerId);
           line.style.cursor = "pointer";
           line.setAttribute("role", "group");
@@ -213,6 +216,7 @@
         const height = input(row.height_mm, "number"); height.min = String(minDrawerHeight); height.step = "any"; height.required = true;
         height.disabled = disabled;
         height.id = `sd-height-${epoch}-${index}`;
+        heightInputs.set(row, height);
         height.addEventListener("input", () => { row.height_mm = Number(height.value); }, { signal: events.signal });
         const label = input(row.label_text); label.maxLength = labelLimit; label.disabled = disabled;
         label.id = `sd-label-${epoch}-${index}`;
@@ -242,7 +246,10 @@
     const selectDrawer = id => {
       if (!structural || id === activeDrawerId) return;
       activeDrawerId = id;
-      renderRows(); syncHeightField();
+      for (const node of drawerRows.querySelectorAll(".sd-drawer-row")) {
+        node.classList.toggle("sd-drawer-row-active", node.dataset.drawerId === id);
+      }
+      syncHeightField();
     };
     // Typed input, arrow/wheel steps and the 3D handles all land here.
     const setInterior = (axis, requested) => {
@@ -253,7 +260,9 @@
         if (!Number.isFinite(wanted)) return NaN;
         const usable = Math.max(wanted, Math.ceil(heightBasis.offset + minDrawerHeight));
         row.height_mm = roundMm(usable - heightBasis.offset);
-        renderRows(); syncHeightField(); schedule({ keepHeight: true });
+        const rowInput = heightInputs.get(row);
+        if (rowInput) rowInput.value = String(row.height_mm);
+        syncHeightField(); schedule({ keepHeight: true });
         return usable;
       }
       const units = Math.min(maxUnits, Math.max(minUnits, Math.round(Number(requested) / baseUnit)));

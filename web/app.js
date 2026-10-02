@@ -136,11 +136,11 @@ const state = {
   // there yet. Cleared on New Bin/Duplicate/folder switch; set by autosave,
   // Inventory Edit and on-demand source attach from Save/Print.
   designInventoryId: null,
-  // Fix 103: explicit Design target selection ({ kind: "structural" | "bin" |
-  // "new_bin", rowId, drawerId }). null means "derive from the legacy
-  // designInventoryId binding" (DP.getDesignTarget). Only the structural
-  // activation (Packet F) ever sets this; every bin/new-bin path below keeps
-  // it null so derivation stays exact.
+  // Fix 103: explicit Design target selection. Only the structural target is
+  // ever stored here ({ kind: "structural", structural: true, structuralKind:
+  // "box" | "storage_drawers", rowId: null, drawerId: null }); null means
+  // "derive from the legacy designInventoryId binding" (DP.getDesignTarget).
+  // Every bin/new-bin install path keeps it null so derivation stays exact.
   designTarget: null,
   spaceStarterPreviewPending: false,
   // Whether this folder logs generated bins/B4Bs to its inventory file - the
@@ -916,7 +916,7 @@ function typedSpaceOrdinaryBin() {
 }
 
 // Fix 103: the structural target never flows through the ordinary-bin
-// design-source autosave/dirty owners. Dormant until Packet F (false today).
+// design-source autosave/dirty owners.
 function designTargetIsStructural() {
   return typeof DP !== "undefined" && DP.getDesignTarget && DP.getDesignTarget().kind === "structural";
 }
@@ -1895,7 +1895,7 @@ function aiWireHelp() {
 async function designerNewBin(acceptTransition = null) {
   if (acceptTransition && !acceptTransition()) return false;
   // Fix 103 (R6): structural -> New Bin settles an unsaved structural draft first.
-  if (designTargetIsStructural() && !(await SP.confirmLeaveStructuralEditor())) return false;
+  if (typeof designTargetIsStructural === "function" && designTargetIsStructural() && !(await SP.confirmLeaveStructuralEditor())) return false;
   if (acceptTransition && !acceptTransition()) return false;
   return withDeferredDraftSwitch(async () => {
   if (acceptTransition && !acceptTransition()) return false;
@@ -10544,7 +10544,7 @@ function updateStorageBoxHeightWarning(warning) {
 async function refreshPreview({ persistResume = true } = {}) {
   // Fix 103: the structural target owns its own preview (refreshStructuralPreview);
   // an ordinary design must never preview or checkpoint under it.
-  if (designTargetIsStructural()) return;
+  if (typeof designTargetIsStructural === "function" && designTargetIsStructural()) return;
   fullPreviewStarts += 1;
   const request = ++state.previewRequest;
   const lidEpochAtRequest = state.lidThicknessEpoch;

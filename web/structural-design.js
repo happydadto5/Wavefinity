@@ -141,8 +141,12 @@ function syncStructuralEditor({ force = false } = {}) {
 
 function mountStructuralEditor(kind, key) {
   const host = document.getElementById("structural-editor-host");
-  const keepDrawer = structuralEditorRecord?.kind === kind ? structuralEditorRecord.form?.activeDrawerId?.() : null;
-  unmountStructuralEditor({ clearPreview: false });
+  // A rebuild for the same Space (after Save/Cancel) keeps the last preview,
+  // the highlight and the active drawer; another Space starts clean.
+  const previous = structuralEditorRecord;
+  const sameSpace = Boolean(previous) && previous.kind === kind && previous.spaceId === (state.activeSpaceId || null);
+  const keepDrawer = sameSpace ? previous.form?.activeDrawerId?.() : null;
+  unmountStructuralEditor({ clearPreview: !sameSpace });
   host.replaceChildren();
   host.hidden = false;
   const space = clone(state.activeSpace);
@@ -160,7 +164,8 @@ function mountStructuralEditor(kind, key) {
   wrap.append(formHost, dirtyNote, status, actions);
   host.append(wrap);
   const record = {
-    kind, spaceKey: key, serial: ++state.structuralMountSerial, wrap, formHost, status, save, cancel, dirtyNote,
+    kind, spaceKey: key, spaceId: state.activeSpaceId || null,
+    serial: ++state.structuralMountSerial, wrap, formHost, status, save, cancel, dirtyNote,
     form: null, saving: false,
   };
   structuralEditorRecord = record;
@@ -230,7 +235,9 @@ function structuralDraftResult() {
       ok: true,
       space: {
         ...clone(state.activeSpace),
-        x: draft.space.x, y: draft.space.y, z: draft.space.z, storage_box: draft.space.storage_box,
+        x: draft.space.x, y: draft.space.y, z: draft.space.z,
+        // Settings this form does not expose stay as the accepted Space has them.
+        storage_box: { ...(state.activeSpace.storage_box || {}), ...draft.space.storage_box },
       },
     };
   }
@@ -572,7 +579,7 @@ async function structuralSaveChanges() {
       });
       if (!updated) { setStructuralStatus("The cabinet changed before it could be saved. Try again.", { error: true }); return false; }
     } else {
-      const draft = record.form.draft();
+      const draft = structuralDraftResult();
       if (!draft.ok) { setStructuralStatus(draft.message, { error: true }); return false; }
       const space = state.activeSpace;
       await SP.commitSpaceUpdate({
@@ -582,7 +589,8 @@ async function structuralSaveChanges() {
     }
     // Accepted: rebuild the editor from the accepted Space so it is pristine,
     // keeping the active drawer and the highlight.
-    syncStructuralEditor({ force: true });
+    // (A cabinet Save already remounted it when the accepted Space was adopted.)
+    if (structuralEditorRecord === record) syncStructuralEditor({ force: true });
     setStructuralStatus("");
     toast("Space updated.");
     return true;
