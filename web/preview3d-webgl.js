@@ -356,7 +356,11 @@
   // Every entry is already flat-shaded triangles (one normal per triangle in
   // `normals`, expanded to all three corners here), so unlike buildBuffers()
   // this never needs triangulatePolygon().
-  function buildBuffersFromMeshes(gl, meshes, groupNames, kindColor) {
+  // Fix 103 (Section E): highlightOwner tints one owner's meshes with the
+  // highlight color (used for the active drawer in structural Design).
+  // Null/undefined disables highlighting.
+  const HIGHLIGHT_HEX = "#f5a623";
+  function buildBuffersFromMeshes(gl, meshes, groupNames, kindColor, highlightOwner = null) {
     const raw = new Map(groupNames.map(name => [name, emptyBucket()]));
     const aabb = new Map(groupNames.map(name => [name, emptyAabb()]));
     const colorCache = new Map();
@@ -364,8 +368,13 @@
       const bucket = raw.get(mesh.owner);
       if (!bucket) continue;
       const box = aabb.get(mesh.owner);
-      let hex = colorCache.get(mesh.kind);
-      if (!hex) { hex = kindColor(mesh.kind); colorCache.set(mesh.kind, hex); }
+      let hex;
+      if (highlightOwner && mesh.owner === highlightOwner) {
+        hex = HIGHLIGHT_HEX;
+      } else {
+        hex = colorCache.get(mesh.kind);
+        if (!hex) { hex = kindColor(mesh.kind); colorCache.set(mesh.kind, hex); }
+      }
       const [r, g, b] = hexToUnit(hex);
       const bias = (mesh.layer || 0) * LAYER_EPSILON;
       const positions = mesh.positions, normals = mesh.normals;

@@ -1853,3 +1853,33 @@ body.relocating > :not(dialog) { pointer-events: none; }
 .design-bin-nav { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
 .design-bin-select { flex: 1; min-width: 0; }
 #designer-delete-bin { margin-left: auto; }
+
+/* Fix 103 (Section C): structural Design. When a Storage Drawers cabinet or
+   Storage Box case is the Design target, the ordinary bin editor sections hide
+   and the structural editor shows. The bin navigator and New Bin stay so the
+   user can always switch to (or start) an ordinary bin. */
+body.structural-design-active .control-section[data-section="parts-options"],
+body.structural-design-active .control-section[data-section="connector"],
+body.structural-design-active .control-section[data-section="build"] .part-name-row,
+body.structural-design-active #ordinary-size-row,
+body.structural-design-active #design-first-size-help,
+body.structural-design-active #bin-grid-help,
+body.structural-design-active #pegboard-mount-row,
+body.structural-design-active .mode-and-bin-options,
+body.structural-design-active #stack-note,
+body.structural-design-active #designer-duplicate,
+body.structural-design-active #ai-help-open,
+body.structural-design-active #designer-delete-bin,
+body.structural-design-active #designer-history-actions,
+body.structural-design-active #space-head-edit { display: none !important; }
+/* The 2D view of a structural target is the Space canvas, view only. */
+body.structural-design-active #sd-workspace-host,
+body.structural-design-active #dl-staging,
+body.structural-design-active .canvas-wrap[data-canvas="drawer"] .dl-hint { display: none !important; }
+#structural-editor-host[hidden] { display: none; }
+.structural-editor { display: grid; gap: 10px; padding: 10px 12px 14px; }
+.structural-editor-title { margin: 0; font-size: 14px; }
+.structural-dirty-note, .structural-status { margin: 0; font-size: 12px; color: var(--muted); }
+.structural-status.field-error { color: var(--danger, #b3261e); }
+.structural-2d-badge { position: absolute; left: 12px; bottom: 12px; padding: 4px 10px; border-radius: 6px; background: rgba(18, 38, 46, 0.86); color: #fff; font-size: 12px; pointer-events: none; }
+body:not(.structural-design-active) .structural-2d-badge { display: none; }

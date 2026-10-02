@@ -187,7 +187,7 @@ from organizer_storage_drawers import (
     reset_storage_drawers_definition,
     storage_drawers_definition_problem,
 )
-from organizer_storage_drawer_geometry import storage_drawers_summary
+from organizer_storage_drawer_geometry import resolve_storage_drawers_plan, storage_drawers_summary
 from organizer_base_trim_outputs import (
     BASE_TRIM_OUTPUT_KEY,
     base_trim_plan,
@@ -335,7 +335,8 @@ SOURCE_FILES = (
     "wavefinity_web.py", "web/index.html", "web/app.js", "web/spaces.js",
     "web/styles.css", "web/drawer-panel.js", "web/drawer-model.js",
     "web/storage-drawers.js", "web/storage-drawers-form.js",
-    "web/storage-drawers-workspace.js", "images/Drawer.png",
+    "web/storage-drawers-workspace.js", "web/storage-box-form.js",
+    "web/structural-design.js", "images/Drawer.png",
     "images/StorageDrawers.png",
 )
 
@@ -3951,17 +3952,90 @@ def _local_cabinet_folder(payload: dict[str, Any]) -> tuple[Path, dict[str, Any]
     return folder, space, info["space_id"]
 
 
+def storage_drawers_preview_meshes(space: dict[str, Any]) -> dict[str, Any] | None:
+    """Compact GPU-ready 3D preview for a Storage Drawers cabinet (Fix 103, Section D).
+
+    Builds the actual production meshes via resolve_storage_drawers_plan
+    (assembled coordinates, NOT print-bed export orientations), serializes
+    each through _mesh_preview_geometry (numpy, sliver-dropping, micron-
+    rounded), and groups by (kind, owner, layer) exactly like
+    b4b_preview_meshes. No output folder is needed and no files are written,
+    so this works identically hosted and local.
+
+    Owner keys are the production component keys (stable across requests),
+    including "drawer:<stable-id>" for drawer components, so the client can
+    highlight the active drawer. Known printer oversize does NOT block the
+    preview (it is a non-blocking warning at the Space-definition level).
+
+    Returns None if the meshes cannot be built (caller treats a missing
+    preview as "not ready", not as a fatal error).
+    """
+    try:
+        plan = resolve_storage_drawers_plan(space, build_meshes=True)
+    except Exception:
+        return None
+    groups: dict[tuple[str, str, int], dict[str, list[float]]] = {}
+    components: list[dict[str, str]] = []
+    try:
+        with GEOMETRY_LOCK:
+            for component in plan.components:
+                kind = "drawer" if component.key.startswith("drawer:") else "cabinet"
+                owner = component.key
+                components.append({"key": component.key, "name": component.display_name, "owner": owner, "kind": kind})
+                parts = []
+                if component.mesh is not None:
+                    parts.append(component.mesh)
+                for _label, part in component.object_groups or ():
+                    parts.append(part)
+                for mesh in parts:
+                    # _mesh_preview_geometry yields (triangle, kind, normal, layer, owner).
+                    for points, _k, normal, layer, _o in _mesh_preview_geometry(mesh, kind, owner):
+                        bucket = groups.setdefault((kind, owner, layer), {"positions": [], "normals": []})
+                        for corner in points:
+                            bucket["positions"].extend(corner)
+                        bucket["normals"].extend(normal)
+    except Exception:
+        return None
+    meshes = [
+        {"kind": kind, "owner": owner, "layer": layer,
+         "positions": bucket["positions"], "normals": bucket["normals"]}
+        for (kind, owner, layer), bucket in groups.items()
+    ]
+    ox, oy, oz = plan.outside_xyz
+    return {
+        "meshes": meshes,
+        "bounds": {"x": ox, "y": oy, "z": oz},
+        "components": components,
+        # Response-shape compatibility with ordinary previews.
+        "geometry": [],
+    }
+
+
 def _storage_drawers_structural_design(payload: dict[str, Any]) -> dict[str, Any]:
     space = normalise_storage_drawers_definition(payload["space"])
     profile = _printer_profile_for(payload)
-    plan = structural_manifest_plan(space, Path(payload.get("output") or DEFAULT_OUTPUT), profile)
+    # Fix 103 (Section D + R4): the 3D preview is built from production
+    # meshes without an output folder, but ONLY when explicitly requested
+    # via include_preview (structural Design preview). Ordinary summary/
+    # status calls must not trigger mesh generation.
+    include_preview = bool(payload.get("include_preview"))
+    preview = storage_drawers_preview_meshes(space) if include_preview else None
     reply: dict[str, Any] = {
         "kind": STORAGE_DRAWERS, "design": None,
+        "preview": preview,
         "summary": storage_drawers_summary(space, profile),
         "signature": structural_signature(space),
-        "orientations": {one["key"]: one["orientation"] for one in plan["components"]},
+        "orientations": {},
         "printer_profile": profile,
     }
+    # Orientations feed the hosted save/print currentness check, which passes
+    # no output folder, so every existing caller keeps getting them exactly as
+    # before. Only an explicit preview request (no output) skips the plan: it
+    # needs the meshes, not the manifest.
+    output = payload.get("output")
+    if output or not include_preview:
+        plan = structural_manifest_plan(space, Path(output or DEFAULT_OUTPUT), profile)
+        reply["orientations"] = {one["key"]: one["orientation"] for one in plan["components"]}
     if not HOSTED and payload.get("output"):
         folder, _saved, _space_id = _local_cabinet_folder(payload)
         reply["status"] = structural_status(

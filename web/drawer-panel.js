@@ -496,8 +496,22 @@ DP.getDesignTarget = () => {
     ? { kind: "bin", rowId, drawerId: null }
     : { kind: "new_bin", rowId: null, drawerId: null };
 };
-DP.setDesignTarget = target => { state.designTarget = target; };
-DP.clearDesignTarget = () => { state.designTarget = null; };
+DP.setDesignTarget = target => {
+  state.designTarget = target;
+  if (typeof syncStructuralEditor === "function") syncStructuralEditor();
+};
+DP.clearDesignTarget = () => {
+  state.designTarget = null;
+  if (typeof syncStructuralEditor === "function") syncStructuralEditor();
+};
+// Fix 103: which structural object a Space owns ("box" | "storage_drawers"), or
+// null for an ordinary-bin Space. The one place that maps Space kinds.
+DP.structuralKindFor = space => (space?.kind === "storage_drawers" ? "storage_drawers"
+  : ["portable", "box"].includes(space?.kind) ? "box" : null);
+// Fix 103 (R5): while a structural target owns Design, the 2D (Space canvas)
+// view is view/pan only. Space mode is the sole bin/spacer placement owner, so
+// this is false there even when a structural target is still selected.
+DP.structuralReadOnly2D = () => DP.mode === "design" && state.designTarget?.kind === "structural";
 // Fix 103: dormant until Packet F flips the global structural activation.
 DP.structuralTargetEnabled = false;
 
@@ -644,6 +658,9 @@ $("#designer-delete-bin").addEventListener("click", async () => {
 });
 
 DP.openInventoryRow = async id => {
+  // Fix 103 (R6): structural -> Inventory bin settles an unsaved structural
+  // draft through the one dirty/leave owner (true at once when nothing is dirty).
+  if (designTargetIsStructural() && !(await SP.confirmLeaveStructuralEditor())) return false;
   const request = ++DP.modeRequest;
   const spaceContext = DL.spaceContext();
   const acceptTransition = () => request === DP.modeRequest &&
@@ -682,7 +699,10 @@ DP.openStructuralTarget = async () => {
   // after any outgoing ordinary bin is safely flushed; the row itself remains
   // in Inventory and can be reopened from the navigator.
   state.designInventoryId = null;
-  DP.setDesignTarget({ kind: "structural", rowId: null, drawerId: null });
+  DP.setDesignTarget({
+    kind: "structural", structural: true, structuralKind: DP.structuralKindFor(state.activeSpace),
+    rowId: null, drawerId: null,
+  });
   DP.setMode("design");
   DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
   return true;
@@ -1349,6 +1369,7 @@ DP.applyMode = () => {
   document.body.classList.toggle("drawer-mode", space);
   $("#drawer-panel").hidden = !space;
   $(".view-tabs").hidden = space;
+  if (typeof syncStructuralEditor === "function") syncStructuralEditor(); // Fix 103
   $$("[data-space-mode]").forEach(button => {
     const on = button.dataset.spaceMode === DP.mode;
     button.classList.toggle("active", on);
@@ -1389,6 +1410,9 @@ DP.selectMode = async mode => {
     SP.offerSpacePlanning();
     return false;
   }
+  // Fix 103 (R6): structural Design -> Space settles an unsaved draft first.
+  if (mode === "space" && DP.mode === "design" && designTargetIsStructural() &&
+      !(await SP.confirmLeaveStructuralEditor())) return false;
   const request = ++DP.modeRequest;
   DP.showPendingMode(mode);
   try {

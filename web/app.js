@@ -42,6 +42,18 @@ const state = {
   cleanDesign: null,
   preview: null,
   previewDesignKey: null,
+  // Fix 103 (Section C): the single client slot for structural 3D preview.
+  // Holds the adopted preview result (meshes, bounds, etc.) for the current
+  // structural target. Never mixed into state.preview / state.design.
+  structuralPreview: null,
+  structuralPreviewError: "",
+  // Fix 103 (Section E): "drawer:<id>" owner highlighted in the 3D preview.
+  structuralHighlightOwner: null,
+  // Fix 103 (R3): bumped whenever the structural form is destroyed/remounted,
+  // so a response for an older mount can never be adopted.
+  structuralMountSerial: 0,
+  // Fix 103 (R1): live drag of an Interior Width/Depth/Height label.
+  structuralDimensionDrag: null,
   draftKind: "divider",
   draft: null,
   draftResolvedOptions: {},
@@ -102,6 +114,9 @@ const state = {
   lastBoxSize: null,
   previewRequest: 0,
   draftRequest: 0,
+  // Fix 103 (Section C): epoch for structural preview requests; stale
+  // responses are dropped, latest request wins.
+  structuralPreviewRequest: 0,
   output: "",
   runtime: { hosted: false, filesystem: "server" },
   browserFolder: null,
@@ -1878,6 +1893,9 @@ function aiWireHelp() {
 // in a typed Space is preserved through the autosave flush first, never silently
 // discarded; on flush failure New Bin is cancelled rather than losing work.
 async function designerNewBin(acceptTransition = null) {
+  if (acceptTransition && !acceptTransition()) return false;
+  // Fix 103 (R6): structural -> New Bin settles an unsaved structural draft first.
+  if (designTargetIsStructural() && !(await SP.confirmLeaveStructuralEditor())) return false;
   if (acceptTransition && !acceptTransition()) return false;
   return withDeferredDraftSwitch(async () => {
   if (acceptTransition && !acceptTransition()) return false;
@@ -5265,6 +5283,9 @@ async function openDividerSegmentEditor() {
 // A view-only switch never touches remembered design/Space state; it only
 // remembers the last Design 2D/3D view actually used (Fix 078).
 function activatePreviewView(view) {
+  // Fix 103 (R5): while a structural target owns Design, its 2D view is the
+  // Space canvas in view-only mode (no second 2D owner).
+  if (view === "2d" && typeof structuralDesignActive === "function" && structuralDesignActive()) { activateStructural2D(); return; }
   if (view === "drawer" && state.folderMode !== "space") {
     if (typeof SP !== "undefined") SP.offerSpacePlanning();
     return;
@@ -5642,7 +5663,8 @@ function wireControls() {
   window.addEventListener("beforeunload", event => {
     const layoutUnsaved = typeof DL !== "undefined" && DL.active
       && (DL.dirty || DL.saving || Boolean(DL.savePromise) || DL.saveState === "error");
-    if (designHasChanges() || layoutUnsaved) {
+    const structuralUnsaved = typeof structuralEditorDirty === "function" && structuralEditorDirty();
+    if (designHasChanges() || layoutUnsaved || structuralUnsaved) {
       event.preventDefault();
       event.returnValue = "";
     }
@@ -10520,6 +10542,9 @@ function updateStorageBoxHeightWarning(warning) {
 // left alone for possible recovery. Every ordinary call (the ordinary
 // default) persists exactly as before.
 async function refreshPreview({ persistResume = true } = {}) {
+  // Fix 103: the structural target owns its own preview (refreshStructuralPreview);
+  // an ordinary design must never preview or checkpoint under it.
+  if (designTargetIsStructural()) return;
   fullPreviewStarts += 1;
   const request = ++state.previewRequest;
   const lidEpochAtRequest = state.lidThicknessEpoch;
@@ -11375,10 +11400,19 @@ function checkBinSizeChange() {
 // height alone ignores hinge knuckles, and stacking pegs stand proud of
 // that again), so the dimension overlay would otherwise mislabel the case
 // and fail to reach its drawn edges on every axis. See fix3d.md.
-function draw3DDimensions(context, box, camera, project, outerXYZ) {
+function draw3DDimensions(context, box, camera, project, outerXYZ, options = null) {
   state.previewDimensionHandles = [];
   if (!box) return;
-  const interactive = !baseTrimEnabled();
+  // Fix 103 (R1): `options` is the structural variant. It supplies the
+  // interior values to edit/label, per-axis interactivity and an optional
+  // height span (the active drawer); the guide geometry still comes from
+  // `outerXYZ`. Without it this is exactly the ordinary bin overlay.
+  const interactive = options ? true : !baseTrimEnabled();
+  const axisInteractive = axis => interactive && (!options || options.interactive(axis));
+  const axisHandle = (axis, value, displayValue) => (axisInteractive(axis)
+    ? { view: "3d", axis, value: options ? options.value(axis) : value, displayValue, structural: Boolean(options) }
+    : null);
+  const axisLabel = (axis, fallback) => (options ? options.label(axis) : fallback);
   const outerX = outerXYZ ? number(outerXYZ[0]) : number(box.x);
   const outerY = outerXYZ ? number(outerXYZ[1]) : number(box.y);
   const outerZ = outerXYZ ? number(outerXYZ[2]) : number(box.z);
@@ -11432,10 +11466,10 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     widthDim.sA,
     widthDim.sB,
     widthDim.normal,
-    `Width ${fmt(outerX)} mm`,
+    axisLabel("x", `Width ${fmt(outerX)} mm`),
     gap,
     over,
-    interactive ? { view: "3d", axis: "x", value: editBox.x, displayValue: outerX } : null
+    axisHandle("x", editBox.x, outerX)
   );
 
   // 2. Depth (along Y on front ground)
@@ -11447,10 +11481,10 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     depthDim.sA,
     depthDim.sB,
     depthDim.normal,
-    `Depth ${fmt(outerY)} mm`,
+    axisLabel("y", `Depth ${fmt(outerY)} mm`),
     gap,
     over,
-    interactive ? { view: "3d", axis: "y", value: editBox.y, displayValue: outerY } : null
+    axisHandle("y", editBox.y, outerY)
   );
 
   // 3. Height (vertical Z edge on the leftmost corner of the bin)
@@ -11470,8 +11504,10 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     }
   }
 
-  const sBot = project(iso([leftmostCorner[0], leftmostCorner[1], 0], camera));
-  const sTop = project(iso([leftmostCorner[0], leftmostCorner[1], hz], camera));
+  const zLow = options?.zSpan ? options.zSpan[0] : 0;
+  const zHigh = options?.zSpan ? options.zSpan[1] : hz;
+  const sBot = project(iso([leftmostCorner[0], leftmostCorner[1], zLow], camera));
+  const sTop = project(iso([leftmostCorner[0], leftmostCorner[1], zHigh], camera));
   const heightNormal = [-1, 0];
   const offBot = [sBot[0] - standoff, sBot[1]];
   const offTop = [sTop[0] - standoff, sTop[1]];
@@ -11483,10 +11519,10 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     sBot,
     sTop,
     heightNormal,
-    `Height ${fmt(outerZ)} mm`,
+    axisLabel("z", `Height ${fmt(outerZ)} mm`),
     gap,
     over,
-    interactive ? { view: "3d", axis: "z", value: editBox.z, displayValue: outerZ } : null
+    axisHandle("z", editBox.z, options?.zSpan ? zHigh - zLow : outerZ)
   );
 }
 
@@ -11630,6 +11666,7 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
       value: handle.value,
       displayValue: handle.displayValue ?? handle.value,
       labelCenter: mid,
+      structural: Boolean(handle.structural),
     });
   }
 }
@@ -11754,6 +11791,10 @@ function currentPreviewPasses(buffers) {
 }
 
 function renderPreview3D() {
+  // Fix 103 (Section C): a structural target in Design renders from its own
+  // slot through its own scene; the ordinary predicates below read
+  // state.design and must never see the structural target.
+  if (typeof structuralDesignActive === "function" && structuralDesignActive()) { renderStructuralPreview3D(); return; }
   if (!state.preview) return;
   checkBinSizeChange();
   const overlayCanvas = $("#preview-3d");
@@ -12309,7 +12350,10 @@ function wireSceneInteraction(canvas, camera, render) {
     if (!state.designMutationBusy) {
       const handle = hitDimensionHandle("3d", canvasPointFromEvent(canvas, event));
       if (handle) {
-        beginDimensionDrag("3d", handle, canvas, event);
+        // Fix 103 (R1): a structural label edits the structural form's draft,
+        // never state.design.
+        if (handle.structural) beginStructuralDimensionDrag(handle, canvas, event);
+        else beginDimensionDrag("3d", handle, canvas, event);
         repaint();
         return;
       }
@@ -12326,6 +12370,11 @@ function wireSceneInteraction(canvas, camera, render) {
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener("pointermove", event => {
+    if (state.structuralDimensionDrag) {
+      updateStructuralDimensionDrag(event.clientX, event.clientY);
+      repaint();
+      return;
+    }
     if (state.dimensionDrag) {
       updateDimensionDrag(event.clientX, event.clientY);
       repaint();
@@ -12345,6 +12394,11 @@ function wireSceneInteraction(canvas, camera, render) {
     repaint();
   });
   canvas.addEventListener("pointerup", event => {
+    if (state.structuralDimensionDrag) {
+      endStructuralDimensionDrag(canvas, { commit: true });
+      repaint();
+      return;
+    }
     if (state.dimensionDrag) {
       commitDimensionDrag(canvas);
       repaint();
@@ -12358,6 +12412,10 @@ function wireSceneInteraction(canvas, camera, render) {
     if (clickedSupport) void selectFromPreview(clickedSupport, pickContext);
   });
   canvas.addEventListener("pointercancel", () => {
+    if (state.structuralDimensionDrag) {
+      endStructuralDimensionDrag(canvas, { commit: false });
+      repaint();
+    }
     if (state.dimensionDrag) {
       cancelDimensionDrag(canvas);
       repaint();

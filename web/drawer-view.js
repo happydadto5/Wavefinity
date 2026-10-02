@@ -913,11 +913,20 @@ DV.stackTarget = (moving, sx, sy, skip) => {
 
 DV.wire = () => {
   const canvas = $("#drawer-canvas");
+  // Fix 103 (R5): structural Design shows this canvas view-only.
+  const readOnly = () => Boolean(DP.structuralReadOnly2D?.());
   canvas.addEventListener("contextmenu", event => event.preventDefault());
   canvas.addEventListener("pointerdown", event => {
     if (!DL.layout || !DV.cam) return;
     const [sx, sy] = DV.point(event);
     canvas.setPointerCapture(event.pointerId);
+    if (readOnly()) {
+      // View only: no spacer toggle, selection or bin drag - just pan.
+      const start = DV.cam.onPlane(sx, sy, 0);
+      if (start) DV.pan = { cam: DV.cam, start, panX: DV.view.panX, panY: DV.view.panY };
+      canvas.classList.add("panning");
+      return;
+    }
     const hit = event.button === 0 ? DV.hitAt(sx, sy) : null;
     if (hit && hit.candidate) {
       if (hit.removeCandidate) DL.removeSpacerCandidate(hit.key);
@@ -952,6 +961,7 @@ DV.wire = () => {
   });
   canvas.addEventListener("pointermove", event => {
     const [sx, sy] = DV.point(event);
+    if (DV.drag && readOnly()) { DV.drag = null; DV.render(); return; }
     if (DV.drag) {
       const drag = DV.drag;
       if (!drag.moved && Math.hypot(sx - drag.sx, sy - drag.sy) < 4) return;
@@ -1004,7 +1014,7 @@ DV.wire = () => {
     const drag = DV.drag;
     DV.drag = null;
     DV.pan = null;
-    if (drag?.moved) {
+    if (drag?.moved && !readOnly()) {
       if (drag.outside) {
         const count = DL.takeOut(drag.key);
         toast(`Moved to Unplaced bins${count > 1 ? ` (${count} bins)` : ""}. Still in Inventory.`);
@@ -1034,7 +1044,7 @@ DV.wire = () => {
   // Dropping a bin dragged from the inventory list: onto the floor, or onto a
   // stack it can snap onto.
   canvas.addEventListener("dragover", event => {
-    if (!DV.dragBin || !DV.cam) return;
+    if (readOnly() || !DV.dragBin || !DV.cam) return;
     event.preventDefault();
     const [sx, sy] = DV.point(event);
     const moving = DL.movingForBins([DV.dragBin]);
@@ -1053,7 +1063,7 @@ DV.wire = () => {
     event.preventDefault();
     const drop = DV.drop;
     DV.drop = null;
-    if (drop) {
+    if (drop && !readOnly()) {
       if (!drop.valid) toast(drop.reason || "It does not fit there.", true);
       else DL.placeAt(drop.bin, drop.target ? { target: drop.target } : { gx: drop.gx, gy: drop.gy });
     }
@@ -1067,7 +1077,7 @@ DV.wire = () => {
   // Keys while the drawer is on screen. Capture phase, so the bin editor's
   // own shortcuts (Undo, arrow nudges) never act on the hidden design.
   window.addEventListener("keydown", event => {
-    if (!DP.spaceEditing() || !DL.layout) return;
+    if (!DP.spaceEditing() || !DL.layout || readOnly()) return;
     if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return;
     if (document.querySelector("dialog[open]")) return;
     if (event.key === "Escape" && DV.drag) {
@@ -1123,7 +1133,7 @@ DV.wire = () => {
 
   // The header's Undo/Redo act on the drawer while this view is showing.
   document.addEventListener("click", event => {
-    if (!DP.spaceEditing()) return;
+    if (!DP.spaceEditing() || readOnly()) return;
     const button = event.target.closest?.("#undo-design, #redo-design");
     if (!button) return;
     event.preventDefault();

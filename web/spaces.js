@@ -290,13 +290,42 @@ SP.leaveDrawerLayoutSafely = async ({ noDeferredPreview = false } = {}) => {
   return true;
 };
 
+// Fix 103 (R6): the one settle/leave owner for an unsaved structural draft.
+// Resolves true when nothing is dirty, or after Save Changes succeeded, or
+// after the user chose Discard; resolves false for Keep Editing or a failed
+// Save (the structural editor stays mounted and dirty). Structural Save itself
+// never calls this - it commits straight through the cabinet / Space owners.
+SP.confirmLeaveStructuralEditor = async () => {
+  if (typeof structuralEditorDirty !== "function" || !structuralEditorDirty()) return true;
+  const what = structuralTargetKind() === "box" ? "case" : "cabinet";
+  const choice = await appConfirm({
+    title: "Save Changes?",
+    message: `You changed this ${what}'s settings and have not saved them.`,
+    primaryLabel: "Save Changes",
+    secondaryLabel: "Discard",
+    secondaryDanger: true,
+    cancelLabel: "Keep Editing",
+  });
+  if (choice === "primary") return structuralSaveChanges();
+  if (choice === "secondary") return structuralDiscardDraft();
+  return false;
+};
+
+// Every Space/folder identity exit settles a structural draft first, then the
+// Drawer layout. (The cabinet mutation controller keeps calling
+// SP.leaveDrawerLayoutSafely directly.)
+SP.leaveSpaceSafely = async options => {
+  if (!(await SP.confirmLeaveStructuralEditor())) return false;
+  return SP.leaveDrawerLayoutSafely(options);
+};
+
 // Returns true once it is safe for the caller to change folder/Space
 // identity, false when the switch was aborted (a failed save, or the user
 // choosing Cancel) - in which case DL.layout/DL.dirty are left untouched.
 SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
   if (typeof DL === "undefined") return true;
   if (!skipSafeLeave || DL.savePromise || DL.dirty) {
-    const ok = await SP.leaveDrawerLayoutSafely();
+    const ok = await SP.leaveSpaceSafely();
     if (!ok) return false;
   }
   // A different folder means a different Space: close the workspace first.
@@ -1329,7 +1358,7 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   // before calling in here) - it must never be used to skip the decision
   // itself, only to avoid asking twice.
   if (!skipLeaveCheck) {
-    const ok = await SP.leaveDrawerLayoutSafely();
+    const ok = await SP.leaveSpaceSafely();
     if (!ok) return null;
   }
 
@@ -1455,7 +1484,7 @@ SP.afterPick = async folder => {
   // folder as active (Fix 019 correction C1.2) - Cancel or a failed save
   // must abort before /api/folder/use ever runs, so the backend's
   // remembered active folder/Space cannot get ahead of what is on screen.
-  const okToLeave = await SP.leaveDrawerLayoutSafely();
+  const okToLeave = await SP.leaveSpaceSafely();
   if (!okToLeave) return null;
   const data = await api("/api/folder/use", { output: folder });
   SP.recent = data.recent || [];
@@ -1857,7 +1886,7 @@ SP.doStorageChange = async mode => {
   }
   // Settle every write owner (design autosave, inventory, layout); a failed
   // save aborts before anything is changed. No deferred preview may survive.
-  if (!(await SP.leaveDrawerLayoutSafely({ noDeferredPreview: true }))) return;
+  if (!(await SP.leaveSpaceSafely({ noDeferredPreview: true }))) return;
   state.relocating = true; // blocks every new write entry point
   document.body.classList.add("relocating");
   if (typeof DL !== "undefined") DL.saveSoon.cancel();
@@ -2320,7 +2349,7 @@ SP.create = async () => {
   // and local runtimes - Cancel or a failed save must abort here, leaving
   // the target folder, the backend's remembered active folder, and the
   // previously active handle all untouched.
-  const okToLeave = await SP.leaveDrawerLayoutSafely();
+  const okToLeave = await SP.leaveSpaceSafely();
   if (!okToLeave) return;
 
   let info;
@@ -2644,7 +2673,7 @@ SP.useUntypedFolder = async () => {
         // Resolve the safe-leave decision BEFORE writing the target folder's
         // own metadata (Fix 019 correction C1.3) - Cancel or a failed save
         // must abort before "design" is committed to this folder.
-        const okToLeave = await SP.leaveDrawerLayoutSafely();
+        const okToLeave = await SP.leaveSpaceSafely();
         if (!okToLeave) return;
         await SP.writeMetadata(folder.handle, "design", null, true);
         SP.configureData = null;
@@ -2657,7 +2686,7 @@ SP.useUntypedFolder = async () => {
         // Resolve the safe-leave decision BEFORE the backend mutates the
         // active folder (Fix 019 correction C1.2) - Cancel or a failed save
         // must abort before /api/space/use-untyped ever runs.
-        const okToLeave = await SP.leaveDrawerLayoutSafely();
+        const okToLeave = await SP.leaveSpaceSafely();
         if (!okToLeave) return;
         const data = await api("/api/space/use-untyped", { output: SP.configureData });
         // Clear the selected-folder setup context now that it has been
@@ -3785,6 +3814,8 @@ SP.renderSpaceInfo = () => {
     if (btnShow) btnShow.hidden = state.runtime.hosted;
     SP.renderStructuralActions();
     SP.updateCabinetWorkspace?.();
+    // Fix 103: a mounted structural editor follows the accepted Space.
+    if (typeof syncStructuralEditor === "function") syncStructuralEditor();
 };
 
 SP.showFolder = async () => {
@@ -3899,6 +3930,15 @@ SP.updateSpace = async () => {
         toast("Space updated.");
         return;
     }
+    return SP.commitSpaceUpdate(values);
+};
+
+// The ordinary (non-cabinet) Space update, shared by the setup form and the
+// structural Storage Box editor (Fix 103). `structural` skips the setup-form
+// chrome (inline edit teardown, toast) and the ordinary-bin preview refresh;
+// the structural editor reports and previews for itself.
+SP.commitSpaceUpdate = async (values, { structural = false } = {}) => {
+    const { kind, name, x, y, z, trimSize, extra = {} } = values;
     const context = typeof DL !== "undefined" ? DL.spaceContext() : null;
     const requireCurrent = () => { if (context) DL.requireSpaceContext(context); };
     // Fix 095: the one confirmation happens before anything is committed; Cancel
@@ -3966,8 +4006,10 @@ SP.updateSpace = async () => {
         state.activeSpace = data.folder.space;
     }
     SP.setupFormSnapshot = null;
-    SP.cancelInlineEdit();
-    toast("Space updated.");
+    if (!structural) {
+        SP.cancelInlineEdit();
+        toast("Space updated.");
+    }
     
     if (kind === "surface" && typeof DL !== "undefined" && DL.loaded) {
         await DL.load();
@@ -3987,7 +4029,7 @@ SP.updateSpace = async () => {
             await DL.load();
             requireCurrent();
         }
-        if (typeof refreshPreview === "function") await refreshPreview();
+        if (!structural && typeof refreshPreview === "function") await refreshPreview();
     }
     if ((kind === "drawer" || kind === "pegboard") && typeof DL !== "undefined" && DL.active) {
         DL.syncSingleDrawerFromSpace(state.activeSpace);
