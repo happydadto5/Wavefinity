@@ -25,6 +25,10 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_BLOCKED = 2
 
+# These exact root-level untracked files are known launcher/Git command debris,
+# not Wavefinity source. They may be removed automatically; nothing else may be.
+KNOWN_SAFE_ROOT_DEBRIS = {"FETCH_HEAD", "git"}
+
 
 def _git(*args: str, timeout: int = 30) -> tuple[int, str]:
     try:
@@ -36,6 +40,26 @@ def _git(*args: str, timeout: int = 30) -> tuple[int, str]:
     except (OSError, subprocess.TimeoutExpired):
         return 1, ""
     return proc.returncode, proc.stdout.strip()
+
+
+def _remove_known_safe_root_debris() -> list[str]:
+    """Remove only exact allowlisted untracked files at the repo root."""
+    code, out = _git("ls-files", "--others", "--exclude-standard")
+    if code != 0:
+        return []
+    untracked = {line.strip() for line in out.splitlines() if line.strip()}
+    removed: list[str] = []
+    for name in sorted(KNOWN_SAFE_ROOT_DEBRIS & untracked):
+        path = ROOT / name
+        # Never recurse into directories, and never touch anything outside ROOT.
+        if not (path.is_file() or path.is_symlink()):
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        removed.append(name)
+    return removed
 
 
 def git_state() -> dict:
@@ -90,6 +114,12 @@ def ensure_current() -> int:
     if not state["is_wavefinity"]:
         print("This Git checkout is not Wavefinity; skipping the source update check.")
         return EXIT_OK
+
+    removed = _remove_known_safe_root_debris()
+    if removed:
+        print("Removed known-safe launcher debris: " + ", ".join(removed))
+        state = git_state()
+
     branch = state["branch"]
     if state["detached"]:
         head = state["head"][:12] or "unknown"
