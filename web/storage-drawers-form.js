@@ -67,6 +67,7 @@
     const nameGroup = group(form, "Name"); nameGroup.classList.add("sd-name-group");
     const name = input(space.name); name.maxLength = 80; name.required = true;
     name.id = `sd-name-${epoch}`;
+    name.dataset.heightNeutral = "1";
     nameGroup.append(labeled("Space name", name));
     const sizeGroup = group(form, "Size"); sizeGroup.classList.add("sd-size-group"); const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
     const x = input(space.x), y = input(space.y);
@@ -87,9 +88,10 @@
     // Fix 103 (R1): the full structural editor shows three-across Interior
     // Width / Depth / Height. Height is the ACTIVE drawer's physical usable
     // interior height; its value and edits go through the authoritative draft
-    // summary (see heightBasis below), never a copy of the server's formula.
+    // summary (see the per-row `basis` below), never a copy of the server's formula.
     const structural = scope === "full" && callbacks.structural === true;
     const zField = input("", "number"); zField.id = `sd-z-${epoch}`; zField.step = "1"; zField.disabled = true;
+    zField.dataset.usableHeight = "1";
     const zHelp = help("");
     const zLabel = labeled("Interior Height", zField, null, "mm"); zLabel.append(zHelp);
     sizeGrid.append(labeled(structural ? "Interior Width" : "Width", x), labeled(structural ? "Interior Depth" : "Depth", y));
@@ -119,7 +121,8 @@
     count.disabled = mode === "edit";
     const countNote = el("small", "sd-field-error"); countNote.hidden = true; countNote.id = `sd-count-note-${epoch}`;
     count.setAttribute("aria-describedby", countNote.id);
-    const countField = labeled("Number of drawers", count, mode === "edit" ? "Add or remove drawers from the cabinet panel." : null);
+    const countField = labeled("Number of drawers", count,
+      structural ? "Use Add Drawer or a drawer's Delete button below." : mode === "edit" ? "Add or remove drawers from the cabinet panel." : null);
     countField.append(countNote);
     const fit = select(block.drawer_fit_mm, NAMED(rules.fitChoices, ["Tight", "Standard", "Loose"]));
     const handles = select(String(block.drawer_handles), [["true", "Pull handles"], ["false", "No handles"]]);
@@ -157,6 +160,7 @@
     const unitEnabled = select(String(block.unit_label_enabled), [["false", "Unit label off"], ["true", "Unit label on"]]);
     const unitText = input(block.unit_label_text); unitText.maxLength = labelLimit;
     unitText.id = `sd-unit-label-${epoch}`;
+    unitText.dataset.heightNeutral = "1";
     const drawerEnabled = select(String(block.drawer_labels_enabled), [["false", "Drawer labels off"], ["true", "Drawer labels on"]]);
     const labelStyle = select(block.drawer_label_style, [["inlaid", "Inlaid"], ["raised", "Raised"]]);
     const unitTextField = labeled("Unit label text", unitText), styleField = labeled("Drawer label style", labelStyle);
@@ -189,12 +193,25 @@
         handleField.hidden = true;
       }
     };
+    let syncAddButton = () => {};
+    let renderRowHeights = () => {};
     const heightInputs = new Map();
     const renderRows = () => {
       drawerRows.replaceChildren();
       heightInputs.clear();
       block.drawers.forEach((row, index) => {
-        const line = el("div", `sd-drawer-row${drawerEnabled.value === "true" ? " sd-drawer-row-with-label" : ""}`); line.append(el("strong", "", `Drawer ${index + 1}`));
+        const line = el("div", `sd-drawer-row${drawerEnabled.value === "true" ? " sd-drawer-row-with-label" : ""}`);
+        const head = el("div", "sd-drawer-head"); head.append(el("strong", "", `Drawer ${index + 1}`)); line.append(head);
+        // Fix 103 Correction 1 (C2): full structural Design owns Add/Delete. The
+        // buttons only ask the controller; the cabinet mutation authority
+        // (SP.cabinetAdd / SP.cabinetDelete) does the work.
+        if (structural && row.id && !String(row.id).startsWith("temporary:")) {
+          const remove = el("button", "link-button sd-drawer-delete", "Delete"); remove.type = "button";
+          remove.disabled = disabled || block.drawers.length <= 1;
+          remove.title = block.drawers.length <= 1 ? "A cabinet keeps at least one drawer." : `Delete Drawer ${index + 1}`;
+          remove.addEventListener("click", event => { event.stopPropagation(); callbacks.deleteDrawer?.(row.id); }, { signal: events.signal });
+          head.append(remove);
+        }
         // Fix 103 (Section E): click a drawer row to make it the active drawer
         // and highlight it in 3D. Rows without a stable saved id (temporary
         // keys) have no server owner, so they never highlight.
@@ -213,57 +230,109 @@
             callbacks.onHighlightDrawer?.(owner, { ensure: inField });
           }, { signal: events.signal });
         }
-        const height = input(row.height_mm, "number"); height.min = String(minDrawerHeight); height.step = "any"; height.required = true;
-        height.disabled = disabled;
+        // The visible value is the drawer's USABLE interior height from the
+        // current authoritative summary; row.height_mm stays internal.
+        const height = input("", "number"); height.step = "any"; height.required = true;
+        height.disabled = true;
         height.id = `sd-height-${epoch}-${index}`;
+        height.dataset.usableHeight = "1";
         heightInputs.set(row, height);
-        height.addEventListener("input", () => { row.height_mm = Number(height.value); }, { signal: events.signal });
+        height.addEventListener("change", () => {
+          const applied = setUsable(row, height.value, false);
+          renderRowHeights();
+          if (Number.isFinite(applied)) { syncHeightField(); schedule({ keepHeight: true }); }
+        }, { signal: events.signal });
         const label = input(row.label_text); label.maxLength = labelLimit; label.disabled = disabled;
         label.id = `sd-label-${epoch}-${index}`;
+        label.dataset.heightNeutral = "1";
         label.addEventListener("input", () => { row.label_text = label.value; }, { signal: events.signal });
         const labelField = labeled("Label text", label); labelField.hidden = drawerEnabled.value !== "true";
-        line.append(labeled("Height", height, null, "mm"), labelField);
+        line.append(labeled("Usable height", height, null, "mm"), labelField);
         drawerRows.append(line);
       });
+      renderRowHeights();
     };
-    drawersGroup.append(help("Usable bin height is shown in Summary."));
-    // ---- Fix 103 (R1): Interior Width / Depth / Height editing ----
+    drawersGroup.append(help("Each height is the drawer's usable interior height."));
+    if (structural) {
+      const addRow = el("div", "sd-drawer-actions");
+      const add = el("button", "button secondary", "Add Drawer"); add.type = "button";
+      add.addEventListener("click", () => callbacks.addDrawer?.(), { signal: events.signal });
+      addRow.append(add); drawersGroup.append(addRow);
+      syncAddButton = () => {
+        add.disabled = disabled || block.drawers.length >= maxDrawers;
+        add.title = block.drawers.length >= maxDrawers ? `A cabinet holds at most ${maxDrawers} drawers.` : "";
+      };
+      syncAddButton();
+    }
+    // ---- Fix 103 (R1 + Correction 1 C1): usable-height basis for EVERY row ----
     let activeDrawerId = block.drawers.find(row => row.id && !String(row.id).startsWith("temporary:"))?.id || null;
-    // { id, offset }: usable height minus the stored row height, read from the
-    // latest authoritative summary for the active drawer. Cleared whenever any
-    // other draft field changes, until the next summary lands.
-    let heightBasis = null;
+    // Map(rowKey -> { usable, height }): the authoritative pair from the latest
+    // summary for each drawer, matched by stable id (or the create-time temp
+    // key the summary request copied into the row id). No production formula
+    // lives here: usable height is always `summary usable + (row.height_mm -
+    // summary height)`, i.e. the summary value moved by the delta applied since.
+    // Cleared whenever a change that can alter the height relationship happens,
+    // until a new matching summary lands; height-only edits keep it.
+    let basis = null;
     const roundMm = value => Math.round(value * 1000) / 1000;
+    const rowKey = row => row.id || (row.temp_key ? row.temp_key.slice("temporary:".length) : null);
+    const rowBasis = row => (basis && rowKey(row) ? basis.get(rowKey(row)) || null : null);
+    const usableOf = row => { const one = rowBasis(row); return one ? roundMm(one.usable + (row.height_mm - one.height)) : NaN; };
+    const usableMinOf = row => { const one = rowBasis(row); return one ? roundMm(one.usable + (minDrawerHeight - one.height)) : NaN; };
+    // Maps a desired usable height back onto the persisted row by delta.
+    const setUsable = (row, requested, whole) => {
+      const one = rowBasis(row);
+      if (!one) return NaN;
+      let wanted = Number(requested);
+      if (!Number.isFinite(wanted)) return NaN;
+      if (whole) wanted = Math.round(wanted);
+      const floor = usableMinOf(row);
+      wanted = Math.max(wanted, whole ? Math.ceil(floor) : floor);
+      row.height_mm = roundMm(one.height + (wanted - one.usable));
+      return wanted;
+    };
     const activeRow = () => block.drawers.find(row => row.id === activeDrawerId) || null;
+    const isHeightField = node => Boolean(node?.dataset?.usableHeight);
+    const isHeightNeutral = node => Boolean(node?.dataset?.heightNeutral);
+    // Row inputs show the usable height, or stay disabled "checking…" - never a guess.
+    renderRowHeights = () => {
+      block.drawers.forEach(row => {
+        const field = heightInputs.get(row);
+        if (!field) return;
+        const usable = usableOf(row), ready = Number.isFinite(usable);
+        field.disabled = disabled || !ready;
+        field.placeholder = ready ? "" : "checking…";
+        if (ready) field.min = String(usableMinOf(row));
+        if (document.activeElement !== field) field.value = ready ? String(usable) : "";
+      });
+      syncAddButton();
+    };
     const syncHeightField = () => {
       if (!structural) return;
       const row = activeRow(), index = block.drawers.indexOf(row);
-      const ready = Boolean(row && heightBasis && heightBasis.id === row.id);
+      const usable = row ? usableOf(row) : NaN, ready = Number.isFinite(usable);
       zField.disabled = disabled || !ready;
-      if (document.activeElement !== zField) zField.value = ready ? String(roundMm(row.height_mm + heightBasis.offset)) : "";
+      if (document.activeElement !== zField) zField.value = ready ? String(usable) : "";
       zHelp.textContent = !row ? "Select a drawer" : ready ? `Drawer ${index + 1} usable height, whole mm` : `Drawer ${index + 1}: checking…`;
     };
     const selectDrawer = id => {
-      if (!structural || id === activeDrawerId) return;
+      if (!structural || id === activeDrawerId || !block.drawers.some(row => row.id === id)) return;
       activeDrawerId = id;
       for (const node of drawerRows.querySelectorAll(".sd-drawer-row")) {
         node.classList.toggle("sd-drawer-row-active", node.dataset.drawerId === id);
       }
+      // The already-current summary holds every drawer: no waiting on selection.
       syncHeightField();
     };
     // Typed input, arrow/wheel steps and the 3D handles all land here.
     const setInterior = (axis, requested) => {
       if (axis === "z") {
         const row = activeRow();
-        if (!row || !heightBasis || heightBasis.id !== row.id) return NaN;
-        const wanted = Math.round(Number(requested));
-        if (!Number.isFinite(wanted)) return NaN;
-        const usable = Math.max(wanted, Math.ceil(heightBasis.offset + minDrawerHeight));
-        row.height_mm = roundMm(usable - heightBasis.offset);
-        const rowInput = heightInputs.get(row);
-        if (rowInput) rowInput.value = String(row.height_mm);
-        syncHeightField(); schedule({ keepHeight: true });
-        return usable;
+        if (!row) return NaN;
+        const applied = setUsable(row, requested, true);
+        if (!Number.isFinite(applied)) return NaN;
+        renderRowHeights(); syncHeightField(); schedule({ keepHeight: true });
+        return applied;
       }
       const units = Math.min(maxUnits, Math.max(minUnits, Math.round(Number(requested) / baseUnit)));
       if (!Number.isFinite(units)) return NaN;
@@ -276,7 +345,7 @@
       return {
         x: resolveMm(x).ok ? resolveMm(x).mm : NaN,
         y: resolveMm(y).ok ? resolveMm(y).mm : NaN,
-        z: row && heightBasis && heightBasis.id === row.id ? roundMm(row.height_mm + heightBasis.offset) : NaN,
+        z: row ? usableOf(row) : NaN,
       };
     };
     const draft = () => {
@@ -307,7 +376,10 @@
       if (countProblem()) return fail(`Number of drawers: ${countProblem().toLowerCase()}`, count.id);
       for (let i = 0; i < block.drawers.length; i++) {
         const height = block.drawers[i].height_mm;
-        if (!Number.isFinite(height) || height < minDrawerHeight) return fail(`Drawer ${i + 1} needs at least ${minDrawerHeight} mm usable height`, `sd-height-${epoch}-${i}`);
+        if (!Number.isFinite(height) || height < minDrawerHeight) {
+          const floor = usableMinOf(block.drawers[i]);
+          return fail(Number.isFinite(floor) ? `Drawer ${i + 1} needs at least ${fmt(Math.ceil(floor))} mm usable height` : `Drawer ${i + 1} is too short`, `sd-height-${epoch}-${i}`);
+        }
       }
       if (unitEnabled.value === "true" && !unitText.value.trim()) return fail("Enter unit label text", unitText.id);
       if (unitText.value.length > labelLimit) return fail("Shorten the unit label", unitText.id);
@@ -348,7 +420,7 @@
       const outside = (response.outside_xyz || []).map(v => fmt(v));
       const [ux, uy] = response.field_units || [];
       const [fx, fy] = (response.field_mm || []).map(v => fmt(v));
-      const heights = (response.drawers || []).map(row => fmt(row.height_mm)).join(", ");
+      const heights = (response.drawers || []).map(row => fmt(row.usable_height_mm)).join(", ");
       const material = response.effective_material || {};
       const lines = [
         line("Finished outside", `${outside.join(" × ")} mm`, "sd-summary-outside"),
@@ -363,17 +435,16 @@
       guide.append(link); lines.push(guide);
       summary.replaceChildren(...lines);
       updatePrinterRow();
-      if (structural) {
-        const one = (response.drawers || []).find(row => row.id === activeDrawerId);
-        heightBasis = one ? { id: one.id, offset: Number(one.usable_height_mm) - Number(one.height_mm) } : null;
-        syncHeightField();
-      }
+      basis = new Map((response.drawers || []).map(row => [row.id, { usable: Number(row.usable_height_mm), height: Number(row.height_mm) }]));
+      renderRowHeights();
+      syncHeightField();
       callbacks.onSummary?.(response);
     };
     const showSummaryText = (text, bad = false) => { summary.replaceChildren(el("p", bad ? "sd-fit-verdict bad" : "sd-summary-line", text)); updatePrinterRow(); };
     const schedule = ({ keepHeight = false } = {}) => {
-      if (!keepHeight) heightBasis = null;
+      if (!keepHeight) basis = null;
       summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…"); notifyReady();
+      renderRowHeights();
       syncHeightField();
       callbacks.onChange?.();
       clearTimeout(timer); const n = ++requestNumber; const identity = callbacks.identity?.() ?? space.id ?? space.name;
@@ -409,16 +480,27 @@
       renderRows(); schedule();
     };
     count.addEventListener("input", applyCount, { signal: events.signal });
+    let sizeSeen = "";
     for (const field of [x, y]) {
       field.addEventListener("focus", () => {
         const resolved = resolveMm(field);
         if (resolved.ok) { field.value = String(resolved.mm); field.select(); }
       }, { signal: events.signal });
-      field.addEventListener("blur", () => { formatMm(field); schedule(); }, { signal: events.signal });
+      // Tabbing through a size field without changing it must not drop the
+      // height basis (it would disable the field the user is moving to).
+      field.addEventListener("blur", () => {
+        formatMm(field);
+        const now = `${resolveMm(x).mm}/${resolveMm(y).mm}`;
+        if (now !== sizeSeen) { sizeSeen = now; schedule(); }
+      }, { signal: events.signal });
     }
-    form.addEventListener("input", event => { if (event.target !== count && event.target !== zField) schedule(); }, { signal: events.signal });
+    form.addEventListener("input", event => {
+      if (event.target !== count && !isHeightField(event.target)) schedule({ keepHeight: isHeightNeutral(event.target) });
+    }, { signal: events.signal });
     form.addEventListener("change", event => {
-      if (event.target !== count && event.target !== zField) { syncVisibility(); renderRows(); schedule(); }
+      if (event.target !== count && !isHeightField(event.target)) {
+        syncVisibility(); renderRows(); schedule({ keepHeight: isHeightNeutral(event.target) });
+      }
     }, { signal: events.signal });
     if (structural) {
       zField.addEventListener("change", () => { if (!Number.isFinite(setInterior("z", zField.value))) syncHeightField(); }, { signal: events.signal });
@@ -442,6 +524,7 @@
       return resolved.ok ? resolved.mm : `invalid:${field.value}`;
     };
     formatMm(x); formatMm(y);
+    sizeSeen = `${resolveMm(x).mm}/${resolveMm(y).mm}`;
     const snapshot = () => JSON.stringify([
       name.value.trim(), snapshotValue(x), snapshotValue(y), count.value,
       block.drawers.map(row => [row.id || "", row.height_mm, row.label_text]),
@@ -482,6 +565,7 @@
         disabled = !!value;
         for (const control of form.querySelectorAll("input, select")) control.disabled = disabled;
         if (!disabled) count.disabled = mode === "edit";
+        renderRows();
         syncHeightField();
       },
       destroy() { live = false; mountSerial += 1; clearTimeout(timer); events.abort(); host.replaceChildren(); }

@@ -3970,14 +3970,13 @@ def storage_drawers_preview_meshes(space: dict[str, Any]) -> dict[str, Any] | No
     Returns None if the meshes cannot be built (caller treats a missing
     preview as "not ready", not as a fatal error).
     """
-    try:
-        plan = resolve_storage_drawers_plan(space, build_meshes=True)
-    except Exception:
-        return None
     groups: dict[tuple[str, str, int], dict[str, list[float]]] = {}
     components: list[dict[str, str]] = []
     try:
+        # The production mesh makers / CSG and the serialization below both run
+        # under the one geometry lock (an RLock), never before it.
         with GEOMETRY_LOCK:
+            plan = resolve_storage_drawers_plan(space, build_meshes=True)
             for component in plan.components:
                 kind = "drawer" if component.key.startswith("drawer:") else "cabinet"
                 owner = component.key

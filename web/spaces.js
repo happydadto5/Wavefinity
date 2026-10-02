@@ -4378,23 +4378,26 @@ SP.adoptCabinetResult = result => {
   SP.renderSpaceInfo();
 };
 
+// Resolves true only when the change was adopted into the current Space, so a
+// caller (the structural editor) knows whether to rebuild from the new Space.
 SP.cabinetAdd = async () => {
   try {
     // The controller resolves null for a stale or superseded result, so success
     // is announced only when it was adopted into the same current Space.
-    if (await SP.mutateCabinet("add")) toast("Drawer added.");
+    if (await SP.mutateCabinet("add")) { toast("Drawer added."); return true; }
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) toast(error.message, true, 6000);
   }
+  return false;
 };
 
 SP.cabinetDelete = async drawerId => {
   const rows = StorageDrawers.drawerDescriptors(state.activeSpace);
   const index = rows.findIndex(row => row.id === drawerId);
-  if (index < 0 || rows.length <= 1) return;
+  if (index < 0 || rows.length <= 1) return false;
   if (DL.layout.drawers.find(one => one.id === drawerId)?.placements?.length) {
     toast(`Empty Drawer ${index + 1} before deleting it.`, true, 5000);
-    return;
+    return false;
   }
   const ok = await appConfirmAction({
     title: `Delete Drawer ${index + 1}?`,
@@ -4402,11 +4405,12 @@ SP.cabinetDelete = async drawerId => {
     actionLabel: "Delete Drawer",
     danger: true,
   });
-  if (!ok) return;
+  if (!ok) return false;
   try {
-    await SP.mutateCabinet("delete", { drawer_id: drawerId });
+    return Boolean(await SP.mutateCabinet("delete", { drawer_id: drawerId }));
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) toast(error.message, true, 6000);
+    return false;
   }
 };
 

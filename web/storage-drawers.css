@@ -77,3 +77,6 @@
 .sd-size-grid.sd-size-grid-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .sd-drawer-row.sd-drawer-row-active { outline: 2px solid var(--teal, #168a89); outline-offset: 2px; border-radius: 6px; }
 .storage-box-units { color: var(--muted); font-size: 11px; }
+.sd-drawer-head { display: grid; gap: 2px; justify-items: start; }
+.sd-drawer-delete { font-size: 12px; }
+.sd-drawer-actions { margin-top: 6px; }

@@ -194,6 +194,8 @@ function mountStructuralEditor(kind, key) {
           onChange: onStructuralDraftChange,
           onSummary: () => { if (structuralEditorRecord === record) updateStructuralActions(); },
           onHighlightDrawer: structuralHighlightDrawer,
+          addDrawer: () => structuralCabinetMutation("add"),
+          deleteDrawer: drawerId => structuralCabinetMutation("delete", drawerId),
         },
         onReadyChange: () => { if (structuralEditorRecord === record) updateStructuralActions(); },
       });
@@ -603,6 +605,30 @@ async function structuralSaveChanges() {
   } finally {
     record.saving = false;
     if (structuralEditorRecord === record) updateStructuralActions();
+  }
+}
+
+// Add Drawer / Delete Drawer in full structural Design (Correction 1 C2). The
+// form only asks; the existing cabinet mutation authority (SP.cabinetAdd /
+// SP.cabinetDelete -> SP.mutateCabinet) keeps every placement check,
+// confirmation, hosted/local persistence rule and history reset. A dirty draft
+// is settled first through the one dirty/leave owner; an adopted result
+// rebuilds the editor from the new accepted Space.
+async function structuralCabinetMutation(kind, drawerId = null) {
+  const first = structuralEditorRecord;
+  if (!first || first.kind !== "storage_drawers" || first.saving || first.mutating) return false;
+  first.mutating = true;
+  try {
+    // Save may remount the editor; read the live record again afterwards.
+    if (!(await SP.confirmLeaveStructuralEditor())) return false;
+    const adopted = kind === "add" ? await SP.cabinetAdd() : await SP.cabinetDelete(drawerId);
+    if (adopted && structuralEditorRecord && structuralTargetKind() === "storage_drawers") {
+      // Adoption normally rebuilt it already (SP.renderSpaceInfo); make sure.
+      if (structuralEditorRecord.spaceKey !== structuralSpaceKey()) syncStructuralEditor({ force: true });
+    }
+    return Boolean(adopted);
+  } finally {
+    first.mutating = false;
   }
 }
 
