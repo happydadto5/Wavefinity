@@ -2,6 +2,7 @@ import re
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import json
 from pathlib import Path
 from unittest import mock
@@ -233,8 +234,8 @@ class AutoLayoutRemovalTests(unittest.TestCase):
 class StackTests(unittest.TestCase):
     def test_a_manual_stack_of_same_size_stackable_bins_reports_one_stack(self):
         bins = [
-            {**_bin("B1", 16, 16, 30), "stack": "direct"},
-            {**_bin("B2", 16, 16, 30), "stack": "direct"},
+            {**_bin("B1", 16, 16, 30), "stack": "direct", "wall": 0.8},
+            {**_bin("B2", 16, 16, 30), "stack": "direct", "wall": 0.8},
         ]
         layout = _layout(4 * 8 + 1, 4 * 8 + 1, height=100, placements=[
             {"bin": "B1", "copy": 0, "gx": 0, "gy": 0}, {"bin": "B2", "copy": 0, "on": "B1:0"},
@@ -257,7 +258,7 @@ class SpacerTests(unittest.TestCase):
         from organizer_drawer import _serpentine_flexure
         from organizer_geometry import _extrude_polygon
 
-        poly = _serpentine_flexure(48, 32, "right", flexible=True)
+        poly, _built_flexible = _serpentine_flexure(48, 32, "right", flexible=True)
         mesh = _extrude_polygon(poly, 15)
         self.assertTrue(mesh.is_watertight)
         self.assertAlmostEqual(mesh.bounds[1][2] - mesh.bounds[0][2], 15, places=3)
@@ -267,6 +268,7 @@ class SpacerTests(unittest.TestCase):
             folder = Path(tmp) / "Shop"
             append_bin(folder, file="Box 16 x 16 x 40.3mf", x=16, y=16, z=40, design_spec={})
             layout = _layout(2 * 8 + 1 + 4.0, 2 * 8 + 1, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
+            save_inventory(folder, layout=layout)  # spacer routes plan from the stored layout
             routes = drawer_routes(threading.RLock(), folder)
             planned = routes["/api/drawer/spacers"]({
                 "output": str(folder), "layout": layout, "drawer_id": "d1",
@@ -277,6 +279,7 @@ class SpacerTests(unittest.TestCase):
             made = routes["/api/drawer/spacers/generate"]({
                 "output": str(folder), "layout": layout, "drawer_id": "d1",
                 "options": {"fill": "edges", "height": 12}, "selected": selected_ids,
+                "plan_signature": planned["plan_signature"],
             })
             self.assertEqual(len(made["generated"]), len(selected_ids))
             for gen in made["generated"]:
@@ -370,7 +373,8 @@ class DesignSourceTests(unittest.TestCase):
         return {"kind": "bin", "name": name, "x": 16.0, "y": 16.0, "z": 20.0, "stack": "none", **extra}
 
     def test_old_inventory_without_specs_still_loads(self):
-        append_bin(self.folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts", design_spec={})
+        # A legacy hand-added row has no editable source; new bin rows always do (Fix 096 A2).
+        append_bin(self.folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts", kind="manual")
         loaded = load_inventory(self.folder)
         self.assertEqual(loaded["layout"], None)
         from organizer_inventory import design_specs
@@ -677,6 +681,10 @@ class BulkPrintTests(unittest.TestCase):
         self.slicer = self.folder / "bambu-studio.exe"
         self.slicer.write_bytes(b"")
         self.launched = []
+        # The printer-fit check reads real 3MF geometry; these fixtures are stub files.
+        fit = patch("organizer_drawer.print_file_fit_issues", return_value=[])
+        fit.start()
+        self.addCleanup(fit.stop)
 
     def tearDown(self):
         self.tmp.cleanup()

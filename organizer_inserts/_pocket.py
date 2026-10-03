@@ -82,7 +82,7 @@ def pocket_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, floa
     options=(
         OptionDefinition("Height", "height", "12"),
         OptionDefinition("Wall", "wall", "1.6"),
-        OptionDefinition("Walls", "wall_style", "straight", "enum"),
+        OptionDefinition("Walls", "wall_style", "straight", "enum", choices=(("straight", "Straight"), ("wavy", "Wavy"))),
         OptionDefinition("Recess", "depth", ""),
         OptionDefinition("Rounding", "rounding", "", editor=False),
     ), order=50, palette_visible=False,

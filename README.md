@@ -1996,7 +1996,7 @@ these numbers look arbitrary and are not.
 | One "unit" | **8.0** | so 1, 2, 3 units = 8, 16, 24 mm |
 | Smallest box that clips on both sides | **16.0** | derived, not hard-coded |
 | Wall | **0.8** | independent of the floor |
-| Base thickness | **0.6** default, **0.4** minimum | shown under Advanced in Build your bin |
+| Base thickness | **0.8** default, **0.4** minimum | shown under Advanced in Build your bin |
 | Flat wall band | **0–1.0**, default 0 | height above the floor, not a fill depth |
 | Corner fillet | **0.6** | walls stop `CORNER_INSET` = 1.0 short of the nominal corner |
 | **Connector tolerance** | **0.02** | **locked** by a physical print |

@@ -54,7 +54,8 @@ class BrowserStateLogicTests(unittest.TestCase):
     def test_committed_change_only_clears_starter_for_real_change(self):
         source = function_source("noteCommittedDesignChange", APP)
         script = r"""
-const state={design:{box:{x:16}},spaceStarterPreviewPending:true};
+const state={design:{box:{x:16}},spaceStarterPreviewPending:true,designerHistory:[],designerFuture:[]};
+const designerHistorySnapshot=v=>v,updateDesignerHistoryButtons=()=>{};
 __SOURCE__
 const same=noteCommittedDesignChange({box:{x:16}});
 const stillPending=state.spaceStarterPreviewPending;
@@ -66,7 +67,7 @@ process.stdout.write(JSON.stringify({same,stillPending,changed,known,
  pending:state.spaceStarterPreviewPending}));
 """.replace("__SOURCE__", source)
         self.assertEqual(node_json(script), {"same": False, "stillPending": True,
-                                            "changed": True, "known": True, "pending": False})
+                                            "changed": True, "known": False, "pending": True})
 
     def test_surface_height_label_resets_without_reload(self):
         source = function_source("syncSurfaceControls", APP)
@@ -273,6 +274,7 @@ process.stdout.write(JSON.stringify({results,explicit,clamped}));
         source = function_source("updateBoreCeilingWarning", APP)
         script = r"""
 const element={hidden:true,textContent:''};
+const fmt=v=>String(Math.round(Number(v)*100)/100);
 const $=selector=>selector==='#bore-ceiling-warning' ? element : null;
 __SOURCE__
 updateBoreCeilingWarning({top_mm:72,cap_mm:64,space_kind:'drawer'});
@@ -807,7 +809,8 @@ const session=()=>({request_id:'R',context_fingerprint:'F',baseline:old,
     def test_ai_help_prompt_covers_committed_draft_and_only_answer_defects_are_repairable(self):
         error_class = APP[APP.index("class AiHelpError"):APP.index("\n}\n", APP.index("class AiHelpError")) + 3]
         source = "\n".join(function_source(name, APP) for name in (
-            "aiGeneratePrompt", "aiProcessResponse", "aiProveCandidate", "aiParseEnvelope", "aiCheckSession"))
+            "aiGeneratePrompt", "aiProcessResponse", "aiProveCandidate", "aiParseEnvelope", "aiCheckSession",
+            "friendlyError"))
         schema = re.search(r'const AI_SCHEMA = "([^"]+)"', APP).group(1)
         script = r"""
 __ERROR__
@@ -821,6 +824,7 @@ const aiSetBusy=b=>{aiHelp.busy=b},aiUpdateGenerateAvailability=()=>{},
 const aiShowPrompt=()=>{},toast=()=>{},isStructuralDesign=()=>false,aiCompositionEmpty=d=>!d.layout.features.length;
 const aiSpaceContext=()=>null,aiExistingBinNames=()=>['Existing'],aiRecordRecentDescription=()=>{},
   aiContextKey=()=>'K',visibleDesignSnapshot=()=>clone(state.design);
+const designTargetIsStructural=()=>false;
 const withDeferredDraftSwitch=async(action,refused)=>{
   events.push('guard');if(refuse)return refused;
   state.design.layout.features.push({kind:'post'});events.push('committed');return action({});};

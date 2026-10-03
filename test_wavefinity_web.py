@@ -358,7 +358,7 @@ class WebApplicationTests(unittest.TestCase):
         )
         box, layout, *_ = design_from_dict(catalog["defaults"]["design"])
         self.assertEqual((box.x, box.y, box.z), (16.0, 48.0, 40.0))
-        self.assertEqual(box.base_thickness, 0.6)
+        self.assertEqual(box.base_thickness, 0.8)
         self.assertEqual(layout.mode, "fused")
         # Box modifiers share the catalog lifecycle but do not become Layout features.
         self.assertIn("side_openings", parts)
@@ -545,14 +545,17 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn("Base Trim", str(ctx.exception))
 
     def test_default_draft_changes_real_geometry_when_height_changes(self):
-        design = default_design()
-        feature = default_feature_payload({"design": design, "kind": "pocket"})["feature"]
-        low = draft_payload({"design": design, "feature": feature})
-        low_top = max(point[2] for face in low["geometry"] for point in face["points"])
-        feature["options"]["height"] = 28.0
-        high = draft_payload({"design": design, "feature": feature})
-        high_top = max(point[2] for face in high["geometry"] for point in face["points"])
-        self.assertGreater(high_top, low_top + 4.0)
+        # Draft responses no longer carry mesh geometry; the committed preview does.
+        def feature_top(height):
+            design = default_design()
+            feature = default_feature_payload({"design": design, "kind": "pocket"})["feature"]
+            if height is not None:
+                feature["options"]["height"] = height
+            applied = apply_feature_payload({"design": design, "feature": feature, "index": None})
+            geometry = preview_payload({"design": applied["design"]})["geometry"]
+            return max(point[2] for face in geometry if face["kind"].startswith("feature")
+                       for point in face["points"])
+        self.assertGreater(feature_top(28.0), feature_top(None) + 4.0)
 
 
 
@@ -757,7 +760,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertTrue(saved["alternate_ends"])
         self.assertTrue(draft_payload({
             "design": design, "feature": saved,
-        })["geometry"])
+        })["resolved_options"])
 
     def test_divider_bottom_slope_options_survive_the_browser_api_round_trip(self):
         design = default_design()
@@ -796,7 +799,6 @@ class WebApplicationTests(unittest.TestCase):
             "design": design,
             "feature": applied["design"]["layout"]["features"][0],
         })
-        self.assertTrue(drafted["geometry"])
         self.assertEqual(drafted["resolved_options"]["bottom_angle"], 20.0)
 
     def test_divider_bottom_flags_sent_as_strings_stay_flags_not_floats(self):
@@ -839,7 +841,6 @@ class WebApplicationTests(unittest.TestCase):
             {cell["id"] for cell in drafted["divider_cells"] if cell["scoop"]},
             {"r0c0", "r0c1", "r1c0", "r1c1"},
         )
-        self.assertTrue(drafted["geometry"])
 
     def test_old_divider_cell_targets_migrate_to_all_cells(self):
         design = default_design()
@@ -1237,7 +1238,7 @@ class WebApplicationTests(unittest.TestCase):
         )["feature"]
         draft["options"].update(text="M4", level="rim", rim_side="back")
         result = draft_payload({"design": design, "feature": draft})
-        self.assertTrue(result["geometry"])
+        self.assertTrue(result["resolved_options"]["cap_height"])
         self.assertEqual(result["feature"]["options"]["level"], "rim")
         self.assertNotIn("auto", result["feature"]["options"])
 
@@ -1311,6 +1312,8 @@ class WebApplicationTests(unittest.TestCase):
                 patch("subprocess.Popen") as mock_popen,
                 patch.object(wavefinity_web, "stage_bambu_inputs", return_value=staged) as stage,
             ):
+                # Still running after the handoff window: the GUI accepted the files.
+                mock_popen.return_value.wait.side_effect = subprocess.TimeoutExpired("slicer", 1)
                 result = wavefinity_web.launch_slicer(fake_exe, [fake_3mf, fake_3mf])
                 stage.assert_called_once_with([fake_3mf, fake_3mf])
                 mock_popen.assert_called_once()
@@ -1327,6 +1330,7 @@ class WebApplicationTests(unittest.TestCase):
                 patch("subprocess.Popen") as mock_popen,
                 patch.object(wavefinity_web, "stage_bambu_inputs") as stage,
             ):
+                mock_popen.return_value.wait.side_effect = subprocess.TimeoutExpired("slicer", 1)
                 result = wavefinity_web.launch_slicer(orca, [fake_3mf])
                 stage.assert_not_called()
                 args = mock_popen.call_args[0][0]
@@ -1337,9 +1341,9 @@ class WebApplicationTests(unittest.TestCase):
         fake_exe = Path(temp_dir) / "bambu-studio.exe"
         fake_exe.touch()
         box = Path(temp_dir) / "Box.3mf"
-        box.touch()
+        box.write_bytes(b"3mf")  # the print path refuses missing or empty files
         connector = Path(temp_dir) / "Connector.3mf"
-        connector.touch()
+        connector.write_bytes(b"3mf")
         gen = {"result": {"box": {"output": str(box)}}, "output": str(temp_dir)}
         conn = {"result": {"output": str(connector)}, "output": str(temp_dir)}
         return fake_exe, box, connector, gen, conn
@@ -1352,6 +1356,7 @@ class WebApplicationTests(unittest.TestCase):
                 patch.object(wavefinity_web, "generate_payload", return_value=gen) as generate,
                 patch.object(wavefinity_web, "connector_payload", return_value=conn) as connector_gen,
                 patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
+                patch.object(wavefinity_web, "print_file_fit_issues", return_value=[]),
                 patch.object(wavefinity_web, "launch_slicer", return_value=project),
                 patch.object(wavefinity_web, "inventory_enabled", return_value=True),
                 patch.object(wavefinity_web, "append_bin") as append,
@@ -1373,6 +1378,7 @@ class WebApplicationTests(unittest.TestCase):
                 patch.object(wavefinity_web, "generate_payload", return_value=gen),
                 patch.object(wavefinity_web, "connector_payload", return_value=conn) as connector_gen,
                 patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
+                patch.object(wavefinity_web, "print_file_fit_issues", return_value=[]),
                 patch.object(wavefinity_web, "launch_slicer", side_effect=RuntimeError("no")),
                 patch.object(wavefinity_web, "inventory_enabled", return_value=True),
                 patch.object(wavefinity_web, "append_bin") as append,
@@ -1400,8 +1406,10 @@ class WebApplicationTests(unittest.TestCase):
             ):
                 response = wavefinity_web.connector_save_payload(
                     {"design": default_design(), "output": temp_dir})
-            self.assertIs(wavefinity_web.POST_ROUTES["/api/connector"],
-                          wavefinity_web.connector_save_payload)
+            route = wavefinity_web.POST_ROUTES["/api/connector"]
+            # The route is the idempotency wrapper around the save function.
+            self.assertTrue(any(cell.cell_contents is wavefinity_web.connector_save_payload
+                                for cell in (route.__closure__ or ())))
             self.assertTrue(response["partial"])
             self.assertEqual(response["partial_stage"], "connectors")
             self.assertIn("corner boom", response["error"])
@@ -1421,9 +1429,9 @@ class WebApplicationTests(unittest.TestCase):
             fake_exe = Path(temp_dir) / "bambu-studio.exe"
             fake_exe.touch()
             fake_3mf = Path(temp_dir) / "Box.3mf"
-            fake_3mf.touch()
+            fake_3mf.write_bytes(b"3mf")
             fake_connector = Path(temp_dir) / "Connector.3mf"
-            fake_connector.touch()
+            fake_connector.write_bytes(b"3mf")
 
             fake_gen_result = {
                 "result": {"box": {"output": str(fake_3mf)}},
@@ -1438,6 +1446,7 @@ class WebApplicationTests(unittest.TestCase):
                 patch.object(wavefinity_web, "generate_payload", return_value=fake_gen_result),
                 patch.object(wavefinity_web, "connector_payload", return_value=fake_connector_result),
                 patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
+                patch.object(wavefinity_web, "print_file_fit_issues", return_value=[]),
                 patch.object(wavefinity_web, "launch_slicer") as mock_launch,
             ):
                 response = wavefinity_web.print_payload({
@@ -1459,7 +1468,7 @@ class WebApplicationTests(unittest.TestCase):
     def test_print_payload_raises_when_no_slicer(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fake_3mf = Path(temp_dir) / "Box.3mf"
-            fake_3mf.touch()
+            fake_3mf.write_bytes(b"3mf")
             fake_gen_result = {
                 "result": {"box": {"output": str(fake_3mf)}},
                 "output": str(temp_dir),
@@ -1469,13 +1478,14 @@ class WebApplicationTests(unittest.TestCase):
                 patch.object(wavefinity_web, "generate_payload", return_value=fake_gen_result),
                 patch.object(wavefinity_web, "connector_payload", return_value={"result": {}, "output": str(temp_dir)}),
                 patch.object(wavefinity_web, "detect_bambu_studio", return_value=None),
+                patch.object(wavefinity_web, "print_file_fit_issues", return_value=[]),
             ):
                 with self.assertRaises(ValueError) as ctx:
                     wavefinity_web.print_payload({
                         "design": default_design(),
                         "output": temp_dir,
                     })
-                self.assertIn("Bambu Studio was not found", str(ctx.exception))
+                self.assertIn("A slicer was not found", str(ctx.exception))
 
 
     def test_typed_space_print_handoff_does_not_append_another_row(self):
@@ -1483,12 +1493,13 @@ class WebApplicationTests(unittest.TestCase):
             slicer = Path(temp_dir) / "bambu-studio.exe"
             slicer.touch()
             bin_file = Path(temp_dir) / "A.3mf"
-            bin_file.touch()
+            bin_file.write_bytes(b"3mf")
             fake = {"result": {"box": {"output": str(bin_file)}}, "output": temp_dir}
             with (
                 patch.object(wavefinity_web, "generate_payload", return_value=fake),
                 patch.object(wavefinity_web, "connector_payload", return_value={"result": {}, "output": temp_dir}),
                 patch.object(wavefinity_web, "detect_bambu_studio", return_value=slicer),
+                patch.object(wavefinity_web, "print_file_fit_issues", return_value=[]),
                 patch.object(wavefinity_web, "launch_slicer"),
                 patch.object(wavefinity_web, "append_bin") as append,
                 patch.object(wavefinity_web, "inventory_enabled", return_value=True),
@@ -1544,6 +1555,7 @@ class WebApplicationTests(unittest.TestCase):
             "const baseTrimEnabled = () => false; const syncForm = () => {};",
             "const bindLidMemoryForDesign = () => {};",
             "const refreshPreview = async () => {}; const toast = () => {};",
+            "const DP = {};",
             owner,
             "(async()=>{await SP.initializeDesignForActiveSpace();",
             "process.stdout.write(JSON.stringify(state.designInventoryId));})();",
@@ -1667,9 +1679,10 @@ let shouldFail = false;
 const ctx = {
   debounce: f => f, console, Math, JSON, Number, Set, Map, setTimeout, clearTimeout,
   state: { runtime: { hosted: false }, output: "out" },
-  toast: () => {},
+  toast: () => {}, friendlyError: e => String((e && e.message) || e),
   api: async () => { if (shouldFail) throw new Error("boom"); return {}; },
 };
+ctx.apiSideEffect = (...args) => ctx.api(...args);
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + " ;this.DL = DL;", ctx);
 const DL = ctx.DL;
@@ -1717,12 +1730,13 @@ function makeCtx() {
   const ctx = {
     debounce: f => f, console, Math, JSON, Number, Set, Map, Promise, setTimeout, clearTimeout, setImmediate,
     state: { runtime: { hosted: false }, output: "out" },
-    toast: () => {},
+    toast: () => {}, friendlyError: e => String((e && e.message) || e),
     api: async () => {
       calls.push(1);
       return new Promise((resolve, reject) => { pending.push({ resolve, reject }); });
     },
   };
+  ctx.apiSideEffect = (...args) => ctx.api(...args);
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + " ;this.DL = DL;", ctx);
   const DL = ctx.DL;
@@ -2234,9 +2248,10 @@ class AiHelpBackendTests(unittest.TestCase):
         catalog = catalog_payload()
         listed = {one["kind"]: one for one in manifest["features"]}
         visible = {p["kind"] for p in catalog["parts"]
-                   if p["palette_visible"] and "box_modifier" not in p["capabilities"]}
+                   if (p["palette_visible"] or p["kind"] == "pocket")
+                   and "box_modifier" not in p["capabilities"]}
         self.assertEqual(set(listed), visible)
-        self.assertNotIn("pocket", listed)  # hidden/legacy kinds are never offered
+        self.assertIn("pocket", listed)  # Pocket is offered to outside AI although it has no palette tile
         for kind, one in listed.items():
             expected = "recommend_only" if "photo" in one["capabilities"] else "configurable"
             self.assertEqual(one["ai"], expected, kind)

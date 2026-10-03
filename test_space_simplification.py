@@ -33,7 +33,7 @@ const makeEl = () => ({
   innerHTML: "", textContent: "", value: "", checked: false, disabled: false, hidden: false,
   dataset: {}, style: {}, title: "", open: false, className: "",
   classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
-  addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; },
+  addEventListener() {}, append() {}, replaceChildren() {}, remove() {}, querySelector() { return null; }, querySelectorAll() { return []; },
   contains() { return false; }, closest() { return null; }, matches() { return false; },
   setAttribute() {}, getContext() { return null; }, insertAdjacentHTML() {}, scrollIntoView() {},
 });
@@ -47,11 +47,12 @@ const calls = [];
 const ctx = {
   console, Math, JSON, Number, String, Set, Map, Object, Array, Promise, Date, CSS: { escape: v => v },
   setTimeout: () => 0, clearTimeout() {},
-  $: sel => els[sel] || null, $$: () => [],
-  document: { activeElement: null, querySelector: () => null },
+  $: sel => (els[sel] ||= makeEl()), $$: () => [],
+  document: { activeElement: null, querySelector: () => null, addEventListener() {}, getElementById: () => null, body: makeEl() },
   localStorage: { getItem: () => null, setItem() {} },
   window: { addEventListener() {}, devicePixelRatio: 1 },
   requestAnimationFrame: f => f(), ResizeObserver: class { observe() {} }, MutationObserver: class { observe() {} },
+  Option: class { constructor(text, value) { this.text = text; this.value = value; } },
   debounce: f => f, clone: v => JSON.parse(JSON.stringify(v)),
   fmt: v => (Math.round(Number(v) * 100) / 100).toString(),
   escapeHtml: v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
@@ -69,7 +70,7 @@ load("drawer-view.js", "DV");
 load("drawer-panel.js", "DP");
 const { DL, DV, DP } = ctx;
 DL.emit = () => {};
-const bin = (id, o = {}) => ({ id, kind: "bin", name: id, x: 16, y: 16, z: 30, qty: 0, status: "in_design", stack: "none", file: "", ...o });
+const bin = (id, o = {}) => ({ id, kind: "bin", name: id, x: 16, y: 16, z: 30, qty: 0, status: "in_design", stack: "none", file: "", wall: 0.8, ...o });
 const drawer = (placements = []) => ({ id: "d1", name: "Drawer", width: 200, depth: 200, height: 60, boundary: "wall", placements });
 const setLayout = (bins, placements = [], extra = {}) => {
   DL.bins = bins; DL.loaded = true; DL.active = true;
@@ -188,7 +189,8 @@ setLayout([bin("B1", { stack: "direct", z: 20 }), bin("B2", { stack: "direct", z
   [{ bin: "B1", copy: 0, gx: 0, gy: 0 }]);
 out.overlap = DL.placeAt(DL.bin("B3"), { gx: 1, gy: 1 });
 out.outside = DL.placeAt(DL.bin("B3"), { gx: 99, gy: 0 });
-const target = DL.items()[0];
+const item = DL.items()[0];
+const target = { item, layer: item.layers[0], cx: 0, cy: 0 };
 out.stacked = DL.placeAt(DL.bin("B2"), { target });
 out.stackedOn = DL.layout.drawers[0].placements.find(p => p.bin === "B2").on;
 out.fits = DL.fitsAt(DL.drawer(), [DL.bin("B3")], 4, 4).ok;
@@ -499,9 +501,9 @@ const run = async (hosted) => {
   const toast = (m, e) => toasts.push(m);
   const document = { getElementById: id => els[id] || null };
   const clone = v => JSON.parse(JSON.stringify(v));
-  const fn = new Function("SP", "state", "DL", "api", "saveGeneratedFiles", "toast", "document", "clone",
+  const fn = new Function("SP", "state", "DL", "api", "apiSideEffect", "saveGeneratedFiles", "toast", "document", "clone",
     slice + "; return SP;");
-  const sp = fn(SP, state, DL, api, saveGeneratedFiles, toast, document, clone);
+  const sp = fn(SP, state, DL, api, api, saveGeneratedFiles, toast, document, clone);
   sp.renderStructuralActions();
   const view = { disabled: els["space-structural-print"].disabled, title: els["space-structural-print"].title,
     label: els["space-structural-print"].textContent, saveDisabled: els["space-structural-save"].disabled };
@@ -526,7 +528,7 @@ const run = async (hosted) => {
         hosted, local = out["hosted"], out["local"]
         self.assertTrue(hosted["view"]["disabled"])
         self.assertFalse(hosted["view"]["saveDisabled"])
-        self.assertEqual(hosted["view"]["label"], "Print Storage Box")
+        self.assertEqual(hosted["view"]["label"], "Print Storage Box + Bins")
         self.assertIn("local Wavefinity", hosted["view"]["title"])
         self.assertEqual(hosted["afterPrint"], [])                       # Print never calls generate/save
         self.assertEqual(hosted["afterSave"], ["/api/space/structural-generate"])
