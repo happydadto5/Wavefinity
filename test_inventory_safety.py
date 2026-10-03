@@ -7,6 +7,7 @@ import json
 import re
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from unittest import mock
 
@@ -48,6 +49,10 @@ class BatchFixture(unittest.TestCase):
         self.generated: list[str] = []
         self.fail_on: str | None = None
         self.extra_files: dict[str, list[str]] = {}
+        # The printer-fit check reads real 3MF geometry; these fixtures are stub files.
+        fit = patch("organizer_drawer.print_file_fit_issues", return_value=[])
+        fit.start()
+        self.addCleanup(fit.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -437,7 +442,7 @@ class StorageDrawersStaleSaveTests(unittest.TestCase):
                 "name": "Cabinet", "kind": "storage_drawers", "x": 96, "y": 96, "z": 120,
                 "storage_drawers": {"drawers": [{"height_mm": 40}, {"height_mm": 40}, {"height_mm": 40}]},
             })
-            save_inventory(folder, new_bins=[record("Placed")])
+            save_design_source(folder, design=design("Placed"), record=record("Placed"))
             layout = load_inventory(folder)["layout"]
             layout["drawers"][0]["placements"].append({"bin": "B1", "gx": 0, "gy": 0})
             save_inventory(folder, layout=layout)

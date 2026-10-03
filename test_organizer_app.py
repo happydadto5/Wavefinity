@@ -130,11 +130,12 @@ from organizer_inserts import (
 
 
 REFERENCE_FINGERPRINTS = {
-    # Re-pinned when the floor became its own setting and its default dropped
-    # from 0.8 to 0.6 mm. Only the floor moved: the connector's fingerprint is
-    # byte-identical either side of that change, which is what says the wave,
-    # the mating and the lock were not touched.
-    "box": "884CE0CA18924E23054376E9DC6457DA6EF22AD11A62606DE58DA61AC7CB5A19",
+    # Re-pinned when the floor's default moved 0.8 -> 0.6 mm, and again (Fix 096
+    # B) when it returned to 0.8 mm. Only the floor moved: the connector's
+    # fingerprint is byte-identical either side of those changes, which is what
+    # says the wave, the mating and the lock were not touched. (The box hash
+    # for a 0.6 mm floor is 884CE0CA...; the default 0.8 mm floor is below.)
+    "box": "80F09E19A9422D66ED44BD051702CF70089D487FCA2CE575C7F5D25E3CF2E707",
     "connector": "B192E6A9FA4D486A9E491F84778497738264CBC063B62D34E179D46C02E6BC13",
 }
 
@@ -1109,6 +1110,9 @@ class InsertEditorTests(unittest.TestCase):
             if kind == "nest":
                 self.assertIsNone(feature.contour)
                 continue
+            if kind == "text":
+                # A new Text part starts empty by design; it needs wording to build.
+                feature = replace(feature, options={**feature.options, "text": "M3"})
             geometry = organizer_app.preview_geometry(spec, features=[feature])
             self.assertFalse(geometry["feature_errors"], kind)
             self.assertTrue(
@@ -1177,7 +1181,7 @@ class InsertEditorTests(unittest.TestCase):
                 "--output-dir", directory,
             ])
             with mock.patch.object(
-                organizer_app, "generate_organizer_files", return_value={}
+                organizer_app, "generate_organizer_files_transactional", return_value={}
             ) as generate:
                 organizer_app.run_command(args)
             (used_box, used_layout, _, used_label, used_part,

@@ -605,7 +605,7 @@ Trim) design from the Space definition and go through `/api/space/structural-*`,
 which suppress Inventory logging entirely.
 
 - **Space identity.** A typed Space carries a permanent `space_id` (UUID) in
-  its `.wavefinity.json` (metadata version 8; identity required since version 5). The per-user profile keeps a
+  its `.wavefinity.json` (metadata version 9; identity required since version 5). The per-user profile keeps a
   registry of known Spaces (id, name, kind, last folder) as an index only.
   Renaming the folder within the same parent is recovered automatically by
   that ID; a folder moved elsewhere is recognised when you Open Existing it.

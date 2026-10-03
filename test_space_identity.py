@@ -92,7 +92,7 @@ class SpaceIdentityTests(unittest.TestCase):
 
         opened = self.call("/api/folder/use", output=str(folder))["folder"]
         data = meta(folder)
-        self.assertEqual(data["version"], 8)
+        self.assertEqual(data["version"], 9)
         self.assertEqual(str(uuid.UUID(data["space_id"])), data["space_id"])
         self.assertEqual(data["space"], V4["space"])
         self.assertEqual(data["bin_defaults"], {"marker": 1})
@@ -394,7 +394,8 @@ class InventoryResolverTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Renamed Folder"
             folder.mkdir()
-            append_bin(folder, file="a.3mf", x=16, y=16, z=20, name="One", design_spec={})
+            # A legacy hand-added row: ordinary bins are renamed through their design source.
+            append_bin(folder, file="a.3mf", x=16, y=16, z=20, name="One", kind="manual")
             canonical = folder / INVENTORY_FILENAME
             legacy = folder / "Older bins.md"
             canonical.rename(legacy)

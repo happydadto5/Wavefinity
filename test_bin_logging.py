@@ -32,6 +32,7 @@ class TestBinLogging(unittest.TestCase):
                 generated_files=[out_dir / "Box 40 x 48 x 40.3mf"],
                 label="TOOLS",
                 part_name="Tools",
+                design_spec={},
             )
             self.assertTrue(log_file.is_file())
             self.assertEqual(log_file.name, "Wavefinity bins.md")
@@ -57,6 +58,7 @@ class TestBinLogging(unittest.TestCase):
                 label="",
                 part_name="",
                 scoop=True,
+                design_spec={},
             )
             self.assertEqual(log_file, log_file2)
             content2 = log_file2.read_text(encoding="utf-8")
@@ -98,7 +100,7 @@ class TestBinLogging(unittest.TestCase):
             with (
                 patch.object(wavefinity_web, "HOSTED", False),
                 patch.object(wavefinity_web, "load_preferences", return_value={}),
-                patch.object(wavefinity_web, "generate_organizer_files", return_value={}) as generate,
+                patch.object(wavefinity_web, "generate_organizer_files_transactional", return_value={}) as generate,
             ):
                 # The caller decides whether this generation writes a row.
                 wavefinity_web.generate_payload({"design": design, "output": str(design_folder)})
