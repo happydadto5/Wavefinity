@@ -3750,6 +3750,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(
             "A slicer was not found. Please locate your slicer executable in settings or install a slicer (Bambu Studio or OrcaSlicer)."
         )
+    profile = _printer_profile_for(payload)
 
     # Fix 096 F11: user-facing copy names the detected slicer, never a hardcoded brand.
     name = slicer_display_name(slicer_path) or "the slicer"
@@ -3847,6 +3848,20 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     if not files:
         raise RuntimeError(f"No 3MF files were generated to send to {name}.")
+
+    # Every file handed to the slicer must fit the active printer. A fit
+    # failure is reported before launch; files already saved are kept.
+    fit_issues: list[str] = []
+    for path in dict.fromkeys(files):
+        fit_issues.extend(print_file_fit_issues(Path(path), profile))
+    if fit_issues:
+        return {
+            "partial": True, "partial_stage": "preflight",
+            "error": "A file does not fit the active printer:\n" + "\n".join(fit_issues),
+            "design_reused": design_reused,
+            "design_files": [str(f) for f in design_files],
+            "files": [str(f) for f in files],
+        }
 
     try:
         project_path = launch_slicer(slicer_path, files)
