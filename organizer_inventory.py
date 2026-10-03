@@ -725,7 +725,10 @@ def change_design_status(output_dir: Path | str, row_id: str, action: str,
                 except ValueError:
                     target.update({"file": "", "status": "in_design", "qty": 0})
         superseded: list[Path] = []
-        if action == "saved":
+        # A real Save or successful slicer Print establishes a new current file
+        # set and may retire this row's tracked superseded outputs. Manual
+        # mark_printed only changes Inventory bookkeeping and owns no file work.
+        if action in ("saved", "printed"):
             layout, superseded = _reap_superseded(path.parent, bins, layout, row_id)
         _write(path, bins, layout, current["legacy"])
         _delete_files(superseded)
@@ -734,12 +737,22 @@ def change_design_status(output_dir: Path | str, row_id: str, action: str,
 
 def change_design_status_text(text: str, row_id: str, action: str,
                               file_text: str | None = None, *, title: str = "Wavefinity",
-                              expected_design: dict | None = None) -> dict[str, Any]:
+                              expected_design: dict | None = None,
+                              available_filenames: Iterable[str] = ()) -> dict[str, Any]:
     with INVENTORY_LOCK:
         current = parse_inventory(str(text or ""))
         bins, layout = _change_design_status(current, row_id, action, file_text, expected_design)
+        cleanup_files: list[str] = []
+        # A real Save or successful slicer Print establishes a new current file
+        # set. Manual mark_printed is bookkeeping-only and owns no file cleanup.
+        if action in ("saved", "printed"):
+            layout, cleanup_files = _reap_superseded_names(
+                bins, layout, row_id, available_filenames)
         rendered = render_inventory(title, bins, layout)
-        return _text_payload(rendered, title, parse_inventory(rendered))
+        return {
+            **_text_payload(rendered, title, parse_inventory(rendered)),
+            "cleanup_files": cleanup_files,
+        }
 
 
 def mark_printed_rows(output_dir: Path | str, row_ids: Iterable[str],
@@ -858,6 +871,37 @@ def _reap_superseded(
     else:
         layout.pop("stale_files", None)
     return layout, doomed
+
+
+def _reap_superseded_names(
+    bins: list[dict[str, Any]], layout: dict[str, Any] | None,
+    row_id: str, available_filenames: Iterable[str],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Hosted equivalent of _reap_superseded: plan conservative browser deletes."""
+    if not isinstance(layout, dict):
+        return layout, []
+    stale = _stale_files(layout)
+    if row_id not in stale:
+        return layout, []
+    tracked = list(dict.fromkeys(stale.pop(row_id)))
+    available = {
+        name for name in available_filenames
+        if isinstance(name, str) and name == name.strip()
+        and Path(name).name == name and not Path(name).is_absolute()
+        and "/" not in name and "\\" not in name and name.lower().endswith(".3mf")
+    }
+    target = next((one for one in bins if one["id"] == row_id), None)
+    current = _claimed_names(None, target) if target is not None else set()
+    referenced = _referenced_names(None, bins, row_id)
+    cleanup = [
+        name for name in tracked
+        if name in available and name not in current and name not in referenced
+    ]
+    next_layout = {**layout}
+    # Keep stale_files authoritative even when empty. DL.adopt (D-7) sees the
+    # explicit key and clears its cached stale map after this exact status response.
+    next_layout["stale_files"] = stale
+    return next_layout, cleanup
 
 
 def _delete_files(paths: Iterable[Path]) -> None:

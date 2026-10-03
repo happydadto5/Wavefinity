@@ -390,9 +390,15 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
   const board = rect(0, 0, drawer.width, drawer.depth);
   path(board); ctx.fillStyle = "#d9c79e"; ctx.fill(); ctx.strokeStyle = "#816d48"; ctx.lineWidth = 2; ctx.stroke();
   const standard = state.catalog?.pegboard_rules?.standards?.find(row => row.id === drawer.pegboard_standard) || {};
+  // One standard-aware logical->physical mount transform (Fix 111): the hole
+  // loop and every exact-mount dot loop below share it, so the SKÅDIS
+  // odd-row stagger can never drift between them again.
+  const holeXY = (gx, gy) => [
+    grid.ox + (gx + 0.5) * grid.stepX + (standard.stagger_x_mm && gy % 2 ? standard.stagger_x_mm : 0),
+    grid.oy + (gy + 0.5) * grid.stepY,
+  ];
   for (let gy = 0; gy < grid.rows; gy += 1) for (let gx = 0; gx < grid.cols; gx += 1) {
-    const px = grid.ox + (gx + 0.5) * grid.stepX + (standard.stagger_x_mm && gy % 2 ? standard.stagger_x_mm : 0);
-    const py = grid.oy + (gy + 0.5) * grid.stepY;
+    const [px, py] = holeXY(gx, gy);
     if (px > drawer.width - grid.ox + 1e-9) continue;
     const [sx, sy] = cam.project([px, py, 0]);
     const [rx] = cam.project([px + Number(standard.opening_width_mm || 6) / 2, py, 0]);
@@ -410,8 +416,7 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
     const baseGx = Math.round((entry.x0 - grid.ox) / grid.stepX);
     const baseGy = Math.round((entry.y0 - grid.oy) / grid.stepY);
     for (const [mx, my] of layout.mount_offsets) {
-      const px = grid.ox + (baseGx + mx + 0.5) * grid.stepX;
-      const py = grid.oy + (baseGy + my + 0.5) * grid.stepY;
+      const [px, py] = holeXY(baseGx + mx, baseGy + my);
       const [hx, hy] = cam.project([px, py, 0]);
       ctx.beginPath();
       ctx.arc(hx, hy, 5, 0, Math.PI * 2);
@@ -472,7 +477,10 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
     if (selected) {
       const layout = DL.pegboardRefreshError ? null : (DL.pegboardLayouts[one.id] || one.pegboard_layout);
       for (const [mx, my] of layout?.mount_offsets || []) {
-        const [hx, hy] = cam.project([grid.ox + (Math.round((entry.x0 - grid.ox) / grid.stepX) + mx + 0.5) * grid.stepX, grid.oy + (Math.round((entry.y0 - grid.oy) / grid.stepY) + my + 0.5) * grid.stepY, 0]);
+        const baseGx = Math.round((entry.x0 - grid.ox) / grid.stepX);
+        const baseGy = Math.round((entry.y0 - grid.oy) / grid.stepY);
+        const [px, py] = holeXY(baseGx + mx, baseGy + my);
+        const [hx, hy] = cam.project([px, py, 0]);
         ctx.beginPath(); ctx.arc(hx, hy, 5, 0, Math.PI * 2); ctx.fillStyle = "#ffe16b"; ctx.fill(); ctx.strokeStyle = "#5d4800"; ctx.stroke();
       }
     }

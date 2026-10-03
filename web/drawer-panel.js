@@ -250,6 +250,10 @@ DP.wire = () => {
   $("#dl-drawer-add").addEventListener("click", () => {
     const added = DL.defaultDrawer(`Drawer ${DL.layout.drawers.length + 1}`, DL.drawer());
     DL.change(() => { DL.layout.drawers.push(added); DL.layout.active = added.id; });
+    // The active drawer is now a new empty drawer: a kept row selection
+    // would highlight a row whose placement sits in a different drawer.
+    DL.selected = null;
+    DL.selectedRow = null;
     $("#dl-fit-details").open = true;
     DL.emit();
     $("#dl-name").focus();
@@ -268,6 +272,12 @@ DP.wire = () => {
       DL.layout.drawers = DL.layout.drawers.filter(one => one !== drawer);
       DL.layout.active = DL.layout.drawers[0].id;
     });
+    // The active drawer was re-pointed: a stale selection key is bin-scoped
+    // (DL.key), so it can match a live placement in the new drawer. Clear
+    // both selection kinds, like the drawer switch handler does.
+    DL.selected = null;
+    DL.selectedRow = null;
+    DL.emit();
   });
   const setting = (selector, group, key, read) => $(selector).addEventListener("change", event => {
     DL.change(() => {
@@ -350,12 +360,14 @@ DP.wire = () => {
     event.target.closest("[data-bin]")?.classList.toggle("print-selected", event.target.checked);
     DP.renderBatch();
   });
-  list.addEventListener("keydown", event => {
+  list.addEventListener("keydown", async event => {
     if (!["Enter", " "].includes(event.key) || event.target.closest("button, input, select, a, textarea")) return;
     const row = event.target.closest(".dl-bin[data-bin]");
     if (!row) return;
     event.preventDefault();
-    DL.selectRow(row.dataset.bin);
+    const one = DL.bin(row.dataset.bin);
+    if (!one) return;
+    await DP.activateInventoryRow(one);
   });
   list.addEventListener("dragstart", event => {
     DP.draggingRow = true;
@@ -418,6 +430,7 @@ DP.renderBatch = () => {
   if (!tools) return;
   $("#dl-batch-save").hidden = false;
   $("#dl-batch-print").hidden = hosted;
+  $("#dl-batch-print-complete").hidden = hosted;
   const scope = DP.batchScope();
   const connectorNote = " · Space connectors included";
   const needFiles = scope.subset ? scope.picked.filter(one => DL.saveNeeded(one)).length : scope.save.length;
@@ -456,8 +469,20 @@ DP.renderBatch = () => {
   button.disabled = !printCount || noSlicer || busy;
   button.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."
     : !printCount ? "Every bin has already been printed." : "Make any missing files, then open them in Bambu Studio.";
+  const complete = $("#dl-batch-print-complete");
+  complete.textContent = DL.busy === "print-complete" ? "Opening Bambu Studio…" : "Print Space (bins + spacers)";
+  complete.disabled = busy || noSlicer;
+  complete.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."
+    : "Print every placed bin and spacer in this Space, then open them in Bambu Studio.";
 };
 
+// Inventory row activation: mouse click and keyboard (Enter/Space) share
+// this one path, so both jump to the drawer that physically holds the row
+// before selecting it.
+DP.activateInventoryRow = async one => {
+  if (DL.isStorageDrawers()) await SP.cabinetJumpToRow(one.id);
+  DL.selectRow(one.id);
+};
 DP.onInventoryClick = async event => {
   if (event.target.closest(".dl-print-select") || DP.draggingRow || Date.now() < (DP.suppressRowClickUntil || 0)) return;
   const row = event.target.closest("[data-bin]");
@@ -471,8 +496,7 @@ DP.onInventoryClick = async event => {
   else if (action === "edit") DP.openInventoryRow(one.id);
   else if (action === "delete") DP.deleteRow(one);
   else if (!action && !event.target.closest("button, input, select, a, textarea")) {
-    if (DL.isStorageDrawers()) await SP.cabinetJumpToRow(one.id);
-    DL.selectRow(one.id);
+    await DP.activateInventoryRow(one);
   }
 };
 
@@ -508,6 +532,12 @@ DP.clearDesignTarget = () => {
 // null for an ordinary-bin Space. The one place that maps Space kinds.
 DP.structuralKindFor = space => (space?.kind === "storage_drawers" ? "storage_drawers"
   : ["portable", "box"].includes(space?.kind) ? "box" : null);
+// Fix 111 (F3): the Base Trim is a structural preview target like the box /
+// cabinet — same Design-navigator offer, same main-canvas production preview —
+// but a Surface Space keeps its ordinary landing (the trim is secondary to the
+// bins on it). Landing still keys off structuralKindFor above.
+DP.structuralPreviewTargetKindFor = space => DP.structuralKindFor(space)
+  || (space?.kind === "surface" ? "base_trim" : null);
 // Fix 103 (R5): while a structural target owns Design, the 2D (Space canvas)
 // view is view/pan only. Space mode is the sole bin/spacer placement owner, so
 // this is false there even when a structural target is still selected.
@@ -536,7 +566,7 @@ DP.refreshDesignBinNav = () => {
   // Fix 103: the Design target model. A Storage Drawers / Storage Box Space
   // offers its structural object as the first navigator option.
   const target = DP.getDesignTarget();
-  const structuralSpace = typeof DL !== "undefined" && Boolean(DP.structuralKindFor(state.activeSpace));
+  const structuralSpace = typeof DL !== "undefined" && Boolean(DP.structuralPreviewTargetKindFor(state.activeSpace));
   const structuralShown = structuralSpace && (DP.structuralTargetEnabled || target.kind === "structural");
   const structuralSelected = target.kind === "structural";
   const show = DP.mode === "design" && DL.active && (DP.designNavRows().length > 0 || structuralShown);
@@ -545,7 +575,9 @@ DP.refreshDesignBinNav = () => {
   const currentId = target.kind === "bin" ? target.rowId : null;
   select.innerHTML = "";
   if (structuralShown) {
-    const opt = new Option(DL.isStorageDrawers() ? "Storage Drawers" : "Storage Box", "__structural__");
+    const previewKind = DP.structuralPreviewTargetKindFor(state.activeSpace);
+    const opt = new Option(previewKind === "storage_drawers" ? "Storage Drawers"
+      : previewKind === "base_trim" ? "Base Trim" : "Storage Box", "__structural__");
     if (structuralSelected) opt.selected = true;
     select.append(opt);
   }
@@ -686,22 +718,34 @@ DP.openInventoryRow = async id => {
 DP.openStructuralTarget = async () => {
   if (!DP.structuralTargetEnabled) return false;
   if (DP.designNavBlocked() || DP.mode !== "design") return false;
-  if (typeof DL === "undefined" || !DP.structuralKindFor(state.activeSpace)) return false;
+  if (typeof DL === "undefined" || !DP.structuralPreviewTargetKindFor(state.activeSpace)) return false;
   const outgoing = DP.getDesignTarget();
-  // Only a real bound bin owns an autosave. An unbound New Bin starter must
-  // never be materialized merely because the user switches to the structural
-  // object — that would recreate the phantom-bin defect this architecture fixes.
+  // Only a real bound bin owns an autosave. An untouched unbound New Bin
+  // starter must never be materialized merely because the user switches to
+  // the structural object - that would recreate the phantom-bin defect this
+  // architecture fixes. But a meaningfully edited New Bin (distinguishable
+  // from the untouched fresh starter) owns real work: materialize it through
+  // the one autosave owner before the subject switch, or the edits are lost
+  // inside their first autosave/materialization window.
+  const newBinHasWork = outgoing.kind === "new_bin" && typedSpaceOrdinaryBin() &&
+    typeof freshDesignForCurrentFolder === "function" &&
+    JSON.stringify(state.design) !== JSON.stringify(freshDesignForCurrentFolder());
   if (outgoing.kind === "bin" && typedSpaceOrdinaryBin() &&
       !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
+  if (newBinHasWork &&
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true, materialize: true }))) return false;
   // Structural selection has no Inventory row. Clear the legacy binding only
   // after any outgoing ordinary bin is safely flushed; the row itself remains
   // in Inventory and can be reopened from the navigator.
   state.designInventoryId = null;
   DP.setDesignTarget({
-    kind: "structural", structural: true, structuralKind: DP.structuralKindFor(state.activeSpace),
+    kind: "structural", structural: true, structuralKind: DP.structuralPreviewTargetKindFor(state.activeSpace),
     rowId: null, drawerId: null,
   });
   DP.setMode("design");
+  // Land on the structural subject's own view (3D, or its view-only 2D),
+  // never the outgoing bin's 2D canvas - mirrors SP.landOnStructuralDesign.
+  activatePreviewView(preferredDesignView());
   DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
   return true;
 };
@@ -902,9 +946,15 @@ DP.update = () => {
 };
 
 DP.syncHistory = () => {
-  if (!DP.spaceEditing()) return;
+  // The header Undo/Redo own Space-layout history only (DL.undo/DL.redo):
+  // while Design owns the workspace they hide instead of lingering
+  // visible and stale.
+  const spaceOwns = DP.spaceEditing();
   const undo = $("#undo-design");
   const redo = $("#redo-design");
+  if (undo) undo.hidden = !spaceOwns;
+  if (redo) redo.hidden = !spaceOwns;
+  if (!spaceOwns) return;
   if (undo) undo.disabled = !DL.history.length;
   if (redo) redo.disabled = !DL.future.length;
 };

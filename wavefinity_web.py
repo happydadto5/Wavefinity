@@ -169,6 +169,7 @@ from organizer_space_outputs import (
 from organizer_inventory import storage_drawers_mutate_text
 from organizer_printer_profile import (
     DEFAULT_PRINTER_BUILD_MM,
+    component_fit,
     normalise_printer_profile,
     print_file_fit_issues,
     printer_profile_from_preferences,
@@ -1123,6 +1124,10 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
             live_feature = candidate
     existing = live_feature if live_feature is not None else saved_existing
     if index is None and layout.features:
+        # Fix 111 R4-3: an existing Photo Nest is duplicated; ordinary
+        # interior parts can never share a design with a Photo Nest.
+        if any(one.kind != "nest" for one in layout.features):
+            raise ValueError("Photo Nest designs can contain Photo Nests only.")
         raise ValueError("Duplicate an existing Photo Nest first, then use Replace Photo on that copy.")
 
     supplied = dict(payload.get("options", {}))
@@ -2751,6 +2756,10 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         index = payload.get("index")
         if index is None:
             if existing:
+                # Fix 111 R4-3: duplicate only when a Photo Nest already
+                # exists; ordinary parts get the can-contain-only message.
+                if any(item.kind != "nest" for item in existing):
+                    raise ValueError("Photo Nest designs can contain Photo Nests only.")
                 raise ValueError("Duplicate an existing Photo Nest first, then use Replace Photo on that copy.")
         else:
             selected = int(index)
@@ -4101,6 +4110,29 @@ def storage_drawers_reset_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _storage_box_printer_fit(summary: dict[str, Any], profile: dict[str, float]) -> tuple[bool, str | None]:
+    """Drawers-style printer verdict for a Storage Box case.
+
+    The assembled case is one printed component, checked flat and rotated 90
+    degrees on the bed. Unreadable bounds mean "cannot check": no warning, and
+    creation is never blocked.
+    """
+    envelope = summary.get("assembled_envelope_mm") or []
+    try:
+        bounds = tuple(float(value) for value in envelope)
+    except (TypeError, ValueError):
+        return True, None
+    if len(bounds) != 3 or any(value <= 0 for value in bounds):
+        return True, None
+    profile = normalise_printer_profile(profile)
+    fit = component_fit(bounds, ("flat", "bed_90"), profile)
+    if fit["fits"]:
+        return True, None
+    size = " × ".join(f"{value:.1f}" for value in bounds)
+    bed = f"{profile['x_mm']:g} × {profile['y_mm']:g} × {profile['z_mm']:g}"
+    return False, f"Storage Box case is {size} mm and does not fit the {bed} mm printer in any orientation."
+
+
 def structural_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """A Space's structural output design and a plain size summary. Read-only:
     never touches an Inventory."""
@@ -4110,6 +4142,10 @@ def structural_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if kind == STORAGE_BOX:
         box = design_from_dict(design)[0]
         summary = b4b_summary(box)
+        # Fix 111 N3: drawers-style printer verdict for the warning at the
+        # size input. Nonblocking: creation is never refused on fit.
+        summary["fits_printer"], summary["first_fit_error"] = _storage_box_printer_fit(
+            summary, _printer_profile_for(payload))
         return {"kind": kind, "design": design, "summary": summary}
     summary = base_trim_summary(base_trim_from_design(design))
     reply: dict[str, Any] = {"kind": kind, "design": design, "summary": summary}
@@ -4213,19 +4249,22 @@ def structural_print_combined_payload(payload: dict[str, Any]) -> dict[str, Any]
     if slicer_path is None or not slicer_path.is_file():
         raise ValueError(
             "Bambu Studio was not found. Please locate your Bambu Studio executable in settings or install Bambu Studio.")
+    printer_profile = _printer_profile_for(payload)
     folder, space, space_id = _local_cabinet_folder(payload)
     inventory = load_inventory(folder)
     layout, bins = inventory["layout"], inventory["bins"]
     by_id = {str(one["id"]): one for one in bins}
-    # Eligible contained bins: every bin placed in any cabinet drawer.
+    # Combined Cabinet + Bins prints the cabinet every time, plus only ordinary
+    # bin rows that still need printing. Already-Printed rows are omitted, but
+    # an empty bin selection is valid because the cabinet itself is still a
+    # printable component of this combined action.
     counts: dict[str, int] = {}
     for drawer in layout.get("drawers") or []:
         for placement in drawer.get("placements") or []:
             one = by_id.get(str(placement.get("bin")))
-            if one is not None and one.get("kind") in ("bin", "b4b"):
+            if (one is not None and one.get("kind") in ("bin", "b4b")
+                    and one.get("status") != "printed"):
                 counts[one["id"]] = counts.get(one["id"], 0) + 1
-    if not counts:
-        raise ValueError("The cabinet has no placed bins to print.")
     # One truthful preflight — C6's predicate, literally.
     blocked = selected_blocking_problems(layout, bins, counts)
     if blocked:
@@ -4236,7 +4275,7 @@ def structural_print_combined_payload(payload: dict[str, Any]) -> dict[str, Any]
         prepared = prepare_inventory_bins(folder, list(counts), _generate_bin_from_design_spec)
         if prepared["failed"]:
             return {
-                **cabinet, "partial": True, "partial_stage": "generate",
+                **cabinet, **prepared["inventory"], "partial": True, "partial_stage": "generate",
                 "error": "Cabinet files were saved, but the bins could not be prepared: "
                          + _prepare_failure_text(prepared, slicer=True),
             }
@@ -4247,7 +4286,7 @@ def structural_print_combined_payload(payload: dict[str, Any]) -> dict[str, Any]
             connector_counts, notes = _space_connectors(folder, inventory["layout"], inventory["bins"])
         except Exception as error:
             return {
-                **cabinet, "partial": True, "partial_stage": "connectors",
+                **cabinet, **prepared["inventory"], "partial": True, "partial_stage": "connectors",
                 "error": f"Cabinet and bin files were saved, but the Space connectors could not be made: {error}. "
                          "Bambu Studio was not opened.",
             }
@@ -4264,12 +4303,24 @@ def structural_print_combined_payload(payload: dict[str, Any]) -> dict[str, Any]
             "notes": notes,
             "files": [str(one) for one in launch_files],
         }
+        # Every file handed to the slicer must fit the active printer: cabinet
+        # files were already generated profile-aware; bin and connector files
+        # are checked here before launch.
+        fit_issues: list[str] = []
+        for path in dict.fromkeys(launch_files):
+            fit_issues.extend(print_file_fit_issues(Path(path), printer_profile))
+        if fit_issues:
+            return {
+                **cabinet, **prepared["inventory"], "partial": True, "partial_stage": "preflight",
+                "error": "A file does not fit the active printer:\n" + "\n".join(fit_issues),
+                **result_counts,
+            }
         try:
             project_path = launch_slicer(slicer_path, launch_files)
         except Exception as error:
             # Files above are kept; rows stay Saved (never Printed).
             return {
-                **cabinet, "partial": True, "partial_stage": "slicer",
+                **cabinet, **prepared["inventory"], "partial": True, "partial_stage": "slicer",
                 "error": f"Bambu Studio did not open: {error}. Any files made during this attempt were kept.",
                 **result_counts,
             }
@@ -4278,7 +4329,7 @@ def structural_print_combined_payload(payload: dict[str, Any]) -> dict[str, Any]
             saved = mark_printed_rows(folder, counts, specs)
         except Exception as error:
             return {
-                **cabinet, "partial": True, "partial_stage": "status",
+                **cabinet, **prepared["inventory"], "partial": True, "partial_stage": "status",
                 "error": f"Bambu Studio opened, but the printed status could not be recorded: {error}. "
                          "Check the Inventory rows.",
                 **result_counts,
@@ -5392,6 +5443,7 @@ POST_ROUTES.update({
     **drawer_routes(
         GEOMETRY_LOCK, DEFAULT_OUTPUT, detect_bambu_studio, launch_slicer,
         hosted=HOSTED, generate_from_design=_generate_bin_from_design_spec,
+        printer_profile_for=_printer_profile_for,
     ),
 })
 # (Fix 096 A5) Read-only operation status, plus the side-effecting route set.
@@ -5406,6 +5458,7 @@ for _side_effect_path in (
     "/api/print",
     "/api/space/structural-generate",
     "/api/space/structural-print",
+    "/api/space/structural-print-combined",
     "/api/space/storage-box-print",
     "/api/space/surface-print",
     "/api/space/storage-drawers-reset",

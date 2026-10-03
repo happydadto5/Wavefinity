@@ -585,8 +585,8 @@ input[type="number"]::-webkit-inner-spin-button {
 .subheading-row h2 { margin: 0; font-size: 15px; }
 .subheading-row p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
 /* Fix 082 L2: the option currently open for editing - one identity, one
-   Save action - sits once above its own settings, not mixed into the list
-   of everything else already added to the bin. */
+   Done action - sits once above its own settings, not mixed into the list
+   of everything already added to the bin. */
 .active-option-row {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: 18px; padding: 8px 10px; border-radius: 8px;
@@ -632,6 +632,9 @@ input[type="number"]::-webkit-inner-spin-button {
    never by turning this chip or the editor red. */
 .support-choice.active { color: var(--ink); border-color: #1f6b45; background: #edf7f1; box-shadow: 0 0 0 2px rgba(31,107,69,.32); }
 .support-choice.active .support-choice-icon { color: #1f6b45; background: #d5eddf; }
+/* Fix 111: a disallowed tile (non-Divider parts on a Storage Box design)
+   reads unavailable, matching the .button:disabled convention. */
+.support-choice:disabled { opacity: .45; cursor: not-allowed; }
 
 /* Edit state hides the whole palette; the selected Added row owns Save / Delete. */
 .support-palette[hidden] { display: none; }
@@ -754,7 +757,7 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
 .placed-item {
   border: 1px solid var(--line); border-radius: 8px; background: white;
   display: flex; justify-content: space-between; align-items: stretch; gap: 0;
-  min-height: 34px; max-height: 34px; overflow: hidden;
+  min-height: 34px; max-height: 34px; overflow: hidden; cursor: pointer;
 }
 .placed-item.selected { border-color: #d58d21; box-shadow: 0 0 0 2px rgba(240,169,60,.35); background: #fffaf0; }
 .placed-item.selected.status-valid { border-color: #1f6b45; box-shadow: 0 0 0 2px rgba(31,107,69,.18); background: #f3faf6; }
@@ -821,6 +824,7 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
 .pegboard-border-row[hidden] { display: none; }
 .field-help { margin: 8px 0 13px; font-size: 11px; color: var(--muted); line-height: 1.45; }
 .field-error { margin: 6px 0 0; font-size: 11px; color: var(--danger); line-height: 1.4; }
+.portable-fit-warning { margin: 6px 0 0; font-size: 12px; color: var(--danger, #b3261e); line-height: 1.4; }
 .output-panel { position: sticky; bottom: 0; z-index: 5; margin-top: 6px; padding: 10px 12px 12px; background: rgba(235,241,242,.97); border-top: 1px solid var(--line-dark); box-shadow: 0 -10px 24px rgba(30,51,61,.09); backdrop-filter: blur(8px); }
 .save-location-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .save-location-group { display: grid; grid-template-columns: 66px minmax(0, 1fr); align-items: center; gap: 3px 6px; flex: 1; min-width: 0; }
@@ -1871,6 +1875,7 @@ body.structural-design-active #designer-duplicate,
 body.structural-design-active #ai-help-open,
 body.structural-design-active #designer-delete-bin,
 body.structural-design-active #designer-history-actions,
+body.structural-design-active .output-panel,
 body.structural-design-active #space-head-edit { display: none !important; }
 /* The 2D view of a structural target is the Space canvas, view only. */
 body.structural-design-active #sd-workspace-host,

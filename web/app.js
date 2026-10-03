@@ -946,6 +946,17 @@ const staleFileRefreshKey = entry => JSON.stringify([entry.output, entry.spaceId
 const staleFileRefreshEntryCurrent = entry =>
   typeof DL !== "undefined" && entry.output === DL.folder() && entry.spaceId === (state.activeSpaceId || null);
 
+// Wavefinity-owned superseded output for one Inventory row, from the
+// server-tracked layout.stale_files map. The browser owns the hosted folder,
+// so a re-save may only replace names the server recorded as this row's own
+// retired outputs; any other collision still demands a rename.
+function staleFileNamesForRow(rowId) {
+  if (!rowId || typeof DL === "undefined" || !DL.layout) return [];
+  const stale = DL.layout.stale_files;
+  const names = stale && stale[rowId];
+  return Array.isArray(names) ? names.filter(name => typeof name === "string" && name) : [];
+}
+
 function queueStaleFileRefresh(context, rowId, wasPrinted = false) {
   const entry = { output: context.output, spaceId: context.spaceId, rowId, wasPrinted };
   staleFileRefreshQueue.set(staleFileRefreshKey(entry), entry);
@@ -1234,7 +1245,7 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
       toast("Generation finished for the Space you left. No files were saved to the current Space and its Inventory was not changed.");
       return;
     }
-    const savedFiles = await saveGeneratedFiles(result);
+    const savedFiles = await saveGeneratedFiles(result, { ownedStale: staleFileNamesForRow(rowId) });
     try {
       DL.requireSpaceContext(context);
     } catch (error) {
@@ -1972,6 +1983,11 @@ function insideBinFitForStorageBox(space, candidateDesign) {
 // candidate the user sees land.
 async function designerMakeInsideBin() {
   return withDeferredDraftSwitch(async () => {
+  // A Storage Box Space owns a structural case editor: settle an unsaved
+  // structural draft through the one leave owner before this subject switch,
+  // or the switch silently discards the case edits.
+  if (typeof designTargetIsStructural === "function" && designTargetIsStructural() &&
+      !(await SP.confirmLeaveStructuralEditor())) return;
   if (!(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   const candidate = freshDesignForCurrentFolder();
   const fit = insideBinFitForStorageBox(state.activeSpace, candidate);
@@ -1984,6 +2000,9 @@ async function designerMakeInsideBin() {
     state.designInventoryId = null;
     state.surfaceHeightPromptSkipped = false;
     await loadFreshOrdinaryDesignForCurrentFolder({ x: fit.x, y: fit.y, z: fit.z });
+    // Make Inside Bin is a Design action: land on the created bin in Design
+    // instead of leaving the user in Space.
+    if (typeof DP !== "undefined") DP.setMode("design");
     toast("Started an inside bin.");
   } finally {
     finishDesignMutation();
@@ -2038,6 +2057,9 @@ async function designerDuplicate() {
   try {
     const result = await api("/api/design/validate", { design });
     state.design = result.design;
+    // A duplicate is a new design identity: the old design's undo/redo
+    // history must not cross the identity boundary.
+    clearDesignerHistory();
     state.lastOrdinaryDesign = clone(state.design);
     state.cleanDesign = clone(state.design);
     state.designInventoryId = null;
@@ -2158,8 +2180,12 @@ async function restoreDesignerHistory(redo = false) {
     await refreshPreview();
 
     if (typedSpaceOrdinaryBin()) {
-      const priorClean = clone(state.cleanDesign);
-      await persistSpaceDesignSource(priorClean, false);
+      // Undo/redo persists through the same current Space context as
+      // ordinary design edits. (state.cleanDesign is a design object, not a
+      // space context: passing it as expectedContext failed
+      // DL.spaceContextCurrent, so every undo/redo rolled back with a bogus
+      // stale-space error.)
+      await persistSpaceDesignSource(null, false);
       await settleStaleFileRefresh();
     }
   } catch (error) {
@@ -3208,20 +3234,27 @@ function sideOpeningSideSpan(side, design = state.design) {
   return side === "front" || side === "back" ? number(box.x) : number(box.y);
 }
 
-function sideOpeningEligibleSide(side, design = state.design) {
+// Shared conditional-state explanation rule: a choice disabled by
+// eligibility names its exact reason in its own label, never as a bare
+// disabled control. The material reason comes first - a wall too short for
+// the minimum opening width - then the conflicts that can also block a wall
+// (Inside Grip, Edge Mount, rim Text).
+function sideOpeningWallBlockedReason(side, design = state.design) {
   const rules = state.catalog?.side_openings || {};
   const minSide = number(rules.min_side_mm, 16);
-  if (sideOpeningSideSpan(side, design) < minSide - 1e-9) return false;
-
   const box = design?.box || {};
-  if (insideGripWalls(box).has(MODIFIER_SIDE_TO_WALL[side])) return false;
-
+  if (sideOpeningSideSpan(side, design) < minSide - 1e-9)
+    return `wall too short (needs ${fmt(minSide)} mm)`;
+  if (insideGripWalls(box).has(MODIFIER_SIDE_TO_WALL[side]))
+    return "Inside Grip is on this wall";
   if ((box.edge_mount?.label_enabled || box.edge_mount?.holes_enabled) &&
-      box.edge_mount.side === side) return false;
+      box.edge_mount.side === side) return "Edge Mount is on this wall";
+  if (rimLabelSidesForDesign(design).has(side)) return "rim Text is on this wall";
+  return "";
+}
 
-  if (rimLabelSidesForDesign(design).has(side)) return false;
-
-  return true;
+function sideOpeningEligibleSide(side, design = state.design) {
+  return sideOpeningWallBlockedReason(side, design) === "";
 }
 
 // BEGIN SIDE_OPENING_SELECTION_HELPER
@@ -3401,9 +3434,17 @@ function syncSideOpeningControls() {
     const input = $(`#side-opening-${side}`);
     if (!input) continue;
     input.checked = (so.sides || []).includes(side);
-    const eligible = sideOpeningEligibleSide(side);
-    input.disabled = !eligible;
-    if (!eligible) input.checked = false;
+    // Shared conditional-state explanation rule: a disabled wall choice
+    // names its reason in its own label (Row B-15).
+    const blockedReason = sideOpeningWallBlockedReason(side);
+    input.disabled = Boolean(blockedReason);
+    if (blockedReason) input.checked = false;
+    const wallLabel = input.closest("label")?.querySelector("span");
+    if (wallLabel) {
+      wallLabel.textContent = blockedReason
+        ? `${MODIFIER_SIDE_LABEL[side]} (${blockedReason})`
+        : MODIFIER_SIDE_LABEL[side];
+    }
   }
   const anyEligible = SIDE_OPENING_SIDE_IDS.some(side => sideOpeningEligibleSide(side));
   const allowed = sideOpeningAllowedSizes();
@@ -3835,14 +3876,23 @@ function syncConnectorSectionVisibility() {
     syncPrintChoiceAvailability();
     return;
   }
-  if (heightWrap) heightWrap.hidden = false;
-  syncConnectorHeightControls();
+  // Fix 111 N10: lid-locked - the tuning controls hide and the section shows
+  // a compact reason instead (renderConnectorReadout). Here
+  // connectorsUnavailable() can only mean a lid, because b4b/baseTrim
+  // returned above.
+  const lidLocked = connectorsUnavailable();
+  if (heightWrap) heightWrap.hidden = lidLocked;
+  if (lidLocked) {
+    $("#connector-bin-heights").hidden = true;
+    $("#connector-settings").hidden = true;
+  } else {
+    syncConnectorHeightControls();
+  }
   renderConnectorReadout();
-  const connectorLocked = connectorsUnavailable();
-  $("#generate-all").hidden = connectorLocked;
+  $("#generate-all").hidden = lidLocked;
   syncPrintChoiceAvailability();
   $("#generate-bin").hidden = false;
-  $("#generate-connector").hidden = connectorLocked;
+  $("#generate-connector").hidden = lidLocked;
   syncConnectorActionLabels();
 }
 
@@ -3872,6 +3922,15 @@ function renderConnectorReadout(plan = null) {
   if (baseTrimEnabled() || b4bEnabled()) {
     el.hidden = true;
     el.innerHTML = "";
+    return;
+  }
+  // Fix 111 N10: the compact reason for the lid lock - the one eligibility
+  // contract, stated where the connector controls were. After the
+  // b4b/baseTrim return above, connectorsUnavailable() here can only mean
+  // a lid.
+  if (connectorsUnavailable()) {
+    el.textContent = "Side connectors aren't available with a lid.";
+    el.hidden = false;
     return;
   }
   // Audit 006 J3: the readout is exception-only. An ordinary eligible
@@ -4277,6 +4336,12 @@ function b4bPartAllowed(kind) {
   return kind === "divider";
 }
 
+// The one shared reason shown for every Storage Box-disallowed option
+// (Fix 111): disallowed tiles are disabled with this as their hover text,
+// and the same sentence explains any click that still reaches
+// pickKind/selectKind/openModifier/addModifier.
+const B4B_PARTS_ONLY_DIVIDER_MESSAGE = "Storage Box bins support Dividers only.";
+
 function dividerLayoutExtent(box = state.design?.box) {
   if (box?.b4b?.enabled) {
     return [number(box.x), number(box.y)];
@@ -4673,7 +4738,10 @@ function applyStackVisibility() {
   if (!note) return;
   const connectorLocked = hasLid;
   const connectorSection = document.querySelector('.control-section[data-section="connector"]');
-  if (connectorSection) connectorSection.hidden = b4b || baseTrimEnabled() || connectorLocked;
+  // Fix 111 N10: one eligibility contract - a lid locks ordinary side
+  // connectors everywhere. The section stays visible with a compact reason
+  // (rendered by renderConnectorReadout); only the actions hide.
+  if (connectorSection) connectorSection.hidden = b4b || baseTrimEnabled();
   ["#generate-all", "#generate-connector"].forEach(selector => {
     const element = $(selector);
     if (element) element.hidden = b4b || baseTrimEnabled() || connectorLocked;
@@ -5777,7 +5845,17 @@ function pickKind(kind) {
     toast("Photo Nest designs use Duplicate for another group; other interior parts are unavailable.", true, 5000);
     return;
   }
-  if (b4bEnabled() && !b4bPartAllowed(kind)) return;
+  // Fix 111 R4-3: a new Photo Nest cannot join ordinary interior parts. Say
+  // so up front, matching the server, instead of the impossible "duplicate
+  // an existing Photo Nest" instruction after photo upload and tracing.
+  if (kind === "nest" && !isModifier && state.design?.layout?.features?.some(one => one.kind !== "nest")) {
+    toast("Photo Nest designs can contain Photo Nests only. Remove the other interior parts first.", true, 5000);
+    return;
+  }
+  if (b4bEnabled() && !b4bPartAllowed(kind)) {
+    toast(B4B_PARTS_ONLY_DIVIDER_MESSAGE, true, 5000);
+    return;
+  }
   if (b4bEnabled() && kind === "divider") {
     const existing = state.design?.layout?.features?.findIndex(
       one => one.kind === "divider"
@@ -5808,7 +5886,10 @@ const INSIDE_HANDLES_REMOVABLE_MESSAGE =
   "Inside Grip is built into the bin wall, so it isn’t available with Removable insert. Choose Fused into box to use Inside Grip.";
 
 async function openModifier(kind, fromPlaced = false) {
-  if (b4bEnabled()) return;
+  if (b4bEnabled()) {
+    toast(B4B_PARTS_ONLY_DIVIDER_MESSAGE, true, 5000);
+    return;
+  }
   if (!BOX_MODIFIER_KINDS.has(kind) || !edgeMountAvailable()) return;
   if (state.draft && !(await guardDraftSwitch())) return;
   resetNestPhotoSession();
@@ -5860,7 +5941,10 @@ async function openModifier(kind, fromPlaced = false) {
 }
 
 async function addModifier(kind) {
-  if (b4bEnabled()) return;
+  if (b4bEnabled()) {
+    toast(B4B_PARTS_ONLY_DIVIDER_MESSAGE, true, 5000);
+    return;
+  }
   if (kind === "inside_handles" && state.design.layout.mode !== "fused") {
     toast(INSIDE_HANDLES_REMOVABLE_MESSAGE, true, 6500);
     return;
@@ -6097,7 +6181,10 @@ async function growBinForNewCradle(request) {
 }
 
 async function selectKind(kind, reset = false) {
-  if (b4bEnabled() && !b4bPartAllowed(kind)) return;
+  if (b4bEnabled() && !b4bPartAllowed(kind)) {
+    toast(B4B_PARTS_ONLY_DIVIDER_MESSAGE, true, 5000);
+    return;
+  }
   if (kind === "divider" && dividerLockedByLidLabels()) {
     toast(dividerLockMessage(), true, 6500);
     return;
@@ -6932,12 +7019,18 @@ function renderDraftFields() {
     const textInput = `<input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">`;
     let textGroup = `<label>Text${textInput}</label>`;
     // At most one rim Text is allowed per bin (Fix 078). Another Text's At-rim
-    // choices are disabled once one rim Text already exists elsewhere.
+    // choices are disabled once one rim Text already exists elsewhere. Shared
+    // conditional-state explanation rule: the disabled choice names its
+    // reason in its own label, matching the " (base too thin)" depth suffix.
     const hasOtherRimText = (state.design.layout?.features || []).some((feature, index) =>
       index !== state.selected && feature.kind === "text" && feature.options?.level === "rim");
     const styleLabel = `<label>Style<select data-draft="option:text_type">
       ${[["base_inlaid", "On base — inlaid"], ["base_raised", "On base — raised"], ["rim_inlaid", "At rim — inlaid"], ["rim_raised", "At rim — raised"]]
-        .map(([value, label]) => `<option value="${value}" ${value === textType ? "selected" : ""} ${hasOtherRimText && value.startsWith("rim_") ? "disabled" : ""}>${label}</option>`).join("")}
+        .map(([value, label]) => {
+          const rimBlocked = hasOtherRimText && value.startsWith("rim_");
+          const rimSuffix = rimBlocked ? " (one At-rim text already used)" : "";
+          return `<option value="${value}" ${value === textType ? "selected" : ""} ${rimBlocked ? "disabled" : ""}>${label}${rimSuffix}</option>`;
+        }).join("")}
       </select></label>`;
     const capShown = textLevel === "rim"
       ? (state.draftResolvedOptions?.cap_height ?? one.options?.cap_height ?? 5)
@@ -10031,7 +10124,7 @@ async function saveCurrentPart() {
   // the explicit way to abandon it.
   if (state.draft.kind === "nest" && !state.draft.contour) {
     finishDesignMutation();
-    $("#draft-status").textContent = "Upload one part photo to create the cavity outline before saving.";
+    $("#draft-status").textContent = "Upload one part photo to create the cavity outline before finishing.";
     $("#draft-status").classList.add("error");
     return;
   }
@@ -10219,7 +10312,10 @@ function updateSelectionButtons() {
     const count = partInstanceCount(button.dataset.kind);
     const alreadyAdded = count > 0;
     const active = button.classList.contains("active");
-    button.disabled = busy || (hasPhotoNest && !isModifier);
+    // Storage Box designs keep the Divider tile live; every other tile is
+    // visibly unavailable while the design is a Storage Box (Fix 111).
+    const b4bDisallowed = b4bEnabled() && !b4bPartAllowed(button.dataset.kind);
+    button.disabled = busy || (hasPhotoNest && !isModifier) || b4bDisallowed;
     button.classList.toggle("added", alreadyAdded && !active);
     // "Editing"/"Setting up" are edit-state cues, not duplicate presence
     // counts - an already-present, non-editing tile shows no state label at
@@ -10232,10 +10328,17 @@ function updateSelectionButtons() {
         state.draft?.kind === "nest" && !state.draft.contour;
       stateLabel.textContent = settingUpNest ? "Setting up" : active ? "Editing" : "";
     }
-    if (isModifier) {
+    // The title is derived from current state on every refresh. That prevents
+    // a Storage Box-only disabled reason from leaking into the next ordinary
+    // design after the tile becomes enabled again.
+    if (b4bDisallowed) {
+      button.title = `${info?.title || button.dataset.kind} — ${B4B_PARTS_ONLY_DIVIDER_MESSAGE}`;
+    } else if (isModifier) {
       button.title = alreadyAdded
         ? `${info.title} already added. Select it to edit.`
         : `${info.title} — ${info.description}`;
+    } else {
+      button.title = `${info.title} — ${info.description}`;
     }
   });
 }
@@ -10296,7 +10399,7 @@ function placedRowData() {
     });
   }
   // A newly chosen draft (e.g. Photo Nest setup) has no saved feature yet:
-  // show it as one temporary selected row so Save / Delete stay reachable.
+  // show it as one temporary selected row so Done / Delete stay reachable.
   // Presentation only - nothing is persisted for it.
   if (state.draft && !Number.isInteger(draftCommitIndex()) && !Number.isInteger(state.draftSourceIndex)) {
     rows.push({
@@ -10318,7 +10421,7 @@ function placedRowsMarkup(rows, { actions = false } = {}) {
     const title = escapeHtml(row.title);
     // Fix 082 L2: the row currently open for editing renders in the active
     // option row above, not here - every row this list ever shows is an
-    // inactive sibling, so it always shows Edit, never Save.
+    // inactive sibling, so it always shows Edit, never Done.
     const rowActions = actions
       ? `<div class="placed-item-actions">
         <button type="button" class="placed-item-edit button secondary" ${identity} aria-label="Edit ${title}">Edit</button>
@@ -10343,6 +10446,17 @@ function wirePlacedRows(container) {
   $$(".placed-item[data-support-kind]", container).forEach(row => {
     row.style.setProperty("--support-color", kindColor(row.dataset.supportKind));
   });
+  // The whole option card opens the option for editing; the Edit button is
+  // only the visible affordance. Clicks on the row's own action buttons
+  // (Edit/Delete) keep their own handlers: a synthesized Edit click bubbles
+  // from inside .placed-item-actions, which this listener ignores, so it
+  // never double-fires.
+  $$(".placed-item[data-support-kind]", container).forEach(row => {
+    row.addEventListener("click", event => {
+      if (event.target.closest?.(".placed-item-actions")) return;
+      row.querySelector(".placed-item-edit")?.click();
+    });
+  });
   $$(".placed-item-edit[data-index]", container).forEach(button => button.addEventListener("click", async () => {
     const index = Number(button.dataset.index);
     if (Number.isInteger(index) && index === draftCommitIndex()) return;
@@ -10366,7 +10480,7 @@ function wirePlacedRows(container) {
 }
 
 // Fix 082 L2: the option currently open for editing shows once, above its
-// own settings, with its identity and the one Save action (plus Delete, so
+// own settings, with its identity and the one Done action (plus Delete, so
 // abandoning an in-progress part loses no capability the combined list used
 // to give it). "Options in this bin" below never repeats this row.
 function renderActiveOptionRow(row) {
@@ -10582,7 +10696,7 @@ function updateBoreCeilingWarning(warning) {
   if (!element) return;
   element.hidden = !warning;
   element.textContent = warning
-    ? `Object reaches ${fmt(warning.top_mm)} mm; this ${warning.space_kind === "drawer" ? "Drawer" : "Storage Box"} is ${fmt(warning.cap_mm)} mm high. The object may not fit when closed.`
+    ? `Object reaches ${fmt(warning.top_mm)} mm; this ${warning.space_kind === "drawer" || warning.space_kind === "storage_drawers" ? "Drawer" : "Storage Box"} is ${fmt(warning.cap_mm)} mm high. The object may not fit when closed.`
     : "";
 }
 
@@ -10625,8 +10739,15 @@ async function refreshPreview({ persistResume = true } = {}) {
   setError();
   setDesignInvalidOverlay();
   try {
+    // Storage Drawers: the bore-ceiling cap is the active drawer's usable
+    // closed height (cabinetActiveLimits), never the cabinet's compatibility
+    // total. The server reads this same space for _capped_bore_warning and
+    // _ai_space_cap_violation, so both are fixed by the one payload.
+    const previewSpace = state.folderMode === "space" && state.activeSpace?.kind === "storage_drawers"
+      ? { ...state.activeSpace, ...cabinetActiveLimits() }
+      : (state.folderMode === "space" ? state.activeSpace : null);
     const payload = { design: state.design, client_id: previewClientId, generation: request,
-      space: state.folderMode === "space" ? state.activeSpace : null };
+      space: previewSpace };
     if (state.draft && !(state.draft.kind === "nest" && !state.draft.contour)) {
       payload.draft = state.draft;
       // A draft opened from a placed part replaces that part for preview
@@ -14179,6 +14300,12 @@ function handleLayoutArrowKeys(event) {
 }
 
 async function saveDesign() {
+  // Ordinary output entry points defensively reject structural ownership:
+  // a Storage Box or Storage Drawers target has its own Save/Print chrome.
+  if (designTargetIsStructural()) {
+    toast("These outputs are for ordinary bins. The structural editor has its own Save and Print actions.", true);
+    return;
+  }
   if (relocationBlocksWrites()) return;
   if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
   if (!beginDesignMutation()) return;
@@ -14449,6 +14576,36 @@ function confirmReplaceConnectorFiles(names) {
   });
 }
 
+// A differing same-name file that is not proven Wavefinity-owned gets an
+// explicit Replace / Cancel choice instead of a hard rename demand.
+function confirmReplaceOutputFiles(names, what) {
+  return new Promise(resolve => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "wf-confirm-dialog";
+    const title = document.createElement("h3");
+    title.textContent = `Replace existing ${what} file(s)?`;
+    const body = document.createElement("p");
+    body.textContent = `These ${what} files already exist in your folder with different contents:`;
+    const list = document.createElement("ul");
+    for (const name of names) { const li = document.createElement("li"); li.textContent = name; list.append(li); }
+    const actions = document.createElement("div");
+    actions.className = "button-row";
+    const replace = document.createElement("button");
+    replace.type = "button"; replace.textContent = "Replace"; replace.className = "button danger";
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.textContent = "Cancel"; cancel.className = "button secondary";
+    let answer = false;
+    replace.addEventListener("click", () => { answer = true; dialog.close(); });
+    cancel.addEventListener("click", () => dialog.close());
+    actions.append(cancel, replace);
+    dialog.append(title, body, list, actions);
+    dialog.addEventListener("close", () => { dialog.remove(); resolve(answer); }, { once: true });
+    document.body.append(dialog);
+    dialog.showModal();
+    cancel.focus();
+  });
+}
+
 function checkPartNamePresent(target = "bin") {
   if (target === "connector") return true;
   const val = ($("#part-name")?.value || "").trim();
@@ -14460,6 +14617,12 @@ function checkPartNamePresent(target = "bin") {
 }
 
 async function generateParts(target) {
+  // Ordinary output entry points defensively reject structural ownership:
+  // a Storage Box or Storage Drawers target has its own Save/Print chrome.
+  if (designTargetIsStructural()) {
+    toast("These outputs are for ordinary bins. The structural editor has its own Save and Print actions.", true);
+    return;
+  }
   if (relocationBlocksWrites()) return;
   if (state.designMutationBusy || isGenerating) {
     toast("Finish the current action before saving files.", true);
@@ -14577,7 +14740,7 @@ async function generateParts(target) {
       const binResult = await apiSideEffect("/api/generate", payload, { onStillFinishing: () => setItemStatus("bin", "generating", "Still finishing…") });
       if (designSpaceContext) DL.requireSpaceContext(designSpaceContext);
       saveOutput = binResult.output || saveOutput;
-      const binFiles = await saveGeneratedFiles(binResult);
+      const binFiles = await saveGeneratedFiles(binResult, { ownedStale: staleFileNamesForRow(designRowId) });
       if (designSpaceContext) {
         DL.requireSpaceContext(designSpaceContext);
         if (state.designInventoryId !== designRowId ||
@@ -14736,6 +14899,12 @@ async function generate(path, selector) {
 }
 
 async function printModel(target = "bin", initiatingButton = null) {
+  // Ordinary output entry points defensively reject structural ownership:
+  // a Storage Box or Storage Drawers target has its own Save/Print chrome.
+  if (designTargetIsStructural()) {
+    toast("These outputs are for ordinary bins. The structural editor has its own Save and Print actions.", true);
+    return;
+  }
   if (relocationBlocksWrites()) return;
   if (state.runtime.hosted) return generateParts(target === "all" ? "all" : "bin");
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
@@ -14976,6 +15145,11 @@ async function saveGeneratedFiles(result, policy = {}) {
     for (const file of files) {
       if (await WFFileSystem.fileExists(folder.handle, file.name)) existing.push(file);
     }
+    // A re-save may replace Wavefinity's own superseded output: the caller
+    // lists those names in policy.ownedStale (the row's server-tracked
+    // stale_files). Any other collision still demands a rename.
+    const ownedStale = new Set((policy.ownedStale || []).filter(name => typeof name === "string" && name));
+    const foreign = existing.filter(file => !ownedStale.has(file.name));
     if (existing.length && connector) {
       const different = [];
       for (const file of existing) {
@@ -14987,11 +15161,33 @@ async function saveGeneratedFiles(result, policy = {}) {
       if (different.length && !(await confirmReplaceConnectorFiles(different))) {
         throw new Error("Connector save cancelled. Nothing was replaced.");
       }
-    } else if (existing.length) {
+    } else if (policy.kind === "structural" && existing.length) {
+      // A Storage Box re-save reuses the same deterministic names. A
+      // byte-identical file is provably Wavefinity's own prior output and is
+      // left alone; a differing same-name file gets an explicit Replace /
+      // Cancel choice instead of a hard rename demand.
+      for (const file of files) {
+        if (!blobs.has(file.name)) {
+          const response = await fetch(file.url);
+          if (!response.ok) throw new Error(`Could not download ${file.name}.`);
+          blobs.set(file.name, await response.blob());
+        }
+      }
+      const different = [];
+      for (const file of existing) {
+        const [oldHash, newHash] = await Promise.all([
+          WFFileSystem.sha256(folder.handle, file.name), WFFileSystem.sha256Blob(blobs.get(file.name)),
+        ]);
+        if (oldHash === newHash) skip.add(file.name); else different.push(file.name);
+      }
+      if (different.length && !(await confirmReplaceOutputFiles(different, "Storage Box"))) {
+        throw new Error("Storage Box save cancelled. Nothing was replaced.");
+      }
+    } else if (foreign.length) {
       const hint = policy.kind === "structural"
         ? "Give the Space a different name, then save again."
         : undefined;
-      showFilenameConflictDialog(existing.map(file => file.name), hint);
+      showFilenameConflictDialog(foreign.map(file => file.name), hint);
       throw new Error(policy.kind === "structural"
         ? "Give the Space a different name to avoid overwriting an existing file."
         : "Give the bin a different name to avoid overwriting an existing file.");

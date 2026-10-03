@@ -984,6 +984,12 @@ DL.adopt = data => {
     // Refuse to reuse the old report until requestReport() returns the new map.
     DL.report = null;
   }
+  if (DL.layout && data.layout && Object.hasOwn(data.layout, "stale_files")) {
+    // The server retires a row's old outputs into layout.stale_files when an
+    // edit makes them non-current; the hosted re-save needs the current map
+    // to prove which folder files are Wavefinity's own superseded output.
+    DL.layout.stale_files = data.layout.stale_files;
+  }
 };
 
 DL.refreshPegboardLayouts = async () => {
@@ -1851,14 +1857,30 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
 // placed spacer with a file + the Space's connectors, one preflight, one
 // slicer launch. Hosted is rejected by the backend with a plain message.
 DL.printCompleteSpace = () => DL.busyWith("print-complete", async context => {
-  const result = await api("/api/drawer/print-complete", {
-    output: DL.output ?? DL.folder(), layout: DL.layout, bins: DL.bins,
-    drawer_id: DL.layout.active, slicer_path: state.slicer?.path || null,
-  });
-  if (!DL.spaceContextCurrent(context)) {
+  const drawer = DL.layout && Array.isArray(DL.layout.drawers) ? DL.drawer() || null : null;
+  const placedIds = [...new Set(((drawer && drawer.placements) || []).map(placement => placement.bin))];
+  if (!(await DL.prepareBatch(placedIds, { printing: true }))) return;
+  if (!state.slicer || !state.slicer.available) {
+    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 7000);
+    return;
+  }
+  if (!(await DL.save())) return;
+  DL.requireSpaceContext(context);
+  let result;
+  try {
+    result = await DL.inventoryCall("/api/drawer/print-complete", {
+      layout: DL.layout, bins: DL.bins,
+      drawer_id: DL.layout.active, slicer_path: state.slicer?.path || null,
+    }, { context, sideEffect: true });
+  } catch (error) {
+    if (!DL.isStaleSpaceError(error)) throw error;
     toast("Bambu Studio opened for the Space you left. The current Space was not changed.");
     return;
   }
+  DL.adoptBatchResult(result);
+  DP.renderInventory(true);
+  DL.emit();
+  DL.requestReport();
   const parts = [
     `${result.bin_copies ?? 0} bin ${(result.bin_copies ?? 0) === 1 ? "copy" : "copies"}`,
     `${result.spacer_copies ?? 0} spacer ${(result.spacer_copies ?? 0) === 1 ? "copy" : "copies"}`,

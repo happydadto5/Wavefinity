@@ -20,8 +20,10 @@
 
 // ---------------------------------------------------------------- target
 
-// "box" | "storage_drawers" | null. The explicit Design target is
+// "box" | "storage_drawers" | "base_trim" | null. The explicit Design target is
 // { kind: "structural", structural: true, structuralKind, rowId, drawerId }.
+// "base_trim" is preview-only: the trim is derived from the Surface Space, so
+// it mounts no editable form (Fix 111 F3).
 function structuralTargetKind() {
   if (typeof DP === "undefined" || !DP.getDesignTarget) return null;
   const target = DP.getDesignTarget();
@@ -69,7 +71,7 @@ function structuralEl(tag, className = "", text = "") {
 }
 
 function structuralLabel(kind = structuralTargetKind()) {
-  return kind === "box" ? "Storage Box" : "Storage Drawers";
+  return kind === "box" ? "Storage Box" : kind === "base_trim" ? "Base Trim" : "Storage Drawers";
 }
 
 // The one structural dirty predicate (R6). The ordinary designHasChanges()
@@ -161,7 +163,14 @@ function mountStructuralEditor(kind, key) {
   const save = structuralEl("button", "button primary", "Save Changes"); save.type = "button"; save.disabled = true;
   const cancel = structuralEl("button", "button secondary", "Cancel"); cancel.type = "button"; cancel.disabled = true;
   actions.append(save, cancel);
-  wrap.append(formHost, dirtyNote, status, actions);
+  // Fix 111 (F3): the Base Trim has no editable draft — the preview is the
+  // production trim derived from the Surface. Nothing to save or cancel here;
+  // Save/Print live in the Space structural panel.
+  const trimNote = structuralEl("p", "dl-note",
+    "Production preview of the trim. It follows the Surface size — edit the Surface to change it.");
+  trimNote.hidden = kind !== "base_trim";
+  if (kind === "base_trim") { actions.hidden = true; formHost.hidden = true; }
+  wrap.append(formHost, dirtyNote, status, trimNote, actions);
   host.append(wrap);
   const record = {
     kind, spaceKey: key, spaceId: state.activeSpaceId || null,
@@ -172,7 +181,11 @@ function mountStructuralEditor(kind, key) {
   save.addEventListener("click", () => { void structuralSaveChanges(); });
   cancel.addEventListener("click", () => { void structuralDiscardDraft(); });
   try {
-    if (kind === "box") {
+    if (kind === "base_trim") {
+      // Fix 111 (F3): preview-only target — the trim is derived from the
+      // accepted Surface Space, so no form is mounted. The preview below is
+      // the production geometry that Save/Print manufactures.
+    } else if (kind === "box") {
       if (!window.StorageBoxForm) throw new Error("The case editor did not load. Reload Wavefinity.");
       record.form = window.StorageBoxForm.mount({
         host: formHost, initialSpace: space,
@@ -205,7 +218,8 @@ function mountStructuralEditor(kind, key) {
     setStructuralStatus(friendlyError(error), { error: true });
     return;
   }
-  record.form.markPristine?.();
+  // Base Trim is preview-only and intentionally has no form.
+  record.form?.markPristine?.();
   updateStructuralActions();
   scheduleStructuralPreview({ immediate: true });
 }
@@ -226,10 +240,13 @@ function structuralHighlightDrawer(owner, { ensure = false } = {}) {
 // ---------------------------------------------------------------- draft
 
 // The form's CURRENT draft Space (R2). Preview and Save both read this, never
-// merely the accepted state.activeSpace.
+// merely the accepted state.activeSpace. The Base Trim has no form: its
+// preview reads the accepted Surface Space directly (Fix 111 F3).
 function structuralDraftResult() {
   const record = structuralEditorRecord;
-  if (!record?.form || !state.activeSpace) return { ok: false, message: "The editor is not ready." };
+  if (!state.activeSpace) return { ok: false, message: "The editor is not ready." };
+  if (record?.kind === "base_trim") return { ok: true, space: clone(state.activeSpace) };
+  if (!record?.form) return { ok: false, message: "The editor is not ready." };
   const draft = record.form.draft();
   if (!draft.ok) return draft;
   if (record.kind === "box") {
@@ -249,6 +266,9 @@ function structuralDraftResult() {
 function structuralDraftKey(kind, space) {
   const profile = typeof PrinterProfile !== "undefined" ? PrinterProfile.current() : null;
   if (kind === "storage_drawers") return StorageDrawers.structuralDraftKey(space, profile);
+  // Fix 111 (F3): the trim is fixed by the Surface footprint, trim size and
+  // printer profile (hosted only — local uses the one global profile).
+  if (kind === "base_trim") return JSON.stringify([space.x, space.y, space.trim_size, state.runtime.hosted ? profile : null]);
   return JSON.stringify([space.x, space.y, space.z, space.storage_box, state.runtime.hosted ? profile : null]);
 }
 
@@ -295,7 +315,10 @@ function setStructuralPreviewState(text, { error = false } = {}) {
 async function refreshStructuralPreview() {
   const record = structuralEditorRecord;
   const kind = structuralTargetKind();
-  if (!record || !record.form || !kind || DP.mode !== "design") return;
+  // Fix 111 (F3): the Base Trim mounts no form; its preview reads the accepted
+  // Surface Space (see structuralDraftResult).
+  if (!record || !kind || DP.mode !== "design") return;
+  if (!record.form && record.kind !== "base_trim") return;
   const draft = structuralDraftResult();
   if (!draft.ok) {
     // An incomplete draft cannot preview; keep the last good geometry and
@@ -326,12 +349,14 @@ async function refreshStructuralPreview() {
     const hosted = Boolean(state.runtime.hosted);
     const profile = typeof PrinterProfile !== "undefined" ? PrinterProfile.current() : null;
     let result;
-    if (kind === "box") {
+    if (kind === "box" || kind === "base_trim") {
       const structural = await api("/api/space/structural-design", {
         space: draft.space, ...(hosted ? { printer_profile: profile } : {}),
       });
       if (!current()) return;
-      if (!structural?.design) throw new Error("The case preview is not available right now.");
+      if (!structural?.design) throw new Error(kind === "base_trim"
+        ? "The Base Trim preview is not available right now."
+        : "The case preview is not available right now.");
       // Its own client lane: a structural request never supersedes, or is
       // superseded by, the Designer's own previews.
       result = await api("/api/preview", {
@@ -355,15 +380,15 @@ async function refreshStructuralPreview() {
       const owners = new Set((result.meshes || []).map(mesh => mesh.owner));
       if (!owners.has(state.structuralHighlightOwner)) state.structuralHighlightOwner = null;
     }
-    record.form.setOutside?.(structuralOutsideXYZ(result, kind));
-    record.form.setError?.("");
+    record.form?.setOutside?.(structuralOutsideXYZ(result, kind));
+    record.form?.setError?.("");
     setStructuralPreviewState("");
     renderPreview3D();
   } catch (error) {
     if (!current()) return;
     state.structuralPreview = null;
     state.structuralPreviewError = friendlyError(error);
-    record.form.setError?.(state.structuralPreviewError);
+    record.form?.setError?.(state.structuralPreviewError);
     setStructuralPreviewState("Preview could not build", { error: true });
     renderPreview3D();
   }

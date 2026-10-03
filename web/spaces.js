@@ -1061,7 +1061,9 @@ SP.inventoryRequest = async (
     const mayDeleteOwnedFiles =
       deleting || path === "/api/drawer/spacers/refresh";
     const needsFilenameSnapshot =
-      mayDeleteOwnedFiles || path === "/api/drawer/design-source/save";
+      mayDeleteOwnedFiles ||
+      path === "/api/drawer/design-source/save" ||
+      path === "/api/drawer/design-source/status";
 
     requireContext();
     const availableFilenames = needsFilenameSnapshot
@@ -1143,7 +1145,7 @@ SP.addInventoryBin = async (entry, designSpec = null) => {
   // a spec.
   const data = await SP.inventoryRequest("/api/drawer/save", {
     new_bins: [entry], ...(designSpec ? { new_bin_specs: [designSpec] } : {}),
-  });
+  }, { sideEffect: true });
   if (typeof DL !== "undefined" && DL.active) {
     DL.adopt(data);
     DL.exists = true;
@@ -2481,9 +2483,11 @@ SP.create = async () => {
   if (createdStructural) {
     await SP.landOnStructuralDesign(createdStructural);
   } else {
-    // The Designer always means an ordinary Bin. Base Trim is saved from the
-    // Space itself (Space Actions), never designed here.
+    // Ordinary typed Spaces land Space-first on the Space just created: the
+    // starter design is installed for the session, then the Space workspace
+    // opens in Space mode - never an unbound generic starter bin in Design.
     await loadFreshOrdinaryDesignForCurrentFolder();
+    await DP.enter("space");
   }
 };
 
@@ -3142,8 +3146,10 @@ SP.setupOutsideToken = 0;
 SP.refreshSetupOutside = () => {
   const label = document.getElementById("portable-outside-label");
   const value = document.getElementById("portable-outside-readout");
+  const fitWarn = document.getElementById("portable-printer-fit");
   if (!label || !value) return;
   const hideOutside = () => { label.hidden = true; value.hidden = true; value.textContent = ""; };
+  const hideFit = () => { if (fitWarn) { fitWarn.hidden = true; fitWarn.textContent = ""; } };
   const token = ++SP.setupOutsideToken;
   clearTimeout(SP.setupOutsideTimer);
   const num = id => Number(document.getElementById(id)?.value);
@@ -3151,18 +3157,32 @@ SP.refreshSetupOutside = () => {
   const minField = Number(state.catalog?.b4b_rules?.min_field_mm);
   const minHeight = Number(state.catalog?.b4b_rules?.min_secure_height_mm);
   const valid = [x, y, z].every(n => Number.isFinite(n) && n > 0) && x >= minField && y >= minField && z >= minHeight;
-  if (!valid || SP.setupKind !== "portable") { hideOutside(); return; }
+  if (!valid || SP.setupKind !== "portable") { hideOutside(); hideFit(); return; }
   const space = { kind: "portable", name: "Storage Box", x, y, z, storage_box: SP.readStorageBoxForm() };
   SP.setupOutsideTimer = setTimeout(async () => {
     try {
-      const result = await api("/api/space/structural-design", { space });
+      const result = await api("/api/space/structural-design", {
+        space,
+        // Fix 111 N3: hosted supplies the printer profile so the server can
+        // warn when the case will not fit the printer; local reads its own.
+        ...(state.runtime.hosted ? { printer_profile: PrinterProfile.current() } : {}),
+      });
       if (token !== SP.setupOutsideToken) return;
       const size = result.summary?.assembled_envelope_mm;
-      if (!Array.isArray(size) || size.length < 3) { hideOutside(); return; }
+      if (!Array.isArray(size) || size.length < 3) { hideOutside(); hideFit(); return; }
       value.textContent = `${size.map(n => fmt(Number(n))).join(" × ")} mm`;
       label.hidden = false; value.hidden = false;
+      // Fix 111 N3: nearby nonblocking printer-size warning, like Storage
+      // Drawers - visible at the size input, creation stays allowed.
+      const fitError = result.summary?.first_fit_error;
+      if (fitWarn && result.summary?.fits_printer === false && fitError) {
+        fitWarn.textContent = fitError;
+        fitWarn.hidden = false;
+      } else {
+        hideFit();
+      }
     } catch (_error) {
-      if (token === SP.setupOutsideToken) hideOutside();
+      if (token === SP.setupOutsideToken) { hideOutside(); hideFit(); }
     }
   }, 250);
 };
@@ -3228,6 +3248,10 @@ SP.runStructural = async (mode, event) => {
   const kind = SP.structuralKind();
   if (kind === "storage_drawers") return SP.runCabinetStructural(mode);
   if (!kind || SP.structuralBusy) return;
+  // A dirty structural Design draft must be settled before output is
+  // manufactured from the accepted Space: Save Changes, Discard, or the
+  // output stays blocked while the user keeps editing.
+  if (!(await SP.confirmLeaveStructuralEditor())) return;
   const label = SP.structuralLabel(kind);
   const hosted = Boolean(state.runtime.hosted);
   if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
@@ -3658,6 +3682,10 @@ SP.saveStructural = () => SP.structuralKind() === "base_trim"
   ? SP.saveBaseTrim() : SP.runStructural("save");
 SP.printStorageBox = async () => {
   if (SP.structuralBusy || SP.structuralKind() !== "storage_box") return;
+  // A dirty structural Design draft must be settled before output is
+  // manufactured from the accepted Space: Save Changes, Discard, or the
+  // output stays blocked while the user keeps editing.
+  if (!(await SP.confirmLeaveStructuralEditor())) return;
   if (state.runtime.hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
   if (!state.slicer?.available) {
     toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
@@ -4367,7 +4395,11 @@ SP.adoptCabinetResult = result => {
   DL.future = [];
   DL.dirty = false;
   DL.selected = null;
-  DL.selectedRow = keepRow && DL.bin(keepRow) ? keepRow : null;
+  // Keep the row selected only when it still exists and physically lives in
+  // the reconciled active drawer (or is unplaced). Otherwise the Inventory
+  // highlight and the drawer on screen would name different drawers.
+  const holder = keepRow && DL.bin(keepRow) ? StorageDrawers.drawerHoldingRow(DL.layout, keepRow) : null;
+  DL.selectedRow = keepRow && DL.bin(keepRow) && (!holder || holder === DL.layout.active) ? keepRow : null;
   DL.saveState = "saved";
   DL.prune();
   DL.clearSpacerPlan();
@@ -4482,17 +4514,21 @@ SP.updateCabinetWorkspace = () => {
     } else {
       SP.cabinetWorkspace.update(data);
     }
-    // Hosted Wavefinity has no local slicer: Print stays disabled, never a Save.
-    const printButton = host.querySelector(".sd-print");
-    if (state.runtime.hosted && printButton) {
-      printButton.disabled = true;
-      printButton.title = SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP;
-      // Fix 096 F9: visible reason beside the disabled button, not only a tooltip.
+    // Hosted Wavefinity has no local slicer: both Print actions stay disabled, never a Save.
+    const printButtons = [".sd-print", ".sd-print-both"]
+      .map(selector => host.querySelector(selector))
+      .filter(Boolean);
+    if (state.runtime.hosted && printButtons.length) {
+      for (const printButton of printButtons) {
+        printButton.disabled = true;
+        printButton.title = SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP;
+      }
+      // Fix 096 F9: visible reason beside the disabled buttons, not only a tooltip.
       let reason = host.querySelector(".sd-print-reason");
       if (!reason) {
         reason = document.createElement("p");
         reason.className = "sd-help sd-print-reason";
-        printButton.after(reason);
+        printButtons[printButtons.length - 1].after(reason);
       }
       reason.textContent = "Printing is unavailable on hosted Wavefinity: there is no local slicer here.";
     }
@@ -4562,6 +4598,10 @@ SP.hostedCabinetStatus = async (signature, orientations = null) => {
 // and one slicer handoff. Hosted stays unavailable: it has no local slicer.
 SP.printCabinetAndBins = async event => {
   if (SP.structuralBusy) return;
+  // A dirty structural Design draft must be settled before output is
+  // manufactured from the accepted Space: Save Changes, Discard, or the
+  // output stays blocked while the user keeps editing.
+  if (!(await SP.confirmLeaveStructuralEditor())) return;
   const hosted = Boolean(state.runtime.hosted);
   if (hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
   if (!state.slicer?.available) {
@@ -4576,13 +4616,23 @@ SP.printCabinetAndBins = async event => {
   SP.structuralBusy = true;
   SP.renderSpaceInfo();
   try {
-    const result = await api("/api/space/structural-print-combined", {
+    DL.requireSpaceContext(context);
+    if (typeof flushSpaceDesignAutosave === "function" &&
+        !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
+    DL.requireSpaceContext(context);
+    if (!(await DL.save())) return;
+    DL.requireSpaceContext(context);
+    const result = await apiSideEffect("/api/space/structural-print-combined", {
       space: clone(state.activeSpace),
       output: state.output, space_id: state.activeSpaceId,
       slicer_path: state.slicer?.path || null,
     });
     wroteFiles = true;
     DL.requireSpaceContext(context);
+    DL.adoptBatchResult(result);
+    DP.renderInventory(true);
+    DL.emit();
+    DL.requestReport();
     if (result.partial) {
       toast(result.error || "Cabinet + bins files were saved, but the slicer did not open.", true, 8000);
     } else {
@@ -4604,6 +4654,10 @@ SP.printCabinetAndBins = async event => {
 };
 SP.runCabinetStructural = async mode => {
   if (SP.structuralBusy) return;
+  // A dirty structural Design draft must be settled before output is
+  // manufactured from the accepted Space: Save Changes, Discard, or the
+  // output stays blocked while the user keeps editing.
+  if (!(await SP.confirmLeaveStructuralEditor())) return;
   const hosted = Boolean(state.runtime.hosted);
   if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
   if (mode === "print" && hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }

@@ -115,6 +115,17 @@ from organizer_stack import STACK_MIN_WALL, STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
 from organizer_pegboard import pegboard_layout_for_bin, pegboard_standard
 from organizer_edge_mount import edge_mount_projection_envelope
 from organizer_slicer import slicer_display_name
+from organizer_printer_profile import (
+    DEFAULT_PRINTER_BUILD_MM,
+    normalise_printer_profile,
+    print_file_fit_issues,
+)
+
+
+def _default_printer_profile() -> dict[str, float]:
+    return normalise_printer_profile(dict(zip(
+        ("x_mm", "y_mm", "z_mm"), DEFAULT_PRINTER_BUILD_MM,
+    )))
 
 UNIT = BASE_UNIT
 SNAPS = (8.0, 4.0)
@@ -749,12 +760,15 @@ def surface_fill_plan(inventory: dict[str, Any]) -> dict[str, Any]:
 def _connector_eligible(item: dict[str, Any]) -> bool:
     """Whether this footprint's seam can take a side connector at all.
 
-    A Storage Box case has no bare wave wall to clip onto, and a stackable bin's
-    mouth is meant for the bin above, not a side clip - so neither should
-    ever get one, no matter how long the shared seam runs."""
+    A Storage Box case has no bare wave wall to clip onto, a stackable bin's
+    mouth is meant for the bin above, not a side clip, and any lid (handled
+    or stackable) covers the rim a side connector would grip - so none of
+    them should ever get one, no matter how long the shared seam runs."""
     if item["kind"] == "b4b":
         return False
     if item["top"].get("stack", "none") != "none":
+        return False
+    if item.get("has_lid"):
         return False
     if item["kind"] in SPACER_KINDS:
         return False
@@ -1117,6 +1131,17 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         float(p.get("w", 0)) * float(p.get("d", 0))
         for p in drawer["placements"] if "gx" not in p and "on" not in p and p.get("bin") in by_id
     )
+    # Fix 111 N10: one eligibility contract - a lid makes ordinary side
+    # connectors unavailable everywhere, matching the Designer's
+    # connectorsUnavailable(). Stamp lid rows from their canonical design
+    # specs so _connector_eligible sees the same rule the UI applies.
+    lid_rows = {
+        row_id for row_id, spec in specs.items()
+        if isinstance(spec, dict) and isinstance(spec.get("box"), dict)
+        and bool((spec["box"].get("lid") or {}).get("enabled"))
+    }
+    for item in items:
+        item["has_lid"] = item["bin"] in lid_rows
     connectors, mismatched, short_seams = _connectors(items, step)
     if surface:
         for component in _interior_components(items, cols, rows):
@@ -1674,7 +1699,9 @@ def generate_connectors(
     pair of rim heights, with how many of it to print."""
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    report = drawer_report(find_drawer(layout, drawer_id), bins)
+    # Fix 111 N10: pass the authoritative layout so lid rows are stamped from
+    # their canonical design specs (drawer_report needs it for specs).
+    report = drawer_report(find_drawer(layout, drawer_id), bins, layout=layout)
     made, notes = [], []
     connector = ConnectorSpec()
     for group in report["connectors"]:
@@ -1925,10 +1952,16 @@ def prepare_inventory_bins(
 def _space_connectors(
     output_dir: Path, layout: dict[str, Any] | None, bins: list[dict[str, Any]],
 ) -> tuple[dict[str, int], list[str]]:
-    """Generate every drawer's connector set once: file name -> copies, notes."""
+    """Generate every drawer's connector set once: file name -> copies, notes.
+
+    A Pegboard drawer has no Space side-connector bundle (Fix 111 R3-A), so
+    the batch connector path skips it instead of entering a connector report
+    that assumes ordinary drawer fields."""
     counts: dict[str, int] = {}
     notes: list[str] = []
     for drawer in (layout or {}).get("drawers") or []:
+        if drawer.get("boundary") == "pegboard":
+            continue
         made = generate_connectors(output_dir, layout, bins, drawer.get("id"))
         for item in made["connectors"]:
             counts[item["file"]] = counts.get(item["file"], 0) + int(item["count"])
@@ -2019,6 +2052,7 @@ def print_inventory_bins(
     launch_slicer: Callable,
     slicer_path: str | None = None,
     generate_from_design: Callable[[Path, dict[str, Any]], list[Path]] | None = None,
+    printer_profile: dict | None = None,
 ) -> dict[str, Any]:
     """Send selected generated bins (and optional Space connectors) to the slicer.
 
@@ -2068,7 +2102,9 @@ def print_inventory_bins(
     notes: list[str] = []
     if include_connectors:
         try:
-            connector_counts, notes = _space_connectors(output_dir, layout, inventory["bins"])
+            # Fix 111 R4-10: consume the refreshed authoritative layout, not
+            # the pre-prepare request layout, with the refreshed bins.
+            connector_counts, notes = _space_connectors(output_dir, inventory["layout"], inventory["bins"])
         except Exception as error:
             return _batch_partial(
                 prepared, "connectors",
@@ -2088,6 +2124,16 @@ def print_inventory_bins(
         "connector_copies": sum(connector_counts.values()),
         "notes": notes,
     }
+    # Every file handed to the slicer must fit the active printer; a fit
+    # failure fails before launch so nothing is orphaned mid-print.
+    fit_issues: list[str] = []
+    for path in dict.fromkeys(launch_files):
+        fit_issues.extend(print_file_fit_issues(path, printer_profile or _default_printer_profile()))
+    if fit_issues:
+        return _batch_partial(
+            prepared, "preflight",
+            "A file does not fit the active printer:\n" + "\n".join(fit_issues),
+            **result_counts)
     try:
         launch_slicer(Path(slicer), launch_files)
     except Exception as error:
@@ -2187,8 +2233,16 @@ def drawer_routes(
     launch_slicer: Callable | None = None,
     hosted: bool = False,
     generate_from_design: Callable[[Path, dict[str, Any]], list[Path]] | None = None,
+    printer_profile_for: Callable[[dict], dict] | None = None,
 ) -> dict[str, Callable[[dict], dict]]:
     """POST handlers for the browser service, keyed by path."""
+
+    def _printer_profile(payload: dict) -> dict:
+        # organizer_drawer cannot import load_preferences (it lives in
+        # wavefinity_web); the host injects its resolver instead.
+        if printer_profile_for is not None:
+            return printer_profile_for(payload)
+        return _default_printer_profile()
 
     def folder(payload: dict[str, Any]) -> Path:
         return Path(str(payload.get("output") or default_output)).expanduser().resolve()
@@ -2279,6 +2333,7 @@ def drawer_routes(
                 payload.get("inventory_text") or "", row_id, action, file_text,
                 title=str(payload.get("inventory_title") or "Wavefinity"),
                 expected_design=expected_design,
+                available_filenames=payload.get("available_filenames") or (),
             )
         else:
             result = _change_design_status_row(folder(payload), row_id, action, file_text, expected_design)
@@ -2674,19 +2729,40 @@ def drawer_routes(
             files: list[Path] = []
             launch_files: list[Path] = []
             counts: dict[str, int] = {}
-            for b in inv["bins"]:
-                count = selection.get(b["id"])
-                if count and int(count) > 0 and b.get("file"):
-                    path = out_dir / b["file"]
-                    if path.is_file():
-                        files.append(path)
-                        launch_files.extend([path] * int(count))
-                        counts[b["file"]] = int(count)
+            # All-or-nothing preflight: every selected spacer must resolve to a
+            # real file before anything launches; unresolved selections are named.
+            unresolved: list[str] = []
+            by_id = {str(b["id"]): b for b in inv["bins"]}
+            for row_id, count in (selection or {}).items():
+                if not count or int(count) <= 0:
+                    continue
+                one = by_id.get(str(row_id))
+                if one is None:
+                    unresolved.append(str(row_id))
+                    continue
+                safe = _safe_row_file(out_dir, one.get("file") or "")
+                if safe is None:
+                    unresolved.append(_label(one))
+                    continue
+                files.append(safe)
+                launch_files.extend([safe] * int(count))
+                counts[safe.name] = int(count)
+            if unresolved:
+                raise ValueError(
+                    "These spacers have no printable file and were not sent: "
+                    + ", ".join(sorted(set(unresolved)))
+                    + ". Generate their files first, then print again.")
             if not files:
                 raise ValueError("Select at least one spacer to print.")
             slicer = detect_slicer(payload.get("slicer_path"))
             if slicer is None or not Path(slicer).is_file():
                 raise ValueError("A slicer was not found. Locate it with Change slicer in the bin view.")
+            fit_issues: list[str] = []
+            for path in dict.fromkeys(launch_files):
+                fit_issues.extend(print_file_fit_issues(path, _printer_profile(payload)))
+            if fit_issues:
+                raise ValueError(
+                    "A file does not fit the active printer:\n" + "\n".join(fit_issues))
             launch_slicer(Path(slicer), launch_files)
             return {"files": [str(path) for path in files], "counts": counts, "notes": []}
 
@@ -2704,6 +2780,7 @@ def drawer_routes(
                 bool(payload.get("include_connectors", True)),
                 detect_slicer, launch_slicer, payload.get("slicer_path"),
                 generate_from_design,
+                _printer_profile(payload),
             ))
 
     def print_complete(payload):
@@ -2745,10 +2822,9 @@ def drawer_routes(
             counts: dict[str, int] = {}
             for placement in drawer.get("placements") or []:
                 one = by_id.get(placement.get("bin"))
-                if one is not None and one.get("kind") in ("bin", "b4b"):
+                if (one is not None and one.get("kind") in ("bin", "b4b")
+                        and one.get("status") != "printed"):
                     counts[one["id"]] = counts.get(one["id"], 0) + 1
-            if not counts:
-                raise ValueError("This drawer has no placed bins to print.")
             blocked = selected_blocking_problems(layout, bins, counts)
             if blocked:
                 raise ValueError(blocking_problem_copy(bins, blocked))
@@ -2813,7 +2889,26 @@ def drawer_routes(
                     "open Spacers and choose Generate to remake it."
                     for name in sorted(skipped_spacers)
                 )
-            # 6. One launch.
+            # 6. Fit check, then one launch: every file handed to the slicer
+            # must fit the active printer; a fit failure fails before launch.
+            # Truthful count payload for the preflight branch (defined here so
+            # the fit-failure partial cannot hit a NameError).
+            result_counts = {
+                "bin_copies": sum(counts.values()),
+                "spacer_copies": spacer_copies,
+                "connector_counts": connector_counts,
+                "connector_copies": sum(connector_counts.values()),
+            }
+            if not launch_files:
+                raise ValueError("There is nothing in this Space left to print.")
+            fit_issues: list[str] = []
+            for path in dict.fromkeys(launch_files):
+                fit_issues.extend(print_file_fit_issues(path, _printer_profile(payload)))
+            if fit_issues:
+                return _batch_partial(
+                    prepared, "preflight",
+                    "A file does not fit the active printer:\n" + "\n".join(fit_issues),
+                    **result_counts, notes=notes)
             try:
                 project_path = launch_slicer(Path(slicer), launch_files)
             except Exception as error:

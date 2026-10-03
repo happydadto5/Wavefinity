@@ -137,7 +137,7 @@
             <strong id="active-option-title"></strong>
             <div class="active-option-actions">
               <button type="button" id="active-option-delete" class="button danger dl-small">Delete</button>
-              <button type="button" id="active-option-save" class="button primary dl-small">Save</button>
+              <button type="button" id="active-option-save" class="button primary dl-small">Done</button>
             </div>
           </div>
           <div id="lid-option" class="lid-option-card" hidden>
@@ -1136,6 +1136,7 @@
             <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="portable-y" type="number" min="1" step="any"></label>
             <label class="space-field"><span>Usable inside height <span class="unit">mm</span></span><input id="portable-z" type="number" min="1" step="any"></label>
           </div>
+          <p id="portable-printer-fit" class="portable-fit-warning" hidden></p>
           <div id="portable-readout" class="derived-readout" hidden>
              <dt>Resolved Size</dt><dd id="portable-size-readout"></dd>
              <dt id="portable-outside-label" hidden>Finished outside</dt><dd id="portable-outside-readout" hidden></dd>
