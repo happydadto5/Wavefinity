@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from space_source import spaces_source
 
 from organizer_spaces import FolderMetadataError
 from test_space_identity import make_routes, make_v4_space, meta
@@ -15,7 +16,7 @@ from test_space_identity import make_routes, make_v4_space, meta
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 APP_JS = (WEB / "app.js").read_text(encoding="utf-8")
-SPACES_JS = (WEB / "spaces.js").read_text(encoding="utf-8")
+SPACES_JS = spaces_source(WEB)
 
 PREFERENCE_MARKER = "// ------------------------------------------------ Space preference memory (Fix 053)"
 

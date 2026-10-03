@@ -14,6 +14,7 @@ from organizer_engine import BoxSpec, SideOpeningSpec, StackSpec, SIDE_OPENING_W
 from organizer_side_openings import (
     SIDE_OPENING_CORNER_MARGIN_MM, side_opening_allowed_sizes, validate_side_openings,
 )
+from space_source import spaces_source
 from test_space_preferences import function_source
 from test_wavefinity_web import _fix21_photo_design
 from wavefinity_web import default_design, default_feature_payload, duplicate_feature_payload, preview_payload
@@ -40,7 +41,7 @@ class BrowserStateLogicTests(unittest.TestCase):
                      "restoreHistory(", "updateHistoryButtons(",
                      "pendingNudgeHistory", "#undo-design", "#redo-design"):
             self.assertNotIn(dead, APP)
-        spaces = (ROOT / "web" / "spaces.js").read_text(encoding="utf-8")
+        spaces = spaces_source(ROOT / "web")
         panel = (ROOT / "web" / "drawer-panel.js").read_text(encoding="utf-8")
         for dead in ("state.history", "state.future", "updateHistoryButtons("):
             self.assertNotIn(dead, spaces)

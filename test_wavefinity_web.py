@@ -9,6 +9,7 @@ import math
 import os
 from dataclasses import replace
 from pathlib import Path
+from space_source import spaces_source
 import re
 import shutil
 import socket
@@ -105,7 +106,7 @@ class PreferredSpaceLandingTests(unittest.TestCase):
         script = r"""
           const fs = require('fs');
           const vm = require('vm');
-          const source = fs.readFileSync('web/spaces.js', 'utf8');
+          const source = [...fs.readdirSync('web/spaces').filter(f => f.endsWith(".js")).sort().map(f => fs.readFileSync('web' + "/spaces/" + f, "utf8")), fs.readFileSync('web' + "/spaces.js", "utf8")].join("\n");
           const fn = source.match(/SP\.openTypedSpacePreferredView = async \(\) => \{[\s\S]*?\n\};/)[0];
           const calls = [];
           const DL = { bins: [], layout: { design_specs: {} },
@@ -1507,7 +1508,7 @@ class WebApplicationTests(unittest.TestCase):
 
 
     def test_hosted_inventory_writes_share_one_file_queue(self):
-        source = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")
+        source = spaces_source(Path(__file__).resolve().parent / "web")
         owner = source[source.index("SP._inventoryWriteChain = Promise.resolve();"):
                        source.index("// Fix 034 F1", source.index("SP._inventoryWriteChain = Promise.resolve();"))]
         script = "\n".join([
@@ -1528,7 +1529,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(self._run_node(script), {"text": "AB", "calls": 2})
 
     def test_resume_binds_existing_inventory_row_identity(self):
-        source = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")
+        source = spaces_source(Path(__file__).resolve().parent / "web")
         start = source.index("SP.initializeDesignForActiveSpace = async () => {")
         owner = source[start:source.index("\n};", start) + 3]
         script = "\n".join([
@@ -1553,7 +1554,7 @@ class WebApplicationTests(unittest.TestCase):
         root = Path(__file__).resolve().parent / "web"
         app = (root / "app.js").read_text(encoding="utf-8")
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
-        spaces = (root / "spaces.js").read_text(encoding="utf-8")
+        spaces = spaces_source(root)
         for function in ("designerInstallInventorySpec", "designerNewBin", "designerDuplicate",
                          "generateParts", "printModel"):
             start = app.index(f"async function {function}(")
@@ -1811,7 +1812,7 @@ const tick = () => new Promise(r => setImmediate(r));
         # validated the same way as keep_bin_defaults/bin_defaults already are.
         node = self._node_or_skip()
         root = Path(__file__).resolve().parent / "web"
-        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        spaces_js = spaces_source(root)
 
         valid_space = self._spaces_slice(spaces_js, "SP.validSpace = raw => {")
         valid_uuid = self._spaces_slice(spaces_js, "SP.validUuid = raw => {")
@@ -1865,7 +1866,7 @@ const tick = () => new Promise(r => setImmediate(r));
         # never overwrite a different Space's in-memory checkpoint.
         node = self._node_or_skip()
         root = Path(__file__).resolve().parent / "web"
-        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        spaces_js = spaces_source(root)
 
         start = "SP._resume = {"
         end = "SP.flushOutgoingResumeCheckpoint = () => SP._pumpResumeQueue();"
@@ -1968,7 +1969,7 @@ const tick = () => new Promise(r => setImmediate(r));
         # mutates state.output/state.activeSpaceId - not after.
         node = self._node_or_skip()
         root = Path(__file__).resolve().parent / "web"
-        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        spaces_js = spaces_source(root)
         apply_folder = self._spaces_slice(spaces_js, "SP.applyFolder = async (info,")
 
         script = "\n".join([

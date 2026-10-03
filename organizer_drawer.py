@@ -2333,7 +2333,13 @@ def drawer_routes(
                 payload.get("inventory_text") or "", row_id, action, file_text,
                 title=str(payload.get("inventory_title") or "Wavefinity"),
                 expected_design=expected_design,
-                available_filenames=payload.get("available_filenames") or (),
+                # Omitted = no folder snapshot (nothing proven gone); an
+                # explicit [] = known-empty snapshot. Keep them distinct.
+                available_filenames=(
+                    payload.get("available_filenames")
+                    if "available_filenames" in payload
+                    else None
+                ),
             )
         else:
             result = _change_design_status_row(folder(payload), row_id, action, file_text, expected_design)

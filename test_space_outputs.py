@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from space_source import spaces_source
 from unittest.mock import patch
 
 import trimesh
@@ -55,7 +56,7 @@ class FourSpaceTypeTests(unittest.TestCase):
                 self.assertEqual(edited["layout"]["space"]["name"], raw["name"] + " 2")
                 self.assertEqual(load_inventory(folder)["layout"]["space"]["kind"], raw["kind"])
         names = sorted({"Drawer", "Storage Box", "Surface", "Pegboard"})
-        spaces_js = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")
+        spaces_js = spaces_source(Path(__file__).resolve().parent / "web")
         kinds = spaces_js[spaces_js.index("const SP_KINDS = {"):spaces_js.index("const FOLDER_METADATA")]
         for name in names:
             self.assertIn(f'label: "{name}"', kinds)

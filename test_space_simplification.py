@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import unittest
 from pathlib import Path
+from space_source import spaces_source
 
 from test_space_preferences import node_run
 
@@ -364,8 +365,8 @@ out.saved = { identity: ctx.state.designInventoryId,
                                         "mode": ["space"]})
 
     def test_hosted_delete_writes_inventory_then_removes_exact_files_and_reports_failure(self):
-        source = _read("spaces.js")
-        request = source[source.index("SP.inventoryRequest = async"):source.index("// Fix 034 F1", source.index("SP.inventoryRequest = async"))]
+        source = spaces_source(WEB)
+        request = source[source.index("SP.writeHostedFileSet = async"):source.index("// Fix 034 F1", source.index("SP.inventoryRequest = async"))]
         script = r"""
 const events = [], oldFolder = { handle: {}, name: "Old" }, newFolder = { handle: {}, name: "New" };
 const state = { browserFolder: oldFolder, activeSpace: { name: "Old" } };
@@ -401,8 +402,8 @@ const api = async (_path, payload) => {
             ["api", ["Owned.3mf", "Other.3mf"]], ["write"], ["error", "STALE_SPACE_CONTEXT"]])
 
     def test_hosted_edit_snapshots_before_api_and_edit_then_delete_removes_old_file(self):
-        source = _read("spaces.js")
-        request = source[source.index("SP.inventoryRequest = async"):source.index("// Fix 034 F1", source.index("SP.inventoryRequest = async"))]
+        source = spaces_source(WEB)
+        request = source[source.index("SP.writeHostedFileSet = async"):source.index("// Fix 034 F1", source.index("SP.inventoryRequest = async"))]
         script = r"""
 const events = [], folder = { handle: {}, name: "Space" }, next = { handle: {}, name: "Next" };
 const state = { browserFolder: folder, activeSpace: { name: "Space" } };
@@ -479,8 +480,10 @@ out.html = els["#dl-inv-list"].innerHTML;
 class HostedStructuralPrintTests(unittest.TestCase):
     SCRIPT = r"""
 const fs = require("fs");
-const source = fs.readFileSync(process.argv[1] + "/spaces.js", "utf8");
-const slice = source.slice(source.indexOf("SP.structuralKind = "), source.indexOf("SP.renderSpaceInfo = "));
+const source = [...fs.readdirSync(process.argv[1] + "/spaces").filter(f => f.endsWith(".js")).sort().map(f => fs.readFileSync(process.argv[1] + "/spaces/" + f, "utf8")), fs.readFileSync(process.argv[1] + "/spaces.js", "utf8")].join("\n");
+// Fix 112 split the Space code: the leave-editor guard now lives in an earlier module.
+const leave = source.match(/SP\.confirmLeaveStructuralEditor = async \(\) => \{[\s\S]*?\n\};/)[0];
+const slice = leave + "\n" + source.slice(source.indexOf("SP.structuralKind = "), source.indexOf("SP.renderSpaceInfo = "));
 const calls = [], toasts = [], els = {};
 const el = () => ({ hidden: false, disabled: false, textContent: "", title: "", value: "256" });
 ["space-structural", "space-structural-save", "space-structural-print", "space-structural-bed",

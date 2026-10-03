@@ -738,7 +738,7 @@ def change_design_status(output_dir: Path | str, row_id: str, action: str,
 def change_design_status_text(text: str, row_id: str, action: str,
                               file_text: str | None = None, *, title: str = "Wavefinity",
                               expected_design: dict | None = None,
-                              available_filenames: Iterable[str] = ()) -> dict[str, Any]:
+                              available_filenames: Iterable[str] | None = None) -> dict[str, Any]:
     with INVENTORY_LOCK:
         current = parse_inventory(str(text or ""))
         bins, layout = _change_design_status(current, row_id, action, file_text, expected_design)
@@ -875,17 +875,22 @@ def _reap_superseded(
 
 def _reap_superseded_names(
     bins: list[dict[str, Any]], layout: dict[str, Any] | None,
-    row_id: str, available_filenames: Iterable[str],
+    row_id: str, available_filenames: Iterable[str] | None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
-    """Hosted equivalent of _reap_superseded: plan conservative browser deletes."""
+    """Hosted equivalent of _reap_superseded: plan conservative browser deletes.
+
+    ``available_filenames`` None means no folder snapshot was supplied, so
+    nothing is proven gone; an explicit (even empty) list is a known snapshot.
+    """
     if not isinstance(layout, dict):
         return layout, []
     stale = _stale_files(layout)
     if row_id not in stale:
         return layout, []
     tracked = list(dict.fromkeys(stale.pop(row_id)))
+    availability_known = available_filenames is not None
     available = {
-        name for name in available_filenames
+        name for name in (available_filenames or ())
         if isinstance(name, str) and name == name.strip()
         and Path(name).name == name and not Path(name).is_absolute()
         and "/" not in name and "\\" not in name and name.lower().endswith(".3mf")
@@ -897,6 +902,15 @@ def _reap_superseded_names(
         name for name in tracked
         if name in available and name not in current and name not in referenced
     ]
+    # The cleanup plan is only a plan: the browser may not have deleted
+    # anything. Forget only names reclaimed as current or proven gone by a
+    # known snapshot; everything else (including referenced names) stays tracked.
+    remaining = [
+        name for name in tracked
+        if name not in current and (name in available or not availability_known)
+    ]
+    if remaining:
+        stale[row_id] = remaining
     next_layout = {**layout}
     # Keep stale_files authoritative even when empty. DL.adopt (D-7) sees the
     # explicit key and clears its cached stale map after this exact status response.
