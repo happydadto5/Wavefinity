@@ -5,26 +5,30 @@ Tests are broken into 4 chunks for fast troubleshooting. Run one command,
 walk away, and check which chunk needs attention.
 
 Usage:
-    python3 run_tests.py                 # all 4 chunks (22 modules)
+    python3 run_tests.py                 # all 4 chunks, run concurrently (22 modules)
     python3 run_tests.py part1           # fast core tests
     python3 run_tests.py part2           # geometry/insert tests
     python3 run_tests.py part3           # organizer app tests
     python3 run_tests.py part4           # web/space tests
-    python3 run_tests.py part1 part3     # multiple chunks
+    python3 run_tests.py part1 part3     # multiple chunks, run concurrently
     python3 run_tests.py test_drawer     # single module (backward compat)
     python3 run_tests.py core            # original 8-module core gate
 
 Each module runs in its own subprocess — one module's crash or import
-error never kills the rest. After every module, test-status.md is rewritten
-with per-module results and full tracebacks for failures.
+error never kills the rest. Each chunk runs its own modules one after another;
+two or more chunks run at the same time. Only the main process prints and
+writes test-status.md: after every module, test-status.md is rewritten with
+per-module results and full tracebacks for failures.
 
 Exit code is 0 iff everything passed.
 """
 from __future__ import annotations
 
+import queue
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Chunk definitions: module names in each part
@@ -114,12 +118,65 @@ def update_status(results: dict[str, tuple[str, str]]):
     STATUS_FILE.write_text("\n".join(lines))
 
 
+def _part_worker(part: str, modules: list[str], done: "queue.Queue") -> None:
+    """Run one part's modules one after another; report each back to the parent.
+
+    Workers never print and never touch test-status.md; the parent does both.
+    """
+    try:
+        for index, module in enumerate(modules, 1):
+            status, output = run_module(module)
+            done.put((part, index, len(modules), module, status, output))
+    finally:
+        done.put((part, None, None, None, None, None))  # this part is finished
+
+
+def run_parts_concurrently(parts: list[str]) -> tuple[list[str], dict[str, tuple[str, str]]]:
+    """Run the named parts at the same time (one worker per part).
+
+    Returns (modules in part/module order, results). The parent is the only
+    writer of console lines and test-status.md.
+    """
+    ordered = [m for part in parts for m in PARTS[part]]
+    results: dict[str, tuple[str, str]] = {}
+    done: "queue.Queue" = queue.Queue()
+    remaining = len(parts)
+    with ThreadPoolExecutor(max_workers=len(parts)) as pool:
+        for part in parts:
+            pool.submit(_part_worker, part, PARTS[part], done)
+        while remaining:
+            part, index, total, module, status, output = done.get()
+            if module is None:
+                remaining -= 1
+                continue
+            results[module] = (status, output)
+            icon = "✅" if status == "PASS" else "❌"
+            print(f"[{part} {index}/{total}] {module}: {icon} {status}", flush=True)
+            update_status(results)
+    return ordered, results
+
+
+def run_serially(modules: list[str]) -> dict[str, tuple[str, str]]:
+    """Original simple behavior: one module at a time."""
+    results: dict[str, tuple[str, str]] = {}
+    for i, module in enumerate(modules, 1):
+        print(f"[{i}/{len(modules)}] {module}...", flush=True)
+        status, output = run_module(module)
+        results[module] = (status, output)
+        icon = "✅" if status == "PASS" else "❌"
+        print(f"  {icon} {status}")
+        update_status(results)
+    return results
+
+
 def main(argv: list[str]) -> int:
-    # Resolve which modules to run
+    # Resolve which modules to run. Two or more named parts (or no arguments,
+    # meaning all four parts) run concurrently; everything else is serial.
+    concurrent_parts: list[str] = []
     if not argv:
-        # All parts
-        modules = [m for part in ["part1", "part2", "part3", "part4"] for m in PARTS[part]]
-        label = "all 4 parts"
+        concurrent_parts = ["part1", "part2", "part3", "part4"]
+        modules = [m for part in concurrent_parts for m in PARTS[part]]
+        label = "all 4 parts, concurrently"
     elif argv == ["core"]:
         modules = CORE
         label = "core gate"
@@ -135,25 +192,23 @@ def main(argv: list[str]) -> int:
                 modules.append(arg)
                 label_parts.append(arg)
         label = ", ".join(label_parts)
+        if len(argv) >= 2 and all(arg in PARTS for arg in argv) and len(set(argv)) == len(argv):
+            concurrent_parts = list(argv)
+            label += " (concurrently)"
 
     print(f"Running {label}: {len(modules)} modules")
     print(f"Status file: {STATUS_FILE}")
     print()
 
-    results: dict[str, tuple[str, str]] = {}
     start = time.time()
-
-    for i, module in enumerate(modules, 1):
-        print(f"[{i}/{len(modules)}] {module}...", flush=True)
-        status, output = run_module(module)
-        results[module] = (status, output)
-        icon = "✅" if status == "PASS" else "❌"
-        print(f"  {icon} {status}")
-        update_status(results)
+    if concurrent_parts:
+        modules, results = run_parts_concurrently(concurrent_parts)
+    else:
+        results = run_serially(modules)
 
     elapsed = time.time() - start
     passed = sum(1 for s, _ in results.values() if s == "PASS")
-    failed = [m for m, (s, _) in results.items() if s != "PASS"]
+    failed = [m for m in dict.fromkeys(modules) if results[m][0] != "PASS"]
 
     print()
     print(f"Done in {elapsed:.1f}s: {passed}/{len(modules)} passed")
