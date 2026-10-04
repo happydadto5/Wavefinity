@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from organizer_product_rules import STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
+from space_source import app_source
 from organizer_storage_drawers import (
     STORAGE_DRAWER_FIT_CHOICES, STORAGE_DRAWER_FIT_DEFAULT,
     new_drawer_descriptor, prepare_new_storage_drawers_definition,
@@ -203,7 +204,7 @@ class GuideAndPreviewTruthTests(unittest.TestCase):
 
 
 class EdgeMountTruthTests(unittest.TestCase):
-    app = source("web/app.js")
+    app = app_source(ROOT / "web")
     html = source("web/index.html")
 
     def test_integrated_choice_is_labelled_requires_support(self):

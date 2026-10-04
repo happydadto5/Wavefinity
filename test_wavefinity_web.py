@@ -9,7 +9,7 @@ import math
 import os
 from dataclasses import replace
 from pathlib import Path
-from space_source import spaces_source
+from space_source import app_source, spaces_source
 import re
 import shutil
 import socket
@@ -1564,7 +1564,7 @@ class WebApplicationTests(unittest.TestCase):
 
     def test_typed_space_replacement_and_output_boundaries_flush_autosave(self):
         root = Path(__file__).resolve().parent / "web"
-        app = (root / "app.js").read_text(encoding="utf-8")
+        app = app_source(root)
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         spaces = spaces_source(root)
         for function in ("designerInstallInventorySpec", "designerNewBin", "designerDuplicate",
@@ -1579,7 +1579,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn('action: "printed"', app[app.index("async function printModel("):])
 
     def _app_js_functions(self, *names):
-        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        source = app_source(Path(__file__).resolve().parent / "web")
         chunks = []
         for name in names:
             start = source.index(f"function {name}(")
@@ -1598,7 +1598,7 @@ class WebApplicationTests(unittest.TestCase):
 
     def test_first_bin_starter_waits_for_a_meaningful_edit(self):
         root = Path(__file__).resolve().parent / "web"
-        app = (root / "app.js").read_text(encoding="utf-8")
+        app = app_source(root)
         fresh = app[app.index("async function loadFreshOrdinaryDesignForCurrentFolder"):]
         fresh = fresh[:fresh.index("\n}\n")]
         self.assertIn('state.designInventoryId = null', fresh)
@@ -2033,7 +2033,7 @@ const tick = () => new Promise(r => setImmediate(r));
         # Fix 032 Correction 1, item 4: an HTTP-200 preview that still
         # reports fit/feature/draft errors must not replace the last valid
         # resume checkpoint.
-        app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        app_js = app_source(Path(__file__).resolve().parent / "web")
         # refreshPreview() adopts its result through adoptPreviewResult() (shared
         # with AI Help's already-proven candidate), which owns the checkpoint rule.
         start = app_js.index("async function refreshPreview(")
@@ -2343,7 +2343,7 @@ class AiHelpBackendTests(unittest.TestCase):
         # Fixed hex-bit dimensions come from the Bore constants, and the browser's own
         # literals (which cannot read them yet) must agree - this is the drift guard.
         self.assertEqual(bore_item["hex_bit"], _bore.HEX_BIT_FIXED)
-        app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        app_js = app_source(Path(__file__).resolve().parent / "web")
         labels = dict(ITEM_PROFILES)
         for profile, fixed in _bore.HEX_BIT_FIXED.items():
             match = re.search(

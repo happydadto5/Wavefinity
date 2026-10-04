@@ -14,14 +14,14 @@ from organizer_engine import BoxSpec, SideOpeningSpec, StackSpec, SIDE_OPENING_W
 from organizer_side_openings import (
     SIDE_OPENING_CORNER_MARGIN_MM, side_opening_allowed_sizes, validate_side_openings,
 )
-from space_source import spaces_source
+from space_source import app_source, spaces_source
 from test_space_preferences import function_source
 from test_wavefinity_web import _fix21_photo_design
 from wavefinity_web import default_design, default_feature_payload, duplicate_feature_payload, preview_payload
 
 
 ROOT = Path(__file__).resolve().parent
-APP = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+APP = app_source(ROOT / "web")
 PANEL = (ROOT / "web" / "drawer-panel.js").read_text(encoding="utf-8")
 
 
