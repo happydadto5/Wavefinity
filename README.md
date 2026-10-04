@@ -183,28 +183,30 @@ supplies the font outlines for floor labels.
 - If that change affects something an outside AI could legally choose, configure, return, or must avoid, the same change must also update `ai-features.md`.
 - These documentation files explain capabilities; exact geometry constants, validation limits, and canonical schema remain code/catalog-owned.
 
-All instructions for coding agents (OpenAI, Anthropic, Google) and human contributors are centralized here. Do not create tool-specific instructions elsewhere.
+Project-wide coding and architecture guidance is centralized here for all agents and human contributors. Help Code orchestration and task contracts are maintained in the helper repository described below; this README is its entry point, not a duplicate protocol. Do not create competing tool-specific instructions.
 
 
 ### Development handoff workflow
 
-> **CODING LLM — STOP BEFORE SEARCHING THIS REPO FOR A FIX FILE.**
-> Help Code plans intentionally do **not** exist in the Wavefinity checkout. For any “implement/read/check fix N” request, first fetch the authoritative plan from the private helper repo `happydadto5/Wavefinity-Help-Code` on its current `main`. For lettered work, e.g. Fix 35A, the path is `fixes/fix-035a.md`. If that private repo cannot be read with your authenticated GitHub access, report **HELPER REPO ACCESS FAILED**. Do not report “fix missing” merely because it is absent from Wavefinity, and do not ask the human to paste a plan that exists in the helper repo.
+**Wavefinity contains the product. [Wavefinity-Help-Code](https://github.com/happydadto5/Wavefinity-Help-Code) contains the development protocol and Fix records.** The helper repository is private and requires authenticated access. A missing local `/fixes` directory is intentional, not evidence that a Fix is missing. Never copy, restore, or commit helper Fix records into this product repository.
 
-> **WHERE THE FIXES LIVE:** all fix plans (fix 1, fix 27, etc.) are in the separate private GitHub repo **`happydadto5/Wavefinity-Help-Code`**, in its `fixes/` folder. They are NOT in this repo. When told "implement fix N" or "read fix N", read `fixes/fix-00N.md` from that repo first (use `gh api`, see below). Never say a fix is missing without checking there.
+| Authority | Where it lives |
+| --- | --- |
+| Product behavior, architecture, code and project guidance | This Wavefinity repository and README |
+| Help Code workflow, role boundaries and testing limits | Helper `README.md`, `help-code-state.json` and its declared overrides |
+| Current coder assignment and startup/claim rules | Helper `reviews/code-chat.md` and `CODER.md` |
+| Exact implementation behavior and evidence | Assigned active Fix or fixlet in helper `fixes/`; its master controls shared ordering/status |
+| Permanent lifecycle ledger | Helper `fixes/Fix Master.md`, maintained by reviewers; coders neither read nor edit it |
+| Reviewer coordination | Helper `REVIEWER-CHAT.md`; use its current transport, not an old channel path |
 
-Wavefinity is developed through handoffs between **chat/planning LLMs** and **coding LLMs**. Project-wide rules and architecture live in this `README.md`.
+Use the helper's **current default branch**, freshly resolved through authenticated GitHub access. Read related authorities from the same resolved commit and record that SHA. Memory, old branches, copied plans, and unverified local files are not authority.
 
-**Help Code task records do not live in this repository.** The only authoritative Help Code store is the private GitHub repository `happydadto5/Wavefinity-Help-Code`.
+- **`code chat` / `chat code`** (including obvious standalone near-matches such as `hat code`) wakes the coder: read helper `CODER.md` and `reviews/code-chat.md` first. Follow only the current assignment. Claim it in the helper **before any product-repository access**, as described below.
+- **`chat`** wakes a reviewer: read helper state and `REVIEWER-CHAT.md`, then perform the reviewer work. It does not authorize coder implementation.
+- **`read fix 4`** means read helper `fixes/fix-004.md`; `Fix 35A` ordinarily uses `fixes/fix-035a.md`. For fixlet bundles, follow the current assignment/master's exact paths rather than inventing names. A read/review request does not itself start implementation.
+- An empty or unrelated cwd requires safe repository recovery, not a request for the PM to locate the code. If authoritative helper access actually fails, report **HELPER REPO ACCESS FAILED** with the concrete failure; never implement from a stale copy.
 
-- `happydadto5/Wavefinity-Help-Code/fixes/Fix Master.md` is the permanent ledger.
-- `happydadto5/Wavefinity-Help-Code/fixes/fix-###.md` is the active specification.
-- Completed specifications are archived there as `fix-### archive.md`.
-- This Wavefinity repository must not contain, restore, clone, or commit a local `/fixes` directory.
-
-If the human says **"read fix4"**, **"read fix 4"**, or equivalent shorthand, read the corresponding zero-padded file directly from the private Help Code repository's current `main`, for example `fixes/fix-004.md`. Do not ask the human to paste the plan when authenticated GitHub access is available.
-
-**Help Code planning quality gate:** Every implementation plan must be comprehensive enough that a junior coding LLM can execute it without rediscovering architecture, product decisions, affected code paths, edge cases, or completion criteria. Name relevant files/functions and give exact implementation direction or code-level structure whenever current code makes that reasonably possible. After drafting, re-read the plan against current code and requirements and revise until a complete pass finds no material issue.
+The helper protocol governs Help Code orchestration; this README governs product facts and project constraints; the active contract governs the assigned change within those rules. Generic non-Help-Code guidance below cannot broaden a Help Code task or weaken its testing/acceptance gates. Report a real conflict to reviewers instead of guessing.
 
 ### 1. User communication preferences
 - **Operate in "caveman mode"**: keep messages simple, plain, and short.
@@ -213,44 +215,15 @@ If the human says **"read fix4"**, **"read fix 4"**, or equivalent shorthand, re
 
 ### 2. Branch, commit & push workflow
 
-Starting with Fix 6, non-trivial Help Code work uses one temporary implementation branch per fix in this Wavefinity repository. The **code branch is local/remote Git work; the fix specification and ledger remain cloud-only in `Wavefinity-Help-Code`.**
+Help Code uses one active coder and the assigned implementation branch. Detailed lifecycle rules stay in the helper protocol; the integration boundary here is:
 
-#### Mandatory cloud + code remote-state gate
+1. **Read and claim in the helper first.** Read the current assignment, active contract, status, and outbrief. Follow `CODER.md`'s collision/replacement rules. Atomically record the required status + Work started claim and successfully push it before opening/inspecting/checking out the product. If claim writing is blocked, use the documented reviewer-fallback process and wait for its explicit confirmation; do not begin implementation.
+2. **Recover a safe product workspace.** After the claim, read this README and project instructions, fetch current remote state, and create/continue the exact assigned branch at the contract's pinned baseline. Never silently substitute the latest `main` for a pinned baseline or reset/stash/delete unrelated work. An existing branch or stale status alone is not a blocker; incompatible owned work or another unfinished coder claim is.
+3. **Implement and verify the contract.** Use one coder sequentially, with no parallel implementation subagents. Stay inside the assigned scope, inspect the diff, and perform only the verification permitted by the active contract and helper protocol.
+4. **Push and report.** Push the assigned product branch, then append the outbrief to the active helper Fix's permitted outbrief location. Include stage (Original Implementation / Correction N), helper SHA, exact product branch/HEAD, actual provider/model/thinking or Unknown, changed files, evidence and limitations. Coders do not edit Fix Master or reviewer mailboxes. If the final outbrief write fails, preserve it in the completion message and report the write failure; this does not waive the earlier claim requirement.
+5. **Reviewers finish the lifecycle.** Reviewers compare the actual implementation with the current contract and accepted product baseline. Corrections continue on the assigned branch. Reviewers own acceptance, integration, archive, ledger updates and dependency release. The coder does not merge or call an unaccepted implementation complete. If `main` moves, reviewers reconcile it under the helper integration rules; do not force-push or silently replace the baseline.
 
-A coding agent must **never trust a local fix file, local Fix Master, chat memory, a copied plan, or an old branch** as the authoritative Help Code state.
-
-Before reading or implementing every Help Code fix:
-
-1. Read this current Wavefinity `README.md` from current `origin/main`.
-2. Read the requested fix directly from the private Help Code repository's current `main` using authenticated GitHub access. Example:
-   `gh api -H "Accept: application/vnd.github.raw+json" repos/happydadto5/Wavefinity-Help-Code/contents/fixes/fix-012.md`
-3. Read cloud Fix Master directly:
-   `gh api -H "Accept: application/vnd.github.raw+json" repos/happydadto5/Wavefinity-Help-Code/contents/fixes/Fix%20Master.md`
-4. Record the exact Help Code repository `main` commit SHA used:
-   `gh api repos/happydadto5/Wavefinity-Help-Code/commits/main --jq .sha`
-5. Confirm the requested fix exists and Fix Master says it is ready/active for implementation. If the two cloud files disagree, or authenticated access fails, **STOP**. Do not fall back to a cached or local copy.
-6. Sync the Wavefinity code checkout separately: run `git fetch --prune origin`, switch to local `main`, then `git merge --ff-only origin/main`.
-7. Prove local Wavefinity `HEAD` equals `origin/main`. If not, **STOP**.
-8. Only then create/switch to the exact assigned `fixN` branch from current `origin/main` and begin implementation.
-9. Never create, restore, or commit a Wavefinity `/fixes` directory.
-
-The cloud Help Code repository is the authority even if an old Wavefinity commit or branch historically contains a `/fixes` folder.
-
-Planner-side handoff rule: before telling the coding agent to implement a fix, the outside ChatGPT planner verifies in `happydadto5/Wavefinity-Help-Code` current `main` that the active fix file exists, Fix Master has the intended ready/active status, and the cloud file contains the final rechecked plan.
-
-- `main` is the accepted Wavefinity implementation line. Do not implement Help Code work directly on `main`.
-- Each fix uses branch `fixN`, using the unpadded number: `fix6`, `fix9`, `fix12`, etc.
-- Old unrelated branches are not blockers. Stop only when the exact assigned branch already exists and its ownership/state is unclear.
-- Coding agents work only on the assigned Wavefinity `fixN` branch. Never force-push/rewrite `main` or merge the fix to `main` before outside review authorizes it.
-- Make the coherent implementation, inspect the diff, perform the verification explicitly required by the active cloud fix, commit coherently, and push `origin/fixN`.
-- At implementation completion, put the outbrief in the **cloud active fix file in `Wavefinity-Help-Code`**, including the Help Code specification SHA used, implementation commit SHA, files changed, tests/results, deviations, and environment limitations. Do not put the outbrief in a Wavefinity `/fixes` directory.
-- Coding agents must never edit cloud `Fix Master.md`. If the coding environment can read but cannot write the private Help Code repository, include the full outbrief in the completion message and do not create a local fix file; the outside ChatGPT reviewer will write it to the cloud record.
-- ChatGPT's outside completion review compares `fixN` against current Wavefinity `main` and the exact cloud fix specification.
-- If review returns **NO — NOT FULLY DONE**, corrections continue on the same `fixN` branch.
-- If review returns **YES — DONE**, the outside ChatGPT reviewer owns finalization when repository write/merge capability is available: integrate the accepted code into Wavefinity `main`, archive the active fix in `Wavefinity-Help-Code`, update cloud Fix Master there, verify both repositories, and release any downstream fixes whose prerequisites are now satisfied.
-- If two active fixes overlap implementation files, prefer sequencing. If work already overlaps, the later branch must incorporate current `origin/main` after the earlier fix merges and be reviewed again against the new base.
-- If another accepted fix lands on `main` while a branch is active, incorporate current `origin/main` before final review whenever the new change overlaps, affects a dependency, or changes assumptions.
-- If multiple coding agents are active at once, use separate clones/worktrees rather than one working directory that switches branches.
+For planning/release, reviewers verify the active authority, prerequisites, exact branch/baseline, settled product decisions and required sign-offs before updating the current coder assignment. A historical READY file or stale ledger label never selects the coder's next job.
 
 The hosted app tracks `main`; fix branches remain isolated until outside review accepts them.
 
@@ -258,7 +231,7 @@ The hosted app tracks `main`; fix branches remain isolated until outside review 
 
 #### Purpose & Core Rule
 
-> **Help Code override:** The generic testing guidance below is for work without an active Help Code implementation contract. For a Help Code Fix/correction, the active cloud fix is the sole task-specific authority for testing. If it says not to write, update, or run automated tests, do not do so regardless of the generic Class A/B/C guidance below.
+> **Help Code override:** The generic testing guidance below is for work without an active Help Code implementation contract. For a Help Code Fix/correction, the active cloud fix selects task-specific verification within the helper protocol's standing limits, including its full-suite approval gate and retired-browser policy. If it says not to write, update, or run automated tests, do not do so regardless of the generic Class A/B/C guidance below.
 
 > **MAXIMIZE CONFIDENCE PER TOKEN.**
 > Use cheap automated tests when they materially improve confidence.
