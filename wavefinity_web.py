@@ -7,36 +7,7 @@ validation and export comes from the existing Python geometry engine.
 
 from __future__ import annotations
 
-import argparse
-from collections import OrderedDict
-from contextlib import contextmanager
-from dataclasses import replace
-import hashlib
-import ipaddress
-import json
-import math
-import mimetypes
-import os
-from pathlib import Path
-import re
-import shutil
-import signal
-import secrets
-import subprocess
-import sys
-import threading
-import time
-import tempfile
-import uuid
-import webbrowser
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Callable
-from urllib.parse import quote, unquote, urlparse
-from urllib.request import urlopen
-
-import numpy as np
-
+# Names this module used to re-export from sibling modules (kept for compatibility).
 from organizer_engine import (
     TEXT_MIN_BACKING,
     connector_arm_thickness_floor,
@@ -147,8 +118,6 @@ from organizer_inserts import (
 )
 from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED, is_walls_only, normalize_bore_style, bore_reference_top
 from organizer_inserts._core import ITEM_CLEARANCE, ITEM_PROFILES, feature_touches_wall
-from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
-from bambu_handoff import _validate_settings_safe, is_bambu_studio_executable, stage_bambu_inputs
 from organizer_drawer import (
     blocking_problem_messages, blocking_problem_copy, drawer_report, drawer_routes, generate_connectors, inventory_row_files,
     prepare_inventory_bins, selected_blocking_problems, stack_part_height,
@@ -320,45 +289,182 @@ from organizer_side_openings import (
 )
 from organizer_pegboard import pegboard_catalog, pegboard_layout_for_bin
 
+from dataclasses import replace
+import ipaddress
+import json
+import math
+import mimetypes
+import os
+from pathlib import Path
+import shutil
+import secrets
+import subprocess
+import sys
+import threading
+import time
+import tempfile
+import webbrowser
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Callable
+from urllib.parse import quote, unquote, urlparse
+from urllib.request import urlopen
+from photo_nest import photo_outline_from_data
+from bambu_handoff import (
+    _validate_settings_safe,
+    is_bambu_studio_executable,
+    stage_bambu_inputs,
+)
 
-WEB_ROOT = APP_DIR / "web"
-IMAGE_ROOT = APP_DIR / "images"
-DEFAULT_OUTPUT = APP_DIR / "generated"
+from wavefinity_web_impl._runtime import (
+    WEB_ROOT,
+    IMAGE_ROOT,
+    DEFAULT_OUTPUT,
+    SERVER_VERSION,
+    API_COMPAT_VERSION,
+    SERVER_INSTANCE,
+    SERVER_BUILD,
+    SOURCE_FILES,
+    source_fingerprint,
+    SOURCE_ROOT,
+    SOURCE_FINGERPRINT,
+    GEOMETRY_LOCK,
+    _PREVIEW_REQUEST_LOCK,
+    _PREVIEW_REQUESTS,
+    _SupersededGeometry,
+    _register_preview_request,
+    _preview_geometry_lock,
+    LEGACY_PREFERENCES_FILE,
+    _user_config_dir,
+    PREFERENCES_LOCK,
+    EXPORT_LOCK,
+    EXPORT_TTL_SECONDS,
+    EXPORTS,
+    OPERATION_LOCK,
+    OPERATION_REGISTRY,
+    OPERATION_TTL_SECONDS,
+    OPERATION_MAX_ENTRIES,
+    _prune_operations,
+    _idempotent_operation,
+    operation_status_payload,
+    default_design,
+    _stack_base_min_by_wall,
+    _read_preferences_file,
+    _write_preferences_file,
+    CONNECTOR_SETTINGS_FILENAME,
+    _write_connector_settings_path,
+    _drop_legacy_connector_settings,
+    _interior_work_box,
+    WavefinityServer,
+    build_parser,
+    _pid_on_port,
+    _replace_stale_process,
+)
+from wavefinity_web_impl._nest import (
+    _json_value,
+    feature_to_dict,
+    _item_from_json,
+    _feature_from_json,
+    NEST_TOOL_TOP_CLEARANCE,
+    _nest_effective_z_requirement,
+    _legacy_nest_z_requirement,
+    _fit_photo_nest_box,
+    _auto_size_photo_nest_box,
+    _sized_photo_nest_box,
+    _auto_size_photo_nest_layout_box,
+    _resolve_photo_nest_edit,
+    nest_retrace_payload,
+    photo_nest_payload,
+    _first_open_position,
+    _option_payload,
+)
+from wavefinity_web_impl._designs import (
+    _design,
+    _is_base_trim_design,
+    _base_trim_preview_meshes,
+    _base_trim_preview_payload,
+    _reject_if_b4b,
+    _footprint_bounds,
+    _resolved_text,
+    _b4b_preview_payload,
+    validate_design_payload,
+    default_feature_payload,
+    _divider_cells_payload,
+    _bore_required_bin_z,
+    _bore_height_bin,
+    draft_payload,
+    _draft_payload,
+    feature_fit_payload,
+    apply_feature_payload,
+    apply_reference_payload,
+    duplicate_feature_payload,
+    delete_feature_payload,
+    mode_payload,
+    expand_layout_payload,
+    inventory_preview_payload,
+    pegboard_layouts_payload,
+    create_space_text_payload,
+    configure_space_text_payload,
+)
+from wavefinity_web_impl._ai import (
+    AI_DESIGN_SCHEMA,
+    AI_FEATURE_REFERENCE_REPO,
+    AI_FEATURE_REFERENCE_PATH,
+    _HEX40,
+    ai_feature_reference_url,
+    AI_MAX_DESCRIPTION,
+    AI_MAX_RESPONSE,
+    AI_SPACE_KINDS,
+    AI_MEDIA_CAPABILITIES,
+    AI_MEDIA_REASON,
+    AI_MODIFIER_BLOCKS,
+    _AI_PATH_RE,
+    _ai_example_base,
+    _ai_legal_values,
+    _AI_GENERIC_FIELD_EXCLUSIONS,
+    _ai_generic_fields,
+    _ai_modifier_examples,
+    _ai_clean_text,
+    _ai_safe_message,
+    _ai_bin_design,
+    _ai_space_context,
+    _capped_space_height,
+    _ai_controlled_fields,
+    _ai_fingerprint,
+    _ai_prompt_text,
+    _ai_num,
+    _ai_item_profile_violation,
+    _ai_close,
+    _ai_semantic_violation,
+    ai_repair_prompt_payload,
+)
+from wavefinity_web_impl._outputs import (
+    slicer_name,
+    _find_bambu_studio_windows,
+    _find_bambu_studio_darwin,
+    _find_bambu_studio_linux,
+    SLICER_HANDOFF_TIMEOUT_S,
+    open_log_with_wordpad,
+    _PartialConnectorBundleError,
+    _remove_export,
+    _clean_expired_exports,
+    _extract_generated_files,
+    _printed_reuse_files,
+    _is_storage_drawers_request,
+    storage_drawers_mutate_text_payload,
+    storage_drawers_preview_meshes,
+    storage_drawers_validate_payload,
+    storage_drawers_reset_payload,
+    _storage_box_printer_fit,
+    _is_base_trim_request,
+    _storage_box_arrangement_issue,
+    _surface_arrangement_issue,
+)
+
 HOSTED = (
     os.environ.get("WAVEFINITY_DEPLOYMENT", "local").lower() == "hosted"
     or os.environ.get("RENDER", "").lower() == "true"
 )
-SERVER_VERSION = "1"
-API_COMPAT_VERSION = 2
-SERVER_INSTANCE = uuid.uuid4().hex
-SERVER_BUILD = os.environ.get("RENDER_GIT_COMMIT", SERVER_VERSION)[:12]
-SOURCE_FILES = (
-    "wavefinity_web.py", "web/index.html", "web/app.js", "web/spaces.js",
-    "web/styles.css", "web/drawer-panel.js", "web/drawer-model.js",
-    "web/storage-drawers.js", "web/storage-drawers-form.js",
-    "web/storage-drawers-workspace.js", "web/storage-box-form.js",
-    "web/structural-design.js", "images/Drawer.png",
-    "images/StorageDrawers.png",
-)
-
-
-def source_fingerprint(root: Path = APP_DIR) -> str:
-    digest = hashlib.sha256()
-    for relative in SOURCE_FILES:
-        path = root / relative
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        if path.is_file():
-            digest.update(b"<present>")
-            digest.update(path.read_bytes())
-        else:
-            digest.update(b"<missing>")
-        digest.update(b"\0")
-    return digest.hexdigest()[:12]
-
-
-SOURCE_ROOT = str(APP_DIR.resolve())
-SOURCE_FINGERPRINT = source_fingerprint()
 
 
 def health_payload(client_address: str, *, hosted: bool = HOSTED) -> dict[str, Any]:
@@ -375,208 +481,12 @@ def health_payload(client_address: str, *, hosted: bool = HOSTED) -> dict[str, A
         result["source_root"] = SOURCE_ROOT
     return result
 
-GEOMETRY_LOCK = threading.RLock()
-_PREVIEW_REQUEST_LOCK = threading.Lock()
-_PREVIEW_REQUESTS: OrderedDict[tuple[str, str], tuple[int, float]] = OrderedDict()
-
-
-class _SupersededGeometry(Exception):
-    pass
-
-
-def _register_preview_request(payload: dict[str, Any], lane: str) -> tuple[str, str, int] | None:
-    if not isinstance(payload, dict):
-        return None
-    client = payload.get("client_id")
-    generation = payload.get("generation")
-    if (not isinstance(client, str) or not 0 < len(client) <= 128
-            or type(generation) is not int or generation < 0):
-        return None
-    key = (client, lane)
-    now = time.monotonic()
-    with _PREVIEW_REQUEST_LOCK:
-        previous = _PREVIEW_REQUESTS.get(key)
-        _PREVIEW_REQUESTS[key] = (max(generation, previous[0]) if previous else generation, now)
-        _PREVIEW_REQUESTS.move_to_end(key)
-        while _PREVIEW_REQUESTS and (len(_PREVIEW_REQUESTS) > 256
-                                     or now - next(iter(_PREVIEW_REQUESTS.values()))[1] > 600):
-            _PREVIEW_REQUESTS.popitem(last=False)
-    return client, lane, generation
-
-
-@contextmanager
-def _preview_geometry_lock(token: tuple[str, str, int] | None):
-    while True:
-        GEOMETRY_LOCK.acquire()
-        if token is None:
-            break
-        if _PREVIEW_REQUEST_LOCK.acquire(blocking=False):
-            try:
-                latest = _PREVIEW_REQUESTS.get(token[:2])
-            finally:
-                _PREVIEW_REQUEST_LOCK.release()
-            if latest is not None and token[2] < latest[0]:
-                GEOMETRY_LOCK.release()
-                raise _SupersededGeometry()
-            break
-        GEOMETRY_LOCK.release()
-        # Never wait for the registry lock while holding the geometry lock.
-        with _PREVIEW_REQUEST_LOCK:
-            pass
-    try:
-        yield
-    finally:
-        GEOMETRY_LOCK.release()
-LEGACY_PREFERENCES_FILE = APP_DIR / "wavefinity_prefs.json"
-
-
-def _user_config_dir() -> Path:
-    """The current OS user's Wavefinity settings folder."""
-    home = Path.home()
-    if sys.platform == "win32":
-        base = os.environ.get("APPDATA")
-        return (Path(base) if base else home / "AppData" / "Roaming") / "Wavefinity"
-    if sys.platform == "darwin":
-        return home / "Library" / "Application Support" / "Wavefinity"
-    base = os.environ.get("XDG_CONFIG_HOME")
-    return (Path(base) if base else home / ".config") / "Wavefinity"
-
 
 # A hosted server is not the end user's profile; it keeps the old file.
 PREFERENCES_FILE = (
     LEGACY_PREFERENCES_FILE if HOSTED else _user_config_dir() / "wavefinity_prefs.json"
 )
-PREFERENCES_LOCK = threading.RLock()
 PID_FILE = Path(os.environ.get("WAVEFINITY_PID_FILE", str(APP_DIR / "wavefinity.pid")))
-EXPORT_LOCK = threading.RLock()
-EXPORT_TTL_SECONDS = 15 * 60
-EXPORTS: dict[str, dict[str, Any]] = {}
-
-# (Fix 096 A5) Side-effecting operations registry. The browser's timeout only
-# aborts its own wait: Python keeps running the Generate / Save / Print to
-# completion in the handler thread. Every side-effecting route registered in
-# A5-b runs through _idempotent_operation below: the client supplies one
-# operation_id per logical operation and the registry guarantees the route
-# body executes at most once per id. A duplicate id while the first request
-# is running returns {"operation_status": "running"}; after completion it
-# returns the stored result (or re-raises the stored error). The read-only
-# /api/operation-status endpoint lets the UI poll the first request until it
-# is terminal instead of showing a generic "try again".
-OPERATION_LOCK = threading.RLock()
-OPERATION_REGISTRY: dict[str, dict[str, Any]] = {}
-OPERATION_TTL_SECONDS = 60 * 60
-OPERATION_MAX_ENTRIES = 500
-
-
-def _prune_operations(now: float) -> None:
-    # (Fix 096 A5) Never evict a running operation: its id must keep mapping
-    # to the in-flight execution until it reaches a terminal state, otherwise
-    # a retried request with the same id could start a second execution.
-    # Only terminal (done/error) entries are pruned.
-    stale = [key for key, entry in OPERATION_REGISTRY.items()
-             if entry["status"] != "running"
-             and now - entry["finished_at"] > OPERATION_TTL_SECONDS]
-    for key in stale:
-        del OPERATION_REGISTRY[key]
-    while len(OPERATION_REGISTRY) > OPERATION_MAX_ENTRIES:
-        terminal = [key for key in OPERATION_REGISTRY
-                    if OPERATION_REGISTRY[key]["status"] != "running"]
-        if not terminal:
-            break
-        oldest = min(terminal,
-                     key=lambda key: OPERATION_REGISTRY[key]["finished_at"])
-        del OPERATION_REGISTRY[oldest]
-
-
-def _idempotent_operation(route):
-    """Run a side-effecting POST route at most once per client operation_id.
-
-    The id rides inside the request payload as "operation_id". A request with
-    no id, a non-string id, or an id longer than 128 characters runs exactly
-    as today (pass-through): reads and legacy callers are unaffected.
-    """
-    def wrapped(payload):
-        operation_id = payload.get("operation_id") if isinstance(payload, dict) else None
-        if not isinstance(operation_id, str) or not operation_id or len(operation_id) > 128:
-            return route(payload)
-        with OPERATION_LOCK:
-            _prune_operations(time.time())
-            entry = OPERATION_REGISTRY.get(operation_id)
-            if entry is not None:
-                if entry["status"] == "running":
-                    return {"operation_id": operation_id, "operation_status": "running"}
-                if entry["status"] == "done":
-                    return entry["result"]
-                # A stored failure re-raises in the same status class the first
-                # attempt produced, so a duplicate sees the same HTTP status
-                # (400 for client errors, 500 otherwise).
-                if entry["error_kind"] == "client":
-                    raise ValueError(entry["error"])
-                raise RuntimeError(entry["error"])
-            OPERATION_REGISTRY[operation_id] = {
-                "status": "running", "result": None,
-                "error": None, "error_kind": None, "finished_at": time.time(),
-            }
-        try:
-            result = route(payload)
-        except Exception as error:
-            with OPERATION_LOCK:
-                OPERATION_REGISTRY[operation_id] = {
-                    "status": "error", "result": None,
-                    "error": str(error) or "The earlier request failed.",
-                    "error_kind": "client" if isinstance(error, (KeyError, TypeError, ValueError)) else "server",
-                    "finished_at": time.time(),
-                }
-            raise
-        with OPERATION_LOCK:
-            OPERATION_REGISTRY[operation_id] = {
-                "status": "done", "result": result,
-                "error": None, "error_kind": None, "finished_at": time.time(),
-            }
-        return result
-    wrapped.__name__ = getattr(route, "__name__", "operation")
-    return wrapped
-
-
-def operation_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Read-only: report one side-effecting operation's state. (Fix 096 A5)"""
-    operation_id = payload.get("operation_id") if isinstance(payload, dict) else None
-    with OPERATION_LOCK:
-        entry = OPERATION_REGISTRY.get(operation_id) if isinstance(operation_id, str) else None
-    if entry is None:
-        return {"operation_id": operation_id, "operation_status": "unknown"}
-    if entry["status"] == "running":
-        return {"operation_id": operation_id, "operation_status": "running"}
-    if entry["status"] == "done":
-        return {"operation_id": operation_id, "operation_status": "done", "result": entry["result"]}
-    return {"operation_id": operation_id, "operation_status": "error", "error": entry["error"]}
-
-
-def default_design() -> dict[str, Any]:
-    box = BoxSpec(x=2 * BASE_UNIT, y=6 * BASE_UNIT, z=40.0)
-    return design_to_dict(box, Layout((), "fused", EDITOR_SNAP))
-
-
-def _stack_base_min_by_wall() -> dict[str, dict[str, float]]:
-    """Required base thickness for every stacking wall step, by mode.
-
-    Minimum base thickness depends on wall thickness (the foot's flare has to
-    finish inside solid base material), so the browser cannot carry a fixed
-    number here - it has to read the same geometry stack_base_minimum() uses.
-    """
-    probe = BoxSpec(x=2 * BASE_UNIT, y=6 * BASE_UNIT, z=100.0)
-    table: dict[str, dict[str, float]] = {"lid": {}, "direct": {}}
-    steps = round((MAX_WALL - STACK_MIN_WALL) / WALL_STEP)
-    for i in range(steps + 1):
-        wall = round(STACK_MIN_WALL + i * WALL_STEP, 3)
-        for mode in ("lid", "direct"):
-            box = replace(
-                probe, wall=wall, standard_walls=False,
-                stack=StackSpec(mode="direct") if mode == "direct" else StackSpec(),
-                lid=LidSpec(enabled=True, stackable=True) if mode == "lid" else LidSpec(),
-            )
-            table[mode][f"{wall:g}"] = round(stack_base_minimum(box), 3)
-    return table
 
 
 def load_preferences() -> dict[str, Any]:
@@ -592,21 +502,6 @@ def load_preferences() -> dict[str, Any]:
         if PREFERENCES_FILE.exists() or PREFERENCES_FILE == LEGACY_PREFERENCES_FILE:
             return _read_preferences_file(PREFERENCES_FILE)
         return _read_preferences_file(LEGACY_PREFERENCES_FILE)
-
-
-def _read_preferences_file(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _write_preferences_file(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_file = path.with_suffix(".tmp")
-    temp_file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    temp_file.replace(path)
 
 
 def mutate_preferences(mutator: Callable[[dict[str, Any]], Any]) -> dict[str, Any]:
@@ -627,9 +522,6 @@ def save_preferences(update: dict[str, Any]) -> dict[str, Any]:
     return mutate_preferences(lambda current: current.update(update))
 
 
-CONNECTOR_SETTINGS_FILENAME = "connector_settings.json"
-
-
 def connector_settings_path(prefs: dict[str, Any] | None = None) -> Path | None:
     """Where desktop connector settings live: inside the Wavefinity folder.
 
@@ -646,19 +538,6 @@ def connector_settings_path(prefs: dict[str, Any] | None = None) -> Path | None:
         return None
     root = Path(storage["root"])
     return root / CONNECTOR_SETTINGS_FILENAME if root.is_dir() else None
-
-
-def _write_connector_settings_path(path: Path, settings: dict[str, Any]) -> None:
-    """Atomic JSON write that never creates the parent Wavefinity folder."""
-    if not path.parent.is_dir():
-        raise FileNotFoundError(path.parent)
-    temp_file = path.with_suffix(".tmp")
-    temp_file.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    temp_file.replace(path)
-
-
-def _drop_legacy_connector_settings(current: dict[str, Any]) -> None:
-    current.pop("connector_settings", None)
 
 
 def read_connector_settings_file(path: Path | None = None) -> dict[str, Any]:
@@ -735,309 +614,6 @@ def served_preferences() -> dict[str, Any]:
         return prefs
 
 
-def _json_value(value: Any) -> Any:
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, dict):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_json_value(item) for item in value]
-    return value
-
-
-def feature_to_dict(one: Feature, mode: str = "fused") -> dict[str, Any]:
-    return layout_to_dict(Layout((one,), mode, EDITOR_SNAP))["features"][0]
-
-
-def _item_from_json(raw: dict[str, Any] | None) -> Item | None:
-    if not raw:
-        return None
-    segments = tuple(
-        Segment(float(segment["length"]), float(segment["diameter"]))
-        for segment in raw.get("segments", [])
-        if str(segment.get("length", "")).strip()
-        and str(segment.get("diameter", "")).strip()
-    )
-    if not segments:
-        raise ValueError("enter the stored item's length and thickness")
-    return Item(
-        str(raw.get("name", "Custom item")).strip() or "Custom item",
-        segments,
-        str(raw.get("profile", "round")),
-        float(raw.get("clearance", 0.4)),
-    )
-
-
-def _feature_from_json(raw: dict[str, Any], mode: str) -> Feature:
-    data = dict(raw)
-    options = {
-        str(key): option_value(str(key), value, str(data.get("kind", "")))
-        for key, value in dict(data.get("options", {})).items()
-        if str(value).strip() != ""
-    }
-    data["options"] = options
-    if data.get("count") in {"", "auto", None}:
-        data["count"] = None
-    data["item"] = data.get("item") or None
-    layout = layout_from_dict({
-        "version": 1,
-        "mode": mode,
-        "snap": EDITOR_SNAP,
-        "features": [data],
-    })
-    return layout.features[0]
-
-
-NEST_TOOL_TOP_CLEARANCE = 1.0  # mm of clear air above the tool's own top
-
-
-def _nest_effective_z_requirement(
-    box: BoxSpec, mode: str, base_z: float, resolved: dict[str, Any],
-) -> float:
-    """The smallest interior work-box Z this Nest can legally use: enough for
-    the printable structural minimum, 1 mm of air above the tool's own top,
-    and whatever the resolved holder geometry itself rises to."""
-    tool_thickness = float(resolved["tool_thickness"])
-    if str(resolved["holder_style"]) == "recessed":
-        geometry_top = base_z + float(resolved["cavity_depth"])
-    else:
-        push_depth = (
-            float(resolved["push_depth"]) if str(resolved["lift_assist"]) == "push_out" else 0.0
-        )
-        geometry_top = base_z + tool_thickness + push_depth
-    tool_top_requirement = base_z + tool_thickness + NEST_TOOL_TOP_CLEARANCE
-    structural_minimum = base_z + MIN_HEIGHT_ABOVE_BASE
-    return max(structural_minimum, tool_top_requirement, geometry_top)
-
-
-def _legacy_nest_z_requirement(box: BoxSpec, mode: str, resolved: dict[str, Any]) -> float:
-    """The exact historical grow-only Z requirement for a true legacy Nest
-    (no stored holder_style): base_z + its depth, plus Push Out's own deck
-    depth when active. No new 1 mm tool-top clearance, no structural-minimum
-    floor beyond whatever the box already is - that policy is new-format
-    only and must not change a legacy design's sizing just because it is
-    edited or re-applied."""
-    base_z = base_height(box, mode)
-    tool_thickness = float(resolved["tool_thickness"])
-    push_depth = float(resolved["push_depth"]) if str(resolved["lift_assist"]) == "push_out" else 0.0
-    return base_z + tool_thickness + push_depth
-
-
-def _fit_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
-    """Legacy grow-only sizing, for a design saved before Auto-size existed.
-
-    The current dimensions are floors: uploading or editing a smaller outline
-    must not undo a larger bin the user deliberately chose.
-    """
-    resolved = resolve_nest_settings(box, one, base_height(box, mode))
-    required_x = 2.0 * max(abs(one.zone.x0), abs(one.zone.x1))
-    required_y = 2.0 * max(abs(one.zone.y0), abs(one.zone.y1))
-    x = max(box.x, BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
-    y = max(box.y, BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
-    z_requirement = (
-        _legacy_nest_z_requirement(box, mode, resolved) if is_legacy_nest(one)
-        else _nest_effective_z_requirement(box, mode, base_height(box, mode), resolved)
-    )
-    z = max(box.z, z_requirement)
-    for _attempt in range(200):
-        trial = replace(box, x=float(x), y=float(y), z=float(z))
-        bounds = layout_zone(trial, mode)
-        grow_x = one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
-        grow_y = one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6
-        if not grow_x and not grow_y:
-            return trial
-        if grow_x:
-            x += BASE_UNIT
-        if grow_y:
-            y += BASE_UNIT
-    raise ValueError("the photographed outline is too large for a printable bin")
-
-
-def _auto_size_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
-    """New Auto-size: the smallest legal X/Y footprint that holds the fitted,
-    centred Nest - Width and Length may grow or shrink, but the box's existing
-    Height is always preserved exactly. Height is user-controlled; a fused
-    Raised Wall taller than the rim is a layout-mode policy decision made
-    centrally in ``build_features``, not something footprint auto-sizing may
-    resolve by growing Z."""
-    trial: BoxSpec | None = None
-    required_x = 2.0 * max(abs(one.zone.x0), abs(one.zone.x1))
-    required_y = 2.0 * max(abs(one.zone.y0), abs(one.zone.y1))
-    x = max(BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
-    y = max(BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
-    for _attempt in range(400):
-        trial = replace(box, x=float(x), y=float(y))
-        bounds = layout_zone(trial, mode)
-        grow_x = one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
-        grow_y = one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6
-        if not grow_x and not grow_y:
-            break
-        if grow_x:
-            x += BASE_UNIT
-        if grow_y:
-            y += BASE_UNIT
-    else:
-        raise ValueError("the photographed outline is too large for a printable bin")
-    for axis in ("x", "y"):
-        while True:
-            try:
-                candidate = replace(trial, **{axis: getattr(trial, axis) - BASE_UNIT})
-            except ValueError:
-                break
-            bounds = layout_zone(candidate, mode)
-            if (one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
-                    or one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6):
-                break
-            trial = candidate
-    return trial
-
-
-def _sized_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> tuple[BoxSpec, Feature]:
-    """Apply this Nest's sizing policy: new Auto grows, shrinks and recentres
-    around the fitted outline; Manual never resizes, and reports a plain fit
-    error instead; legacy (no stored preference) only ever grows, unchanged
-    from before Auto-size existed."""
-    resolved = resolve_nest_settings(box, one, base_height(box, mode))
-    auto_size = resolved.get("auto_size")
-    if auto_size is True:
-        one = fitted_nest_feature(one, (0.0, 0.0))
-        return _auto_size_photo_nest_box(box, one, mode), one
-    if auto_size is False:
-        one = fitted_nest_feature(one, one.zone.centre)
-        base_z = base_height(box, mode)
-        bounds = layout_zone(box, mode)
-        xy_fails = (
-            one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
-            or one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6
-        )
-        # A fused Raised Wall is allowed to rise above the rim, so its own
-        # height is not a fit failure there; Recessed always depends on real
-        # material above the floor, and any non-fused mode still clips to the
-        # bin, so both keep the Z check.
-        must_fit_z = (
-            mode != "fused"
-            or str(resolved["holder_style"]) == "recessed"
-        )
-        z_fails = False
-        if must_fit_z:
-            z_required = _nest_effective_z_requirement(box, mode, base_z, resolved)
-            z_fails = z_required > box.z + 1e-6
-        if xy_fails:
-            raise ValueError(
-                "This Photo Nest no longer fits its bin. Use “Fit footprint to "
-                "tool” below, or turn Automatic footprint sizing back on."
-            )
-        if z_fails:
-            raise ValueError(
-                "This Photo Nest's holder no longer fits the bin's Height. "
-                "Increase Bin Height, or reduce the Tool thickness or other "
-                "measurement that controls its height."
-            )
-        return box, one
-    one = fitted_nest_feature(one, one.zone.centre)
-    return _fit_photo_nest_box(box, one, mode), one
-
-
-def _auto_size_photo_nest_layout_box(box: BoxSpec, features: list[Feature], mode: str,
-                                     *, grow_only: bool = False) -> BoxSpec:
-    """Smallest grid box holding every independently placed Nest group."""
-    required_x = 2.0 * max(max(abs(one.zone.x0), abs(one.zone.x1)) for one in features)
-    required_y = 2.0 * max(max(abs(one.zone.y0), abs(one.zone.y1)) for one in features)
-    x = max(box.x if grow_only else BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
-    y = max(box.y if grow_only else BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
-    for _attempt in range(400):
-        trial = replace(box, x=float(x), y=float(y))
-        bounds = layout_zone(trial, mode)
-        if all(bounds.x0 - 1e-6 <= one.zone.x0 and one.zone.x1 <= bounds.x1 + 1e-6
-               and bounds.y0 - 1e-6 <= one.zone.y0 and one.zone.y1 <= bounds.y1 + 1e-6
-               for one in features):
-            break
-        if any(one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6 for one in features):
-            x += BASE_UNIT
-        if any(one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6 for one in features):
-            y += BASE_UNIT
-    else:
-        raise ValueError("the photographed outline is too large for a printable bin")
-    if not grow_only:
-        for axis in ("x", "y"):
-            while getattr(trial, axis) - BASE_UNIT >= BASE_UNIT:
-                candidate = replace(trial, **{axis: getattr(trial, axis) - BASE_UNIT})
-                bounds = layout_zone(candidate, mode)
-                if not all(bounds.x0 - 1e-6 <= one.zone.x0 and one.zone.x1 <= bounds.x1 + 1e-6
-                           and bounds.y0 - 1e-6 <= one.zone.y0 and one.zone.y1 <= bounds.y1 + 1e-6
-                           for one in features):
-                    break
-                trial = candidate
-    return trial
-
-
-def _resolve_photo_nest_edit(
-    request_box: BoxSpec,
-    layout: Layout,
-    one: Feature,
-    label: str,
-    label_location: str,
-    scoop: bool,
-    *,
-    index: int | None = None,
-    request_token=None,
-) -> tuple[BoxSpec, BoxSpec, Layout, Feature, list[str], list[Any]]:
-    """Repair a live Nest edit before anything can reject stale dimensions."""
-    if one.kind != "nest" or not one.contour:
-        raise ValueError("upload a part photo before adding a Photo Nest")
-    if any(existing.kind != "nest" for existing in layout.features):
-        raise ValueError("Photo Nest designs can contain Photo Nests only.")
-    one, warnings = clamp_nest_feature_options(one)
-    box = _interior_work_box(request_box)
-    features = list(layout.features)
-    if index is None:
-        if features:
-            raise ValueError("Duplicate an existing Photo Nest first, then use Replace Photo on that copy.")
-        selected = 0
-        features.append(one)
-    else:
-        if not 0 <= index < len(features) or features[index].kind != "nest":
-            raise ValueError("the selected Photo Nest no longer exists")
-        selected = index
-        features[selected] = one
-    resolved = resolve_nest_settings(box, one, base_height(box, layout.mode))
-    recenter = len(features) == 1 and resolved.get("auto_size") is True
-    one = fitted_nest_feature(one, (0.0, 0.0) if recenter else one.zone.centre)
-    features[selected] = one
-    auto_size = resolved.get("auto_size")
-    if auto_size is True:
-        grown = _auto_size_photo_nest_layout_box(box, features, layout.mode)
-    elif auto_size is None:
-        grown = _auto_size_photo_nest_layout_box(box, features, layout.mode, grow_only=True)
-    else:
-        grown = box
-        bounds = layout_zone(box, layout.mode)
-        if not all(bounds.x0 - 1e-6 <= member.zone.x0 and member.zone.x1 <= bounds.x1 + 1e-6
-                   and bounds.y0 - 1e-6 <= member.zone.y0 and member.zone.y1 <= bounds.y1 + 1e-6
-                   for member in features):
-            raise ValueError("This Photo Nest no longer fits its bin. Turn Automatic footprint sizing back on or enlarge the bin.")
-    request_box = replace(
-        request_box, x=grown.x, y=grown.y,
-        z=request_box.z + (grown.z - box.z),
-    )
-    box = _interior_work_box(request_box)
-    updated = replace(layout, features=tuple(features))
-    updated.validate(box)
-    validate_customization_clearance(
-        box, updated.features, label, label_location, scoop, updated.mode
-    )
-    with _preview_geometry_lock(request_token):
-        solids = build_features(
-            box, updated.features, base_height(box, updated.mode),
-            layout_zone(box, updated.mode), updated.mode,
-        )
-    return request_box, box, updated, one, warnings, solids
-
-
 def nest_trace_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Trace-only phase (spec section 1): paper detection/correction,
     segmentation and contour extraction. Independent of any design - it does
@@ -1070,201 +646,6 @@ def nest_trace_payload(payload: dict[str, Any]) -> dict[str, Any]:
         # never written into the saved design.
         result["rectified_image"] = outline.rectified_image
     return result
-
-
-def nest_retrace_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Re-tune an already-rectified reference sheet without repeating paper
-    detection or perspective correction. Purely informational: the caller
-    decides whether/when to accept the candidate outline it returns."""
-    outline = retrace_outline_from_rectified(
-        str(payload.get("rectified_image", "")), str(payload.get("mime_type", "image/jpeg")),
-        float(payload.get("sensitivity", 50.0)), float(payload.get("cleanup", 50.0)),
-    )
-    result = {
-        "outline": {"width": outline.width, "depth": outline.depth},
-        "contour": [list(point) for point in outline.contour],
-        "trace_center_mm": list(outline.trace_center_mm) if outline.trace_center_mm else None,
-    }
-    if outline.reference_image and outline.reference_bounds:
-        result["reference"] = {
-            "image": outline.reference_image,
-            "bounds": list(outline.reference_bounds),
-        }
-    return result
-
-
-def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Finalize (create or update) the Photo Nest from an ALREADY-TRACED
-    contour - see nest_trace_payload for the separate, design-independent
-    tracing phase this depends on. Never decodes or retraces a photo."""
-    request_box, layout, label, part_name, label_location, scoop = design_from_dict(
-        payload["design"], validate_layout=False
-    )
-
-    contour_raw = payload.get("contour")
-    if not isinstance(contour_raw, list) or len(contour_raw) < 3:
-        raise ValueError("no traced outline was supplied")
-    contour = tuple((float(point[0]), float(point[1])) for point in contour_raw)
-    source_raw = payload.get("source_contour", contour_raw)
-    source_contour = tuple((float(point[0]), float(point[1])) for point in source_raw)
-
-    raw_index = payload.get("index")
-    index = int(raw_index) if raw_index is not None else None
-    if index is not None and not 0 <= index < len(layout.features):
-        raise ValueError("the selected Photo Nest no longer exists")
-    saved_existing = layout.features[index] if index is not None else None
-    # Replace Photo: prefer the browser's own live draft over the last-saved
-    # copy - a debounced auto-save may not have caught up with the newest
-    # setting yet, and starting the photo operation must not lose it.
-    live_raw = payload.get("feature")
-    live_feature = None
-    if isinstance(live_raw, dict):
-        candidate = _feature_from_json(live_raw, layout.mode)
-        if candidate.kind == "nest" and candidate.contour:
-            live_feature = candidate
-    existing = live_feature if live_feature is not None else saved_existing
-    if index is None and layout.features:
-        # Fix 111 R4-3: an existing Photo Nest is duplicated; ordinary
-        # interior parts can never share a design with a Photo Nest.
-        if any(one.kind != "nest" for one in layout.features):
-            raise ValueError("Photo Nest designs can contain Photo Nests only.")
-        raise ValueError("Duplicate an existing Photo Nest first, then use Replace Photo on that copy.")
-
-    supplied = dict(payload.get("options", {}))
-    if existing is None:
-        # New scan: Tool thickness is the one measurement the user actually
-        # has to supply, and must never be invented.
-        measured = supplied.get("tool_thickness", supplied.get("depth"))
-        if measured in (None, ""):
-            raise ValueError("enter the tool's thickness before generating a Photo Nest")
-        tool_thickness = float(measured)
-        if not math.isfinite(tool_thickness) or tool_thickness <= 0.0:
-            raise ValueError("Tool thickness must be a positive number")
-        # A brand-new scan defaults to Recessed Cavity, automatic 60% cavity
-        # depth, automatic finger access and automatic bin sizing (spec
-        # section 2) - but ONLY when the user has not already chosen
-        # otherwise on the draft before the scan finished.
-        options = {
-            "clearance": float(supplied.get("clearance", 0.6)),
-            "tool_thickness": tool_thickness,
-            "rim": 3.0,
-            "smoothing": float(supplied.get("smoothing", 0.0)),
-            "holder_style": str(supplied.get("holder_style", "recessed")),
-            "cavity_depth_mode": str(supplied.get("cavity_depth_mode", "auto")),
-            "auto_size": bool(supplied["auto_size"]) if "auto_size" in supplied else True,
-            "lift_assist": str(supplied.get("lift_assist", "auto")),
-            "finger_position": str(supplied.get("finger_position", "sides")),
-            "push_position": str(supplied.get("push_position", "right")),
-            "push_area": float(supplied.get("push_area", 30.0)),
-            "push_depth": float(supplied.get("push_depth", 4.0)),
-        }
-        if supplied.get("cavity_depth") not in (None, ""):
-            options["cavity_depth"] = float(supplied["cavity_depth"])
-        if supplied.get("finger_width") not in (None, ""):
-            options["finger_width"] = float(supplied["finger_width"])
-        starter = Feature(
-            "nest", Zone(-0.5, -0.5, 0.5, 0.5), options=options,
-            count=1, contour=contour, source_contour=source_contour,
-        )
-    else:
-        # Replace Photo: change only the outline. Holder style, cavity
-        # depth/mode, finger access, Auto-size, Tool thickness, rotation and
-        # scale all survive untouched, or replacing a blurry photo of the
-        # same tool would silently reset choices the user already made
-        # (including shrinking a manually sized bin back to Auto).
-        starter = replace(existing, contour=contour, source_contour=source_contour)
-    request_box, _box, updated, one, nest_warnings, _solids = _resolve_photo_nest_edit(
-        request_box, layout, starter, label, label_location, scoop, index=index,
-    )
-    return {
-        "design": design_to_dict(
-            request_box, updated, label, part_name, label_location, scoop,
-        ),
-        "selected": index if index is not None else 0,
-        "access": nest_access_preview(one),
-        "warnings": nest_warnings,
-    }
-
-
-def _first_open_position(
-    one: Feature,
-    box: BoxSpec,
-    layout: Layout,
-    label: str,
-    label_location: str,
-    scoop: bool,
-) -> Feature:
-    # Auto-placed text does its own searching, over its real ink rather than a
-    # placeholder rectangle, so hunting a slot for it here only produces a
-    # zone that ``resolve_text_features`` immediately replaces - and a bad one,
-    # since the placeholder is wider than the lettering it stands for.
-    if one.kind == "text" and one.options.get("auto"):
-        return one
-    if one.kind == "scoop":
-        return replace(one, zone=scoop_zone(
-            box, one, base_height(box, layout.mode), layout.mode, layout.snap
-        ))
-    bounds = layout_zone(box, layout.mode)
-    pitch = 8.0 if layout.mode == "cartridge" else layout.snap
-    xs = np.arange(
-        bounds.x0 + one.zone.width / 2.0,
-        bounds.x1 - one.zone.width / 2.0 + 1e-8,
-        pitch,
-    )
-    ys = np.arange(
-        bounds.y0 + one.zone.depth / 2.0,
-        bounds.y1 - one.zone.depth / 2.0 + 1e-8,
-        pitch,
-    )
-    candidates = [(float(x), float(y)) for y in ys for x in xs]
-    candidates.sort(key=lambda point: point[0] ** 2 + point[1] ** 2)
-    if not candidates:
-        raise ValueError("there is no open floor area large enough for that interior part")
-    reserved = _customization_zones(
-        box, label, label_location, scoop, layout.mode
-    )
-    # Judged on the floor each support actually covers rather than on its zone,
-    # so a new one can drop into the open end of a cradle's zone - see
-    # ``occupied_zones``.
-    base_z = base_height(box, layout.mode)
-    taken = [zone for feature, zone in zip(
-        layout.features, occupied_zones(box, layout.features, base_z, layout.mode)
-    ) if not (feature.kind == "text" and feature.options.get("level") == "rim")]
-    taken.extend(zone for _name, zone in reserved)
-    # That covered floor sits at a fixed offset inside the support's own zone,
-    # and moving the support moves both together, so it is worked out once here
-    # instead of being rebuilt for every candidate centre on the grid.
-    trial = moved_feature(one, box, candidates[0], layout.mode, layout.snap)
-    covered = occupied_zones(box, [trial], base_z, layout.mode)[0]
-    trial_x, trial_y = trial.zone.centre
-    inset = (covered.x0 - trial_x, covered.y0 - trial_y,
-             covered.x1 - trial_x, covered.y1 - trial_y)
-    for centre in candidates:
-        placed = moved_feature(one, box, centre, layout.mode, layout.snap)
-        centre_x, centre_y = placed.zone.centre
-        covers = Zone(centre_x + inset[0], centre_y + inset[1],
-                      centre_x + inset[2], centre_y + inset[3])
-        if (all(not covers.overlaps(zone, MIN_FEATURE_GAP) for zone in taken)
-                and inside_handle_conflict(box, placed, base_z, layout.mode) is None):
-            return placed
-    raise ValueError("there is no open floor area large enough for that interior part")
-
-
-def _option_payload(option) -> dict[str, Any]:
-    """One option's key/type plus whatever legal-value metadata it declares."""
-    entry: dict[str, Any] = {"key": option.key, "type": option.value_type}
-    if option.choices:
-        entry["choices"] = [{"value": value, "label": label} for value, label in option.choices]
-    for name in ("minimum", "maximum", "step"):
-        if getattr(option, name) is not None:
-            entry[name] = getattr(option, name)
-    if option.note:
-        entry["note"] = option.note
-    if option.internal:
-        entry["internal"] = True
-    if option.legacy:
-        entry["legacy"] = True
-    return entry
 
 
 def catalog_payload() -> dict[str, Any]:
@@ -1626,95 +1007,6 @@ def catalog_payload() -> dict[str, Any]:
     }
 
 
-def slicer_name(slicer_path: Path | None) -> str:
-    return slicer_display_name(slicer_path) or "Bambu Studio"
-
-
-def _find_bambu_studio_windows() -> Path | None:
-    # 1. Standard installation locations
-    candidates = [
-        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Bambu Studio" / "bambu-studio.exe",
-        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Bambu Studio" / "bambu-studio.exe",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Bambu Studio" / "bambu-studio.exe",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Bambu Studio" / "bambu-studio.exe",
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
-
-    # 2. PATH
-    which = shutil.which("bambu-studio") or shutil.which("bambu-studio.exe")
-    if which:
-        return Path(which).resolve()
-
-    # 3. Windows Registry
-    try:
-        import winreg
-
-        # App Paths
-        for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-            try:
-                with winreg.OpenKey(root, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\bambu-studio.exe") as key:
-                    val, _ = winreg.QueryValueEx(key, "")
-                    if val and Path(str(val)).is_file():
-                        return Path(str(val)).resolve()
-            except OSError:
-                pass
-
-        # Uninstall keys
-        for root, subkey in (
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
-            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-        ):
-            try:
-                with winreg.OpenKey(root, subkey) as ukey:
-                    for i in range(winreg.QueryInfoKey(ukey)[0]):
-                        try:
-                            subkey_name = winreg.EnumKey(ukey, i)
-                            with winreg.OpenKey(ukey, subkey_name) as app_key:
-                                display_name, _ = winreg.QueryValueEx(app_key, "DisplayName")
-                                if "bambu studio" in str(display_name).lower():
-                                    try:
-                                        icon, _ = winreg.QueryValueEx(app_key, "DisplayIcon")
-                                        icon_path = Path(str(icon).strip('"'))
-                                        if icon_path.is_file() and icon_path.name.lower() == "bambu-studio.exe":
-                                            return icon_path.resolve()
-                                    except OSError:
-                                        pass
-                                    try:
-                                        loc, _ = winreg.QueryValueEx(app_key, "InstallLocation")
-                                        loc_exe = Path(str(loc).strip('"')) / "bambu-studio.exe"
-                                        if loc_exe.is_file():
-                                            return loc_exe.resolve()
-                                    except OSError:
-                                        pass
-                        except OSError:
-                            continue
-            except OSError:
-                pass
-    except Exception:
-        pass
-    return None
-
-
-def _find_bambu_studio_darwin() -> Path | None:
-    candidates = [
-        Path("/Applications/BambuStudio.app/Contents/MacOS/BambuStudio"),
-        Path.home() / "Applications/BambuStudio.app/Contents/MacOS/BambuStudio",
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
-    which = shutil.which("BambuStudio") or shutil.which("bambu-studio")
-    return Path(which).resolve() if which else None
-
-
-def _find_bambu_studio_linux() -> Path | None:
-    which = shutil.which("bambu-studio")
-    return Path(which).resolve() if which else None
-
-
 def detect_bambu_studio(custom_path: str | None = None) -> Path | None:
     if custom_path:
         p = Path(custom_path).expanduser().resolve()
@@ -1731,14 +1023,6 @@ def detect_bambu_studio(custom_path: str | None = None) -> Path | None:
         return _find_bambu_studio_darwin()
     else:
         return _find_bambu_studio_linux()
-
-
-# Fix 096 C8: how long a freshly spawned slicer GUI gets to prove it started.
-# Still running after this bound = accepted handoff (a GUI takes longer than a
-# second to show itself, but a broken launch fails fast). A nonzero quick exit
-# = launch failure. A zero quick exit = accepted handoff: single-instance GUI
-# launchers may exit at once after handing off to an already-running process.
-SLICER_HANDOFF_TIMEOUT_S = 1.0
 
 
 def launch_slicer(slicer_path: Path, files: list[Path]) -> Path | None:
@@ -1984,34 +1268,6 @@ print(filedialog.askdirectory(parent=root, initialdir={repr(str(initial))}))
     return {"folder": str(absolute), "storage": storage_startup_state(load_preferences())}
 
 
-def open_log_with_wordpad(file_path: Path) -> None:
-    """Open a file with WordPad, falling back to os.startfile / default editor if WordPad is missing."""
-    target = str(file_path.resolve())
-    wordpad_candidates = [
-        shutil.which("wordpad.exe") or shutil.which("wordpad"),
-        shutil.which("write.exe") or shutil.which("write"),
-        r"C:\Program Files\Windows NT\Accessories\wordpad.exe",
-        r"C:\Program Files (x86)\Windows NT\Accessories\wordpad.exe",
-        r"C:\Windows\write.exe",
-        r"C:\Windows\System32\write.exe",
-    ]
-    for exe in wordpad_candidates:
-        if exe and (Path(exe).is_file() or shutil.which(exe)):
-            try:
-                subprocess.Popen([exe, target])
-                return
-            except Exception:
-                pass
-    if sys.platform == "win32":
-        try:
-            os.startfile(target)
-            return
-        except Exception:
-            pass
-    fallback = shutil.which("notepad.exe") or shutil.which("notepad") or "notepad"
-    subprocess.Popen([fallback, target])
-
-
 def show_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Display the Wavefinity bins.md inventory in WordPad for the specified output folder."""
     if HOSTED:
@@ -2023,291 +1279,6 @@ def show_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     open_log_with_wordpad(log_file)
     return {"file": str(log_file)}
-
-
-def _design(raw: dict[str, Any]) -> tuple[BoxSpec, Layout, str, str, str, bool]:
-    return design_from_dict(raw)
-
-
-def _is_base_trim_design(raw: Any) -> bool:
-    return isinstance(raw, dict) and raw.get("design_kind") == "base_trim"
-
-
-def _base_trim_preview_meshes(spec) -> list[dict[str, Any]]:
-    """Compact assembled-position mesh transport for every physical piece."""
-    positions: list[float] = []
-    normals: list[float] = []
-    for _piece, mesh in make_base_trim_pieces(spec):
-        triangles = np.asarray(mesh.triangles, dtype=float)
-        if not len(triangles):
-            continue
-        keep = np.asarray(mesh.area_faces, dtype=float) > 1e-4
-        positions.extend(np.round(triangles[keep], 3).reshape(-1).tolist())
-        normals.extend(np.round(np.asarray(mesh.face_normals)[keep], 3).reshape(-1).tolist())
-    if not positions:
-        return []
-    return [{
-        "kind": "base_trim",
-        "owner": "bin",
-        "layer": 0,
-        "positions": positions,
-        "normals": normals,
-    }]
-
-
-def _base_trim_preview_payload(payload: dict[str, Any], token=None) -> dict[str, Any]:
-    raw = payload["design"]
-    spec = base_trim_from_design(raw)
-    part_name = str(raw.get("part_name") or "")
-    canonical = base_trim_design_to_dict(spec, part_name)
-    canonical["base_trim"]["auto_size"] = bool(
-        isinstance(raw.get("base_trim"), dict) and raw["base_trim"].get("auto_size")
-    )
-    with _preview_geometry_lock(token):
-        summary = base_trim_summary(spec)
-        meshes = _base_trim_preview_meshes(spec)
-    inner = base_trim_inner_polygon(spec)
-    outer_x, outer_y = summary["outer_mm"]
-    return {
-        "design": canonical,
-        "base_trim": summary,
-        "label_outline": [],
-        "label_meta": None,
-        "text_meta": [],
-        "geometry": [],
-        "meshes": meshes,
-        "fits": True,
-        "message": "",
-        "feature_errors": [],
-        "invalid_feature_indexes": [],
-        "draft_error": None,
-        "dimensions": {
-            "size": (
-                f"{outer_x:g} X {outer_y:g} X {spec.height_mm:g} mm Base Trim; "
-                f"field {spec.units[0]}U x {spec.units[1]}U"
-            ),
-            "inside_x": spec.field_x,
-            "inside_y": spec.field_y,
-        },
-        "layout_bounds": [-outer_x / 2.0, -outer_y / 2.0, outer_x / 2.0, outer_y / 2.0],
-        "cavity_outline": [[float(x), float(y)] for x, y in inner.exterior.coords],
-        "customization_zones": [],
-        "feature_footprints": [],
-        "draft_footprint": None,
-        "feature_outlines": [],
-        "nest_soft_contours": [],
-        "draft_soft_contour": None,
-        "nest_access": [],
-        "draft_nest_access": None,
-    }
-
-
-def _interior_work_box(box: BoxSpec) -> BoxSpec:
-    """The printable body interior-feature math should size against.
-
-    A stackable request's module-height ``box`` is not what gets printed: lid
-    stacking makes the body shorter, direct stacking makes it 3 mm taller.
-    preview/export already build against ``stack_effective_box`` - every
-    editor path that fits or validates interior geometry has to use the same
-    body, or a part can pass Add/Edit/Fit and then fail preview/export.
-    """
-    if not stack_enabled(box) and not lid_enabled(box):
-        return box
-    validate_stack_design(box)
-    return stack_effective_box(box)
-
-
-def _reject_if_b4b(payload: dict[str, Any], what: str) -> None:
-    """Guard routes that assume a normal box + interior layout."""
-    design = payload.get("design")
-    if not isinstance(design, dict):
-        return
-    box_raw = design.get("box", {})
-    b4b_raw = box_raw.get("b4b") if isinstance(box_raw, dict) else None
-    if isinstance(b4b_raw, dict) and b4b_raw.get("enabled"):
-        raise ValueError(
-            f"{what} is not available while Storage Box is enabled - Storage Box "
-            "Parts & options supports Dividers only"
-        )
-
-
-def _footprint_bounds(
-    box: BoxSpec, one: Feature | None, mode: str
-) -> list[float] | None:
-    """One support's covered floor for the 2D layout, or ``None`` when it is
-    simply its whole zone and the browser has nothing extra to draw."""
-    if one is None:
-        return None
-    zone = occupied_zones(box, [one], base_height(box, mode), mode)[0]
-    if zone == one.zone:
-        return None
-    return [zone.x0, zone.y0, zone.x1, zone.y1]
-
-
-def _resolved_text(
-    box: BoxSpec, features: tuple, mode: str,
-    label: str, label_location: str, scoop: bool,
-) -> tuple:
-    """Canonical Text, resolving old auto-placement once on import."""
-    return resolve_text_features(
-        box, features,
-        reserved=[
-            zone.polygon for _name, zone in _customization_zones(
-                box, label, label_location, scoop, mode
-            )
-        ],
-        base_z=base_height(box, mode), mode=mode,
-    )
-
-def _b4b_preview_payload(payload: dict[str, Any], token=None) -> dict[str, Any]:
-    """Preview for a Storage Box design: body/lid/latch/label meshes plus the
-    authoritative capacity + hardware readout.  Shares the ordinary response
-    shape so the frontend needs no special case to render it."""
-    box, layout, label, part_name, label_location, scoop = _design(payload["design"])
-    eff = b4b_effective_box(box)
-    adopted = replace(box, x=eff.x, y=eff.y, z=eff.z)
-    message = ""
-    feature_errors: list[str] = []
-    invalid_feature_indexes: list[int] = []
-    draft_error: str | None = None
-
-    normalized_saved = []
-    saved_indexes: list[int] = []
-    for idx, feat in enumerate(layout.features):
-        try:
-            normalized_saved.append(normalize_b4b_divider(box, feat))
-            saved_indexes.append(idx)
-        except Exception as err:
-            feature_errors.append(str(err))
-            invalid_feature_indexes.append(idx)
-
-    saved_layout = Layout(tuple(normalized_saved), "fused", layout.snap)
-    display_features = list(normalized_saved)
-
-    draft_raw = payload.get("draft")
-    selected = payload.get("selected")
-    draft_feature = None
-    showing_draft = False
-    if draft_raw and isinstance(draft_raw, dict):
-        try:
-            one = _feature_from_json(draft_raw, "fused")
-            one = normalize_b4b_divider(box, one)
-            draft_feature = one
-            if selected == 0:
-                display_features = [one]
-                showing_draft = True
-            elif selected is None and not normalized_saved:
-                display_features = [one]
-                showing_draft = True
-            else:
-                draft_error = "Storage Box supports one Divider layout."
-        except Exception as err:
-            draft_error = str(err)
-
-    meshes: list[dict[str, Any]] = []
-    b4b_block: dict[str, Any] | None = None
-    try:
-        with _preview_geometry_lock(token):
-            validate_b4b_design(
-                box,
-                layout_feature_kinds=tuple(f.kind for f in display_features),
-            )
-            b4b_block = b4b_summary(box)
-            meshes = b4b_preview_meshes(box, features=display_features)
-    except _SupersededGeometry:
-        raise
-    except Exception as error:
-        if draft_feature is not None and display_features == [draft_feature]:
-            draft_error = str(error)
-            showing_draft = False
-            try:
-                with _preview_geometry_lock(token):
-                    validate_b4b_design(
-                        box,
-                        layout_feature_kinds=tuple(f.kind for f in normalized_saved),
-                    )
-                    b4b_block = b4b_summary(box)
-                    meshes = b4b_preview_meshes(box, features=normalized_saved)
-            except _SupersededGeometry:
-                raise
-            except Exception as saved_err:
-                if not feature_errors and normalized_saved:
-                    feature_errors.append(str(saved_err))
-                    invalid_feature_indexes.extend(range(len(normalized_saved)))
-                try:
-                    with _preview_geometry_lock(token):
-                        validate_b4b_design(box)
-                        b4b_block = b4b_summary(box)
-                        meshes = b4b_preview_meshes(box, features=())
-                except _SupersededGeometry:
-                    raise
-                except Exception as base_err:
-                    message = str(base_err)
-        else:
-            if display_features and not feature_errors:
-                feature_errors.append(str(error))
-                invalid_feature_indexes.extend(range(len(display_features)))
-            try:
-                with _preview_geometry_lock(token):
-                    validate_b4b_design(box)
-                    b4b_block = b4b_summary(box)
-                    meshes = b4b_preview_meshes(box, features=())
-            except _SupersededGeometry:
-                raise
-            except Exception as base_err:
-                message = str(base_err)
-
-    if not b4b_block:
-        try:
-            b4b_block = b4b_summary(box)
-        except Exception:
-            b4b_block = None
-
-    bounds = b4b_divider_zone(box)
-    cavity = b4b_mating_polygon(box)
-    divider_pick = ({"type": "draft"} if showing_draft else
-                    {"type": "saved", "index": saved_indexes[0]}
-                    if saved_indexes else None)
-    pick_meshes = [
-        {"mesh_index": index, "pick": divider_pick}
-        for index, mesh in enumerate(meshes)
-        if divider_pick and mesh.get("kind") == "feature_divider"
-    ]
-    return {
-        "design": design_to_dict(
-            adopted, saved_layout, label, part_name, label_location, False
-        ),
-        "b4b": b4b_block,
-        "label_outline": [],
-        "label_meta": None,
-        "text_meta": [],
-        "geometry": [],
-        "meshes": meshes,
-        "pick_meshes": pick_meshes,
-        "fits": not message and not feature_errors and not draft_error,
-        "message": message,
-        "feature_errors": feature_errors,
-        "invalid_feature_indexes": invalid_feature_indexes,
-        "draft_error": draft_error,
-        "dimensions": {
-            "size": (f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm Storage Box child field - "
-                     f"case outside {b4b_block['case_outer_mm'][0]:g} x "
-                     f"{b4b_block['case_outer_mm'][1]:g} mm"
-                     if b4b_block else f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm Storage Box"),
-            "inside_x": b4b_block["capacity_mm"][0] if b4b_block else None,
-            "inside_y": b4b_block["capacity_mm"][1] if b4b_block else None,
-        },
-        "layout_bounds": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
-        "cavity_outline": [[float(x), float(y)] for x, y in cavity.exterior.coords],
-        "customization_zones": [],
-        "feature_footprints": [None] * len(saved_layout.features),
-        "draft_footprint": None,
-        "feature_outlines": [],
-        "nest_soft_contours": [],
-        "draft_soft_contour": None,
-        "nest_access": [],
-        "draft_nest_access": None,
-    }
 
 
 def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2470,782 +1441,6 @@ def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
     }
 
 
-def validate_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    raw = payload["design"]
-    if _is_base_trim_design(raw):
-        spec = base_trim_from_design(raw)
-        design = base_trim_design_to_dict(spec, str(raw.get("part_name") or ""))
-        design["base_trim"]["auto_size"] = bool(
-            isinstance(raw.get("base_trim"), dict) and raw["base_trim"].get("auto_size")
-        )
-        return {"design": design}
-    return {"design": design_to_dict(*_design(raw))}
-
-
-def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    box, layout, *_ = _design(payload["design"])
-    kind = str(payload["kind"])
-    if box.b4b.enabled:
-        if kind != "divider":
-            raise ValueError(
-                "adding interior parts is not available while Storage Box is enabled - "
-                "Storage Box Parts & options supports Dividers only"
-            )
-        if any(f.kind == "divider" for f in layout.features):
-            raise ValueError("Storage Box supports one Divider layout.")
-        work = b4b_divider_work_box(box)
-        one = default_feature(
-            work,
-            "divider",
-            along=str(payload.get("along", "x")),
-            mode="fused",
-        )
-        one = normalize_b4b_divider(box, one)
-        return {
-            "feature": feature_to_dict(one, "fused"),
-            "resolved_options": resolved_options(work, one, work.base_thickness),
-            "divider_cells": _divider_cells_payload(work, one, "fused"),
-        }
-    _reject_if_b4b(payload, "adding interior parts")
-    box = _interior_work_box(box)
-    try:
-        definition = feature_definition(kind)
-    except KeyError:
-        raise ValueError(f"unknown interior part {kind!r}")
-    item = (_item_from_json(payload.get("item"))
-            if definition.flags["item"] else None)
-    one = default_feature(
-        box,
-        kind,
-        along=str(payload.get("along", "x")),
-        mode=layout.mode,
-        item=item,
-    )
-    if one.kind == "nest":
-        # A fresh draft is new-format, not a legacy Raised Wall waiting to be
-        # upgraded after upload. Seed the choices the UI already promises so
-        # the before-photo controls and the generated holder cannot disagree.
-        one = replace(one, options={
-            **one.options,
-            "holder_style": "recessed",
-            "cavity_depth_mode": "auto",
-            "auto_size": True,
-            "lift_assist": "auto",
-        })
-    # Ordinary defaults are display values, not explicit choices. Keeping them
-    # out of ``one.options`` preserves dependency cascades; Nest is the one
-    # exception because holder_style also separates new saves from legacy ones.
-    result = {
-        "feature": feature_to_dict(one, layout.mode),
-        "resolved_options": resolved_options(
-            box, one, base_height(box, layout.mode)
-        ),
-    }
-    if one.kind == "divider":
-        result["divider_cells"] = _divider_cells_payload(box, one, layout.mode)
-    return result
-
-
-def _divider_cells_payload(
-    box: BoxSpec, one: Feature, mode: str
-) -> list[dict[str, Any]]:
-    base_z = base_height(box, mode)
-    selected = set(divider_scoop_targets(box, one, base_z))
-    return [
-        {
-            "id": cell.identity,
-            "row": cell.row,
-            "column": cell.column,
-            "zone": [cell.zone.x0, cell.zone.y0, cell.zone.x1, cell.zone.y1],
-            "scoop": cell.identity in selected,
-        }
-        for cell in divider_cells(box, one, base_z)
-    ]
-
-
-def _bore_required_bin_z(
-    request_box: BoxSpec, box: BoxSpec, mode: str, bore: Feature,
-) -> float:
-    """The bin height (mm, whole) that holds a Bore at its own resolved Height.
-
-    The one owner of "size the bin to the Bore": the expand endpoint uses it to
-    resize, and the draft answer reports it so the browser knows whether the bin
-    is already there.
-    """
-    current_base_z = base_height(box, mode)
-    bore_height = float(resolved_options(box, bore, current_base_z)["height"])
-    required_work_z = current_base_z + bore_height
-    if feature_touches_wall(box, bore):
-        required_work_z += box.z - connector_keep_out(box)
-    effective_z_offset = box.z - request_box.z
-    structural_minimum = max(
-        ORDINARY_BIN_MIN_HEIGHT_MM,
-        request_box.base_thickness + MIN_HEIGHT_ABOVE_BASE,
-    )
-    return float(math.ceil(max(
-        structural_minimum,
-        required_work_z - effective_z_offset,
-    ) - 1e-9))
-
-
-def _bore_height_bin(
-    request_box: BoxSpec, mode: str, one: Feature, box: BoxSpec,
-) -> float | None:
-    """Bin height a Height "Auto size bin to bore" Bore asks for, else ``None``."""
-    if one.kind != "bore" or one.options.get("height_size_mode") != "bin_to_bore":
-        return None
-    try:
-        return _bore_required_bin_z(request_box, box, mode, one)
-    except ValueError:
-        return None
-
-
-def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    token = _register_preview_request(payload, "draft")
-    try:
-        return _draft_payload(payload, token)
-    except _SupersededGeometry:
-        return {"superseded": True}
-
-
-def _draft_payload(payload: dict[str, Any], token) -> dict[str, Any]:
-    box, layout, label, _part, label_location, scoop = _design(payload["design"])
-    if box.b4b.enabled:
-        one = _feature_from_json(payload["feature"], "fused")
-        if one.kind != "divider":
-            raise ValueError(
-                "editing interior parts is not available while Storage Box is enabled - "
-                "Storage Box Parts & options supports Dividers only"
-            )
-        one = normalize_b4b_divider(box, one)
-        with _preview_geometry_lock(token):
-            b4b_divider_solids(box, [one])
-        work = b4b_divider_work_box(box)
-        return {
-            "feature": feature_to_dict(one, "fused"),
-            "resolved_options": resolved_options(work, one, work.base_thickness),
-            "divider_cells": _divider_cells_payload(work, one, "fused"),
-        }
-    _reject_if_b4b(payload, "editing interior parts")
-    request_box = box
-    box = _interior_work_box(request_box)
-    one = _feature_from_json(payload["feature"], layout.mode)
-    one = normalize_bore_modes(box, one, base_height(box, layout.mode), layout.mode)
-    if one.kind == "text":
-        one = _resolved_text(box, (one,), layout.mode, label, label_location, scoop)[0]
-    nest_solids = None
-    if one.kind == "nest":
-        request_box, box, _updated, one, _warnings, nest_solids = _resolve_photo_nest_edit(
-            request_box, layout, one, label, label_location, scoop, index=payload.get("index"),
-            request_token=token,
-        )
-    if one.kind == "divider":
-        one = normalize_divider_scoop(
-            box, one, base_height(box, layout.mode)
-        )
-        if one.full_span:
-            one = replace(one, zone=layout_zone(box, layout.mode))
-    elif one.kind == "scoop":
-        one = replace(one, zone=scoop_zone(
-            box, one, base_height(box, layout.mode), layout.mode, layout.snap
-        ))
-    if one.kind == "text" and one.options.get("level") == "rim":
-        from organizer_inserts._text import rim_text_geometry
-        _ledge, _glyph, effective_cap, _surface = rim_text_geometry(box, one)
-        return {
-            "feature": feature_to_dict(one, layout.mode),
-            "resolved_options": {"cap_height": round(effective_cap, 3)},
-        }
-    shown = (
-        resolve_nest_settings(box, one, base_height(box, layout.mode))
-        if one.kind == "nest" else
-        resolved_options(box, one, base_height(box, layout.mode))
-    )
-    if nest_solids is None:
-        with _preview_geometry_lock(token):
-            build_features(
-                box, [one], base_height(box, layout.mode),
-                layout_zone(box, layout.mode), layout.mode, include_text=True,
-            )
-    result = {
-        "feature": feature_to_dict(one, layout.mode),
-        "resolved_options": shown,
-    }
-    # A Bore that sizes the bin around itself (Auto size bin to bore) reports the
-    # cheap smallest bin around it; the browser runs the exact fit when the bin
-    # is not already there.
-    bore_bin = bore_bin_minimum(box, [one], base_height(box, layout.mode), layout.mode)
-    if bore_bin is not None:
-        result["bore_bin"] = {"x": bore_bin[0], "y": bore_bin[1]}
-    height_bin = _bore_height_bin(request_box, layout.mode, one, box)
-    if height_bin is not None:
-        result["bore_bin_height"] = height_bin
-    if one.kind == "divider":
-        result["divider_cells"] = _divider_cells_payload(box, one, layout.mode)
-    return result
-
-
-def feature_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    _reject_if_b4b(payload, "fitting interior parts")
-    """Resize one draft feature's zone to the smallest that still holds
-    everything it builds - its hole grid, peg row, slot bank or tool. Keeps the
-    zone centred and touches nothing else. Raises for a kind with no natural
-    contents size (pocket, steps, photo nest, divider, text).
-    """
-    box, layout, *_ = _design(payload["design"])
-    box = _interior_work_box(box)
-    one = _feature_from_json(payload["feature"], layout.mode)
-    base_z = base_height(box, layout.mode)
-    size = feature_min_footprint(box, one, base_z)
-    if size is None:
-        raise ValueError("this interior part has no contents to fit its size to")
-    # Round the exact footprint up to the editor grid so the snapped zone is
-    # never a hair under what the part needs (a leaned grid's reach is rarely
-    # a whole millimetre).
-    snap = layout.snap or EDITOR_SNAP
-    size = tuple(math.ceil(v / snap - 1e-6) * snap for v in size)
-    fitted = resized_feature(one, box, size, layout.mode, layout.snap)
-    with GEOMETRY_LOCK:
-        build_features(
-            box, (fitted,), base_z, layout_zone(box, layout.mode), layout.mode,
-        )
-    return {"feature": feature_to_dict(fitted, layout.mode)}
-
-
-def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    box, layout, label, part_name, label_location, scoop = _design(payload["design"])
-    if box.b4b.enabled:
-        one = _feature_from_json(payload["feature"], "fused")
-        if one.kind != "divider":
-            raise ValueError(
-                "adding interior parts is not available while Storage Box is enabled - "
-                "Storage Box Parts & options supports Dividers only"
-            )
-        index = payload.get("index")
-        if index is None:
-            if len(layout.features) > 0:
-                raise ValueError("Storage Box supports one Divider layout.")
-        else:
-            if int(index) != 0 or len(layout.features) == 0 or layout.features[0].kind != "divider":
-                raise ValueError("Storage Box supports one Divider layout.")
-        one = normalize_b4b_divider(box, one)
-        with GEOMETRY_LOCK:
-            validate_b4b_design(box, layout_feature_kinds=("divider",), deep=True)
-            b4b_divider_solids(box, [one])
-        updated = Layout((one,), "fused", layout.snap)
-        return {
-            "design": design_to_dict(
-                box, updated, label, part_name, label_location, False
-            ),
-            "selected": 0,
-            "warnings": [],
-        }
-    _reject_if_b4b(payload, "adding interior parts")
-    request_box = box
-    box = _interior_work_box(request_box)
-    one = _feature_from_json(payload["feature"], layout.mode)
-    one = normalize_bore_modes(box, one, base_height(box, layout.mode), layout.mode)
-    if one.kind == "divider":
-        one = normalize_divider_scoop(
-            box, one, base_height(box, layout.mode)
-        )
-        if one.full_span:
-            one = replace(one, zone=layout_zone(box, layout.mode))
-    if one.kind == "nest":
-        existing = list(layout.features)
-        index = payload.get("index")
-        if index is None:
-            if existing:
-                # Fix 111 R4-3: duplicate only when a Photo Nest already
-                # exists; ordinary parts get the can-contain-only message.
-                if any(item.kind != "nest" for item in existing):
-                    raise ValueError("Photo Nest designs can contain Photo Nests only.")
-                raise ValueError("Duplicate an existing Photo Nest first, then use Replace Photo on that copy.")
-        else:
-            selected = int(index)
-            if not 0 <= selected < len(existing):
-                raise ValueError("the selected interior part no longer exists")
-            if existing[selected].kind != "nest" or any(item.kind != "nest" for item in existing):
-                raise ValueError("Photo Nest designs can contain Photo Nests only.")
-        request_box, _box, updated, one, nest_warnings, _solids = _resolve_photo_nest_edit(
-            request_box, layout, one, label, label_location, scoop,
-            index=(int(index) if index is not None else None),
-        )
-        return {
-            "design": design_to_dict(
-                request_box, updated, label, part_name, label_location, scoop,
-            ),
-            "selected": (int(index) if index is not None else 0),
-            "warnings": nest_warnings,
-        }
-    if one.kind == "text":
-        from organizer_inserts._text import canonical_text_feature
-        one = canonical_text_feature(one)
-    if one.kind == "scoop":
-        one = replace(one, zone=scoop_zone(
-            box, one, base_height(box, layout.mode), layout.mode, layout.snap
-        ))
-
-    # Full-span Dividers and Curved Scoops are derived from the bin, not from
-    # a user-draggable footprint. Keep their exact normalized zone instead of
-    # passing it through ordinary 1 mm resize/move snapping.
-    if not (one.kind in {"scoop", "text"} or (one.kind == "divider" and one.full_span)
-            or (one.kind == "bore" and one.options.get("xy_size_mode") == "bore_to_bin")):
-        width, depth = one.zone.width, one.zone.depth
-        cx, cy = one.zone.centre
-        one = resized_feature(one, box, (width, depth), layout.mode, layout.snap)
-        one = moved_feature(one, box, (cx, cy), layout.mode, layout.snap)
-    index = payload.get("index")
-    existing = list(layout.features)
-    if any(item.kind == "nest" and item.contour for item in existing):
-        raise ValueError("Photo Nest designs can contain scanned Photo Nests only.")
-    if index is None:
-        if one.kind != "text":
-            one = _first_open_position(
-                one, box, layout, label, label_location, scoop
-            )
-        existing.append(one)
-        selected = len(existing) - 1
-    else:
-        selected = int(index)
-        if not 0 <= selected < len(existing):
-            raise ValueError("the selected interior part no longer exists")
-        if one.kind != existing[selected].kind:
-            remaining = existing[:selected] + existing[selected + 1:]
-            if one.kind != "text":
-                one = _first_open_position(
-                    one, box, replace(layout, features=tuple(remaining)),
-                    label, label_location, scoop,
-                )
-        existing[selected] = one
-    # Auto-placed text finds its own spot, so resolve before judging overlaps -
-    # otherwise a second one is refused for sitting on the first at the
-    # placeholder zone it has not been moved out of yet.
-    existing = list(_resolved_text(box, tuple(existing), layout.mode,
-                                   label, label_location, scoop))
-    updated = replace(layout, features=tuple(existing))
-    updated.validate(box)
-    validate_customization_clearance(
-        box, updated.features, label, label_location, scoop, updated.mode
-    )
-    with GEOMETRY_LOCK:
-        build_features(
-            box, updated.features, base_height(box, updated.mode),
-            layout_zone(box, updated.mode), updated.mode,
-        )
-    return {
-        "design": design_to_dict(
-            request_box, updated, label, part_name, label_location, scoop,
-        ),
-        "selected": selected,
-        "warnings": [],
-    }
-
-
-def apply_reference_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Commit preview/planning data without running holder sizing owners."""
-    _reject_if_b4b(payload, "editing a reference object")
-    request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
-    one = _feature_from_json(payload["feature"], layout.mode)
-    features = list(layout.features)
-    index = payload.get("index")
-    if index is None:
-        if one.reference_object is None:
-            raise ValueError("a new reference edit needs a reference object")
-        features.append(one)
-        selected = len(features) - 1
-    else:
-        selected = int(index)
-        if not 0 <= selected < len(features):
-            raise ValueError("the selected interior part no longer exists")
-        if replace(one, reference_object=features[selected].reference_object) != features[selected]:
-            raise ValueError("Reference edit also changed printable holder settings")
-        features[selected] = one
-    updated = replace(layout, features=tuple(features))
-    box = _interior_work_box(request_box)
-    updated.validate(box)
-    validate_customization_clearance(box, updated.features, label, label_location, scoop, updated.mode)
-    return {"design": design_to_dict(request_box, updated, label, part_name, label_location, scoop),
-            "selected": selected}
-
-
-def duplicate_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Duplicate a completed Photo Nest to another spot (Fix 082 J: Text's own
-    Duplicate to rim is retired; this endpoint now serves Photo Nest only)."""
-    request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
-    index = int(payload["index"])
-    features = list(layout.features)
-    if not 0 <= index < len(features) or features[index].kind != "nest" or not features[index].contour:
-        raise ValueError("the selected Photo Nest no longer exists")
-    if any(one.kind != "nest" for one in features):
-        raise ValueError("Photo Nest designs can contain Photo Nests only.")
-    box = _interior_work_box(request_box)
-    source = features[index]
-    clone = replace(source, options=dict(source.options))
-    w, d = clone.zone.width, clone.zone.depth
-    gap = MIN_FEATURE_GAP
-    sx, sy = source.zone.centre
-    candidates = [
-        (source.zone.x1 + gap + w / 2, sy), (sx, source.zone.y1 + gap + d / 2),
-        (source.zone.x0 - gap - w / 2, sy), (sx, source.zone.y0 - gap - d / 2),
-    ]
-    min_x = min(one.zone.x0 for one in features); max_x = max(one.zone.x1 for one in features)
-    min_y = min(one.zone.y0 for one in features); max_y = max(one.zone.y1 for one in features)
-    gcx, gcy = (min_x + max_x) / 2, (min_y + max_y) / 2
-    candidates += [(max_x + gap + w / 2, gcy), (gcx, max_y + gap + d / 2),
-                   (min_x - gap - w / 2, gcy), (gcx, min_y - gap - d / 2)]
-    # Also try every existing legal grid centre, nearest first, for Manual.
-    bounds = layout_zone(box, layout.mode)
-    pitch = CARTRIDGE_PITCH if layout.mode == "cartridge" else layout.snap
-    x = bounds.x0 + w / 2
-    while x <= bounds.x1 - w / 2 + 1e-9:
-        y = bounds.y0 + d / 2
-        while y <= bounds.y1 - d / 2 + 1e-9:
-            candidates.append((x, y)); y += pitch
-        x += pitch
-    unique: list[tuple[float, float]] = []
-    for candidate in candidates:
-        if candidate not in unique:
-            unique.append(candidate)
-    auto = resolve_nest_settings(box, clone, base_height(box, layout.mode)).get("auto_size")
-    choices = []
-    for order, (cx, cy) in enumerate(unique):
-        candidate = replace(clone, zone=Zone(cx - w / 2, cy - d / 2, cx + w / 2, cy + d / 2))
-        proposed = features + [candidate]
-        try:
-            prospective = (_auto_size_photo_nest_layout_box(box, proposed, layout.mode,
-                grow_only=(auto is None)) if auto is not False else box)
-            bounds = layout_zone(prospective, layout.mode)
-            if not all(bounds.x0 <= one.zone.x0 + 1e-6 and one.zone.x1 <= bounds.x1 + 1e-6
-                       and bounds.y0 <= one.zone.y0 + 1e-6 and one.zone.y1 <= bounds.y1 + 1e-6
-                       for one in proposed):
-                continue
-            updated = replace(layout, features=tuple(proposed))
-            updated.validate(prospective)
-            validate_customization_clearance(prospective, updated.features, label, label_location, scoop, updated.mode)
-        except ValueError:
-            continue
-        choices.append(((prospective.x * prospective.y, max(prospective.x, prospective.y),
-                         (cx - sx) ** 2 + (cy - sy) ** 2, order), prospective, updated))
-    if not choices:
-        if auto is False:
-            raise ValueError("No room to duplicate this Photo Nest. Turn Automatic footprint sizing on or enlarge the bin.")
-        raise ValueError("Could not find room for another copy of this Photo Nest.")
-    _score, grown, updated = min(choices, key=lambda choice: choice[0])
-    request_box = replace(request_box, x=grown.x, y=grown.y, z=request_box.z + (grown.z - box.z))
-    box = _interior_work_box(request_box)
-    with GEOMETRY_LOCK:
-        build_features(box, updated.features, base_height(box, updated.mode),
-                       layout_zone(box, updated.mode), updated.mode)
-    return {"design": design_to_dict(request_box, updated, label, part_name, label_location, scoop),
-            "selected": len(updated.features) - 1}
-
-
-def delete_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    box, layout, label, part_name, label_location, scoop = design_from_dict(
-        payload["design"], validate_layout=False
-    )
-    if box.b4b.enabled:
-        index = int(payload["index"])
-        if index != 0 or len(layout.features) == 0 or layout.features[0].kind != "divider":
-            raise ValueError("the selected interior part no longer exists")
-        updated = Layout((), "fused", layout.snap)
-        return {"design": design_to_dict(
-            box, updated, label, part_name, label_location, False,
-        )}
-    _reject_if_b4b(payload, "editing interior parts")
-    # Deletion is the recovery path for a design made invalid by shrinking the
-    # bin. Parse its schema and box, but defer layout validation until after
-    # the unwanted support has been removed.
-    index = int(payload["index"])
-    existing = list(layout.features)
-    if not 0 <= index < len(existing):
-        raise ValueError("the selected interior part no longer exists")
-    existing.pop(index)
-    updated = replace(layout, features=tuple(existing))
-    return {"design": design_to_dict(
-        box, updated, label, part_name, label_location, scoop,
-    )}
-
-
-def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    _reject_if_b4b(payload, "changing the interior-parts print mode")
-    request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
-    box = _interior_work_box(request_box)
-    new_mode = str(payload["mode"])
-    converted = convert_layout_mode(box, layout.features, new_mode, layout)
-    validate_customization_clearance(
-        box, converted.features, label, label_location, scoop, converted.mode
-    )
-    return {"design": design_to_dict(
-        request_box, converted, label, part_name, label_location, scoop,
-    )}
-
-
-def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    _reject_if_b4b(payload, "auto-expanding the layout")
-    """Resize the bin - on the 8 mm grid, both axes - to the smallest size that
-    fits every interior support at the footprint it actually needs, then trim
-    back any axis that overshot. A cradle footprint is recomputed from its
-    tool, and a bore / post / slot zone is grown (never shrunk) to hold the
-    hole grid, peg row or slot bank it was given - so an explicit X/Y quantity
-    that overflowed the drawn zone still makes the bin grow instead of erroring.
-    Other supports keep the size the user drew. Supports that now overlap - a
-    grown block crowding its neighbour - are slid apart along the floor: the
-    ``payload["anchor"]`` part (the one just edited) holds still and the rest
-    move outward from it, with the bin growing to take in whatever ends up past
-    its edge. Nothing is re-sized to make room; only moved.
-
-    The current size is always the floor: this operation only grows. A larger
-    bin is valid user intent and is never silently tightened around its parts.
-
-    ``payload["fit"] = True`` switches to a true smallest-fit search instead:
-    the current X/Y are no longer a floor, and the bin may shrink as well as
-    grow to the smallest legal footprint that still holds the layout. Z is
-    never touched either way.
-    """
-    request_box, layout, label, part_name, label_location, scoop = design_from_dict(
-        payload["design"], validate_layout=False
-    )
-    box = _interior_work_box(request_box)
-    mode = layout.mode
-    originals = list(layout.features)
-    if not originals:
-        raise ValueError("there are no interior supports to fit")
-    # The part the user was editing when the fit gave out. It stays where it is
-    # and the others move around it; without one, the biggest block anchors.
-    anchor = payload.get("anchor")
-    anchor = int(anchor) if anchor is not None and 0 <= int(anchor) < len(originals) else None
-    fit = bool(payload.get("fit", False))
-
-    if payload.get("fit_height_to_bore"):
-        if anchor is None or originals[anchor].kind != "bore":
-            raise ValueError("select a Bore before sizing the bin height")
-        bore = originals[anchor]
-        candidate_z = _bore_required_bin_z(request_box, box, mode, bore)
-        max_height = payload.get("max_height")
-        if max_height is not None and candidate_z > float(max_height) + 1e-9:
-            raise ValueError(
-                f"the Bore needs a {candidate_z:g} mm bin, above this Space's "
-                f"{float(max_height):g} mm maximum height"
-            )
-
-        candidate_request = replace(request_box, z=candidate_z)
-        candidate_design = design_to_dict(
-            candidate_request, replace(layout, features=tuple(originals), mode=mode),
-            label, part_name, label_location, scoop,
-        )
-        (validated_request, validated_layout, validated_label, validated_name,
-         validated_location, validated_scoop) = _design(candidate_design)
-        validated_box = _interior_work_box(validated_request)
-        validate_customization_clearance(
-            validated_box, validated_layout.features, validated_label,
-            validated_location, validated_scoop, validated_layout.mode,
-        )
-        with GEOMETRY_LOCK:
-            preview_geometry(
-                validated_box, validated_label, validated_layout.features,
-                validated_layout.mode, validated_location, validated_scoop,
-            )
-        canonical = design_to_dict(
-            validated_request, validated_layout, validated_label,
-            validated_name, validated_location, validated_scoop,
-        )
-        return {
-            "design": canonical,
-            "box": {
-                "x": validated_request.x,
-                "y": validated_request.y,
-                "z": validated_request.z,
-            },
-            "grew": validated_request.z > request_box.z,
-            "changed": validated_request.z != request_box.z,
-        }
-
-    def sized(one: Feature, trial: BoxSpec) -> Feature:
-        if one.kind == "text":
-            return one  # Text has no user-sized floor footprint.
-        exact = False
-        if one.kind == "bore":
-            # A Bore's persisted sizing modes are re-resolved against each trial
-            # bin: bore_to_bin follows the trial's usable floor exactly, and
-            # bin_to_bore holds the Bore at its own minimum footprint.
-            one = normalize_bore_modes(trial, one, base_height(trial, mode), mode)
-            if one.options.get("xy_size_mode") == "bore_to_bin":
-                return one
-            exact = one.options.get("xy_size_mode") == "bin_to_bore"
-        if one.kind == "nest" and one.contour:
-            return fitted_nest_feature(one)
-        if one.kind == "cradle" and one.item is not None:
-            min_width, min_depth = cradle_min_footprint(one)
-            if one.count is None:
-                if one.along == "x":
-                    width = min_width
-                    depth = max(one.zone.depth, min_depth)
-                else:
-                    width = max(one.zone.width, min_width)
-                    depth = min_depth
-            else:
-                width, depth = min_width, min_depth
-        else:
-            width, depth = one.zone.width, one.zone.depth
-            grown = feature_min_footprint(trial, one, base_height(trial, mode))
-            if grown is not None:
-                # Round the grown footprint up to the editor grid, exactly as
-                # "Fit to contents" does - otherwise the zone snap can leave it
-                # a hair under what a leaned grid's reach needs.
-                snap = layout.snap or EDITOR_SNAP
-                grown = tuple(math.ceil(v / snap - 1e-6) * snap for v in grown)
-                width, depth = (grown if exact else (max(width, grown[0]), max(depth, grown[1])))
-                return resized_feature(one, trial, (width, depth), mode, layout.snap)
-        cx, cy = one.zone.centre
-        raw = Zone(cx - width / 2.0, cy - depth / 2.0,
-                   cx + width / 2.0, cy + depth / 2.0)
-        return replace(one, zone=snapped_zone(raw, trial, mode))
-
-    def spread_apart(placed: list[Feature], trial: BoxSpec) -> list[Feature]:
-        """Slide parts along the floor until none overlap, holding the anchor
-        still and pushing the rest outward from it. Movement is clamped to the
-        trial bin, so a size that cannot separate them just fails this trial and
-        the search grows the bin one grid step and tries again."""
-        if len(placed) < 2:
-            return placed
-        base_z = base_height(trial, mode)
-        covered = lambda feat: occupied_zones(trial, [feat], base_z, mode)[0]
-        zones = [covered(f) for f in placed]
-        pivot = anchor
-        if pivot is None:
-            pivot = max(range(len(placed)),
-                        key=lambda i: zones[i].width * zones[i].depth)
-        ax, ay = zones[pivot].centre
-        order = sorted((i for i in range(len(placed)) if i != pivot),
-                       key=lambda i: (zones[i].centre[0] - ax) ** 2
-                       + (zones[i].centre[1] - ay) ** 2)
-        out = list(placed)
-        settled = [pivot]
-        def rim_text(one: Feature) -> bool:
-            return one.kind == "text" and one.options.get("level") == "rim"
-        for i in order:
-            feat = out[i]
-            if rim_text(feat):
-                settled.append(i)
-                continue
-            for _ in range(80):
-                here = covered(feat)
-                clash = next((j for j in settled
-                              if not rim_text(out[j])
-                              and here.overlaps(covered(out[j]), MIN_FEATURE_GAP)),
-                             None)
-                if clash is None:
-                    break
-                if feat.kind == "text":
-                    break  # A centered Text feature cannot be slid.
-                other = covered(out[clash])
-                # One editor grid step of slack on top of the bare overlap, so
-                # the centre snap in ``moved_feature`` can't round it back into
-                # a sub-gap touch and stall the loop.
-                slack = (layout.snap or EDITOR_SNAP) + MIN_FEATURE_GAP
-                over_x = min(here.x1, other.x1) - max(here.x0, other.x0) + slack
-                over_y = min(here.y1, other.y1) - max(here.y0, other.y0) + slack
-                cx, cy = here.centre
-                if over_x <= over_y:
-                    step = over_x if cx >= other.centre[0] else -over_x
-                    moved = moved_feature(feat, trial, (cx + step, cy), mode, layout.snap)
-                else:
-                    step = over_y if cy >= other.centre[1] else -over_y
-                    moved = moved_feature(feat, trial, (cx, cy + step), mode, layout.snap)
-                if moved.zone.centre == feat.zone.centre:
-                    break        # pinned against the bin wall - this trial is too small
-                feat = moved
-            out[i] = feat
-            settled.append(i)
-        return out
-
-    def fits(x: float, y: float):
-        try:
-            trial = replace(box, x=float(x), y=float(y))
-            placed = spread_apart(
-                [sized(one, trial) for one in originals], trial
-            )
-            updated = replace(layout, features=tuple(placed), mode=mode)
-            updated.validate(trial)
-            validate_customization_clearance(
-                trial, updated.features, label, label_location, scoop, mode
-            )
-        except ValueError:
-            return None
-        return trial, updated
-
-    start_x, start_y = box.x, box.y
-    ceiling = math.floor(MAX_BOX_SIZE / BASE_UNIT) * BASE_UNIT
-
-    if fit:
-        # Smallest legal footprint that fits the whole current layout: every
-        # X/Y pair on the grid, tried in deterministic increasing order of
-        # area, then max side, then side sum, then X, then Y.
-        floor_units = int(round(MIN_BOX_SIZE / BASE_UNIT))
-        ceiling_units = int(round(ceiling / BASE_UNIT))
-        legal = [round(units * BASE_UNIT) for units in range(floor_units, ceiling_units + 1)]
-        pairs = sorted(
-            ((xv, yv) for xv in legal for yv in legal),
-            key=lambda pair: (pair[0] * pair[1], max(pair), pair[0] + pair[1], pair[0], pair[1]),
-        )
-        x = y = None
-        for xv, yv in pairs:
-            if fits(xv, yv) is not None:
-                x, y = xv, yv
-                break
-        if x is None:
-            raise ValueError(
-                "this layout will not fit within Wavefinity's maximum "
-                f"{ceiling:g} mm bin size - remove or shrink a support"
-            )
-    else:
-        floor_x, floor_y = start_x, start_y
-        x, y = floor_x, floor_y
-        result = fits(x, y)
-        while result is None:
-            x = round(x + BASE_UNIT)
-            y = round(y + BASE_UNIT)
-            if x > ceiling:
-                raise ValueError(
-                    "this layout will not fit within Wavefinity's maximum "
-                    f"{ceiling:g} mm bin size - remove or shrink a support"
-                )
-            result = fits(x, y)
-
-        # First fit found by growing both axes; give back any step that was not
-        # actually needed (down to the floor).
-        for _ in range(200):
-            trimmed = False
-            if x - BASE_UNIT >= floor_x and fits(x - BASE_UNIT, y) is not None:
-                x = round(x - BASE_UNIT)
-                trimmed = True
-            if y - BASE_UNIT >= floor_y and fits(x, y - BASE_UNIT) is not None:
-                y = round(y - BASE_UNIT)
-                trimmed = True
-            if not trimmed:
-                break
-
-    trial, updated = fits(x, y)
-    with GEOMETRY_LOCK:
-        build_features(
-            trial, updated.features, base_height(trial, mode),
-            layout_zone(trial, mode), mode,
-        )
-    # Growth here is X/Y only - the saved design keeps the requested module Z,
-    # never the effective work box's printable Z.
-    saved_box = replace(request_box, x=trial.x, y=trial.y)
-    return {
-        "design": design_to_dict(
-            saved_box, updated, label, part_name, label_location, scoop,
-        ),
-        "box": {"x": saved_box.x, "y": saved_box.y, "z": saved_box.z},
-        "grew": (trial.x > start_x or trial.y > start_y),
-        "changed": (trial.x != start_x or trial.y != start_y),
-    }
-
-
 def generate_payload(
     payload: dict[str, Any],
     *,
@@ -3295,43 +1490,6 @@ def generate_payload(
     return reply
 
 
-def inventory_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """The planning record Space shows for the design being edited.
-
-    Read-only: the same ``inventory_bin_record`` a generated bin would log, so
-    Space sees the exact same x/y/z/kind/stack/wall envelope, but nothing is
-    written, counted or claimed to exist as a file. Interior parts need not be
-    generation-valid; only the container envelope matters here.
-    """
-    raw_design = payload["design"]
-    if _is_base_trim_design(raw_design):
-        raise ValueError("Base Trim is not a bin, so it has no place to plan in Space.")
-    box, layout, label, part_name, _location, scoop = design_from_dict(
-        raw_design, validate_layout=False,
-    )
-    with GEOMETRY_LOCK:
-        record = inventory_bin_record(box, layout, None, label, part_name, scoop)
-    record["file"] = ""
-    plan = object_height_plan(raw_design, record.get("object_height_mm"))
-    record["planning"] = {**plan, "physical_mm": stack_part_height(record),
-                          "effective_mm": max(stack_part_height(record), plan["object_top_mm"] or 0.0)}
-    return {"bin": record}
-
-
-def pegboard_layouts_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    standard = payload.get("standard") or "standard"
-    layouts: dict[str, Any] = {}
-    for one in payload.get("bins") or []:
-        if not isinstance(one, dict):
-            continue
-        key = str(one.get("id") or "")
-        try:
-            layouts[key] = pegboard_layout_for_bin(one, standard)
-        except (TypeError, ValueError, KeyError) as error:
-            layouts[key] = {"error": str(error), "compatible": False}
-    return {"standard": standard, "layouts": layouts}
-
-
 def base_trim_joint_test_payload(payload: dict[str, Any]) -> dict[str, Any]:
     raw_design = payload["design"]
     if not _is_base_trim_design(raw_design):
@@ -3341,51 +1499,6 @@ def base_trim_joint_test_payload(payload: dict[str, Any]) -> dict[str, Any]:
     with GEOMETRY_LOCK:
         result = generate_base_trim_joint_test_file(spec, output, auto_timestamp=True)
     return _generation_reply(result=result, output=output)
-
-
-def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Hosted equivalent of a genuinely new typed Space - never accepts
-    legacy "box"; that only ever comes from configure_space_text_payload's
-    migration path (see Fix 004 Correction 7.H)."""
-    raw_def = {
-        "name": payload.get("name"), "kind": payload.get("kind"),
-        "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z"),
-    }
-    if "trim_size" in payload:
-        raw_def["trim_size"] = payload["trim_size"]
-    for key in ("max_x_mm", "max_y_mm"):
-        if key in payload:
-            raw_def[key] = payload[key]
-    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
-        if key in payload:
-            raw_def[key] = payload[key]
-    return configure_space_text(
-        payload.get("inventory_text") or "",
-        title=str(payload.get("inventory_title") or payload.get("name") or "Wavefinity"),
-        raw_def=raw_def, mode="create",
-    )
-
-
-def configure_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Hosted Configure Existing / migration: never rejected merely because
-    the browser-owned inventory text already carries a layout.space."""
-    raw_def = {
-        "name": payload.get("name"), "kind": payload.get("kind"),
-        "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z"),
-    }
-    if "trim_size" in payload:
-        raw_def["trim_size"] = payload["trim_size"]
-    for key in ("max_x_mm", "max_y_mm"):
-        if key in payload:
-            raw_def[key] = payload[key]
-    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
-        if key in payload:
-            raw_def[key] = payload[key]
-    return configure_space_text(
-        payload.get("inventory_text") or "",
-        title=str(payload.get("inventory_title") or payload.get("name") or "Wavefinity"),
-        raw_def=raw_def, mode="update", allow_legacy=True,
-    )
 
 
 def _generate_side_connector(
@@ -3487,21 +1600,6 @@ def _generate_corner_connector(
         "webbed": False,
     }
     return result, plan
-
-
-class _PartialConnectorBundleError(Exception):
-    """An automatic connector bundle failed unexpectedly after one or more
-    connectors already generated successfully. Carries those completed
-    connector results so the caller can report them truthfully instead of
-    losing them behind the exception."""
-
-    def __init__(
-        self, error: Exception, completed: dict[str, Any], output: Path | None = None,
-    ) -> None:
-        super().__init__(str(error))
-        self.error = error
-        self.completed = completed
-        self.output = output
 
 
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3619,17 +1717,6 @@ def _generation_output(payload: dict[str, Any]) -> Path:
     return Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
 
 
-def _remove_export(record: dict[str, Any]) -> None:
-    shutil.rmtree(record["directory"], ignore_errors=True)
-
-
-def _clean_expired_exports() -> None:
-    now = time.monotonic()
-    expired = [token for token, record in EXPORTS.items() if record["expires"] <= now]
-    for token in expired:
-        _remove_export(EXPORTS.pop(token))
-
-
 def _generation_reply(*, result: Any, output: Path, extra: dict[str, Any] | None = None) -> dict[str, Any]:
     if not HOSTED:
         return {"result": result, "output": str(output), **(extra or {})}
@@ -3677,63 +1764,6 @@ def _generate_bin_from_design_spec(output_dir: Path, design_spec: dict[str, Any]
             auto_timestamp=False, keep_log=False,
         )
     return _extract_generated_files(result)
-
-
-def _extract_generated_files(result_data: Any) -> list[Path]:
-    paths: list[Path] = []
-    if isinstance(result_data, dict):
-        if "output" in result_data and isinstance(result_data["output"], (str, Path)):
-            paths.append(Path(result_data["output"]))
-        for v in result_data.values():
-            paths.extend(_extract_generated_files(v))
-    elif isinstance(result_data, (list, tuple)):
-        for item in result_data:
-            paths.extend(_extract_generated_files(item))
-    seen: set[Path] = set()
-    deduped: list[Path] = []
-    for p in paths:
-        try:
-            res = p.resolve()
-            if res not in seen and res.is_file():
-                seen.add(res)
-                deduped.append(res)
-        except Exception:
-            continue
-    return deduped
-
-
-def _printed_reuse_files(payload: dict[str, Any]) -> tuple[Path, list[Path]] | None:
-    """Existing Wavefinity-owned bin file(s) of an unchanged Printed row, else None.
-
-    The browser only asks; this proves it under Inventory authority. Any failed
-    proof returns None so the normal timestamped generation runs instead.
-    """
-    if payload.get("reuse_printed_file") is not True:
-        return None
-    row_id = str(payload.get("design_row_id") or "")
-    if not row_id or not isinstance(payload.get("design"), dict):
-        return None
-    try:
-        from organizer_drawer import inventory_row_files
-        from organizer_inventory import INVENTORY_LOCK, design_specs, load_inventory
-
-        canonical, _record = design_source_payload(payload["design"])
-        folder = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
-        with INVENTORY_LOCK:
-            current = load_inventory(folder)
-            row = next((one for one in current["bins"] if one.get("id") == row_id), None)
-            if row is None or row.get("kind") not in ("bin", "b4b") or row.get("status") != "printed":
-                return None
-            if not str(row.get("file") or "").strip():
-                return None
-            if design_specs(current["layout"]).get(row_id) != canonical:
-                return None
-            files = inventory_row_files(folder, row)
-        if not files or not all(path.suffix.lower() == ".3mf" and path.is_file() for path in files):
-            return None
-        return folder, files
-    except Exception:
-        return None
 
 
 def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3929,27 +1959,12 @@ def _structural_request(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return kind, design
 
 
-def _is_storage_drawers_request(payload: dict[str, Any]) -> bool:
-    space = payload.get("space")
-    return structural_kind(space if isinstance(space, dict) else None) == STORAGE_DRAWERS
-
-
 def storage_drawers_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Read-only cabinet summary for a draft or saved definition."""
     space = payload.get("space")
     if not isinstance(space, dict):
         raise ValueError("Storage Drawers settings are missing.")
     return storage_drawers_summary(space, _printer_profile_for(payload))
-
-
-def storage_drawers_mutate_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Hosted twin of the cabinet mutation: pure over the supplied Inventory text."""
-    return storage_drawers_mutate_text(
-        payload.get("inventory_text") or "",
-        title=str(payload.get("inventory_title") or "Wavefinity"),
-        operation=str(payload.get("operation") or ""),
-        drawer_id=payload.get("drawer_id"), proposed=payload.get("space"),
-    )
 
 
 def _local_cabinet_folder(payload: dict[str, Any]) -> tuple[Path, dict[str, Any], str]:
@@ -3974,64 +1989,6 @@ def _local_cabinet_folder(payload: dict[str, Any]) -> tuple[Path, dict[str, Any]
     # Orphan app-owned temp/backup files from an interrupted earlier save.
     sweep_cabinet_debris(folder)
     return folder, space, info["space_id"]
-
-
-def storage_drawers_preview_meshes(space: dict[str, Any]) -> dict[str, Any] | None:
-    """Compact GPU-ready 3D preview for a Storage Drawers cabinet (Fix 103, Section D).
-
-    Builds the actual production meshes via resolve_storage_drawers_plan
-    (assembled coordinates, NOT print-bed export orientations), serializes
-    each through _mesh_preview_geometry (numpy, sliver-dropping, micron-
-    rounded), and groups by (kind, owner, layer) exactly like
-    b4b_preview_meshes. No output folder is needed and no files are written,
-    so this works identically hosted and local.
-
-    Owner keys are the production component keys (stable across requests),
-    including "drawer:<stable-id>" for drawer components, so the client can
-    highlight the active drawer. Known printer oversize does NOT block the
-    preview (it is a non-blocking warning at the Space-definition level).
-
-    Returns None if the meshes cannot be built (caller treats a missing
-    preview as "not ready", not as a fatal error).
-    """
-    groups: dict[tuple[str, str, int], dict[str, list[float]]] = {}
-    components: list[dict[str, str]] = []
-    try:
-        # The production mesh makers / CSG and the serialization below both run
-        # under the one geometry lock (an RLock), never before it.
-        with GEOMETRY_LOCK:
-            plan = resolve_storage_drawers_plan(space, build_meshes=True)
-            for component in plan.components:
-                kind = "drawer" if component.key.startswith("drawer:") else "cabinet"
-                owner = component.key
-                components.append({"key": component.key, "name": component.display_name, "owner": owner, "kind": kind})
-                parts = []
-                if component.mesh is not None:
-                    parts.append(component.mesh)
-                for _label, part in component.object_groups or ():
-                    parts.append(part)
-                for mesh in parts:
-                    # _mesh_preview_geometry yields (triangle, kind, normal, layer, owner).
-                    for points, _k, normal, layer, _o in _mesh_preview_geometry(mesh, kind, owner):
-                        bucket = groups.setdefault((kind, owner, layer), {"positions": [], "normals": []})
-                        for corner in points:
-                            bucket["positions"].extend(corner)
-                        bucket["normals"].extend(normal)
-    except Exception:
-        return None
-    meshes = [
-        {"kind": kind, "owner": owner, "layer": layer,
-         "positions": bucket["positions"], "normals": bucket["normals"]}
-        for (kind, owner, layer), bucket in groups.items()
-    ]
-    ox, oy, oz = plan.outside_xyz
-    return {
-        "meshes": meshes,
-        "bounds": {"x": ox, "y": oy, "z": oz},
-        "components": components,
-        # Response-shape compatibility with ordinary previews.
-        "geometry": [],
-    }
 
 
 def _storage_drawers_structural_design(payload: dict[str, Any]) -> dict[str, Any]:
@@ -4110,49 +2067,6 @@ def _hosted_cabinet_export(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def storage_drawers_validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Pure: the canonical normalizer over a raw Storage Drawers Space. Hosted
-    inspection and setup use it so browser and desktop accept the same cabinets."""
-    return {"space": normalise_storage_drawers_definition(payload.get("space"))}
-
-
-def storage_drawers_reset_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Pure: what Reset cabinet settings would leave, plus why it is needed."""
-    raw = payload.get("space")
-    return {
-        "space": reset_storage_drawers_definition(raw),
-        "message": storage_drawers_definition_problem(raw) or "",
-    }
-
-
-def _storage_box_printer_fit(summary: dict[str, Any], profile: dict[str, float]) -> tuple[bool, str | None]:
-    """Drawers-style printer verdict for a Storage Box case.
-
-    Each separately printed object (body, lid) is checked on its own, flat and
-    rotated 90 degrees on the bed, in the pose it is exported in. The assembled
-    envelope is never the test: a body and lid that each fit are not refused
-    because the closed case is taller or wider than the bed. Unreadable bounds
-    mean "cannot check": no warning, and creation is never blocked.
-    """
-    objects = summary.get("print_objects_mm")
-    if not isinstance(objects, list) or not objects:
-        return True, None
-    profile = normalise_printer_profile(profile)
-    bed = f"{profile['x_mm']:g} × {profile['y_mm']:g} × {profile['z_mm']:g}"
-    for one in objects:
-        try:
-            bounds = tuple(float(value) for value in one["bounds_mm"])
-            name = str(one["name"])
-        except (KeyError, TypeError, ValueError):
-            return True, None
-        if len(bounds) != 3 or any(value <= 0 for value in bounds):
-            return True, None
-        if not component_fit(bounds, ("flat", "bed_90"), profile)["fits"]:
-            size = " × ".join(f"{value:.1f}" for value in bounds)
-            return False, f"{name} is {size} mm and does not fit the {bed} mm printer in any orientation."
-    return True, None
-
-
 def structural_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """A Space's structural output design and a plain size summary. Read-only:
     never touches an Inventory."""
@@ -4181,11 +2095,6 @@ def structural_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
             space_id=space_id,
         )
     return reply
-
-
-def _is_base_trim_request(payload: dict[str, Any]) -> bool:
-    space = payload.get("space")
-    return structural_kind(space if isinstance(space, dict) else None) == BASE_TRIM
 
 
 def _materialize_local_base_trim(payload: dict[str, Any]) -> dict[str, Any]:
@@ -4424,29 +2333,6 @@ def _local_surface_folder(payload: dict[str, Any]) -> tuple[Path, dict[str, Any]
     return root, space, expected
 
 
-def _storage_box_arrangement_issue(arranged: dict[str, Any], space: dict[str, Any]) -> str | None:
-    if any(abs(float(arranged.get(axis, 0)) - float(space[axis])) > 1e-6 for axis in ("x", "y", "z")) \
-            or normalise_storage_box(arranged.get("storage_box")) != normalise_storage_box(space.get("storage_box")):
-        return "Storage Box settings and saved arrangement disagree. Reopen this Space and try again."
-    return None
-
-
-def _surface_arrangement_issue(arranged: dict[str, Any], space: dict[str, Any]) -> str | None:
-    if any(abs(float(arranged.get(axis, 0)) - float(space[axis])) > 1e-6 for axis in ("x", "y", "z")) \
-            or arranged.get("trim_size") != space.get("trim_size"):
-        return "Surface settings and saved arrangement disagree. Reopen this Space and try again."
-    # Canonical maximums: a legacy layout with none seeds to its current finished
-    # footprint, so it only disagrees when a real maximum differs.
-    try:
-        saved = surface_maximums(arranged, float(arranged["x"]), float(arranged["y"]), arranged["trim_size"], strict=False)
-        authoritative = surface_maximums(space, float(space["x"]), float(space["y"]), space["trim_size"], strict=False)
-    except (KeyError, TypeError, ValueError):
-        return "Surface settings and saved arrangement disagree. Reopen this Space and try again."
-    if any(abs(one - other) > 1e-6 for one, other in zip(saved, authoritative)):
-        return "Surface settings and saved arrangement disagree. Reopen this Space and try again."
-    return None
-
-
 def _storage_box_structural_files(root: Path, space: dict[str, Any], _space_id: str) -> list[Path]:
     case = structural_generate_payload({"space": space, "output": str(root)})
     return _extract_generated_files(case)
@@ -4670,218 +2556,6 @@ def surface_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     })
 
 
-# ---------------------------------------------------------------- AI Help (Fix 073)
-#
-# Wavefinity never calls an AI provider. This section only builds the prompt a
-# person pastes into any outside AI, and proves a pasted answer is a legal
-# ordinary bin before the browser installs it. Nothing here is stored: the
-# request ID / fingerprint are opaque, and the browser owns the runtime session.
-
-AI_DESIGN_SCHEMA = "wavefinity-ai-design-v1"
-# The public outside-AI reference (see ai-features.md). Supplemental only: the
-# embedded prompt is always sufficient, so nothing here ever makes a network
-# call - it just picks which URL to print, from the one already-known commit
-# identity Wavefinity has (RENDER_GIT_COMMIT), falling back to the stable
-# branch link when that is absent or not a real full SHA.
-AI_FEATURE_REFERENCE_REPO = "happydadto5/Wavefinity"
-AI_FEATURE_REFERENCE_PATH = "ai-features.md"
-_HEX40 = re.compile(r"^[0-9a-f]{40}$")
-
-
-def ai_feature_reference_url() -> str:
-    commit = os.environ.get("RENDER_GIT_COMMIT", "")
-    ref = commit if _HEX40.fullmatch(commit) else "main"
-    return f"https://raw.githubusercontent.com/{AI_FEATURE_REFERENCE_REPO}/{ref}/{AI_FEATURE_REFERENCE_PATH}"
-
-AI_MAX_DESCRIPTION = 4000
-AI_MAX_RESPONSE = 400_000
-AI_SPACE_KINDS = ("drawer", "box", "surface", "portable", "pegboard", "storage_drawers")
-# Capabilities a text-only AI cannot legally supply. They are offered to the
-# person as a recommendation, never as something the returned JSON may contain.
-AI_MEDIA_CAPABILITIES = ("photo",)
-AI_MEDIA_REASON = (
-    "Needs a photo or traced outline that a text answer cannot supply. "
-    "Recommend the person add it themselves with Photo Nest inside Wavefinity; "
-    "never put this part in the returned design."
-)
-AI_MODIFIER_BLOCKS = (
-    ("lid_stacking", "Lid & Stacking",
-     "Choose ONE of three configurations (see example): Stackable Bin "
-     "(box.stack = {\"mode\": \"direct\"}, no box.lid), Stackable Lid (box.lid with "
-     "stackable=true; its label style is forced to flush) or Lid with Handle "
-     "(box.lid with stackable=false, handle_type/size/position). "
-     "Never combine a lid with direct stacking.",
-     ("box.lid", "box.stack")),
-    ("inside_handles", "Inside Grip",
-     "A finger grip inside the bin (box.lift_grabbers).", ("box.lift_grabbers",)),
-    ("side_openings", "Side Openings",
-     "Finger-access cutouts through selected walls (box.side_openings).",
-     ("box.side_openings",)),
-    ("edge_mount", "Edge Mount",
-     "A label and/or screw mounting on one outside edge (box.edge_mount). "
-     "Include the block only when the edge mount is wanted.",
-     ("box.edge_mount",)),
-)
-_AI_PATH_RE = re.compile(r"[A-Za-z]:[\\/][^\s\"']*|(?:/[\w.\-]+){2,}")
-
-
-def _ai_example_base() -> dict[str, Any]:
-    """A roomy blank bin, so every example part and modifier is legal in it."""
-    design = default_design()
-    design["box"].update({"x": 64.0, "y": 64.0, "z": 60.0})
-    return design
-
-
-def _ai_legal_values(option: dict[str, Any]) -> str:
-    """One readable line of what an option may hold, from its own metadata."""
-    kind = option["type"]
-    if "choices" in option:
-        quote = "" if kind in ("number", "integer") else '"'
-        return "one of: " + ", ".join(f'{quote}{one["value"]}{quote}' for one in option["choices"])
-    if kind == "boolean":
-        return "true or false"
-    if kind in ("number", "integer"):
-        low, high = option.get("minimum"), option.get("maximum")
-        span = (f"{low:g} to {high:g}" if low is not None and high is not None
-                else f"at least {low:g}" if low is not None
-                else f"at most {high:g}" if high is not None else "any number")
-        return ("whole number " if kind == "integer" else "number ") + span
-    return {"string": "text", "json": "JSON value", "enum": "see note"}.get(kind, kind)
-
-
-# Correction 3: a registry capability flag says a feature HAS this kind of
-# control, not that today's Designer exposes it at the generic top-level field.
-# Bore's lean direction moved to options.angle_towards (top-level `along` is a
-# legacy fallback); Divider's quantities moved entirely to options.count_x /
-# count_y (top-level `count`/`along` are legacy single-axis compatibility).
-# This table is the one place that overrides the mechanical inference.
-_AI_GENERIC_FIELD_EXCLUSIONS: dict[str, set[str]] = {
-    "bore": {"along"},
-    "divider": {"qty", "along"},
-}
-
-
-def _ai_generic_fields(part: dict[str, Any], starter: dict[str, Any],
-                       item_rules: dict[str, Any]) -> dict[str, Any]:
-    """The shared top-level feature fields (outside ``options``) this holder uses.
-
-    Driven by the holder's capabilities, then narrowed by
-    ``_AI_GENERIC_FIELD_EXCLUSIONS`` for the cases where the current Designer UI
-    does not actually expose the generic control a capability flag implies (see
-    Fix 073 Correction 3). ``full_span``/``wedge`` are never offered here: the
-    current Designer only builds upright grid dividers and never lets a person
-    edit either field, so they are canonical structure to copy from the example,
-    not an AI-facing choice.
-    """
-    caps = set(part["capabilities"]) - _AI_GENERIC_FIELD_EXCLUSIONS.get(part["kind"], set())
-    kind = part["kind"]
-    zone_note = ("Text's zone is derived from its lettering: copy the example's zone and do not tune it."
-                 if kind == "text" else
-                 "Width is x1-x0 and depth is y1-y0; make it large enough for the count and item size.")
-    fields: dict[str, Any] = {
-        "zone": {
-            "type": "array of 4 numbers", "form": "[x0, y0, x1, y1]",
-            "rules": "millimetres from the bin centre; x1 > x0 and y1 > y0; must lie entirely inside "
-                     "the interior of the design you RETURN (not the old size). " + zone_note,
-            "example": starter["zone"],
-        },
-    }
-    if "size" in caps:
-        fields["size"] = {
-            "rules": "This part's footprint is its zone: width = x1-x0, depth = y1-y0. There is no separate "
-                     "size field, so choose a zone big enough for the requested quantity/shape.",
-        }
-    if "qty" in caps:
-        auto = kind != "steps"
-        fields["count"] = {
-            "type": "whole number or null", "minimum": 1,
-            "null_means": ("Auto: as many as fit the zone" if auto else
-                           "not allowed for Steps: give the number of steps (default 3)"),
-            "example": starter["count"],
-            **({"note": "Dividers are normally set with options.count_x / options.count_y; leave count null."}
-               if kind == "divider" else
-               {"note": "Posts may instead use options.count_x / options.count_y for a grid."}
-               if kind == "post" else {}),
-        }
-    if "along" in caps:
-        fields["along"] = {
-            "type": "text", "default": "x",
-            "values": [
-                {"value": "x", "meaning": "the part runs along the bin's X axis (its width, left to right)"},
-                {"value": "y", "meaning": "the part runs along the bin's Y axis (its depth, front to back)"},
-            ],
-            **({"note": "A Bore's lean direction is options.angle_towards when present; along is the older control."}
-               if kind == "bore" else {}),
-        }
-    if "alternate" in caps:
-        fields["alternate_ends"] = {
-            "type": "boolean", "default": False,
-            "meaning": "false = every item faces the same way (Aligned); true = every second item is turned "
-                       "end-for-end so neighbouring handles and shafts interleave (Alternate ends)",
-        }
-    if "item" in caps:
-        profiles = [dict(one) for one in part["item_profiles"]]
-        item: dict[str, Any] = {
-            "type": "object",
-            "shape": {"name": "non-empty text",
-                      "profile": "one of the profile values below",
-                      "clearance": "number, mm, 0 or more (slack around the item)",
-                      "segments": "list of at least one {length, diameter}; both positive numbers in mm"},
-            "profiles": profiles,
-            "default_clearance_mm": item_rules["default_clearance_mm"],
-            "example": starter["item"],
-        }
-        if kind == "bore":
-            item["rules"] = (
-                "Use one segment {length, diameter}; length is the item's length and diameter its width. "
-                f"Set clearance to exactly {item_rules['bore_clearance_mm']:g} mm. "
-                "Profile 'hex_bit_short' / 'hex_bit_long' are fixed 1/4 inch hex-bit presets: the item MUST be "
-                "exactly the hex_bit entry below for that profile (single segment, its length_mm and diameter_mm, its clearance_mm), "
-                "and the bore stands straight up, so leave options.angle at 0 and omit options.angle_towards. "
-                "Its hole depth (options.depth) defaults to the entry's hole_depth_mm.")
-            item["hex_bit"] = item_rules["hex_bit"]
-        elif kind == "cradle":
-            item["rules"] = ("A cradle is a half-round notch: profile is always 'round', clearance 0. Give one "
-                             "segment {length, diameter} for the tool laid on its side.")
-        fields["item"] = item
-    if kind == "divider":
-        fields["note"] = (
-            "Quantities are options.count_x / options.count_y only; the top-level count/along "
-            "fields are legacy and are not read for a grid divider. Copy full_span and wedge "
-            "from the example unchanged - they are fixed structure, not choices."
-        )
-    return fields
-
-
-def _ai_modifier_examples() -> dict[str, dict[str, Any]]:
-    """One canonical example block per user-facing modifier.
-
-    Each is produced by running a raw block through the same validator every
-    design uses, so an example can never drift from the real serializer.
-    """
-    raw_blocks = {
-        "lid_with_handle": {"lid": {"enabled": True}},
-        "stackable_lid": {"lid": {"enabled": True, "stackable": True}},
-        "stackable_bin": {"stack": {"mode": "direct"}},
-        "inside_handles": {"lift_grabbers": {
-            "enabled": True, "size": "medium", "location": "sides"}},
-        "side_openings": {"side_openings": {
-            "enabled": True, "shape": "curved", "sides": ["front"], "size": "medium",
-            "from_bottom_percent": 0, "from_top_percent": 0,
-            "percent_mode": "inset_v2"}},
-        "edge_mount": {"edge_mount": {
-            "side": "front", "label_enabled": True, "label_text": "Label",
-            "holes_enabled": True}},
-    }
-    examples: dict[str, dict[str, Any]] = {}
-    for name, blocks in raw_blocks.items():
-        design = _ai_example_base()
-        design["box"].update(blocks)
-        design = validate_design_payload({"design": design})["design"]
-        examples[name] = {key: design["box"][key] for key in blocks if key in design["box"]}
-    return examples
-
-
 def ai_capability_manifest() -> dict[str, Any]:
     """The AI's authoritative list of what it may put in a design.
 
@@ -4992,163 +2666,6 @@ def ai_capability_manifest() -> dict[str, Any]:
     }
 
 
-def _ai_clean_text(text: str, limit: int = 600) -> str:
-    """A short user-facing reason: no paths, no tracebacks."""
-    text = re.sub(r"Traceback.*", "", text, flags=re.S)
-    return _AI_PATH_RE.sub("[path]", text).strip()[:limit]
-
-
-def _ai_safe_message(error: BaseException) -> str:
-    if isinstance(error, KeyError):
-        key = error.args[0] if error.args else "a required field"
-        return _ai_clean_text(f"The design is missing required field {key!s}.", 300)
-    if isinstance(error, TypeError):
-        return "The design has a value of the wrong type."
-    if isinstance(error, ValueError):
-        return _ai_clean_text(str(error)) or "The design is not valid."
-    return "The design could not be read as a Wavefinity bin design."
-
-
-def _ai_bin_design(raw: Any) -> dict[str, Any]:
-    """Canonical ordinary-bin design, or a safe ValueError."""
-    if not isinstance(raw, dict):
-        raise ValueError("The response has no design object.")
-    box_raw = raw.get("box")
-    b4b_raw = box_raw.get("b4b") if isinstance(box_raw, dict) else None
-    if _is_base_trim_design(raw) or (isinstance(b4b_raw, dict) and b4b_raw.get("enabled")):
-        raise ValueError("A Storage Box or Base Trim cannot be used as an AI bin design.")
-    try:
-        canonical = validate_design_payload({"design": raw})["design"]
-    except Exception as error:  # every parse failure becomes one safe sentence
-        raise ValueError(_ai_safe_message(error)) from None
-    for feature in canonical["layout"]["features"]:
-        if feature.get("kind") == "nest" or feature.get("contour") or feature.get("source_contour"):
-            raise ValueError(
-                "Photo Nest or traced outlines cannot come from an AI answer. "
-                "Remove that part and add it in Wavefinity."
-            )
-    return canonical
-
-
-def _ai_space_context(raw: Any) -> dict[str, Any]:
-    """Only the user-relevant Space facts; nothing else from the browser."""
-    if not isinstance(raw, dict) or raw.get("kind") not in AI_SPACE_KINDS:
-        return {"typed_space": False}
-    space: dict[str, Any] = {"typed_space": True, "kind": raw["kind"]}
-    # Fix 078: Drawer and Storage Box (current `portable`, legacy `box`) are a
-    # hard vertical ceiling at their Space z; Surface and Pegboard are not.
-    space["capped"] = raw["kind"] in ("drawer", "box", "portable", "storage_drawers")
-    for axis in ("x", "y", "z"):
-        value = raw.get(axis)
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
-            space[f"{axis}_mm"] = round(float(value), 3)
-    if raw["kind"] == "surface" and isinstance(raw.get("trim_size"), str):
-        space["trim_size"] = raw["trim_size"][:24]
-    if raw["kind"] == "pegboard" and isinstance(raw.get("pegboard_standard"), str):
-        space["pegboard_standard"] = raw["pegboard_standard"][:24]
-    # The browser owns the Pegboard product minimums (the same ones New Bin uses).
-    for key in ("min_x", "min_z"):
-        value = raw.get(key)
-        if raw["kind"] == "pegboard" and isinstance(value, (int, float))                 and not isinstance(value, bool) and math.isfinite(value) and value > 0:
-            space[f"{key}_mm"] = round(float(value), 3)
-    return space
-
-
-def _capped_space_height(raw: Any) -> float | None:
-    if not isinstance(raw, dict) or raw.get("kind") not in ("drawer", "portable", "box", "storage_drawers"):
-        return None
-    z = raw.get("z")
-    return float(z) if isinstance(z, (int, float)) and not isinstance(z, bool) and math.isfinite(z) else None
-
-
-def _ai_controlled_fields(space: dict[str, Any]) -> list[str]:
-    kind = space.get("kind")
-    if kind == "pegboard":
-        return ["box.pegboard"]
-    if kind == "surface":
-        return ["box.base_thickness", "box.standard_base", "layout.surface_base_mode"]
-    return []
-
-
-def _ai_fingerprint(design: dict[str, Any], space: dict[str, Any]) -> str:
-    text = json.dumps({"design": design, "space": space}, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-
-
-def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
-                    context: dict[str, Any], manifest: dict[str, Any],
-                    shape: dict[str, Any]) -> str:
-    def block(value: Any) -> str:
-        return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
-    envelope = {
-        "schema": AI_DESIGN_SCHEMA, "request_id": request_id,
-        "context_fingerprint": fingerprint, "assumptions": [],
-        "design": "<complete Wavefinity ordinary-bin design>",
-    }
-    # Fix 078: state the Space cap in plain language - do not expect the
-    # outside AI to infer it merely from bin/Space dimensions.
-    if context.get("typed_space"):
-        z_mm = context.get("z_mm")
-        cap_line = (
-            f"- Active Space type: {context.get('kind')}. Hard object-height cap: {z_mm:g} mm - "
-            "the full physical envelope of a Bore-held object, including tilt and width, must stay below this height."
-            if context.get("capped") and isinstance(z_mm, (int, float))
-            else f"- Active Space type: {context.get('kind')}. No hard vertical cap."
-        )
-    else:
-        cap_line = "- No active typed Space. No hard vertical cap."
-    return "\n".join([
-        "You are helping design ONE 3D-printable storage bin for the Wavefinity app.",
-        "Read everything below. Ask the person questions if you need to. When you are",
-        "sure, reply with the final answer exactly as described in RESPONSE CONTRACT.",
-        "",
-        "=== USER REQUEST ===",
-        description,
-        "=== END USER REQUEST ===",
-        "",
-        "=== HOW TO WORK ===",
-        "- Design exactly ONE object. If the request describes several, ask the person to narrow it to one BEFORE giving the final answer.",
-        "- If any critical measurement is missing, ambiguous, suspicious or has conflicting units, ASK the person first. Do not guess it and do not reinterpret the units they gave.",
-        "- All values in the design are millimetres. Convert nothing silently; ask if unsure.",
-        "- You may use any legal part, option or modifier in the CAPABILITY MANIFEST that best solves the request.",
-        "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",
-        "- Optional reference_object {width, depth, height} is only for Pocket, Post, Slot and Steps. It is a preview/planning envelope, never holder geometry. Include it only when the person supplied or confirmed all three measurements; never invent them. Bore and Cradle use their existing item instead.",
-        "- Interior part zones are [x0,y0,x1,y1] in mm from the bin centre. current_baseline_layout_bounds_mm is only the interior of the CURRENT bin size. If you change box.x/box.y/box.z, the legal interior changes with it (each axis keeps about interior_margin_mm of shell in total): every zone you return must fit inside the interior of the design you RETURN, not the old one. Adjust the example zones, counts and sizes to the real item.",
-        "- Keep every field listed in space_controlled_fields exactly as it is in the current design.",
-        cap_line,
-        "- design.part_name must be a short, descriptive, non-blank name (1-80 characters) for what the bin holds - for example \"Lipstick\" or \"Hex Drivers\", never a generic \"Bin\" or dimensions-only text. Existing Inventory names, when supplied below, are advisory: avoid an obvious duplicate, but Wavefinity enforces final uniqueness itself, so do not invent your own numbering suffix.",
-        "- A design may contain at most one rim Text feature in total, not one per rim side.",
-        "- Bore: when Base - Straight Walls vs Base - Wavy Walls, or Straight Walls Only vs Wavy Walls Only, are otherwise equally suitable, prefer the wavy one. Choose the correct structural family (Base vs Walls Only) first; never switch families merely to get \"wavy\".",
-        "- Bore: an object's length, its insertion depth (Base styles: options.depth; Walls Only: options.walls_depth), and the bin's own height are three different numbers - do not set the insertion depth equal to the object's full length just because that is the length you were given. For an upright hand-retrieved object, plan for roughly 30 mm of it to remain grippable above the bin rim; in a capped Space (see above) this preference never overrides the hard cap.",
-        "- Bore angle: the Designer's user-facing \"Bore angle\" runs 90 (upright) down to 20 (steepest lean). This JSON's canonical options.angle is the same lean measured the other way: 0 (upright) up to 70 (steepest) - displayed_bore_angle = 90 - options.angle. When you lean a Bore with no object-specific reason for a direction, prefer options.angle_towards \"back\", or the side opposite the design's one rim Text's rim_side if the design has one.",
-        "",
-        "=== WAVEFINITY CONTEXT (JSON) ===",
-        block(context),
-        "",
-        "=== CANONICAL DESIGN SHAPE (JSON; the current bin, a complete design) ===",
-        block(shape),
-        "",
-        "=== CAPABILITY MANIFEST (JSON) ===",
-        block(manifest),
-        "",
-        "=== OPTIONAL BACKGROUND (only if you can fetch web pages) ===",
-        f"{ai_feature_reference_url()} explains these features in plain language. Everything above is",
-        "already the exact current data for this request, so use that page only for background; if you",
-        "cannot access it, ignore it and proceed. When it and this prompt ever disagree, the data above",
-        "wins - the page can be newer than this running copy of Wavefinity.",
-        "",
-        "=== RESPONSE CONTRACT ===",
-        "Your FINAL answer is exactly one JSON object and nothing else - no text before or after it:",
-        block(envelope),
-        f"- \"schema\" must be exactly \"{AI_DESIGN_SCHEMA}\".",
-        f"- Copy \"request_id\" (\"{request_id}\") and \"context_fingerprint\" (\"{fingerprint}\") exactly.",
-        "- \"design\" is a COMPLETE Wavefinity ordinary-bin design like the canonical shape - not a patch and not a list of UI steps.",
-        "- \"assumptions\" may list only harmless, non-critical assumptions. It is never permission to invent critical dimensions.",
-        "- Do not invent Photo Nest contour or photo data.",
-        "- A single markdown ```json fence around the object is tolerated; prose around it is not.",
-    ])
-
-
 def ai_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
     description = payload.get("description")
     if not isinstance(description, str) or not description.strip():
@@ -5179,111 +2696,6 @@ def ai_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
     prompt = _ai_prompt_text(
         description, request_id, fingerprint, context, ai_capability_manifest(), design)
     return {"request_id": request_id, "context_fingerprint": fingerprint, "prompt": prompt}
-
-
-def _ai_num(value: Any) -> float | None:
-    """Coerce a JSON-decoded value to float, or None when that is not sound."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value)
-
-
-def _ai_item_profile_violation(kind: str, item: Any) -> str | None:
-    """Item-profile defects a canonically valid design can still carry.
-
-    Runs on the raw item dict, before canonicalization can round an odd hex-bit
-    length/clearance into something that merely builds without complaint - the
-    real bore/cradle geometry ignores a hex-bit item's own numbers entirely and
-    always builds the fixed preset, so a wrong value would otherwise reach an
-    accepted design silently instead of being rejected.
-    """
-    if not isinstance(item, dict):
-        return None
-    profile = item.get("profile", "round")
-    definition = FEATURE_DEFINITIONS.get(kind)
-    allowed = definition.item_profiles if definition else ()
-    if allowed and profile not in allowed:
-        return f"a {kind} may only use item profile {' / '.join(allowed)}, not {profile!r}"
-    if kind == "cradle":
-        if profile != "round":
-            return "a cradle's item profile must be 'round'"
-        if _ai_num(item.get("clearance")) != 0.0:
-            return "a cradle's item clearance must be 0"
-        return None
-    if kind == "bore":
-        fixed = HEX_BIT_FIXED.get(profile)
-        if fixed is None:
-            if _ai_num(item.get("clearance")) != BORE_CLEARANCE:
-                return f"a bore item's clearance must be exactly {BORE_CLEARANCE:g}"
-            return None
-        segments = item.get("segments")
-        segment = segments[0] if isinstance(segments, list) and len(segments) == 1 else None
-        ok = (
-            segment is not None
-            and _ai_close(item.get("clearance"), fixed["clearance_mm"])
-            and _ai_close(segment.get("length"), fixed["length_mm"])
-            and _ai_close(segment.get("diameter"), fixed["diameter_mm"])
-        )
-        if not ok:
-            return (
-                f"{profile} must use exactly the fixed preset: one segment "
-                f"{{length: {fixed['length_mm']:g}, diameter: {fixed['diameter_mm']:g}}}, "
-                f"clearance {fixed['clearance_mm']:g}"
-            )
-    return None
-
-
-def _ai_close(value: Any, target: float) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value - target) < 1e-6
-
-
-def _ai_semantic_violation(raw: Any) -> str | None:
-    """Reject-with-repair defects the canonical/geometry validators would not
-    themselves catch: an AI answer that uses a field this Fix's manifest never
-    offered as a configurable control, or an item that violates its feature's
-    fixed rules. Runs on the raw candidate, before canonicalization can erase or
-    mask the conflict (Fix 073 Correction 3).
-    """
-    if not isinstance(raw, dict):
-        return None
-    # Fix 078: the AI must return a short, descriptive, non-blank bin name -
-    # Wavefinity normalizes/dedupes it on adoption, but a missing or garbled
-    # name is the AI's own answer defect and is repairable like any other.
-    part_name = raw.get("part_name")
-    if not isinstance(part_name, str) or not part_name.strip():
-        return "design.part_name must be a short, non-blank name describing the bin's intended contents"
-    if len(part_name.strip()) > 80:
-        return "design.part_name must be 80 characters or fewer"
-    features = raw.get("layout", {}).get("features") if isinstance(raw.get("layout"), dict) else None
-    if not isinstance(features, list):
-        return None
-    rim_text_count = 0
-    for feature in features:
-        if not isinstance(feature, dict):
-            continue
-        kind = feature.get("kind")
-        if feature.get("reference_object") is not None and kind not in {"pocket", "post", "slot", "steps"}:
-            return f"reference_object is not an AI-configurable field for {kind}"
-        options = feature.get("options") if isinstance(feature.get("options"), dict) else {}
-        if kind == "text" and options.get("level") == "rim":
-            rim_text_count += 1
-            # Fix 078: a design may contain at most one rim Text total.
-            if rim_text_count > 1:
-                return "a design may contain at most one rim Text; remove the extra rim Text"
-        violation = _ai_item_profile_violation(kind, feature.get("item"))
-        if violation:
-            return violation
-        if kind == "bore":
-            profile = feature.get("item", {}).get("profile") if isinstance(feature.get("item"), dict) else None
-            if profile in HEX_BIT_FIXED and (_ai_num(options.get("angle")) or 0.0) != 0.0:
-                return f"{profile} stands upright; its angle must be 0, not editable by lean"
-        if kind == "steps" and "count" in options:
-            return "a Steps part's Number of steps is top-level feature.count, not options.count"
-        if kind == "post" and ("count_x" in options or "count_y" in options):
-            return "a Post part's layout is top-level feature.count/along, not options.count_x/count_y"
-        if kind == "divider" and feature.get("count") is not None:
-            return "a Divider's grid is options.count_x/options.count_y, not top-level feature.count"
-    return None
 
 
 def ai_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -5382,40 +2794,6 @@ def _ai_space_cap_violation(design: dict[str, Any], raw_space: Any) -> str | Non
     return None
 
 
-def ai_repair_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    request_id = payload.get("request_id")
-    fingerprint = payload.get("context_fingerprint")
-    if not isinstance(request_id, str) or not isinstance(fingerprint, str) \
-            or not request_id or not fingerprint:
-        raise ValueError("A repair prompt needs the original request and fingerprint.")
-    response = payload.get("response")
-    if not isinstance(response, str) or not response.strip():
-        raise ValueError("There is no response to repair.")
-    error = _ai_clean_text(str(payload.get("error") or "")) or "The answer was not valid."
-    prompt = "\n".join([
-        "Your previous Wavefinity answer could not be used. Fix it and answer again.",
-        "",
-        f"schema: {AI_DESIGN_SCHEMA}",
-        f"request_id: {request_id}",
-        f"context_fingerprint: {fingerprint}",
-        "",
-        "=== PROBLEM ===",
-        error,
-        "",
-        "=== YOUR PREVIOUS ANSWER ===",
-        response.strip()[:AI_MAX_RESPONSE],
-        "=== END PREVIOUS ANSWER ===",
-        "",
-        f"(Background, optional: {ai_feature_reference_url()} - only if you can fetch it; the exact",
-        "schema/request/fingerprint/error above are authoritative either way.)",
-        "",
-        "Return exactly ONE corrected JSON object and nothing else. It must keep",
-        f"\"schema\": \"{AI_DESIGN_SCHEMA}\", the same request_id and context_fingerprint,",
-        "and a complete Wavefinity ordinary-bin \"design\" that fixes the problem above.",
-    ])
-    return {"prompt": prompt}
-
-
 POST_ROUTES = {
     "/api/preview": preview_payload,
     "/api/design/validate": validate_design_payload,
@@ -5507,18 +2885,6 @@ if not HOSTED:
     # it at all.
     POST_ROUTES["/api/space/storage-drawers-mutate"] = _idempotent_operation(
         POST_ROUTES["/api/space/storage-drawers-mutate"])
-
-
-class WavefinityServer(ThreadingHTTPServer):
-    # On Windows, SO_REUSEADDR lets a socket bind a port another process is
-    # still actively LISTENing on, which would make a second launcher split
-    # requests with the stale one unpredictably - so it stays off there.
-    # On POSIX, SO_REUSEADDR carries no such risk: it only permits binding
-    # over a socket of this launcher's own past connections still winding
-    # down in TIME_WAIT, which is exactly what _replace_stale_process()'s
-    # own health-check requests leave behind, and a bare bind() without it
-    # can otherwise refuse the immediate relaunch for up to a minute.
-    allow_reuse_address = os.name != "nt"
 
 
 class WavefinityHandler(BaseHTTPRequestHandler):
@@ -5670,102 +3036,6 @@ class WavefinityHandler(BaseHTTPRequestHandler):
 
 def make_server(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     return WavefinityServer((host, port), WavefinityHandler)
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Wavefinity local browser app")
-    parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")))
-    parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--check", action="store_true",
-                        help="print source freshness and build identity, then exit")
-    return parser
-
-
-def _pid_on_port(host: str, port: int) -> int | None:
-    """Best-effort: whichever process the OS says is actually bound to this
-    port right now, independent of anything this app wrote about itself.
-
-    ``PID_FILE`` only names a process this launcher itself started; a
-    process from before that file existed, or started some other way
-    entirely, never wrote one - this is the fallback that finds it anyway,
-    by asking the OS directly instead of relying on the process's own
-    cooperation. Never trusted by itself: the caller still requires a real
-    ``/api/health`` response before acting on whatever PID this returns.
-    """
-    try:
-        if os.name == "nt":
-            output = subprocess.run(
-                ["netstat", "-ano"], capture_output=True, text=True,
-                timeout=5, creationflags=subprocess.CREATE_NO_WINDOW,
-            ).stdout
-            for line in output.splitlines():
-                parts = line.split()
-                if (len(parts) >= 5 and parts[0] == "TCP"
-                        and parts[3] == "LISTENING"
-                        and parts[1].rsplit(":", 1)[-1] == str(port)):
-                    return int(parts[-1])
-        else:
-            output = subprocess.run(
-                ["lsof", "-ti", f"tcp:{port}"],
-                capture_output=True, text=True, timeout=5,
-            ).stdout
-            for line in output.splitlines():
-                if line.strip():
-                    return int(line.strip())
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-    return None
-
-
-def _replace_stale_process(requested_url: str, host: str, port: int) -> bool:
-    """Kill whatever previous process is still holding the port.
-
-    A relaunch during active development means "give me the code on disk
-    now," not "reuse whatever is already listening" - that silently serves
-    stale code with no visible sign anything is wrong, since the browser
-    just talks to whichever process answers the port. The only thing that
-    licenses killing anything here is ``/api/health`` proving a genuine
-    Wavefinity service - not some unrelated program - is what actually
-    answers on this port; how its PID is found (this launcher's own record
-    of a process it started, or failing that an OS-level lookup that does
-    not depend on the target's cooperation at all) does not change that.
-    """
-    try:
-        with urlopen(requested_url + "api/health", timeout=1.5) as response:
-            if not json.loads(response.read()).get("ok"):
-                return False
-    except Exception as error:
-        if hasattr(error, "close"):
-            error.close()
-        return False
-    # A PID file can outlive its process and be reused by Windows. Only the
-    # operating system's current port owner is safe to terminate.
-    pid = _pid_on_port(host, port)
-    if pid is None:
-        return False
-    try:
-        if os.name == "nt":
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        else:
-            os.kill(pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError):
-        return False
-    for _ in range(30):
-        time.sleep(0.1)
-        try:
-            with urlopen(requested_url + "api/health", timeout=0.3):
-                continue
-        except Exception as error:
-            if hasattr(error, "close"):
-                error.close()
-            return True
-    return False
 
 
 def main(argv: list[str] | None = None) -> int:
