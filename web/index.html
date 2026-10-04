@@ -290,7 +290,7 @@
                     <select id="edge-mount-label-mode">
                       <option value="none">None</option>
                       <option value="separate">Separate part</option>
-                      <option value="integrated">Integrated</option>
+                      <option value="integrated">Integrated — Requires support</option>
                     </select>
                   </label>
                 </div>
@@ -310,6 +310,7 @@
                     <label class="edge-mount-compact-number">Text depth <span class="unit">mm</span>
                       <input id="edge-mount-label-depth" type="number" min="0.2" max="2" step="0.1">
                     </label>
+                    <p id="edge-mount-depth-error" class="field-error" role="alert" hidden></p>
                     <label id="edge-mount-label-style-row" class="inline-select edge-mount-compact-select" title="Letters are recessed into the surface." hidden>Label style
                       <select id="edge-mount-label-style">
                         <option value="flush">Inlaid / flush</option>
@@ -318,7 +319,7 @@
                     </label>
                   </div>
 
-                  <p id="edge-mount-integrated-support-warning" class="inline-help" hidden>Integrated labels usually need slicer supports.</p>
+                  <p id="edge-mount-integrated-support-warning" class="inline-help" hidden><strong>Requires support.</strong> An Integrated label needs slicer supports. Separate part is recommended for support-free printing.</p>
 
                   <div class="edge-mount-field-group edge-mount-plate-group">
                     <label class="edge-mount-compact-number" title="How far the label plate extends beyond the bin.">Projection <span class="unit">mm</span>
@@ -328,6 +329,7 @@
                       <input id="edge-mount-label-thickness-mm" type="number" min="0.8" max="6" step="0.1">
                     </label>
                   </div>
+                  <p id="edge-mount-thickness-error" class="field-error" role="alert" hidden></p>
 
                   <div id="edge-mount-standoff-rib-controls" class="edge-mount-field-group edge-mount-standoff-group" hidden>
                     <label class="checkbox-row"><span>Standoff Ribs</span><input id="edge-mount-standoff-ribs-enabled" type="checkbox"></label>

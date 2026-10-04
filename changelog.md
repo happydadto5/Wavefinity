@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-04 — Storage Drawers, Storage Box and Edge Mount truth (Fix 114)
+
+- Drawer heights are now usable heights you can edit at any time: typed values are no longer clamped or rounded, the minimum shows as a visible error, default drawers start at the published usable height under Standard fit, and changing Drawer fit keeps each drawer's usable height. A cabinet check that fails or times out now settles into an editable error.
+- Cabinet width/depth fields keep what you type and show the nearest 8 mm grid size that will be saved. Name and size layout now match Storage Box; the Space navigator no longer duplicates Add/Delete Drawer (Design owns them).
+- Cabinet parts are redesigned to print without supports in the specified orientation (checked by a new geometry test, not a slicer): the rear prints with its panel face down, drawer runners grow from the drawer underside, side dovetails are half-dovetails, and the Top is held by a ramped bump near the end of each dovetail instead of a spring arm. Drawer fronts are inset with a uniform 0.6 mm reveal, pulls are horizontal ledges with a 45° underside, and side walls gain a cosmetic wave above the mechanical bands.
+- Storage Box printer fit is checked per printed object (body and lid) rather than the assembled closed case.
+- The assembly guide no longer claims blanket "supports off", describes the new top retention, and says a Drawer fit change means reprinting the whole cabinet.
+- Design labels geometry from an invalid draft as **Last valid preview**.
+- Edge Mount: Integrated is marked **Requires support**; label thickness and text depth are no longer silently clamped — invalid values stay editable and show a local message.
+
 ## 2026-09-28 — Storage Drawers hardening (Fix 086)
 
 - Storage Drawers cabinets now build as real printable solids (the Rear Cross Brace no longer fails), and every part is exported in the print orientation Wavefinity checked against your printer, with its lettering turned with it. A cabinet that cannot print on your printer is stopped at setup, naming the part and what to change.

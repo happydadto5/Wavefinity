@@ -302,8 +302,6 @@ SP.cabinetJumpToRow = async rowId => {
 };
 
 SP.cabinetCallbacks = () => ({
-  addDrawer: () => SP.cabinetAdd(),
-  deleteDrawer: drawerId => SP.cabinetDelete(drawerId),
   resetCabinet: () => SP.resetCabinetSettings(),
   openPrinterSettings: () => SP.openPrinterSettings(),
   saveCabinet: () => SP.runStructural("save"),

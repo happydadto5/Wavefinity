@@ -1592,7 +1592,7 @@ the two switched on.
   text plus a 2 mm margin on every side, never wider than Full Side).
   Projection is one exact 5-200 mm field; a new Edge Mount starts at
   one-third of the mount-normal bin dimension, clamped to that range.
-  Thickness (0.8-6.0 mm) keeps its named choices. The two free Label corners
+  Thickness (0.8-6.0 mm) keeps its named choices; Integrated is marked **Requires support** (Separate is the support-free choice), and out-of-range thickness or text depth is reported beside the field instead of being silently clamped. The two free Label corners
   have a fixed ~1 mm 45-degree shave. Lettering reuses the ordinary text
   engine, sunk to a text depth that defaults to 0.6 mm for a new or missing
   Edge Mount (an explicit saved 0.4 mm design stays 0.4 mm - this default is
@@ -1744,10 +1744,10 @@ layered implementation:
 | `organizer_drawer.py` | Drawer layout: grid fit, drawer report, spacer planning and export, and its `/api/drawer/*` routes. | No. |
 | `organizer_pegboard.py` | Pegboard standards, size derivation, receiver layout/geometry, standard-specific adapters, and mount footprints. | No. |
 | `organizer_storage_drawers.py` | Storage Drawers cabinet schema: drawer descriptors with stable IDs, the canonical normalizer, the damaged-settings reset, and placement-preserving add/delete/reconfigure plans. | No. |
-| `organizer_storage_drawer_geometry.py` | The physical cabinet from one datum: base, top, sides/frames, rear, drawers and stacking pegs, plus the fit summary. | No. |
+| `organizer_storage_drawer_geometry.py` | The physical cabinet from one datum: base, top, sides/frames, rear, drawers and stacking pegs, plus the fit summary. Fix 114: inset fronts with `SD_FRONT_REVEAL_MM`, half-dovetails, a ramped top detent, and support-conscious parts proven by `tests/test_structural_overhang.py` (design intent in the production orientation, not slicer certification). | No. |
 | `organizer_storage_drawer_outputs.py` | Cabinet output planning and the rollback-safe save transaction: oriented 3MF export, manifest and SHA-256 status, app-owned debris sweep. | No. |
 | `organizer_printer_profile.py` | The one printer build-volume owner: normalisation, print orientations (fit bounds and the matching real rotation), and reset. | No. |
-| `web/storage-drawers.js`, `web/storage-drawers-form.js`, `web/storage-drawers-workspace.js` | Cabinet rules from the published catalog, the Create/Edit form and live summary, and the drawer navigator with Save/Print Cabinet and recovery. `web/storage-drawers-guide.html` is the one app-level assembly and print guide. | No. |
+| `web/storage-drawers.js`, `web/storage-drawers-form.js`, `web/storage-drawers-workspace.js` | Cabinet rules from the published catalog, the Create/Edit form and live summary (usable height = stored height + Drawer fit, computed locally), and the drawer navigator with Save/Print Cabinet and recovery; Add/Delete Drawer live only in Design. `web/storage-drawers-guide.html` is the one app-level assembly and print guide. | No. |
 | `web/storage-box-form.js`, `web/structural-design.js` | Structural Space objects in Design (Fix 103): the Storage Box case editor, and the controller that mounts the cabinet/case editor as the Design target, keeps one debounced draft preview in `state.structuralPreview`, draws the Interior Width/Depth/Height 3D handles, shows the Space canvas view-only as the 2D view, and owns Save Changes plus the one structural dirty/leave check. | No. |
 | `web/printer-profile.js` | The browser's printer build-volume owner and the Printer Settings control. | No. |
 | `web/spaces.js` | Typed Space setup and opening, folder and Space activation, resume and startup handoff, and Space setup lifecycle. | No. |

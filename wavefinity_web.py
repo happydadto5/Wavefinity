@@ -4128,24 +4128,29 @@ def storage_drawers_reset_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _storage_box_printer_fit(summary: dict[str, Any], profile: dict[str, float]) -> tuple[bool, str | None]:
     """Drawers-style printer verdict for a Storage Box case.
 
-    The assembled case is one printed component, checked flat and rotated 90
-    degrees on the bed. Unreadable bounds mean "cannot check": no warning, and
-    creation is never blocked.
+    Each separately printed object (body, lid) is checked on its own, flat and
+    rotated 90 degrees on the bed, in the pose it is exported in. The assembled
+    envelope is never the test: a body and lid that each fit are not refused
+    because the closed case is taller or wider than the bed. Unreadable bounds
+    mean "cannot check": no warning, and creation is never blocked.
     """
-    envelope = summary.get("assembled_envelope_mm") or []
-    try:
-        bounds = tuple(float(value) for value in envelope)
-    except (TypeError, ValueError):
-        return True, None
-    if len(bounds) != 3 or any(value <= 0 for value in bounds):
+    objects = summary.get("print_objects_mm")
+    if not isinstance(objects, list) or not objects:
         return True, None
     profile = normalise_printer_profile(profile)
-    fit = component_fit(bounds, ("flat", "bed_90"), profile)
-    if fit["fits"]:
-        return True, None
-    size = " × ".join(f"{value:.1f}" for value in bounds)
     bed = f"{profile['x_mm']:g} × {profile['y_mm']:g} × {profile['z_mm']:g}"
-    return False, f"Storage Box case is {size} mm and does not fit the {bed} mm printer in any orientation."
+    for one in objects:
+        try:
+            bounds = tuple(float(value) for value in one["bounds_mm"])
+            name = str(one["name"])
+        except (KeyError, TypeError, ValueError):
+            return True, None
+        if len(bounds) != 3 or any(value <= 0 for value in bounds):
+            return True, None
+        if not component_fit(bounds, ("flat", "bed_90"), profile)["fits"]:
+            size = " × ".join(f"{value:.1f}" for value in bounds)
+            return False, f"{name} is {size} mm and does not fit the {bed} mm printer in any orientation."
+    return True, None
 
 
 def structural_design_payload(payload: dict[str, Any]) -> dict[str, Any]:

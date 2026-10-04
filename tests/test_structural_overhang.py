@@ -17,15 +17,26 @@ from organizer_storage_drawer_geometry import resolve_storage_drawers_plan
 
 
 def section_xy(mesh, z):
-    section = mesh.section(plane_origin=(0, 0, z), plane_normal=(0, 0, 1))
-    if section is None:
+    """Material cross-section at height z (even-odd fill), without scipy."""
+    from trimesh.intersections import mesh_plane
+    from shapely.geometry import Point
+    from shapely.ops import polygonize
+    segments = mesh_plane(mesh, plane_normal=(0, 0, 1), plane_origin=(0, 0, z))
+    if segments is None or len(segments) == 0:
         return Polygon()
-    # XOR closed rings: internal holes must not count as supporting material.
-    area = Polygon()
-    for ring in section.discrete:
-        if len(ring) >= 4:
-            area = area.symmetric_difference(Polygon(ring[:, :2]).buffer(0))
-    return area
+    segments = np.round(segments[:, :, :2], 5)
+    segments = segments[np.any(segments[:, 0] != segments[:, 1], axis=1)]
+    cells = list(polygonize(unary_union([LineString(seg) for seg in segments])))
+    a, b = segments[:, 0], segments[:, 1]
+    filled = []
+    for cell in cells:
+        px, py = cell.representative_point().coords[0]
+        crosses = (a[:, 1] > py) != (b[:, 1] > py)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            x_at = a[:, 0] + (py - a[:, 1]) * (b[:, 0] - a[:, 0]) / (b[:, 1] - a[:, 1])
+        if int(np.count_nonzero(crosses & (x_at > px))) % 2 == 1:
+            filled.append(cell)
+    return unary_union(filled)
 
 
 def bridged(region, support):
@@ -76,6 +87,26 @@ class StructuralOverhangTests(unittest.TestCase):
         bridge = Polygon([(.2,0),(2.8,0),(2.8,10),(.2,10)])
         self.assertTrue(bridged(bridge, support))
         self.assertFalse(bridged(bridge, Polygon([(0,0),(.2,0),(.2,10),(0,10)])))
+
+    def test_detector_flags_wide_shelves_and_accepts_ramps_and_short_bridges(self):
+        import trimesh
+        def box(x0, y0, z0, x1, y1, z1):
+            mesh = trimesh.creation.box(extents=(x1-x0, y1-y0, z1-z0))
+            mesh.apply_translation(((x0+x1)/2, (y0+y1)/2, (z0+z1)/2))
+            return mesh
+        # A stem with a 6 mm cantilevered shelf: unsupported downward face.
+        shelf = trimesh.util.concatenate([box(0, 0, 0, 10, 10, 10), box(10, 0, 5, 16, 10, 7)])
+        self.assertTrue(unsupported_faces(shelf))
+        # The same ledge with a 45-degree underside is self-supporting.
+        profile = Polygon([(10, 5), (16, 11), (16, 12), (10, 12)])
+        ramp = trimesh.creation.extrude_polygon(profile, 10)
+        ramp.apply_transform(np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]], float))
+        ramped = trimesh.util.concatenate([box(0, 0, 0, 10, 10, 12), ramp])
+        self.assertEqual(unsupported_faces(ramped), [])
+        # A 2.5 mm roof between two posts is a permitted short bridge.
+        bridge = trimesh.util.concatenate([box(0, 0, 0, 2, 10, 10), box(4.5, 0, 0, 6.5, 10, 10),
+                                           box(2, 0, 8, 4.5, 10, 10)])
+        self.assertEqual(unsupported_faces(bridge), [])
 
     def test_drawer_components_grow_from_the_bed_in_production_orientation(self):
         for style, rear, keyholes, fit, base in [

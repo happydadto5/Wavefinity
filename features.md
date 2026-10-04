@@ -207,6 +207,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 - **Save Storage Box** saves the case from the Space header.
 - **Print Storage Box + Bins** opens the case, placed Not Printed bins, and required Space connectors together in the slicer after file and printer-fit checks. Unplaced or already-Printed bins remain on their existing Inventory paths.
 - It is not an ordinary Designer Inventory row.
+- Printer fit is checked per printed object (body and lid, each in its export pose), not against the assembled closed case; the message names the object that does not fit.
 
 ---
 
@@ -214,11 +215,15 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 
 - One shared Inventory and parking lot for the whole cabinet; every drawer is a physical drawer with its own stable identity and usable height.
 - Create/Edit options are grouped like Storage Box: Name, Size entered in millimeters and snapped to whole Wavefinity units, Drawers, Cabinet, Labels, Material (cabinet wall/base/top and drawer wall/base), and a live Summary that shows the resolved inside mm/unit count, finished outside size, and printer fit.
-- A right-side navigator lists the drawers proportionally, marks the active one, and offers Add Drawer, per-drawer Delete (only an empty drawer, and never the last), Save Cabinet and Print Cabinet. Switching drawers is not an undo step.
+- A right-side navigator lists the drawers proportionally with their usable height, marks the active one, and offers Save Cabinet and Print Cabinet. Add Drawer and per-drawer Delete (only an empty drawer, and never the last) live only in Design. Switching drawers is not an undo step.
+- Drawer heights are **usable heights** (stored clear height + Drawer fit). They stay editable at all times, are never silently clamped or rounded while typed, show the minimum as a visible error, and keep their usable value when Drawer fit changes. Cabinet width and depth stay on the 8 mm grid; the typed value stays visible with the nearest grid size and "this size will be saved" shown beside it. A cabinet check that errors or times out settles into an editable error instead of a permanent "Checking cabinet…".
+- Drawer fronts are inset with one uniform 0.6 mm reveal on all four sides and a horizontal, support-conscious pull (a ledge with a 45° underside; narrow faces fall back to a finger scoop or no pull, with a message). Side-wall waves are cosmetic only, above the rails, catch and joint lands. The Cabinet Top is held by a ramped detent bump near the end of each dovetail, with a firm hand push to fit or remove it.
+- Every part is designed to print without supports in the specified orientation, checked by a geometry test of overhang angles and short bridges; this is not a slicer or physical-print guarantee.
+- When the draft is invalid and Design keeps showing the last good geometry, the preview is labelled **Last valid preview**.
 - Inventory rows show where they are placed as `Placed · Drawer N`; choosing a row placed in another drawer switches to that drawer and keeps the row selected.
 - New bins are sized to the active drawer's usable X/Y/height.
 - Save/Print Cabinet writes every cabinet component together; Wavefinity only replaces cabinet files it wrote (verified by content), never unrelated files.
-- Setup shows a labelled Summary (finished outside size, effective base/top, fit verdict naming any part that does not fit) and blocks Create when the cabinet cannot print on the current printer. Printer Settings opens from setup and from the cabinet panel. Drawer fit (Tight/Standard/Loose) changes only drawer-to-cabinet clearance.
+- Setup shows a labelled Summary (finished outside size, effective base/top, fit verdict naming any part that does not fit) and blocks Create when the cabinet cannot print on the current printer. Printer Settings opens from setup and from the cabinet panel. Drawer fit (Tight/Standard/Loose) changes drawer-to-cabinet clearance, the cabinet's outside width and depth, and the spacing between drawer levels, so a Fit change affects every printed cabinet part (reprint the whole cabinet), not only the drawers.
 - Save Cabinet exports each part in the orientation chosen by the printer fit check, and a one-page assembly & print guide is linked from setup and the cabinet panel. A saved cabinet is a transaction: a failed or interrupted save is rolled back, and Saved status checks file contents.
 - Damaged cabinet settings keep Inventory and designs available and offer **Reset cabinet settings**. An existing folder cannot be converted into a Storage Drawers Space.
 - Add/Delete/Edit go through one serialized cabinet change, so an older queued layout save can never bring back a removed drawer.
@@ -864,7 +869,9 @@ Wavefinity prevents Side Openings from occupying wall regions needed by incompat
 - **Separate Part**
 - **Integrated**
 
-Separate Part is the replaceable support-friendly label system. Integrated fuses the label structure into the bin.
+Separate Part is the replaceable support-friendly label system. Integrated fuses the label structure into the bin and is labelled **Requires support** in the editor.
+
+Label thickness and inlay/text depth are never silently clamped or reduced: an out-of-range value stays editable, shows a local message beside the field, and is refused at preview/print until corrected.
 
 ### Label controls
 

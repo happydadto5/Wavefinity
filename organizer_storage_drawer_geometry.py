@@ -26,6 +26,8 @@ SD_JOINT_LAND_MIN_MM = 4.0
 SD_REAR_CROSS_MIN_WIDTH_MM = 14.0
 SD_FRONT_SHOULDER_MM = 1.6
 SD_FRONT_REVEAL_MM = 0.6
+# Rail roots start behind the fascia's back face (shoulder + root) plus clearance.
+SD_TRACK_SETBACK_MM = SD_FRONT_SHOULDER_MM + 0.2 + 0.2
 SD_RAIL_LEDGE_MM = 2.4
 SD_RAIL_CAPTURE_MM = 1.6
 SD_RAIL_LEADIN_MM = 3.0
@@ -133,11 +135,23 @@ def _runner(x0, x1, y0, y1, z0):
     return translated(_extrude_polygon(profile, SD_RAIL_CAPTURE_MM), (0,0,z0))
 
 
-def _catch_bump(x0, x1, y0, y1, z0, height):
-    """A symmetric ridge: gentle slope both ways, so the drawer never has to lift."""
+def _catch_bump(x0, x1, y0, y1, z0, height, *, support_z=None, taper_x1=False):
+    """A symmetric ridge: gentle slope both ways, so the drawer never has to lift.
+
+    When the ridge rises above the lug that carries it (support_z), the end
+    that prints first is trimmed at 45 degrees so no flat underside floats."""
     ridge = orient(Polygon([(y0, z0), (y1, z0), ((y0 + y1) / 2, z0 + height)]), 1.0)
     wedge = _extrude_polygon(ridge, x1 - x0)
     wedge.apply_transform(np.array([[0,0,1,x0],[1,0,0,0],[0,1,0,0],[0,0,0,1]], float))
+    if support_z is not None and z0 + height > support_z:
+        rise = z0 + height - support_z + 0.02
+        edge, away = (x1, -1.0) if taper_x1 else (x0, 1.0)
+        trim = Polygon([(edge - away*0.02, support_z), (edge - away*0.02, support_z + rise),
+                        (edge + away*rise, support_z + rise)])
+        cutter = _extrude_polygon(orient(trim, 1.0), y1 - y0 + 2.0)
+        # Local XY becomes X/Z, extrusion becomes Y (determinant -1; trimesh fixes winding).
+        cutter.apply_transform(np.array([[1,0,0,0],[0,0,1,y0-1.0],[0,1,0,0],[0,0,0,1]], float))
+        wedge = difference([wedge, cutter])
     return wedge
 
 
@@ -633,9 +647,13 @@ def _datum_components(space, datum):
                 # Bounded reinforcement links the thin broad panel to rail root.
                 # The band stops exactly at the rail face (the ledge boxes below
                 # overlap it), so the rear panel's edge passes it without contact.
-                root_x0, root_x1 = (panel_x0, inner) if left else (inner, panel_x0+datum.panel)
-                bars.append(_box(root_x0, datum.front, floor-SD_RAIL_LEDGE_MM-datum.fit,
-                                 root_x1, datum.rear, floor+2*SD_RAIL_CAPTURE_MM+datum.fit))
+                # The inset fascia spans the whole opening between the side
+                # panels, so the thicker rail-root band starts behind its back
+                # face; only the panel-thickness strip runs to the front plane.
+                root_z0, root_z1 = floor-SD_RAIL_LEDGE_MM-datum.fit, floor+2*SD_RAIL_CAPTURE_MM+datum.fit
+                rest_x0, rest_x1 = (panel_x0+datum.panel, inner) if left else (inner, panel_x0)
+                bars.append(_box(panel_x0, datum.front, root_z0, panel_x0+datum.panel, datum.rear, root_z1))
+                bars.append(_box(rest_x0, datum.front+SD_TRACK_SETBACK_MM, root_z0, rest_x1, datum.rear, root_z1))
                 a, b = (inner-0.2, inner+datum.rail_ledge) if left else (inner-datum.rail_ledge, inner+0.2)
                 bars.append(_box(a, datum.front+SD_RAIL_LEADIN_MM, floor-SD_RAIL_LEDGE_MM-datum.fit,
                                  b, datum.rear-datum.track_reach, floor-datum.fit))
@@ -668,7 +686,8 @@ def _datum_components(space, datum):
                 # The catch rises only 0.25 mm above it, less than every fit.
                 bump_base = floor-datum.fit
                 bars.append(_catch_bump(stop_x0, stop_x1, stop_y0, stop_y1, bump_base,
-                                        datum.fit+SD_CATCH_OVERLAP_MM))
+                                        datum.fit+SD_CATCH_OVERLAP_MM,
+                                        support_z=floor+0.25-datum.fit, taper_x1=not left))
             center = x0+datum.track_reach/2
             bars.append(_sliding_dovetail(center, datum.front+SD_FRONT_SHOULDER_MM,
                                           datum.rear, base_root, -1, datum.joint_land,
@@ -702,7 +721,7 @@ def _datum_components(space, datum):
         side_reach = (datum.track_reach + SD_RAIL_CAPTURE_MM + datum.fit
                       + SD_RAIL_LEDGE_MM - 0.2)
         add(key, name, (side_reach, datum.body_depth,
-                        datum.outer_z-datum.top-datum.side_bottom_z),
+                        datum.outer_z-datum.top-datum.side_bottom_z+SD_TOP_DETENT_BUMP_MM),
             side_mesh, ("broad_yz", "broad_yz_90"), flip_up=not left)
 
     # Rear is entirely behind the closed drawer clearance datum.
@@ -826,7 +845,8 @@ def _datum_components(space, datum):
                 # A narrow upper web ties the support rail to the drawer wall
                 # while clearing the guide stop below it.
                 wall_overlap = x+0.25 if left else x-0.25
-                runners.append(_box(min(main_a, wall_overlap), datum.front+SD_RAIL_LEADIN_MM,
+                # The web starts behind the runner's chamfered lead-in corners.
+                runners.append(_box(min(main_a, wall_overlap), datum.front+2*SD_RAIL_LEADIN_MM,
                                     runner_z+1.0, max(main_b, wall_overlap), datum.field_y,
                                     runner_z+SD_RAIL_CAPTURE_MM))
                 # The rear wing catches the guide stop; a relief precedes it.

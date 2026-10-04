@@ -3484,6 +3484,23 @@ def b4b_summary(box: BoxSpec) -> dict:
     # reporting *why* the handle cannot be fitted is most of its job: raising
     # here would leave the UI with no summary at all and therefore nothing to
     # explain itself with.
+    # Print-object bounds, before the bail or stacking pegs widen the
+    # assembled readout: the body and the lid are separate print objects, each
+    # printed in its own production pose, so neither is the assembled stack.
+    core_xy = [round(max_x - min_x, 3), round(max_y - min_y, 3)]
+    underside = b4b_lid_underside_z(box)
+    body_z = underside if b4b.lid else eff.z
+    lid_top = underside + b4b_lid_skin_from_eff(eff)
+    if b4b.secure_lid:
+        hinge_top = plan.hinge_axis_z + plan.profile.pivot_radius
+        body_z = max(body_z, hinge_top)
+        lid_top = max(lid_top, hinge_top)
+    print_objects = [{"name": "Storage Box body", "bounds_mm": [*core_xy, round(body_z, 3)]}]
+    if b4b.lid:
+        # The lid prints top-down; its height is skirt-bottom to its highest point.
+        lap = _skirt_lap(eff)
+        lid_z = lid_top - underside + (lap if lap >= B4B_LID_SKIRT_MIN_LAP else 0.0)
+        print_objects.append({"name": "Storage Box lid", "bounds_mm": [*core_xy, round(lid_z, 3)]})
     handle_ok, handle_why = b4b_handle_eligibility(box)
     handle = b4b_handle_plan(box) if (b4b.handle and handle_ok) else None
     if handle is not None:
@@ -3505,6 +3522,7 @@ def b4b_summary(box: BoxSpec) -> dict:
         "assembled_bounds_mm": [
             round(min_x, 3), round(min_y, 3), round(max_x, 3), round(max_y, 3)
         ],
+        "print_objects_mm": print_objects,
         "base_thickened": b4b_grew(box),
         "capacity_units": [cx, cy],
         "capacity_mm": [round(mx, 2), round(my, 2)],

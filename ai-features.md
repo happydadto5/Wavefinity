@@ -79,7 +79,7 @@ Pocket, Post, Slot and Steps may include an optional `reference_object` with pos
 
 ## Storage Drawers
 
-- The Space context is the selected physical drawer's usable width, depth and height.
+- The Space context is the selected physical drawer's usable width, depth and height (usable height includes the cabinet's Drawer fit).
 - Returned bins must fit inside that one drawer.
 - The AI result is still an ordinary bin. It must not invent or return cabinet structure (drawer count, frame, rails or cabinet settings).
 - Hard object-height cap: the selected drawer's usable height.

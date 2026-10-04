@@ -47,6 +47,7 @@ const state = {
   // structural target. Never mixed into state.preview / state.design.
   structuralPreview: null,
   structuralPreviewError: "",
+  structuralPreviewStale: false,
   // Fix 103 (Section E): "drawer:<id>" owner highlighted in the 3D preview.
   structuralHighlightOwner: null,
   // Fix 103 (R3): bumped whenever the structural form is destroyed/remounted,
@@ -2803,14 +2804,12 @@ function readEdgeMountForm(design) {
   const thicknessWasEdited = thicknessRaw !== (thicknessInput?.dataset.storedValue ?? thicknessRaw);
   let thickness = current.label_thickness_mm;
   if (thicknessWasEdited) {
-    const clamped = Math.min(6, Math.max(0.8, number(thicknessRaw, current.label_thickness_mm)));
-    thickness = Math.round((clamped + Number.EPSILON) * 10) / 10;
-    if (thicknessInput && thicknessRaw !== "") {
-      thicknessInput.value = fmt(thickness);
-      // The design now owns this value; without this, typing the original
-      // number back would look "unedited" and silently keep the new one.
-      thicknessInput.dataset.storedValue = thicknessInput.value;
-    }
+    // Typed intent is kept exactly as entered, even when out of range: the
+    // field stays editable and edgeMountInputProblems() explains the limit.
+    thickness = number(thicknessRaw, current.label_thickness_mm);
+    // The design now owns this value; without this, typing the original
+    // number back would look "unedited" and silently keep the new one.
+    if (thicknessInput && thicknessRaw !== "") thicknessInput.dataset.storedValue = thicknessRaw;
   }
   const spacingMode = $("#edge-mount-spacing-mode")?.value || "auto";
   const ribCountMode = $("#edge-mount-standoff-rib-count-mode")?.value || "auto";
@@ -2825,14 +2824,7 @@ function readEdgeMountForm(design) {
   const requestedTextDepth = number(
     $("#edge-mount-label-depth")?.value, current.label_text_depth_mm,
   );
-  const labelTextDepth = labelRaised
-    ? requestedTextDepth
-    : Math.min(requestedTextDepth, edgeMountLegalInlayDepth({
-        ...current,
-        label_thickness_mm: thickness,
-        label_type: labelType,
-        label_raised: labelRaised,
-      }));
+  const labelTextDepth = requestedTextDepth;
   if ($("#edge-mount-label-depth") && !labelRaised) {
     $("#edge-mount-label-depth").max = String(edgeMountLegalInlayDepth({
       ...current,
@@ -2878,6 +2870,42 @@ function resolvedEdgeMountAccessDiameter(edgeMount) {
     return number(edgeMount.access_diameter_mm, 8);
   }
   return Math.max(8, number(edgeMount.screw_diameter_mm, 4) * 2);
+}
+
+// Local, visible validation for the two label inputs that used to be silently
+// rewritten. Python stays authoritative; these messages sit beside the field
+// and the out-of-range value is still what the design (and so print) sees.
+function edgeMountInputProblems() {
+  const rules = state.catalog?.edge_mount || {};
+  const problems = { thickness: "", depth: "" };
+  const mode = $("#edge-mount-label-mode")?.value || "none";
+  if (mode === "none") return problems;
+  const rawThickness = ($("#edge-mount-label-thickness-mm")?.value ?? "").trim();
+  const minT = number(rules.min_thickness_mm, 0.8), maxT = number(rules.max_thickness_mm, 6);
+  const thickness = rawThickness === "" ? NaN : Number(rawThickness);
+  if (!Number.isFinite(thickness)) problems.thickness = "Enter a label thickness.";
+  else if (thickness < minT || thickness > maxT) problems.thickness = `Label thickness must be ${fmt(minT)}–${fmt(maxT)} mm.`;
+  const rawDepth = ($("#edge-mount-label-depth")?.value ?? "").trim();
+  const minD = number(rules.min_text_depth_mm, 0.2), maxD = number(rules.max_text_depth_mm, 2);
+  const depth = rawDepth === "" ? NaN : Number(rawDepth);
+  if (!Number.isFinite(depth)) problems.depth = "Enter a text depth.";
+  else if (depth < minD || depth > maxD) problems.depth = `Text depth must be ${fmt(minD)}–${fmt(maxD)} mm.`;
+  else if (Number.isFinite(thickness) && !(mode === "integrated" && $("#edge-mount-label-style")?.value === "raised")) {
+    const legal = Math.min(maxD, thickness - number(textBackingRules().min_backing_mm, 0.2));
+    if (depth > legal + 1e-9) problems.depth = `Inlay depth cannot exceed ${fmt(Math.max(minD, legal))} mm for a ${fmt(thickness)} mm label.`;
+  }
+  return problems;
+}
+
+function syncEdgeMountInputProblems() {
+  const problems = edgeMountInputProblems();
+  for (const [key, id, input] of [["thickness", "#edge-mount-thickness-error", "#edge-mount-label-thickness-mm"],
+                                   ["depth", "#edge-mount-depth-error", "#edge-mount-label-depth"]]) {
+    const node = $(id);
+    if (node) { node.textContent = problems[key]; node.hidden = !problems[key]; }
+    $(input)?.toggleAttribute("aria-invalid", Boolean(problems[key]));
+  }
+  return problems;
 }
 
 function edgeMountLegalInlayDepth(edgeMount) {
@@ -2989,6 +3017,7 @@ function syncEdgeMountControls() {
     $("#edge-mount-integrated-support-warning").hidden = labelMode !== "integrated";
   }
   if ($("#edge-mount-hole-orientation-row")) $("#edge-mount-hole-orientation-row").hidden = number(edgeMount.hole_count) <= 1;
+  syncEdgeMountInputProblems();
 }
 
 function syncEdgeMountEditorVisibility() {
@@ -3005,6 +3034,7 @@ function syncEdgeMountEditorVisibility() {
   $("#edge-mount-standoff-rib-count-row").hidden = $("#edge-mount-standoff-rib-count-mode").value !== "manual";
   $("#edge-mount-spacing-custom-row").hidden = $("#edge-mount-spacing-mode").value !== "custom";
   $("#edge-mount-hole-orientation-row").hidden = number($("#edge-mount-hole-count").value) <= 1;
+  syncEdgeMountInputProblems();
   const access = $("#edge-mount-access-diameter");
   if (access) {
     const tooSmall = number(access.value) < number($("#edge-mount-screw-diameter")?.value);

@@ -113,6 +113,7 @@ function unmountStructuralEditor({ clearPreview = true } = {}) {
   }
   if (clearPreview) {
     state.structuralPreview = null;
+    state.structuralPreviewStale = false;
     state.structuralPreviewError = "";
     state.structuralHighlightOwner = null;
   }
@@ -304,6 +305,8 @@ function scheduleStructuralPreview({ immediate = false } = {}) {
   }, immediate ? 0 : STRUCTURAL_PREVIEW_DEBOUNCE_MS);
 }
 
+const STRUCTURAL_STALE_LABEL = "Last valid preview — your current changes are not shown";
+
 function setStructuralPreviewState(text, { error = false } = {}) {
   const node = $("#preview-state");
   if (!node) return;
@@ -321,12 +324,16 @@ async function refreshStructuralPreview() {
   if (!record.form && record.kind !== "base_trim") return;
   const draft = structuralDraftResult();
   if (!draft.ok) {
-    // An incomplete draft cannot preview; keep the last good geometry and
-    // leave the form's own message to explain.
+    // An incomplete draft cannot preview. The last good geometry stays, but it
+    // is labelled so old geometry never passes for the current invalid draft;
+    // the form's own message explains what to fix.
     state.structuralPreviewRequest += 1;
-    setStructuralPreviewState("");
+    state.structuralPreviewStale = Boolean(state.structuralPreview?.meshes?.length);
+    setStructuralPreviewState(state.structuralPreviewStale ? STRUCTURAL_STALE_LABEL : "");
+    renderPreview3D();
     return;
   }
+  state.structuralPreviewStale = false;
   // Currentness tuple (R3). Any member changing makes the response stale.
   const identity = {
     request: ++state.structuralPreviewRequest,
@@ -376,6 +383,7 @@ async function refreshStructuralPreview() {
     }
     state.structuralPreview = result;
     state.structuralPreviewError = "";
+    state.structuralPreviewStale = false;
     if (state.structuralHighlightOwner) {
       const owners = new Set((result.meshes || []).map(mesh => mesh.owner));
       if (!owners.has(state.structuralHighlightOwner)) state.structuralHighlightOwner = null;
@@ -387,6 +395,7 @@ async function refreshStructuralPreview() {
   } catch (error) {
     if (!current()) return;
     state.structuralPreview = null;
+    state.structuralPreviewStale = false;
     state.structuralPreviewError = friendlyError(error);
     record.form?.setError?.(state.structuralPreviewError);
     setStructuralPreviewState("Preview could not build", { error: true });
@@ -449,6 +458,15 @@ function renderStructuralPreview3D() {
     height / 2 + (point[1] - frame.midY) * frame.scale,
   ];
   drawStructuralOverlay(context, camera, project, buffers);
+  if (state.structuralPreviewStale) {
+    context.save();
+    context.font = 'bold 13px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
+    context.textAlign = "center";
+    context.textBaseline = "top";
+    context.fillStyle = "#8a4b00";
+    context.fillText("Last valid preview", width / 2, 10);
+    context.restore();
+  }
 }
 
 const STRUCTURAL_AXIS_NAME = { x: "Width", y: "Depth", z: "Height" };
