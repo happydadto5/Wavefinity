@@ -39,6 +39,10 @@ from organizer_geometry import (
 )
 from organizer_pegboard import PegboardMountSpec
 
+from pathlib import Path
+import numpy as np
+import trimesh
+
 from ._specs import (
     WAVE_LENGTH,
     WAVE_AMPLITUDE,
@@ -228,7 +232,6 @@ from ._fit import (
     validate_side_fit,
     installed_corner_boxes,
     validate_corner_fit,
-    measure_lock,
     _plain_corridor,
 )
 from ._export import (
@@ -250,8 +253,6 @@ from ._export import (
     export_mesh,
     validate_3mf,
     validate_object_groups_3mf,
-    make_sampler_scene,
-    generate_sampler,
 )
 from ._labels import (
     _font,
@@ -285,3 +286,161 @@ from ._labels import (
     label_report,
     top_label_report,
 )
+
+def measure_lock(
+    box: BoxSpec,
+    connector: ConnectorSpec,
+    along_axis: str = "y",
+    position: float = 0.0,
+    lifts: tuple[float, ...] = (0.0, 0.5, 1.5),
+    bin_a_height: float | None = None,
+    bin_b_height: float | None = None,
+) -> dict[str, float]:
+    """Seated clearance, and the interference met while lifting the clip out.
+
+    A seated clip is free; raising it drives the arm notches onto the bumps,
+    which is the lock.  Also reports what a notch-less arm would hit, proving
+    the bumps stand in the arm's path at all.
+    """
+    axis = along_axis.lower()
+    heights = connector_bin_heights(box, bin_a_height, bin_b_height)
+    boxes = installed_side_boxes(box, axis, *heights)
+    clip = make_side_connector(
+        box, connector, axis, position, DEFAULT_SIDE_LENGTH, *heights
+    )
+    base = seat_transform(box, connector, position, axis, max(heights))
+
+    result: dict[str, float] = {}
+    for lift in lifts:
+        placed = translated(clip, (base[0], base[1], base[2] + lift))
+        result[f"lift_{lift:.1f}_mm3"] = round(
+            sum(intersection_volume(placed, item) for item in boxes), 6
+        )
+
+    inner_hw, outer_hw = connector_half_widths(box, connector)
+    samples = np.linspace(-DEFAULT_SIDE_LENGTH / 2.0, DEFAULT_SIDE_LENGTH / 2.0, 5)
+    plain_body = _extrude_polygon(
+        _plain_corridor(box, axis, position, samples, outer_hw), connector.height
+    )
+    plain_channel = _extrude_polygon(
+        _plain_corridor(box, axis, position, samples, inner_hw), connector.arm_depth
+    )
+    plain = translated(difference([plain_body, plain_channel]), base)
+    result["no_notch_mm3"] = round(
+        sum(intersection_volume(plain, item) for item in boxes), 6
+    )
+    result["protrusion_mm"] = LOCK_PROTRUSION
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# sampler
+# --------------------------------------------------------------------------- #
+def make_sampler_scene(
+    sizes: tuple[tuple[float, float], ...] = (
+        (2.0 * BASE_UNIT, 6.0 * BASE_UNIT),
+        (4.0 * BASE_UNIT, 6.0 * BASE_UNIT),
+        (6.0 * BASE_UNIT, 6.0 * BASE_UNIT),
+    ),
+    height: float = 40.0,
+    wall: float = DEFAULT_WALL,
+    connector: ConnectorSpec = ConnectorSpec(),
+    clips: int = 5,
+    side_length: float = DEFAULT_SIDE_LENGTH,
+    flat_inside: float = 0.0,
+    base_thickness: float = DEFAULT_BASE_THICKNESS,
+) -> trimesh.Scene:
+    """Assembly sample: one box per requested size, plus a row of connectors.
+
+    The connector is a single locked part now, so the row is simply ``clips``
+    copies of it rather than a tolerance sweep.
+    """
+    if clips < 1:
+        raise ValueError("the sample needs at least one connector")
+    scene = trimesh.Scene()
+    scene.units = "mm"
+    gap = 6.0
+
+    boxes = []
+    for size_x, size_y in sizes:
+        spec = BoxSpec(
+            x=size_x, y=size_y, z=height, wall=wall, flat_inside=flat_inside,
+            base_thickness=base_thickness,
+        )
+        mesh = make_box(spec)
+        mesh_report(f"sample box {size_x:g}x{size_y:g}", mesh)
+        boxes.append((spec, mesh))
+
+    cursor = 0.0
+    depth = max(float(m.extents[1]) for _, m in boxes)
+    for spec, mesh in boxes:
+        centre = mesh.bounds.mean(axis=0)
+        width = float(mesh.extents[0])
+        placed = translated(
+            mesh,
+            (cursor + width / 2.0 - centre[0], -centre[1], -mesh.bounds[0][2]),
+        )
+        ux, uy = spec.units
+        name = f"box_{ux:g}x{uy:g}_{spec.x:g}x{spec.y:g}"
+        scene.add_geometry(placed, node_name=name, geom_name=name)
+        cursor += width + gap
+    total_width = cursor - gap
+
+    # Use a real sampler bin rather than a fresh default-size BoxSpec. Thick
+    # walls leave less room at a 16 mm bin's rounded corners, even though the
+    # same connector is valid on the sampler's longer wall.
+    clip_box = max(boxes, key=lambda item: item[0].y)[0]
+    clip = make_side_connector(clip_box, connector, "y", 0.0, side_length)
+    validate_side_fit(
+        clip_box, connector, clip, "y",
+    )
+    clip = connector_for_print(clip)
+    mesh_report("sample connector", clip)
+    cell = float(clip.extents[0]) + 6.0
+    row_y = -depth / 2.0 - gap - float(clip.extents[1]) / 2.0
+    for index in range(clips):
+        centre = clip.bounds.mean(axis=0)
+        target = total_width / 2.0 + (index - (clips - 1) / 2.0) * cell
+        placed = translated(
+            clip,
+            (target - centre[0], row_y - centre[1], -clip.bounds[0][2]),
+        )
+        name = f"connector_{index + 1}"
+        scene.add_geometry(placed, node_name=name, geom_name=name)
+    return scene
+
+
+def generate_sampler(
+    output: Path,
+    sizes: tuple[tuple[float, float], ...] | None = None,
+    height: float = 40.0,
+    wall: float = DEFAULT_WALL,
+    connector: ConnectorSpec = ConnectorSpec(),
+    clips: int = 5,
+    side_length: float = DEFAULT_SIDE_LENGTH,
+    flat_inside: float = 0.0,
+    base_thickness: float = DEFAULT_BASE_THICKNESS,
+) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "height": height, "wall": wall, "base_thickness": base_thickness,
+        "connector": connector,
+        "clips": clips, "side_length": side_length, "flat_inside": flat_inside,
+    }
+    if sizes is not None:
+        kwargs["sizes"] = sizes
+    scene = make_sampler_scene(**kwargs)
+    export_bambu_compatible_3mf(scene, output)
+    report = validate_3mf(output, len(scene.geometry))
+    report["boxes"] = [f"{sx:g}x{sy:g}" for sx, sy in (sizes or (
+        (2.0 * BASE_UNIT, 6.0 * BASE_UNIT),
+        (4.0 * BASE_UNIT, 6.0 * BASE_UNIT),
+        (6.0 * BASE_UNIT, 6.0 * BASE_UNIT),
+    ))]
+    report["connectors"] = clips
+    report["tolerance_mm"] = connector.tolerance
+    report["connector_height_mm"] = connector.height
+    report["connector_length_mm"] = side_length
+    report["wave_length_mm"] = WAVE_LENGTH
+    report["wave_amplitude_mm"] = WAVE_AMPLITUDE
+    report["grid_pitch_mm"] = GRID_PITCH
+    return report

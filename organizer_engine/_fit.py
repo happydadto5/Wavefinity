@@ -6,16 +6,11 @@ import hashlib
 import numpy as np
 import trimesh
 from shapely.geometry import Polygon
-from organizer_geometry import _extrude_polygon, difference, translated
+from organizer_geometry import translated
 
-from ._specs import DEFAULT_SIDE_LENGTH, LOCK_PROTRUSION, BoxSpec, ConnectorSpec
+from ._specs import BoxSpec, ConnectorSpec
 from ._wave import wave_value, _sample_count
-from ._boxes import (
-    make_box,
-    connector_half_widths,
-    connector_bin_heights,
-    make_side_connector,
-)
+from ._boxes import make_box, connector_bin_heights
 
 
 def mesh_report(name: str, mesh: trimesh.Trimesh) -> dict[str, object]:
@@ -146,52 +141,6 @@ def validate_corner_fit(
             f"corner connector collides with installed boxes: {overlap:.6f} mm^3"
         )
     return overlap
-
-
-def measure_lock(
-    box: BoxSpec,
-    connector: ConnectorSpec,
-    along_axis: str = "y",
-    position: float = 0.0,
-    lifts: tuple[float, ...] = (0.0, 0.5, 1.5),
-    bin_a_height: float | None = None,
-    bin_b_height: float | None = None,
-) -> dict[str, float]:
-    """Seated clearance, and the interference met while lifting the clip out.
-
-    A seated clip is free; raising it drives the arm notches onto the bumps,
-    which is the lock.  Also reports what a notch-less arm would hit, proving
-    the bumps stand in the arm's path at all.
-    """
-    axis = along_axis.lower()
-    heights = connector_bin_heights(box, bin_a_height, bin_b_height)
-    boxes = installed_side_boxes(box, axis, *heights)
-    clip = make_side_connector(
-        box, connector, axis, position, DEFAULT_SIDE_LENGTH, *heights
-    )
-    base = seat_transform(box, connector, position, axis, max(heights))
-
-    result: dict[str, float] = {}
-    for lift in lifts:
-        placed = translated(clip, (base[0], base[1], base[2] + lift))
-        result[f"lift_{lift:.1f}_mm3"] = round(
-            sum(intersection_volume(placed, item) for item in boxes), 6
-        )
-
-    inner_hw, outer_hw = connector_half_widths(box, connector)
-    samples = np.linspace(-DEFAULT_SIDE_LENGTH / 2.0, DEFAULT_SIDE_LENGTH / 2.0, 5)
-    plain_body = _extrude_polygon(
-        _plain_corridor(box, axis, position, samples, outer_hw), connector.height
-    )
-    plain_channel = _extrude_polygon(
-        _plain_corridor(box, axis, position, samples, inner_hw), connector.arm_depth
-    )
-    plain = translated(difference([plain_body, plain_channel]), base)
-    result["no_notch_mm3"] = round(
-        sum(intersection_volume(plain, item) for item in boxes), 6
-    )
-    result["protrusion_mm"] = LOCK_PROTRUSION
-    return result
 
 
 def _plain_corridor(
