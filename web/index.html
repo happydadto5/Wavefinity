@@ -1265,6 +1265,17 @@
     </dialog>
 
 
+  <div id="folder-access-notice" class="folder-access-notice" role="status" hidden>
+    <div class="folder-access-copy">
+      <strong>Wavefinity can't save to a folder</strong>
+      <span>Choose a folder to enable Inventory and Spaces. You can still design and download parts without it.</span>
+    </div>
+    <div class="folder-access-actions">
+      <button id="folder-access-choose" class="button primary" type="button">Choose folder</button>
+      <label class="folder-access-suppress"><input id="folder-access-suppress" type="checkbox"> Don't show me again</label>
+      <button id="folder-access-dismiss" class="button" type="button">Dismiss</button>
+    </div>
+  </div>
   <div id="update-banner" class="update-banner" role="status" hidden>
     <span>Wavefinity was updated. This update requires the page to reload before you continue.</span>
     <button id="update-banner-reload" class="button primary" type="button">Reload</button>
@@ -1310,6 +1321,7 @@
   <script src="/spaces/12-space-info.js" defer></script>
   <script src="/spaces/13-printer-profiles.js" defer></script>
   <script src="/spaces/14-drawers-cabinet.js" defer></script>
+  <script src="/spaces/15-folder-access-notice.js" defer></script>
   <script src="/spaces.js" defer></script>
   <script src="/structural-design.js" defer></script>
 </body>
