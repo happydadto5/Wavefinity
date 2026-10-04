@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-04 — Wavefinity dispatch runner launcher
+
+- Added `Start_Wavefinity_Dispatch_Runner.bat` in the Wavefinity folder so HPDesktop can restart the GitHub event runner by double-clicking it. The runner stays connected for future coder jobs; the old timed poller stays disabled.
+
 ## 2026-10-04 — Storage Drawers, Storage Box and Edge Mount truth (Fix 114)
 
 - Drawer heights are now usable heights you can edit at any time: typed values are no longer clamped or rounded, the minimum shows as a visible error, default drawers start at the published usable height under Standard fit, and changing Drawer fit keeps each drawer's usable height. A cabinet check that fails or times out now settles into an editable error.
