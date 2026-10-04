@@ -108,40 +108,81 @@ class NavigatorAndGrammarTests(unittest.TestCase):
 
 
 class StorageBoxFitTests(unittest.TestCase):
+    FEATURES = {"stacking": True, "handle": True, "label_enabled": True,
+                "label_text": "HI", "label_location": "front"}
+
     def setUp(self):
         from organizer_app import design_from_dict
         from organizer_b4b import b4b_summary
         from organizer_space_outputs import storage_box_design
         import wavefinity_web
         self.fit = wavefinity_web._storage_box_printer_fit
+        self.design_from_dict, self.storage_box_design = design_from_dict, storage_box_design
 
-        def summary(**extra):
-            space = {"kind": "portable", "name": "Box", "x": 240, "y": 200, "z": 60,
+        def summary(x=240, y=200, z=60, **extra):
+            space = {"kind": "portable", "name": "Box", "x": x, "y": y, "z": z,
                      "storage_box": {"secure_lid": True, **extra}}
             return b4b_summary(design_from_dict(storage_box_design(space))[0])
         self.summary = summary
 
+    def test_every_exported_object_has_a_fit_row(self):
+        names = [one["name"] for one in self.summary(**self.FEATURES)["print_objects_mm"]]
+        self.assertEqual(names, ["Storage Box Body", "Storage Box Lid", "Storage Box Handle",
+                                 "Storage Box Latch 1", "Storage Box Latch 2",
+                                 *(f"Storage Box Stacking Peg {i}" for i in range(1, 5)),
+                                 "Storage Box Front Label"])
+
     def test_each_printed_object_is_checked_not_the_assembled_envelope(self):
         summary = self.summary(stacking=True)
         objects = {one["name"]: one["bounds_mm"] for one in summary["print_objects_mm"]}
-        self.assertEqual(set(objects), {"Storage Box body", "Storage Box lid"})
         envelope_z = summary["assembled_envelope_mm"][2]
-        body_z = objects["Storage Box body"][2]
+        body_z = objects["Storage Box Body"][2]
         self.assertLess(body_z, envelope_z)
         # A printer exactly between the two heights: the assembled case would
         # not fit, but every object that is actually printed does.
         profile = {"x_mm": 256.0, "y_mm": 256.0, "z_mm": (body_z + envelope_z) / 2}
         self.assertEqual(self.fit(summary, profile), (True, None))
 
-    def test_an_oversized_object_names_itself(self):
+    def test_an_oversized_body_names_itself(self):
         fits, message = self.fit(self.summary(), {"x_mm": 200.0, "y_mm": 200.0, "z_mm": 256.0})
         self.assertFalse(fits)
-        self.assertTrue(message.startswith("Storage Box body is"))
+        self.assertTrue(message.startswith("Storage Box Body is"))
+
+    def test_a_non_body_object_can_be_the_failing_object(self):
+        summary = self.summary(**self.FEATURES)
+        for row in summary["print_objects_mm"]:
+            if row["name"] == "Storage Box Handle":
+                row["bounds_mm"] = [300.0, 40.0, 6.0]  # longer than any bed edge
+        fits, message = self.fit(summary, {"x_mm": 256.0, "y_mm": 256.0, "z_mm": 256.0})
+        self.assertFalse(fits)
+        self.assertTrue(message.startswith("Storage Box Handle is"), message)
 
     def test_unreadable_object_bounds_do_not_block(self):
         self.assertEqual(self.fit({}, {"x_mm": 100.0, "y_mm": 100.0, "z_mm": 100.0}), (True, None))
         self.assertEqual(self.fit({"print_objects_mm": [{"name": "x", "bounds_mm": [1, "a", 2]}]},
                                   {"x_mm": 100.0, "y_mm": 100.0, "z_mm": 100.0}), (True, None))
+
+    def test_fit_bounds_match_the_real_export_objects(self):
+        """One real build (about 40 s): the fit rows name exactly the exported
+        objects, are exact for the cheap objects and never understate Body/Lid."""
+        import numpy as np
+        from organizer_b4b import b4b_build_print_objects, b4b_print_object_bounds
+        box = self.design_from_dict(self.storage_box_design(
+            {"kind": "portable", "name": "Box", "x": 176, "y": 104, "z": 64,
+             "storage_box": {"secure_lid": True, **self.FEATURES}}))[0]
+        rows = b4b_print_object_bounds(box)
+        built = b4b_build_print_objects(box)
+        self.assertEqual([r["name"] for r in rows], [name for name, _parts in built])
+        for row, (name, parts) in zip(rows, built):
+            real = (np.max([m.bounds[1] for _n, m in parts], axis=0)
+                    - np.min([m.bounds[0] for _n, m in parts], axis=0))
+            with self.subTest(name=name):
+                if name in ("Storage Box Body", "Storage Box Lid"):
+                    for planned, actual in zip(row["bounds_mm"], real):
+                        self.assertGreaterEqual(planned + 1e-3, actual)
+                else:
+                    for planned, actual in zip(row["bounds_mm"], real):
+                        self.assertAlmostEqual(planned, actual, places=2)
 
 
 class GuideAndPreviewTruthTests(unittest.TestCase):

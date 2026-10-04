@@ -207,7 +207,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 - **Save Storage Box** saves the case from the Space header.
 - **Print Storage Box + Bins** opens the case, placed Not Printed bins, and required Space connectors together in the slicer after file and printer-fit checks. Unplaced or already-Printed bins remain on their existing Inventory paths.
 - It is not an ordinary Designer Inventory row.
-- Printer fit is checked per printed object (body and lid, each in its export pose), not against the assembled closed case; the message names the object that does not fit.
+- Printer fit is checked for every object export can emit (body, lid, handle, each latch, each stacking peg, front label), not against the assembled closed case; the message names the object that does not fit. One plan lists the exported objects for both export and the fit check; body and lid bounds come from plan numbers that never understate the real meshes, the rest are measured on their real print-pose meshes.
 
 ---
 

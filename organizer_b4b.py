@@ -3484,23 +3484,6 @@ def b4b_summary(box: BoxSpec) -> dict:
     # reporting *why* the handle cannot be fitted is most of its job: raising
     # here would leave the UI with no summary at all and therefore nothing to
     # explain itself with.
-    # Print-object bounds, before the bail or stacking pegs widen the
-    # assembled readout: the body and the lid are separate print objects, each
-    # printed in its own production pose, so neither is the assembled stack.
-    core_xy = [round(max_x - min_x, 3), round(max_y - min_y, 3)]
-    underside = b4b_lid_underside_z(box)
-    body_z = underside if b4b.lid else eff.z
-    lid_top = underside + b4b_lid_skin_from_eff(eff)
-    if b4b.secure_lid:
-        hinge_top = plan.hinge_axis_z + plan.profile.pivot_radius
-        body_z = max(body_z, hinge_top)
-        lid_top = max(lid_top, hinge_top)
-    print_objects = [{"name": "Storage Box body", "bounds_mm": [*core_xy, round(body_z, 3)]}]
-    if b4b.lid:
-        # The lid prints top-down; its height is skirt-bottom to its highest point.
-        lap = _skirt_lap(eff)
-        lid_z = lid_top - underside + (lap if lap >= B4B_LID_SKIRT_MIN_LAP else 0.0)
-        print_objects.append({"name": "Storage Box lid", "bounds_mm": [*core_xy, round(lid_z, 3)]})
     handle_ok, handle_why = b4b_handle_eligibility(box)
     handle = b4b_handle_plan(box) if (b4b.handle and handle_ok) else None
     if handle is not None:
@@ -3522,7 +3505,7 @@ def b4b_summary(box: BoxSpec) -> dict:
         "assembled_bounds_mm": [
             round(min_x, 3), round(min_y, 3), round(max_x, 3), round(max_y, 3)
         ],
-        "print_objects_mm": print_objects,
+        "print_objects_mm": b4b_print_object_bounds(box),
         "base_thickened": b4b_grew(box),
         "capacity_units": [cx, cy],
         "capacity_mm": [round(mx, 2), round(my, 2)],
@@ -4452,6 +4435,144 @@ def _pack_print_objects(
     return packed
 
 
+def _once(make):
+    cache: list = []
+
+    def get():
+        if not cache:
+            cache.append(make())
+        return cache[0]
+    return get
+
+
+# Body and Lid are the only print objects whose real meshes are expensive (tens
+# of seconds); their fit bounds come from the same plan numbers the summary uses.
+_PLAN_BOUNDED_OBJECTS = frozenset({"Storage Box Body", "Storage Box Lid"})
+
+
+def _print_object_plan(box: BoxSpec, features=()):
+    """The one owner of which top-level print objects exist, their names, the
+    pose each is exported in and how to build it.
+
+    Returns ``[(object_name, pose_kind, make)]`` where ``make()`` gives the
+    object's ``[(part_name, assembly-space mesh)]``.  Export
+    (:func:`b4b_build_print_objects`) and the printer-fit bounds
+    (:func:`b4b_print_object_bounds`) both read this list, so the objects
+    checked for fit are exactly the objects exported.
+    """
+    eff = b4b_effective_box(box)
+    b4b = eff.b4b
+    plan: list = []
+
+    plan.append(("Storage Box Body", "body", lambda: [
+        ("Storage Box Body", b4b_body_with_features(box, features=features))]))
+
+    if b4b.lid:
+        def lid_parts():
+            lid = make_b4b_lid(box)
+            top_inlay = None
+            if b4b.label_location == "top" and b4b.label_text.strip():
+                lid, top_inlay = _apply_top_label(box, lid)
+            parts = [("Storage Box Lid", lid)]
+            if top_inlay is not None:
+                parts.append(("Storage Box Top Label", top_inlay))
+            return parts
+        plan.append(("Storage Box Lid", "lid", lid_parts))
+
+    if b4b_handle_plan(box) is not None:
+        plan.append(("Storage Box Handle", "handle", lambda: [
+            ("Storage Box Handle", make_b4b_handle(box))]))
+
+    if b4b.secure_lid:
+        levers = _once(lambda: make_b4b_latches(box))
+        for i in range(len(levers())):
+            name = f"Storage Box Latch {i + 1}"
+            plan.append((name, "latch", lambda i=i, name=name: [(name, levers()[i])]))
+
+    if b4b.stacking:
+        pegs = _once(lambda: _stack_pegs(box))
+        for i in range(len(pegs())):
+            name = f"Storage Box Stacking Peg {i + 1}"
+            plan.append((name, "peg", lambda i=i, name=name: [(name, pegs()[i])]))
+
+    if b4b.label_location == "front" and b4b.label_text.strip():
+        def label_parts():
+            _frame, plate, text, centre = b4b_front_label_geometry(box)
+            # Rotated together so the plate and its lettering stay registered:
+            # printed flat on its back, text facing up.
+            return [("Storage Box Front Label Plate", translated(plate, centre)),
+                    ("Storage Box Front Label Text", translated(text, centre))]
+        plan.append(("Storage Box Front Label", "label", label_parts))
+    return plan
+
+
+def b4b_print_object_bounds(box: BoxSpec) -> list[dict]:
+    """Print-pose ``[x, y, z]`` bounds of every object export would emit.
+
+    Handle, latches, pegs and the front label are measured on their real
+    meshes in their real :func:`_print_pose` (all cheap).  Body and Lid use
+    plan-derived bounds that never understate the real meshes, because
+    building them costs tens of seconds.  Rotating a pose about Z or X by 180
+    degrees keeps extents, so assembly-space plan numbers are print-pose
+    numbers for those two.
+    """
+    eff = b4b_effective_box(box)
+    b4b = eff.b4b
+    layout = b4b_layout(box)
+    lid_outer = layout.outer_structural_polygon
+    min_x, min_y, max_x, max_y = (
+        min(layout.case_bounds[0], lid_outer.bounds[0]), min(layout.case_bounds[1], lid_outer.bounds[1]),
+        max(layout.case_bounds[2], lid_outer.bounds[2]), max(layout.case_bounds[3], lid_outer.bounds[3]),
+    )
+    underside = b4b_lid_underside_z(box)
+    body_z = underside if b4b.lid else eff.z
+    lid_top = underside + b4b_lid_skin_from_eff(eff)
+    if b4b.secure_lid:
+        hw = b4b_hardware_plan(box)
+        for centres, width in ((hw.hinge_centers_x, hw.hinge_root_width),
+                               (hw.latch_centers_x, hw.latch_root_width)):
+            min_x = min(min_x, min(c - width / 2.0 for c in centres))
+            max_x = max(max_x, max(c + width / 2.0 for c in centres))
+        min_y = min(min_y, hw.pivot_axis_y - hw.profile.pivot_radius)
+        max_y = max(max_y, hw.hinge_axis_y + hw.profile.pivot_radius)
+        hinge_top = hw.hinge_axis_z + hw.profile.pivot_radius
+        body_z = max(body_z, hinge_top)
+        lid_top = max(lid_top, hinge_top)
+    lid_xy = [max_x - min_x, max_y - min_y]
+    # The body also carries the bail's pivot forks, which reach one pivot
+    # radius past the pivot axis.
+    handle = b4b_handle_plan(box)
+    body_min_x, body_max_x, body_min_y = min_x, max_x, min_y
+    if handle is not None:
+        body_min_y = min(body_min_y, handle.axis_y - handle.profile.pivot_radius)
+        body_min_x = min(body_min_x, handle.centers_x[0] - handle.root_width / 2.0)
+        body_max_x = max(body_max_x, handle.centers_x[1] + handle.root_width / 2.0)
+    body_xy = [body_max_x - body_min_x, max_y - body_min_y]
+    rows = []
+    for name, kind, make in _print_object_plan(box):
+        if name == "Storage Box Body":
+            bounds = [*body_xy, body_z]
+        elif name == "Storage Box Lid":
+            lap = _skirt_lap(eff)
+            lid_z = lid_top - underside + (lap if lap >= B4B_LID_SKIRT_MIN_LAP else 0.0)
+            if b4b.secure_lid:
+                # The hinge knuckles and latch ears hang a full pivot diameter.
+                lid_z = max(lid_z, 2.0 * hw.profile.pivot_radius)
+            bounds = [*lid_xy, lid_z]
+        else:
+            try:
+                meshes = [_print_pose(mesh, kind) for _part, mesh in make()]
+            except ValueError:
+                # A design the geometry refuses (the summary must still render,
+                # and export will say why): that object has no fit to report.
+                continue
+            low = np.min([m.bounds[0] for m in meshes], axis=0)
+            high = np.max([m.bounds[1] for m in meshes], axis=0)
+            bounds = [float(v) for v in high - low]
+        rows.append({"name": name, "bounds_mm": [round(float(v), 3) for v in bounds]})
+    return rows
+
+
 def b4b_build_print_objects(
     box: BoxSpec,
     features=(),
@@ -4461,59 +4582,17 @@ def b4b_build_print_objects(
     Multi-part objects retain their required registration: the lid and its
     flush top-label inlay, or the front-label plate and text.  Every other
     object has one independently movable mesh.  Screws are never emitted.
+    Which objects exist comes from :func:`_print_object_plan`.
     """
-    eff = b4b_effective_box(box)
-    b4b = eff.b4b
     validate_b4b_design(
         box,
         layout_feature_kinds=tuple(one.kind for one in features),
         deep=True,
     )
-
-    objects: list[tuple[str, list[tuple[str, trimesh.Trimesh]]]] = []
-
-    body = b4b_body_with_features(box, features=features)
-    objects.append(("Storage Box Body", [("Storage Box Body", _print_pose(body, "body"))]))
-
-    if b4b.lid:
-        lid = make_b4b_lid(box)
-        top_inlay = None
-        if b4b.label_location == "top" and b4b.label_text.strip():
-            lid, top_inlay = _apply_top_label(box, lid)
-        lid_parts = [("Storage Box Lid", _print_pose(lid, "lid"))]
-        if top_inlay is not None:
-            lid_parts.append(("Storage Box Top Label", _print_pose(top_inlay, "lid")))
-        objects.append(("Storage Box Lid", lid_parts))
-
-    handle = make_b4b_handle(box)
-    if handle is not None:
-        objects.append(("Storage Box Handle", [("Storage Box Handle", _print_pose(handle, "handle"))]))
-
-    if b4b.secure_lid:
-        for i, lever in enumerate(make_b4b_latches(box), start=1):
-            name = f"Storage Box Latch {i}"
-            objects.append((name, [(name, _print_pose(lever, "latch"))]))
-
-    if b4b.stacking:
-        for i, peg in enumerate(_stack_pegs(box), start=1):
-            name = f"Storage Box Stacking Peg {i}"
-            objects.append((name, [(name, _print_pose(peg, "peg"))]))
-
-    if b4b.label_location == "front" and b4b.label_text.strip():
-        _frame, plate, text, centre = b4b_front_label_geometry(box)
-        # Rotated together so the plate and its lettering stay registered:
-        # printed flat on its back, text facing up.
-        objects.append(("Storage Box Front Label", [
-            (
-                "Storage Box Front Label Plate",
-                _print_pose(translated(plate, centre), "label"),
-            ),
-            (
-                "Storage Box Front Label Text",
-                _print_pose(translated(text, centre), "label"),
-            ),
-        ]))
-
+    objects = [
+        (object_name, [(part, _print_pose(mesh, kind)) for part, mesh in make()])
+        for object_name, kind, make in _print_object_plan(box, features)
+    ]
     return _pack_print_objects(objects)
 
 

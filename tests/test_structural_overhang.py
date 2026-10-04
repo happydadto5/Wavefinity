@@ -4,16 +4,42 @@ This checks design intent, not slicer or physical-print certification. The
 3 mm bridge allowance is shared with Storage Box and requires support at
 both ends; an equally small one-sided floating ledge is not a bridge.
 """
+import dataclasses
 import unittest
+from unittest import mock
 
 import numpy as np
 from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
 from organizer_b4b import B4B_SUPPORT_FREE_BRIDGE_MAX
-from organizer_printer_profile import orient_mesh
+from organizer_printer_profile import component_fit, normalise_printer_profile
 from organizer_storage_drawers import prepare_new_storage_drawers_definition
+import organizer_storage_drawer_geometry as geometry
 from organizer_storage_drawer_geometry import resolve_storage_drawers_plan
+from organizer_storage_drawer_outputs import _oriented_parts
+
+BED_DEFAULT = {"x_mm": 256.0, "y_mm": 256.0, "z_mm": 256.0}
+
+
+def cabinet(style, rear, keyholes, fit, base):
+    return prepare_new_storage_drawers_definition({
+        "kind": "storage_drawers", "name": "Print proof", "x": 96, "y": 96,
+        "storage_drawers": {"drawers": [{"height_mm": 40}],
+            "cabinet_style": style, "rear_support": rear, "wall_mounting": keyholes,
+            "drawer_fit_mm": fit, "drawer_base_mm": base},
+    })
+
+
+def production_print(part, bed):
+    """The exported body, oriented exactly as Save Cabinet does: the orientation
+    comes from component_fit(), then the production transform with flip_up.
+    Returns (None, "") when production would refuse the part on this bed."""
+    fit = component_fit(part.bounds_xyz, part.allowed_orientations, normalise_printer_profile(bed))
+    if not fit["fits"]:
+        return None, ""
+    body, _groups = _oriented_parts(part, fit["orientation"])
+    return body, fit["orientation"]
 
 
 def section_xy(mesh, z):
@@ -109,23 +135,60 @@ class StructuralOverhangTests(unittest.TestCase):
         self.assertEqual(unsupported_faces(bridge), [])
 
     def test_drawer_components_grow_from_the_bed_in_production_orientation(self):
-        for style, rear, keyholes, fit, base in [
-            ("full", "solid", "keyholes", .3, .4),
-            ("open", "cross", "keyholes", .6, 1.6),
-            ("full", "cross", "off", .4, 4.0),
+        chosen_non_first = set()
+        for style, rear, keyholes, fit, base, bed in [
+            ("full", "solid", "keyholes", .3, .4, BED_DEFAULT),
+            ("open", "cross", "keyholes", .6, 1.6, BED_DEFAULT),
+            ("full", "cross", "off", .4, 4.0, BED_DEFAULT),
+            # Narrow beds make production pick a non-first orientation.
+            ("full", "cross", "off", .4, .8, {"x_mm": 112.0, "y_mm": 256.0, "z_mm": 256.0}),
+            ("full", "cross", "off", .4, .8, {"x_mm": 256.0, "y_mm": 100.0, "z_mm": 256.0}),
+            ("full", "cross", "off", .4, .8, {"x_mm": 256.0, "y_mm": 256.0, "z_mm": 40.0}),
         ]:
-            space = prepare_new_storage_drawers_definition({
-                "kind": "storage_drawers", "name": "Print proof", "x": 96, "y": 96,
-                "storage_drawers": {"drawers": [{"height_mm": 40}],
-                    "cabinet_style": style, "rear_support": rear, "wall_mounting": keyholes,
-                    "drawer_fit_mm": fit, "drawer_base_mm": base},
-            })
-            plan = resolve_storage_drawers_plan(space)
+            plan = resolve_storage_drawers_plan(cabinet(style, rear, keyholes, fit, base))
             for part in plan.components:
-                with self.subTest(style=style, rear=rear, fit=fit, base=base, part=part.key):
-                    printed = orient_mesh(part.mesh, part.allowed_orientations[0], flip_up=part.flip_up)
+                with self.subTest(style=style, rear=rear, fit=fit, base=base, bed=bed, part=part.key):
+                    printed, orientation = production_print(part, bed)
+                    if printed is None:
+                        continue  # production would refuse this part on this bed
+                    if orientation != part.allowed_orientations[0]:
+                        chosen_non_first.add(orientation)
                     self.assertTrue(printed.is_watertight)
                     self.assertEqual(unsupported_faces(printed), [], part.display_name)
+        self.assertTrue(chosen_non_first, "no case exercised a non-first orientation")
+
+    def test_original_rear_orientation_is_rejected(self):
+        """Fix 114 3B regression: the rear used to print without flip_up."""
+        part = next(p for p in resolve_storage_drawers_plan(cabinet("full", "solid", "keyholes", .3, .4)).components
+                    if p.key == "rear_solid")
+        self.assertTrue(part.flip_up)
+        printed, _orientation = production_print(part, BED_DEFAULT)
+        self.assertEqual(unsupported_faces(printed), [])
+        original, _orientation = production_print(dataclasses.replace(part, flip_up=False), BED_DEFAULT)
+        self.assertTrue(unsupported_faces(original))
+
+    def test_original_full_dovetail_is_rejected(self):
+        """Fix 114 3D regression: both flanks of the side dovetails were angled."""
+        def original(center_x, y0, y1, root_z, direction, land, *, female=False, **_ignored):
+            head, neck, length = land, 0.70 * land, 0.55 * land
+            section = Polygon([(center_x-neck/2, root_z), (center_x+neck/2, root_z),
+                               (center_x+head/2, root_z+direction*length),
+                               (center_x-head/2, root_z+direction*length)])
+            if female:
+                section = section.buffer(geometry.SD_JOINT_CLEARANCE_MM, join_style=2)
+            else:
+                z1 = root_z - direction * 0.25
+                section = unary_union([section, geometry.shape_box(center_x-neck/2, min(root_z, z1),
+                                                                  center_x+neck/2, max(root_z, z1))])
+            solid = geometry._extrude_polygon(section, y1 - y0)
+            solid.apply_transform(np.array([[1, 0, 0, 0], [0, 0, 1, y0], [0, 1, 0, 0], [0, 0, 0, 1]], float))
+            return solid
+        space = cabinet("full", "solid", "off", .4, .8)
+        repaired = next(p for p in resolve_storage_drawers_plan(space).components if p.key == "side_left")
+        self.assertEqual(unsupported_faces(production_print(repaired, BED_DEFAULT)[0]), [])
+        with mock.patch.object(geometry, "_sliding_dovetail", original):
+            old = next(p for p in resolve_storage_drawers_plan(space).components if p.key == "side_left")
+        self.assertTrue(unsupported_faces(production_print(old, BED_DEFAULT)[0]))
 
 
 if __name__ == "__main__":
