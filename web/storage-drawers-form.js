@@ -58,18 +58,24 @@
       const waiters = settleWaiters; settleWaiters = [];
       for (const done of waiters) { try { done(); } catch { /* a waiter must never break validation */ } }
     };
-    const space = copy(initialSpace || { kind: "storage_drawers", name: "", x: minUnits * baseUnit, y: minUnits * baseUnit });
+    // A brand-new Space starts at the legal grid size nearest 210 × 120 mm; a
+    // supplied prefill keeps its own dimensions exactly.
+    const startMm = mm => baseUnit * Math.min(maxUnits, Math.max(minUnits, Math.round(mm / baseUnit)));
+    const space = copy(initialSpace || { kind: "storage_drawers", name: "", x: startMm(210), y: startMm(120) });
     space.storage_drawers = { ...defaults(), ...copy(space.storage_drawers || {}) };
     const block = space.storage_drawers;
     const tail = [];
     host.replaceChildren();
-    const form = el("div", "sd-form"); host.append(form);
-    const nameGroup = el("div", "sd-name-group"); form.append(nameGroup);
+    // Basic scope (New Space and header Edit) is the compact layout: Basics +
+    // Drawers + a quiet status line. Full scope (Design) adds Cabinet and Finish.
+    const compact = scope === "basic";
+    const form = el("div", compact ? "sd-form sd-form-compact" : "sd-form"); host.append(form);
     const name = input(space.name); name.maxLength = 80; name.required = true;
     name.id = `sd-name-${epoch}`;
     name.dataset.heightNeutral = "1";
-    nameGroup.append(labeled("Space name", name));
-    const sizeGroup = group(form, "Size"); sizeGroup.classList.add("sd-size-group"); const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
+    const sizeGroup = group(form, "Basics"); sizeGroup.classList.add("sd-basics-group");
+    sizeGroup.append(labeled("Space name", name));
+    const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
     const x = input(space.x), y = input(space.y);
     x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
     const resolveMm = field => {
@@ -85,9 +91,9 @@
       const resolved = resolveMm(field);
       sizeHelp.get(field).textContent = resolved.ok
         ? (Number(field.value) === resolved.mm
-          ? `${resolved.units} ${resolved.units === 1 ? "unit" : "units"} · committed size ${resolved.mm} mm`
-          : `Nearest 8 mm grid size: ${resolved.mm} mm · this size will be saved`)
-        : `Enter a size that rounds to ${minUnits * baseUnit}–${maxUnits * baseUnit} mm`;
+          ? `${baseUnit} mm grid`
+          : `Will save as ${resolved.mm} mm · ${baseUnit} mm grid`)
+        : `${baseUnit} mm grid · valid range ${minUnits * baseUnit}–${maxUnits * baseUnit} mm`;
     };
     for (const field of [x, y]) { field.inputMode = "decimal"; field.required = true; }
     // Usable height is local: the stored clear height plus the selected fit.
@@ -95,12 +101,11 @@
     const zField = input("", "number"); zField.id = `sd-z-${epoch}`; zField.step = "any";
     zField.dataset.usableHeight = "1";
     const zHelp = help("");
-    const zLabel = labeled("Interior Height", zField, null, "mm"); zLabel.append(zHelp);
+    const zLabel = labeled("Usable height", zField, null, "mm"); zLabel.append(zHelp);
     for (const [field, title] of [[x, structural ? "Interior Width" : "Width"], [y, structural ? "Interior Depth" : "Depth"]]) {
       const label = labeled(title, field, null, "mm"); label.append(sizeHelp.get(field)); sizeGrid.append(label);
     }
     if (structural) { sizeGrid.classList.add("sd-size-grid-three"); sizeGrid.append(zLabel); }
-    sizeGroup.append(help("Width = left ↔ right. Depth = front ↔ back. Cabinet width and depth snap to the nearest 8 mm grid size when saved."));
     // Fix 103 (Packet B): printer status lives beside Size, not in Summary.
     // Known oversize shows a warning here but does not block.
     const printerRow = el("p", "sd-printer-row");
@@ -126,7 +131,7 @@
     const countNote = el("small", "sd-field-error"); countNote.hidden = true; countNote.id = `sd-count-note-${epoch}`;
     count.setAttribute("aria-describedby", countNote.id);
     const countField = labeled("Number of drawers", count,
-      structural ? "Use Add Drawer or a drawer's Delete button below." : mode === "edit" ? "Add or remove drawers in Design." : null);
+      structural ? "Use Add Drawer or Delete below." : mode === "edit" ? "Add or remove drawers in Design." : null);
     countField.append(countNote);
     const fit = select(block.drawer_fit_mm, NAMED(rules.fitChoices, ["Tight", "Standard", "Loose"]));
     let previousFit = Number(fit.value);
@@ -134,8 +139,9 @@
     const handleSize = select(block.drawer_handle_size, [["auto", "Auto"], ["small", "Small"], ["medium", "Medium"], ["large", "Large"]]);
     const handleField = labeled("Pull size", handleSize);
     const drawersRowA = el("div", "sd-size-grid");
-    drawersRowA.append(countField,
-      labeled("Drawer fit", fit, "Standard is recommended for the first print. Tight leaves very little working clearance."));
+    const fitField = labeled("Drawer fit", fit);
+    fitField.title = "Standard is recommended for the first print. Tight leaves very little working clearance.";
+    drawersRowA.append(countField, fitField);
     const drawersRowB = el("div", "sd-size-grid");
     drawersRowB.append(labeled("Handles", handles), handleField);
     drawersGroup.append(drawersRowA, drawersRowB);
@@ -145,10 +151,8 @@
     const rear = select(block.rear_support, [["cross", "Rear cross"], ["solid", "Rear solid"]]);
     const wallMounting = select(block.wall_mounting, [["off", "Off"], ["keyholes", "Keyholes"]]);
     const keyholeCount = select(String(block.wall_mount_keyholes_per_drawer), [["2", "2"], ["4", "4"]]);
-    const keyholeCountField = labeled(
-      "Keyholes per drawer level", keyholeCount,
-      "2 = left/right. 4 = left/right at upper and lower mounting rows."
-    );
+    const keyholeCountField = labeled("Keyholes per drawer level", keyholeCount);
+    keyholeCountField.title = "2 = left/right. 4 = left/right at upper and lower mounting rows.";
     const stack = select(String(block.stacking), [["false", "Not stackable"], ["true", "Stackable"]]);
     const frame = select(block.open_frame_width_mm, NAMED(rules.frameChoices, ["Compact", "Standard", "Strong"]));
     const frameField = labeled("Open frame width", frame);
@@ -161,7 +165,9 @@
     cabinetRowB.append(labeled("Stacking", stack),
       frameField);
     cabinet.append(cabinetRowA, cabinetRowB);
-    const labels = group(form, "Labels"); labels.classList.add("sd-labels-group");
+    // Finish: labels + material in one area (Fix 117).
+    const finish = group(form, "Finish"); finish.classList.add("sd-finish-group");
+    const labels = el("div", "sd-subgroup"); labels.append(el("strong", "sd-subhead", "Labels"));
     const unitEnabled = select(String(block.unit_label_enabled), [["false", "Unit label off"], ["true", "Unit label on"]]);
     const unitText = input(block.unit_label_text); unitText.maxLength = labelLimit;
     unitText.id = `sd-unit-label-${epoch}`;
@@ -174,7 +180,7 @@
     const labelsRowB = el("div", "sd-size-grid");
     labelsRowB.append(labeled("Drawer labels", drawerEnabled), styleField);
     labels.append(labelsRowA, labelsRowB);
-    const material = group(form, "Material"); material.classList.add("sd-material-group"); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
+    const material = el("div", "sd-subgroup"); material.append(el("strong", "sd-subhead", "Material")); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
     material.append(matA, matB);
     const materialFields = {};
     for (const [key, title, row, kind] of [
@@ -183,16 +189,17 @@
       ["drawer_base_mm", "Drawer base thickness", matB, "base_choices"]]) {
       const control = select(block[key], materialChoices(catalog, kind, block[key])); materialFields[key] = control; row.append(labeled(title, control));
     }
-    const summaryGroup = group(form, "Summary"); summaryGroup.classList.add("sd-summary-group"); const summary = el("div", "sd-summary", "Checking cabinet…"); summaryGroup.append(summary);
+    finish.append(labels, material);
+    const summaryGroup = el("div", "sd-summary-compact sd-summary-group"); form.append(summaryGroup); const summary = el("div", "sd-summary", "Checking cabinet…"); summaryGroup.append(summary);
     const syncVisibility = () => {
       frameField.hidden = style.value !== "open"; handleField.hidden = handles.value !== "true";
       keyholeCountField.hidden = wallMounting.value !== "keyholes";
       unitTextField.hidden = unitEnabled.value !== "true"; styleField.hidden = drawerEnabled.value !== "true";
-      // Fix 103 (Packet B): Basic Setup shows only Name + Size + Drawers.
+      // Fix 103 (Packet B): Basic Setup shows only Basics + Drawers.
       // Advanced controls are built but hidden, so draft() reads canonical
       // defaults for them exactly as before.
       if (scope === "basic") {
-        cabinet.hidden = true; labels.hidden = true; material.hidden = true;
+        cabinet.hidden = true; finish.hidden = true;
         fit.closest("label").hidden = true;
         handles.closest("label").hidden = true;
         handleField.hidden = true;
@@ -255,7 +262,7 @@
       });
       renderRowHeights();
     };
-    drawersGroup.append(help("Each height is the drawer's usable interior height."));
+    if (!compact) drawersGroup.append(help("Each height is the drawer's usable interior height."));
     if (structural) {
       const addRow = el("div", "sd-drawer-actions");
       const add = el("button", "button secondary", "Add Drawer"); add.type = "button";
@@ -359,7 +366,7 @@
       const fail = (message, focusId) => ({ ok: false, message, focusId });
       if (!name.value.trim()) return fail("Enter a Space name", name.id);
       for (const [field, axis] of [[x, "Width"], [y, "Depth"]]) {
-        if (!resolveMm(field).ok) return fail(`${axis} must round to ${minUnits}–${maxUnits} whole units.`, field.id);
+        if (!resolveMm(field).ok) return fail(`${axis} must be ${minUnits * baseUnit}–${maxUnits * baseUnit} mm (${baseUnit} mm grid).`, field.id);
       }
       if (countProblem()) return fail(`Number of drawers: ${countProblem().toLowerCase()}`, count.id);
       for (let i = 0; i < block.drawers.length; i++) {
@@ -406,13 +413,12 @@
     const showSummary = response => {
       lastSummary = response;
       const outside = (response.outside_xyz || []).map(v => fmt(v));
-      const [ux, uy] = response.field_units || [];
       const [fx, fy] = (response.field_mm || []).map(v => fmt(v));
       const heights = (response.drawers || []).map(row => fmt(row.usable_height_mm)).join(", ");
       const material = response.effective_material || {};
       const lines = [
         line("Finished outside", `${outside.join(" × ")} mm`, "sd-summary-outside"),
-        line("Inside each drawer", `${fx} × ${fy} mm · ${ux} × ${uy} units`),
+        line("Inside each drawer", `${fx} × ${fy} mm`),
         line("Drawers", `${response.drawer_count} · usable height${response.drawer_count === 1 ? "" : "s"} ${heights} mm`),
         line("Cabinet base / top", `${fmt(material.base_mm)} / ${fmt(material.top_mm)} mm`),
       ];

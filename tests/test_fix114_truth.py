@@ -98,14 +98,14 @@ class NavigatorAndGrammarTests(unittest.TestCase):
         self.assertNotIn("addDrawer", source("web/spaces/14-drawers-cabinet.js"))
         self.assertIn("Add Drawer", source("web/storage-drawers-form.js"))
 
-    def test_structural_host_resets_grid_placement_and_help_sits_outside_values(self):
+    def test_structural_host_is_one_column_and_help_sits_outside_values(self):
         css = source("web/storage-drawers.css")
-        block = css[css.index("#structural-editor-host .sd-name-group"):]
+        block = css[css.index("#structural-editor-host .sd-form"):]
         self.assertRegex(block, r"\.sd-summary-group\s*\{\s*grid-column:\s*1;")
         form = source("web/storage-drawers-form.js")
         self.assertNotIn("mm inside", form)
-        self.assertIn("this size will be saved", form)
-        self.assertIn("snap to the nearest 8 mm grid size", form)
+        self.assertIn("Will save as", form)
+        self.assertNotIn("whole units", form)
 
 
 class StorageBoxFitTests(unittest.TestCase):

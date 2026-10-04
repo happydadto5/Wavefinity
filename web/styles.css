@@ -1865,6 +1865,12 @@ body.relocating > :not(dialog) { pointer-events: none; }
 .storage-box-group { display: grid; gap: 6px; margin-top: 6px; }
 .storage-box-group:first-of-type { margin-top: 0; }
 .storage-box-subtitle { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+/* Fix 117: the Design form is one column of bordered areas (same rhythm as the
+   Storage Drawers editor). Setup's #portable-case is not inside .storage-box-form. */
+.storage-box-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.storage-box-form .storage-box-case { margin-top: 0; padding-top: 0; border-top: 0; }
+.storage-box-form .storage-box-group { margin-top: 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; }
+.storage-box-form .storage-box-capacity { margin: 0; }
 
 .design-bin-nav { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
 .design-bin-select { flex: 1; min-width: 0; }

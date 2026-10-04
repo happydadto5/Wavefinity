@@ -1,8 +1,11 @@
-.sd-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.sd-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .sd-form-group { display: grid; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 9px; min-width: 0; }
-.sd-name-group { grid-column: 1; }
-.sd-size-group { grid-column: 2; }
-.sd-summary-group { grid-column: 1 / -1; }
+.sd-form-compact .sd-form-group { border: 0; padding: 0; }
+.sd-summary-compact { padding-top: 6px; border-top: 1px solid var(--line); }
+.sd-subgroup { display: grid; gap: 6px; }
+.sd-subgroup + .sd-subgroup { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
+.sd-subhead { font-size: 12px; }
+.sd-form-group, .sd-summary-group { grid-column: 1; }
 .sd-form-group h5 { margin: 0; font-size: 14px; }
 .sd-field { display: grid; gap: 4px; min-width: 0; font-size: 12px; }
 .sd-field input, .sd-field select { width: 100%; min-width: 0; box-sizing: border-box; }
@@ -29,8 +32,6 @@
 .sd-structural { display: grid; gap: 6px; }
 .sd-structural p { margin: 0; }
 @media (max-width: 700px) {
-  .sd-form { grid-template-columns: 1fr; }
-  .sd-name-group, .sd-size-group, .sd-summary-group { grid-column: 1; }
   .sd-navigator { top: auto; right: 10px; bottom: 56px; width: 156px; max-height: 42%; }
   .sd-size-grid, .sd-material-three, .sd-material-two, .sd-summary, .sd-drawer-row { grid-template-columns: 1fr; }
 }
@@ -72,15 +73,13 @@
 .space-type-frame { margin: 0 0 8px; color: var(--ink); opacity: .78; font-size: 13px; }
 .type-card[hidden] { display: none; }
 
-/* Fix 103: structural Design editor (side panel). */
-#structural-editor-host .sd-form { grid-template-columns: 1fr; }
-#structural-editor-host .sd-name-group,
-#structural-editor-host .sd-size-group,
+/* Fix 103 / 117: structural Design editor (side panel). The form is one column
+   of major areas (Basics, Drawers, Cabinet, Finish) plus a compact status. */
+#structural-editor-host .sd-form { grid-template-columns: minmax(0, 1fr); }
+#structural-editor-host .sd-form-group,
 #structural-editor-host .sd-summary-group { grid-column: 1; }
-.sd-name-group { align-self: start; }
-.sd-name-group .sd-field { font-size: 12px; }
 .sd-size-grid.sd-size-grid-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.sd-drawer-row.sd-drawer-row-active { outline: 2px solid var(--teal, #168a89); outline-offset: 2px; border-radius: 6px; }
+.sd-drawer-row.sd-drawer-row-active { outline: 2px solid var(--teal, #168a89); outline-offset: 2px; border-radius: 6px; background: color-mix(in srgb, var(--teal, #168a89) 8%, transparent); }
 .storage-box-units { color: var(--muted); font-size: 11px; }
 .sd-drawer-head { display: grid; gap: 2px; justify-items: start; }
 .sd-drawer-delete { font-size: 12px; }

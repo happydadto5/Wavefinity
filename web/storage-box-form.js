@@ -11,7 +11,7 @@
  *   -> { read(), draft(), fill(space), destroy(), isDirty(), markPristine(),
  *        setError(), setInterior(axis, mm), getInterior(), setOutside(mm) }
  *
- * Interior sizing (Fix 103 R1): Width/Depth are whole catalog base units;
+ * Interior sizing (Fix 103 R1): Width/Depth are whole catalog base units (shown in mm);
  * Height is a whole mm at or above the legal minimum and is never snapped to
  * the X/Y grid. Typed input, arrow/wheel steps and the 3D handles all go
  * through setInterior().
@@ -71,7 +71,7 @@
     const minHeight = Number(rules.min_secure_height_mm) || 1;
     const box = { ...defaults(catalog), ...(initialSpace?.storage_box || {}) };
 
-    const form = el("div", "storage-box-form");
+    const form = el("div", "storage-box-form");   // one column of areas: size, Lid, Case Options, Label, Material, status
     const events = new AbortController();
 
     // ---- Interior size (Width / Depth / Height, three across) ----
@@ -98,7 +98,6 @@
     sizeRow.append(xLabel, yLabel, zLabel);
     sizeGroup.append(sizeRow);
     const outside = el("p", "storage-box-capacity");
-    sizeGroup.append(outside);
     form.append(sizeGroup);
 
     // ---- Case Settings ----
@@ -167,11 +166,11 @@
 
     form.append(caseWrap);
 
-    // ---- Error surface (one general surface for system errors) ----
+    // ---- Compact status last: finished-outside result, then the one general error surface ----
     const errorBox = el("p", "field-error", "");
     errorBox.hidden = true;
     errorBox.setAttribute("role", "alert");
-    form.append(errorBox);
+    form.append(outside, errorBox);
 
     host.append(form);
 
@@ -195,10 +194,17 @@
       return Math.min(maxXY, Math.max(minField, Math.round(value / unit) * unit));
     }
     const inputFor = axis => (axis === "x" ? xInput : axis === "y" ? yInput : zInput);
+    // mm-only grid note: quiet when the typed value is already on the grid,
+    // otherwise the mm size that will be committed. Never rewrites the field.
+    function gridNote(axis) {
+      const raw = Number(inputFor(axis).value);
+      if (!(raw > 0)) return "";
+      const mm = normalizeAxis(axis, raw, raw);
+      return raw === mm ? `${unit} mm grid` : `Will save as ${mm} mm · ${unit} mm grid`;
+    }
     function showReadouts() {
-      const x = Number(xInput.value), y = Number(yInput.value);
-      xUnits.textContent = x > 0 ? `${x / unit} ${x / unit === 1 ? "unit" : "units"}` : "";
-      yUnits.textContent = y > 0 ? `${y / unit} ${y / unit === 1 ? "unit" : "units"}` : "";
+      xUnits.textContent = gridNote("x");
+      yUnits.textContent = gridNote("y");
       zNote.textContent = Number(zInput.value) > 0 ? "whole mm" : "";
     }
     function getInterior() {

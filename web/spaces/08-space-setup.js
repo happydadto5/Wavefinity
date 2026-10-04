@@ -127,12 +127,13 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   document.querySelectorAll(".space-type-fields").forEach(el => el.hidden = true);
   const field = document.getElementById(`space-fields-${kind}`);
   if (field) field.hidden = false;
-  // Fix 103 (Packet B): Basic Setup for Storage Box shows Name + Size only.
-  // The full case settings live in the structural Design editor (Section C),
-  // not in the setup dialog. Hidden controls keep their canonical defaults,
-  // so readStorageBoxForm() works unchanged.
+  // Fix 103 (Packet B) / Fix 117: Basic Setup and header Edit for Storage Box
+  // show Name + Size only. The full case settings live in the structural
+  // Design editor, not in the setup dialog. Hidden controls keep their
+  // canonical defaults on create and the accepted Space's own values on edit
+  // (SP.fillStorageBoxForm below), so readStorageBoxForm() works unchanged.
   const portableCase = document.getElementById("portable-case");
-  if (portableCase) portableCase.hidden = (kind === "portable" && !update);
+  if (portableCase) portableCase.hidden = kind === "portable";
   // The cabinet form owns its own name field.
   const nameRow = document.getElementById("space-name-row");
   if (nameRow) nameRow.hidden = kind === "storage_drawers";

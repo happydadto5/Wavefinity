@@ -95,7 +95,9 @@ SP.mountStorageDrawersForm = (prefill, update) => {
     catalog: state.catalog,
     printerProfile: PrinterProfile.current(),
     mode: update ? "edit" : "create",
-    scope: update ? "full" : "basic",
+    // Setup and header Edit stay basic; the structural Design editor is the
+    // only caller that mounts scope "full" (Fix 117).
+    scope: "basic",
     callbacks: {
       identity: () => update ? (state.activeSpaceId || state.activeSpace?.name) : createToken,
       openPrinterSettings: () => SP.openPrinterSettings(),
