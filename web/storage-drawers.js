@@ -73,7 +73,7 @@
         if (placed.bin) seenRows.add(placed.bin);
       }
       return { ...old, id: row.id, name: `Drawer ${index + 1}`, width: space.x, depth: space.y,
-        height: row.height_mm, clearance: 0, boundary: "mating", placements };
+        height: row.height_mm + space.storage_drawers.drawer_fit_mm, clearance: 0, boundary: "mating", placements };
     });
     next.active = ids.has(next.active) ? next.active : rows[0].id;
     next.space = clone(space);
@@ -89,7 +89,7 @@
     drawerName(space, id) { const index = validate(space).findIndex(row => row.id === id); return index < 0 ? null : `Drawer ${index + 1}`; },
     activeDrawerLimits(space, layout) {
       const rows = validate(space); const row = rows.find(one => one.id === layout?.active) || rows[0];
-      return { x: space.x, y: space.y, z: row.height_mm, drawer_id: row.id };
+      return { x: space.x, y: space.y, z: row.height_mm + space.storage_drawers.drawer_fit_mm, drawer_id: row.id };
     },
     drawerHoldingRow(layout, rowId) { return (layout?.drawers || []).find(drawer => drawer.placements?.some(p => p.bin === rowId))?.id || null; },
     rowLocationText(layout, rowId) {

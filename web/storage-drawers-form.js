@@ -21,7 +21,7 @@
     for (const [key, title] of choices) { const option = document.createElement("option"); option.value = key; option.textContent = title; node.append(option); }
     node.value = String(value); return node;
   };
-  const group = (host, title) => { const section = el("section", "sd-form-group"); section.append(el("h3", "", title)); host.append(section); return section; };
+  const group = (host, title) => { const section = el("div", "sd-form-group storage-box-group"); section.append(el("h5", "storage-box-subtitle", title)); host.append(section); return section; };
   const materialChoices = (catalog, kind, current) => {
     const rows = catalog?.b4b_rules?.[kind] || [];
     const options = rows.map(row => {
@@ -40,7 +40,7 @@
     const rules = window.StorageDrawers.catalogRules(catalog);
     const { baseUnit, minDrawerHeight, minUnits, maxUnits, minDrawers, maxDrawers, labelLimit } = rules;
     const defaults = () => ({
-      drawers: Array.from({ length: 3 }, () => ({ temp_key: `temporary:${crypto.randomUUID()}`, height_mm: rules.defaultHeight, label_text: "" })),
+      drawers: Array.from({ length: 3 }, () => ({ temp_key: `temporary:${crypto.randomUUID()}`, height_mm: rules.defaultHeight - rules.defaultFit, label_text: "" })),
       cabinet_style: "full", rear_support: "cross", open_frame_width_mm: rules.defaultFrame, drawer_fit_mm: rules.defaultFit,
       wall_mounting: "off", wall_mount_keyholes_per_drawer: 2,
       drawer_handles: true, drawer_handle_size: "auto", stacking: false,
@@ -64,7 +64,7 @@
     const tail = [];
     host.replaceChildren();
     const form = el("div", "sd-form"); host.append(form);
-    const nameGroup = group(form, "Name"); nameGroup.classList.add("sd-name-group");
+    const nameGroup = el("div", "sd-name-group"); form.append(nameGroup);
     const name = input(space.name); name.maxLength = 80; name.required = true;
     name.id = `sd-name-${epoch}`;
     name.dataset.heightNeutral = "1";
@@ -74,29 +74,33 @@
     x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
     const resolveMm = field => {
       const raw = field.value.trim();
-      const requested = Number.parseFloat(raw);
+      const requested = Number(raw);
       if (!raw || !Number.isFinite(requested) || requested <= 0) return { ok: false };
       const units = Math.round(requested / baseUnit);
       if (units < minUnits || units > maxUnits) return { ok: false };
       return { ok: true, units, mm: units * baseUnit };
     };
+    const sizeHelp = new Map([[x, help("")], [y, help("")]]);
     const formatMm = field => {
       const resolved = resolveMm(field);
-      if (resolved.ok) field.value = `${resolved.mm} mm inside — ${resolved.units} ${resolved.units === 1 ? "unit" : "units"}`;
+      sizeHelp.get(field).textContent = resolved.ok
+        ? (Number(field.value) === resolved.mm
+          ? `${resolved.units} ${resolved.units === 1 ? "unit" : "units"} · committed size ${resolved.mm} mm`
+          : `Nearest 8 mm grid size: ${resolved.mm} mm · this size will be saved`)
+        : `Enter a size that rounds to ${minUnits * baseUnit}–${maxUnits * baseUnit} mm`;
     };
     for (const field of [x, y]) { field.inputMode = "decimal"; field.required = true; }
-    // Fix 103 (R1): the full structural editor shows three-across Interior
-    // Width / Depth / Height. Height is the ACTIVE drawer's physical usable
-    // interior height; its value and edits go through the authoritative draft
-    // summary (see the per-row `basis` below), never a copy of the server's formula.
+    // Usable height is local: the stored clear height plus the selected fit.
     const structural = scope === "full" && callbacks.structural === true;
-    const zField = input("", "number"); zField.id = `sd-z-${epoch}`; zField.step = "1"; zField.disabled = true;
+    const zField = input("", "number"); zField.id = `sd-z-${epoch}`; zField.step = "any";
     zField.dataset.usableHeight = "1";
     const zHelp = help("");
     const zLabel = labeled("Interior Height", zField, null, "mm"); zLabel.append(zHelp);
-    sizeGrid.append(labeled(structural ? "Interior Width" : "Width", x), labeled(structural ? "Interior Depth" : "Depth", y));
+    for (const [field, title] of [[x, structural ? "Interior Width" : "Width"], [y, structural ? "Interior Depth" : "Depth"]]) {
+      const label = labeled(title, field, null, "mm"); label.append(sizeHelp.get(field)); sizeGrid.append(label);
+    }
     if (structural) { sizeGrid.classList.add("sd-size-grid-three"); sizeGrid.append(zLabel); }
-    sizeGroup.append(help("Width = left ↔ right. Depth = front ↔ back. Wavefinity rounds to whole units."));
+    sizeGroup.append(help("Width = left ↔ right. Depth = front ↔ back. Cabinet width and depth snap to the nearest 8 mm grid size when saved."));
     // Fix 103 (Packet B): printer status lives beside Size, not in Summary.
     // Known oversize shows a warning here but does not block.
     const printerRow = el("p", "sd-printer-row");
@@ -122,9 +126,10 @@
     const countNote = el("small", "sd-field-error"); countNote.hidden = true; countNote.id = `sd-count-note-${epoch}`;
     count.setAttribute("aria-describedby", countNote.id);
     const countField = labeled("Number of drawers", count,
-      structural ? "Use Add Drawer or a drawer's Delete button below." : mode === "edit" ? "Add or remove drawers from the cabinet panel." : null);
+      structural ? "Use Add Drawer or a drawer's Delete button below." : mode === "edit" ? "Add or remove drawers in Design." : null);
     countField.append(countNote);
     const fit = select(block.drawer_fit_mm, NAMED(rules.fitChoices, ["Tight", "Standard", "Loose"]));
+    let previousFit = Number(fit.value);
     const handles = select(String(block.drawer_handles), [["true", "Pull handles"], ["false", "No handles"]]);
     const handleSize = select(block.drawer_handle_size, [["auto", "Auto"], ["small", "Small"], ["medium", "Medium"], ["large", "Large"]]);
     const handleField = labeled("Pull size", handleSize);
@@ -230,17 +235,15 @@
             callbacks.onHighlightDrawer?.(owner, { ensure: inField });
           }, { signal: events.signal });
         }
-        // The visible value is the drawer's USABLE interior height from the
-        // current authoritative summary; row.height_mm stays internal.
+        // Usable height never waits for summary or preview work.
         const height = input("", "number"); height.step = "any"; height.required = true;
-        height.disabled = true;
+        height.disabled = disabled;
         height.id = `sd-height-${epoch}-${index}`;
         height.dataset.usableHeight = "1";
         heightInputs.set(row, height);
-        height.addEventListener("change", () => {
-          const applied = setUsable(row, height.value, false);
-          renderRowHeights();
-          if (Number.isFinite(applied)) { syncHeightField(); schedule({ keepHeight: true }); }
+        height.addEventListener("input", () => {
+          if (!height.value.trim() || !Number.isFinite(setUsable(row, height.value))) row.height_mm = NaN;
+          renderRowHeights(); syncHeightField(); schedule();
         }, { signal: events.signal });
         const label = input(row.label_text); label.maxLength = labelLimit; label.disabled = disabled;
         label.id = `sd-label-${epoch}-${index}`;
@@ -264,46 +267,29 @@
       };
       syncAddButton();
     }
-    // ---- Fix 103 (R1 + Correction 1 C1): usable-height basis for EVERY row ----
     let activeDrawerId = block.drawers.find(row => row.id && !String(row.id).startsWith("temporary:"))?.id || null;
-    // Map(rowKey -> { usable, height }): the authoritative pair from the latest
-    // summary for each drawer, matched by stable id (or the create-time temp
-    // key the summary request copied into the row id). No production formula
-    // lives here: usable height is always `summary usable + (row.height_mm -
-    // summary height)`, i.e. the summary value moved by the delta applied since.
-    // Cleared whenever a change that can alter the height relationship happens,
-    // until a new matching summary lands; height-only edits keep it.
-    let basis = null;
     const roundMm = value => Math.round(value * 1000) / 1000;
-    const rowKey = row => row.id || (row.temp_key ? row.temp_key.slice("temporary:".length) : null);
-    const rowBasis = row => (basis && rowKey(row) ? basis.get(rowKey(row)) || null : null);
-    const usableOf = row => { const one = rowBasis(row); return one ? roundMm(one.usable + (row.height_mm - one.height)) : NaN; };
-    const usableMinOf = row => { const one = rowBasis(row); return one ? roundMm(one.usable + (minDrawerHeight - one.height)) : NaN; };
-    // Maps a desired usable height back onto the persisted row by delta.
-    const setUsable = (row, requested, whole) => {
-      const one = rowBasis(row);
-      if (!one) return NaN;
-      let wanted = Number(requested);
+    const getDrawerFitMm = () => Number(fit.value);
+    const usableOf = row => roundMm(row.height_mm + getDrawerFitMm());
+    const usableMinOf = () => roundMm(minDrawerHeight + getDrawerFitMm());
+    const setUsable = (row, requested) => {
+      const wanted = Number(requested);
       if (!Number.isFinite(wanted)) return NaN;
-      if (whole) wanted = Math.round(wanted);
-      const floor = usableMinOf(row);
-      wanted = Math.max(wanted, whole ? Math.ceil(floor) : floor);
-      row.height_mm = roundMm(one.height + (wanted - one.usable));
+      row.height_mm = roundMm(wanted - getDrawerFitMm());
       return wanted;
     };
     const activeRow = () => block.drawers.find(row => row.id === activeDrawerId) || null;
     const isHeightField = node => Boolean(node?.dataset?.usableHeight);
-    const isHeightNeutral = node => Boolean(node?.dataset?.heightNeutral);
-    // Row inputs show the usable height, or stay disabled "checking…" - never a guess.
+    // Background validation cannot disable editing.
     renderRowHeights = () => {
       block.drawers.forEach(row => {
         const field = heightInputs.get(row);
         if (!field) return;
-        const usable = usableOf(row), ready = Number.isFinite(usable);
-        field.disabled = disabled || !ready;
-        field.placeholder = ready ? "" : "checking…";
-        if (ready) field.min = String(usableMinOf(row));
-        if (document.activeElement !== field) field.value = ready ? String(usable) : "";
+        const usable = usableOf(row);
+        field.disabled = disabled;
+        field.min = String(usableMinOf());
+        field.toggleAttribute("aria-invalid", !Number.isFinite(usable) || usable < usableMinOf());
+        if (document.activeElement !== field) field.value = Number.isFinite(usable) ? String(usable) : "";
       });
       syncAddButton();
     };
@@ -311,9 +297,11 @@
       if (!structural) return;
       const row = activeRow(), index = block.drawers.indexOf(row);
       const usable = row ? usableOf(row) : NaN, ready = Number.isFinite(usable);
-      zField.disabled = disabled || !ready;
+      zField.disabled = disabled || !row;
+      zField.min = String(usableMinOf());
+      zField.toggleAttribute("aria-invalid", Boolean(row) && (!ready || usable < usableMinOf()));
       if (document.activeElement !== zField) zField.value = ready ? String(usable) : "";
-      zHelp.textContent = !row ? "Select a drawer" : ready ? `Drawer ${index + 1} usable height, whole mm` : `Drawer ${index + 1}: checking…`;
+      zHelp.textContent = !row ? "Select a drawer" : `Drawer ${index + 1} usable height · minimum ${usableMinOf()} mm`;
     };
     const selectDrawer = id => {
       if (!structural || id === activeDrawerId || !block.drawers.some(row => row.id === id)) return;
@@ -329,16 +317,16 @@
       if (axis === "z") {
         const row = activeRow();
         if (!row) return NaN;
-        const applied = setUsable(row, requested, true);
-        if (!Number.isFinite(applied)) return NaN;
-        renderRowHeights(); syncHeightField(); schedule({ keepHeight: true });
+        const applied = setUsable(row, requested);
+        if (!Number.isFinite(applied)) row.height_mm = NaN;
+        renderRowHeights(); syncHeightField(); schedule();
         return applied;
       }
-      const units = Math.min(maxUnits, Math.max(minUnits, Math.round(Number(requested) / baseUnit)));
-      if (!Number.isFinite(units)) return NaN;
-      (axis === "x" ? x : y).value = `${units * baseUnit} mm inside — ${units} ${units === 1 ? "unit" : "units"}`;
-      schedule();
-      return units * baseUnit;
+      const field = axis === "x" ? x : y;
+      field.value = String(requested);
+      formatMm(field); schedule();
+      const resolved = resolveMm(field);
+      return resolved.ok ? resolved.mm : NaN;
     };
     const getInterior = () => {
       const row = activeRow();
@@ -377,8 +365,8 @@
       for (let i = 0; i < block.drawers.length; i++) {
         const height = block.drawers[i].height_mm;
         if (!Number.isFinite(height) || height < minDrawerHeight) {
-          const floor = usableMinOf(block.drawers[i]);
-          return fail(Number.isFinite(floor) ? `Drawer ${i + 1} needs at least ${fmt(Math.ceil(floor))} mm usable height` : `Drawer ${i + 1} is too short`, `sd-height-${epoch}-${i}`);
+          const floor = usableMinOf();
+          return fail(Number.isFinite(floor) ? `Drawer ${i + 1} needs at least ${fmt(floor)} mm usable height` : `Drawer ${i + 1} is too short`, `sd-height-${epoch}-${i}`);
         }
       }
       if (unitEnabled.value === "true" && !unitText.value.trim()) return fail("Enter unit label text", unitText.id);
@@ -435,14 +423,13 @@
       guide.append(link); lines.push(guide);
       summary.replaceChildren(...lines);
       updatePrinterRow();
-      basis = new Map((response.drawers || []).map(row => [row.id, { usable: Number(row.usable_height_mm), height: Number(row.height_mm) }]));
       renderRowHeights();
       syncHeightField();
       callbacks.onSummary?.(response);
     };
     const showSummaryText = (text, bad = false) => { summary.replaceChildren(el("p", bad ? "sd-fit-verdict bad" : "sd-summary-line", text)); updatePrinterRow(); };
-    const schedule = ({ keepHeight = false } = {}) => {
-      if (!keepHeight) basis = null;
+    const schedule = () => {
+      formatMm(x); formatMm(y);
       summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…"); notifyReady();
       renderRowHeights();
       syncHeightField();
@@ -458,7 +445,14 @@
           for (const row of preview.storage_drawers.drawers) {
             if (!row.id) row.id = row.temp_key?.slice("temporary:".length) || crypto.randomUUID();
           }
-          const response = await callbacks.requestSummary({ space: preview, printer_profile: printerProfile });
+          let timeout;
+          let response;
+          try {
+            response = await Promise.race([
+              callbacks.requestSummary({ space: preview, printer_profile: printerProfile }),
+              new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("Cabinet check timed out. Edit a setting or retry.")), 30000); }),
+            ]);
+          } finally { clearTimeout(timeout); }
           if (!live || epoch !== mountSerial || n !== requestNumber || pEpoch !== profileEpoch || identity !== (callbacks.identity?.() ?? space.id ?? space.name) || key !== window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) return;
           showSummary(response); summaryKey = key; summaryIdentity = identity; summaryState = "ok"; notifyReady(); markSettled();
         } catch (error) {
@@ -476,34 +470,29 @@
       if (problem) { schedule(); return; }
       const wanted = Number(count.value);
       while (block.drawers.length > wanted) tail.unshift(block.drawers.pop());
-      while (block.drawers.length < wanted) block.drawers.push(tail.shift() || { temp_key: `temporary:${crypto.randomUUID()}`, height_mm: block.drawers.at(-1)?.height_mm || rules.defaultHeight, label_text: "" });
+      while (block.drawers.length < wanted) block.drawers.push(tail.shift() || { temp_key: `temporary:${crypto.randomUUID()}`, height_mm: block.drawers.at(-1)?.height_mm ?? (rules.defaultHeight - Number(fit.value)), label_text: "" });
       renderRows(); schedule();
     };
     count.addEventListener("input", applyCount, { signal: events.signal });
-    let sizeSeen = "";
-    for (const field of [x, y]) {
-      field.addEventListener("focus", () => {
-        const resolved = resolveMm(field);
-        if (resolved.ok) { field.value = String(resolved.mm); field.select(); }
-      }, { signal: events.signal });
-      // Tabbing through a size field without changing it must not drop the
-      // height basis (it would disable the field the user is moving to).
-      field.addEventListener("blur", () => {
-        formatMm(field);
-        const now = `${resolveMm(x).mm}/${resolveMm(y).mm}`;
-        if (now !== sizeSeen) { sizeSeen = now; schedule(); }
-      }, { signal: events.signal });
-    }
+    fit.addEventListener("change", () => {
+      const nextFit = Number(fit.value);
+      for (const row of block.drawers) {
+        const oldUsable = roundMm(row.height_mm + previousFit);
+        row.height_mm = roundMm(oldUsable - nextFit);
+      }
+      previousFit = nextFit;
+      renderRowHeights(); syncHeightField(); schedule();
+    }, { signal: events.signal });
     form.addEventListener("input", event => {
-      if (event.target !== count && !isHeightField(event.target)) schedule({ keepHeight: isHeightNeutral(event.target) });
+      if (event.target !== count && event.target !== fit && !isHeightField(event.target)) schedule();
     }, { signal: events.signal });
     form.addEventListener("change", event => {
-      if (event.target !== count && !isHeightField(event.target)) {
-        syncVisibility(); renderRows(); schedule({ keepHeight: isHeightNeutral(event.target) });
+      if (event.target !== count && event.target !== fit && !isHeightField(event.target)) {
+        syncVisibility(); renderRows(); schedule();
       }
     }, { signal: events.signal });
     if (structural) {
-      zField.addEventListener("change", () => { if (!Number.isFinite(setInterior("z", zField.value))) syncHeightField(); }, { signal: events.signal });
+      zField.addEventListener("input", () => { setInterior("z", zField.value.trim() ? Number(zField.value) : NaN); }, { signal: events.signal });
       for (const [axis, field] of [["x", x], ["y", y], ["z", zField]]) {
         const step = axis === "z" ? 1 : baseUnit;
         const current = () => (axis === "z" ? Number(zField.value) : (resolveMm(field).ok ? resolveMm(field).mm : NaN));
@@ -524,7 +513,6 @@
       return resolved.ok ? resolved.mm : `invalid:${field.value}`;
     };
     formatMm(x); formatMm(y);
-    sizeSeen = `${resolveMm(x).mm}/${resolveMm(y).mm}`;
     const snapshot = () => JSON.stringify([
       name.value.trim(), snapshotValue(x), snapshotValue(y), count.value,
       block.drawers.map(row => [row.id || "", row.height_mm, row.label_text]),
@@ -544,8 +532,12 @@
           if (summaryState !== "pending") return resolve();
           const done = () => { clearTimeout(waitTimer); resolve(); };
           const waitTimer = setTimeout(() => {
-            settleWaiters = settleWaiters.filter(fn => fn !== done);
-            resolve();
+            if (summaryState === "pending") {
+              ++requestNumber; clearTimeout(timer);
+              summaryState = "error"; summaryError = "Cabinet check timed out. Edit a setting or retry.";
+              showSummaryText(summaryError, true); notifyReady(); markSettled();
+            }
+            settleWaiters = settleWaiters.filter(fn => fn !== done); resolve();
           }, timeoutMs);
           settleWaiters.push(done);
         });
@@ -568,7 +560,7 @@
         renderRows();
         syncHeightField();
       },
-      destroy() { live = false; mountSerial += 1; clearTimeout(timer); events.abort(); host.replaceChildren(); }
+      destroy() { live = false; mountSerial += 1; clearTimeout(timer); events.abort(); markSettled(); host.replaceChildren(); }
     };
   };
   window.StorageDrawersForm = { mount };

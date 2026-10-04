@@ -3,7 +3,7 @@
 .sd-name-group { grid-column: 1; }
 .sd-size-group { grid-column: 2; }
 .sd-summary-group { grid-column: 1 / -1; }
-.sd-form-group h3 { margin: 0; font-size: 14px; }
+.sd-form-group h5 { margin: 0; font-size: 14px; }
 .sd-field { display: grid; gap: 4px; min-width: 0; font-size: 12px; }
 .sd-field input, .sd-field select { width: 100%; min-width: 0; box-sizing: border-box; }
 .sd-size-grid, .sd-material-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -74,6 +74,11 @@
 
 /* Fix 103: structural Design editor (side panel). */
 #structural-editor-host .sd-form { grid-template-columns: 1fr; }
+#structural-editor-host .sd-name-group,
+#structural-editor-host .sd-size-group,
+#structural-editor-host .sd-summary-group { grid-column: 1; }
+.sd-name-group { align-self: start; }
+.sd-name-group .sd-field { font-size: 12px; }
 .sd-size-grid.sd-size-grid-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .sd-drawer-row.sd-drawer-row-active { outline: 2px solid var(--teal, #168a89); outline-offset: 2px; border-radius: 6px; }
 .storage-box-units { color: var(--muted); font-size: 11px; }

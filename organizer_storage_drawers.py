@@ -70,7 +70,7 @@ def _uuid(value):
 
 
 def new_drawer_descriptor(height_mm: float | None = None) -> dict:
-    height = STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM if height_mm is None else _number(height_mm, "Drawer height", ORDINARY_BIN_MIN_HEIGHT_MM)
+    height = STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - STORAGE_DRAWER_FIT_DEFAULT if height_mm is None else _number(height_mm, "Drawer height", ORDINARY_BIN_MIN_HEIGHT_MM)
     return {"id": str(uuid.uuid4()), "height_mm": height, "label_text": ""}
 
 
@@ -233,7 +233,7 @@ def reset_storage_drawers_definition(raw: object) -> dict:
             ORDINARY_BIN_MIN_HEIGHT_MM,
         )
         if height is None:
-            height = STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
+            height = STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - block["drawer_fit_mm"]
 
         label = _attempt(_label, source.get("label_text", ""), "Drawer label")
         if label is None:
@@ -244,7 +244,9 @@ def reset_storage_drawers_definition(raw: object) -> dict:
             "height_mm": height,
             "label_text": label,
         })
-    block["drawers"] = kept or storage_drawers_defaults(3)["drawers"]
+    if not kept:
+        kept = [new_drawer_descriptor(STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - block["drawer_fit_mm"]) for _ in range(3)]
+    block["drawers"] = kept
     base["storage_drawers"] = block
     return normalise_storage_drawers_definition(base)
 
