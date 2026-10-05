@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-05 — Startup ensures the NN Poller is running (Fix 119 Packet B)
+
+- `Start_Wavefinity_Dispatch_Runner.bat` is now a small best-effort shim that runs NN's `start-poller-unified.ps1 -NoPrompt -EnsureRunning` (NN checkout from `WAVEFINITY_NN_DIR`, else `%USERPROFILE%\nn`). It starts no Scheduled Task, has no dispatch logic and never pauses; a healthy Poller is left alone. Failures are logged to `%LOCALAPPDATA%\Wavefinity\ensure-nn-poller.log`.
+- `Launch_Organizer_UI.bat` fires the shim without waiting after the freshness gate, so Wavefinity still starts when NN is missing, broken, slow or already running.
+
 ## 2026-10-05 — FRONT marker collision and printable Pegboard hooks (Fix 118)
 
 - 3D preview: the FRONT marker no longer sits on top of the Width label. It stays where it was when they do not overlap; when they do, it moves straight up (or down) just clear of the label, never sideways, and is hidden for that frame if there is no room. The 2D view is unchanged.

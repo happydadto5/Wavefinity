@@ -1845,6 +1845,7 @@ Non-Python files:
 |---|---|
 | `Launch_Organizer_UI.vbs` | normal windowless application launcher |
 | `Launch_Organizer_UI.bat` | bootstrapper and diagnostic launcher; starts the local service windowlessly |
+| `Start_Wavefinity_Dispatch_Runner.bat` | best-effort shim that asks the NN desktop Poller (which owns coder dispatch) to be running; never blocks startup |
 | `generated/WAVY_SAMPLE_SET.3mf` | regenerable local sample print plate; intentionally gitignored |
 
 ## Working on this
