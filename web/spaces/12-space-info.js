@@ -127,9 +127,9 @@ SP.showFolder = async () => {
     const fm = isMac ? "Finder" : (isWin ? "File Explorer" : "your file manager");
     // Not destructive - ordinary primary/secondary styling, not danger.
     const ok = await appConfirmAction({
-      title: "Show Folder",
-      message: `Open this Space in ${fm}?`,
-      actionLabel: "Show Folder",
+      title: "Open Space Folder?",
+      message: `Open this Space folder in ${fm}?`,
+      actionLabel: "Open Folder",
     });
     if (!ok) return;
     try {

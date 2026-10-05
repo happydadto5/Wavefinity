@@ -845,7 +845,7 @@ async function sizeBinHeightToBore({ button = null, silent = false, guard = null
   if (state.draft?.kind !== "bore") return "skipped";
   const draftIndex = draftCommitIndex();
   if (!Number.isInteger(draftIndex)) {
-    if (!silent) toast("Select the Bore again before sizing the bin height.", true, 5000);
+    if (!silent) toast("Select the bore again before sizing the bin height.", true, 5000);
     return "skipped";
   }
   if (!beginDesignMutation()) return "skipped";

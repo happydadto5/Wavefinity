@@ -12,7 +12,7 @@
   const stateListeners = new Set();
   const AXIS_NAMES = Object.freeze({ x: "Width", y: "Depth", z: "Height" });
   const normalise = raw => {
-    if (!raw || typeof raw !== "object") throw new Error("Enter printer build volume");
+    if (!raw || typeof raw !== "object") throw new Error("Enter the printer build volume dimensions in mm.");
     const result = {};
     for (const key of ["x_mm", "y_mm", "z_mm"]) {
       const value = raw[key];
