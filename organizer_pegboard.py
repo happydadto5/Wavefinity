@@ -516,3 +516,124 @@ def make_board_adapters(box_spec: Any) -> list[tuple[str, trimesh.Trimesh]]:
                                 -float(mesh.bounds[0][2])))
         result.append((f"pegboard_adapter_{index}", mesh))
     return result
+
+
+PEGBOARD_HOOK_MAX_COUNT = 8
+PEGBOARD_HOOK_DEFAULT_COUNT = 4
+PEGBOARD_HOOK_ARM_WIDTH = 10.0
+PEGBOARD_HOOK_ARM_THICKNESS = 6.0
+PEGBOARD_HOOK_DEFAULT_ARM_LENGTH = 50.0
+PEGBOARD_HOOK_OVERLAP = 1.0
+PEGBOARD_HOOK_ROOT_HEIGHT = 12.0
+PEGBOARD_HOOK_ROOT_DEPTH = 3.0
+PEGBOARD_HOOK_UPTURN_LENGTH = 14.0
+PEGBOARD_HOOK_MIN_ARM_LENGTH = 10.0
+PEGBOARD_HOOK_MAX_ARM_LENGTH = 150.0
+
+
+def _hook_parts(standard_id: Any, arm_length_mm: float) -> dict[str, trimesh.Trimesh]:
+    """The board adapter plus the root, forward arm and upturn that join it.
+
+    Every joint overlaps its neighbour by a real volume (not just a shared
+    face), so the union cannot fall apart into touching-only bodies.
+    """
+    standard = pegboard_standard(standard_id)
+    arm_length = float(arm_length_mm)
+    if not math.isfinite(arm_length) or not (
+        PEGBOARD_HOOK_MIN_ARM_LENGTH <= arm_length <= PEGBOARD_HOOK_MAX_ARM_LENGTH
+    ):
+        raise ValueError(
+            f"Hook arm length must be {PEGBOARD_HOOK_MIN_ARM_LENGTH:g}-{PEGBOARD_HOOK_MAX_ARM_LENGTH:g} mm."
+        )
+    base = make_board_adapter(standard.id)
+    center = 42.4 if standard.id == "standard" else 8.0
+    profile = _adapter_body_profile(center)
+    front_y = max(y for y, _z in profile)
+    low_z = min(z for _y, z in profile)
+    half = PEGBOARD_HOOK_ARM_WIDTH / 2.0
+    thick = PEGBOARD_HOOK_ARM_THICKNESS
+    overlap = PEGBOARD_HOOK_OVERLAP
+
+    # The root starts inside the shared body and ends a little proud of its
+    # front face; the arm then starts inside the root.
+    root_y0 = front_y - overlap
+    root_y1 = front_y + PEGBOARD_HOOK_ROOT_DEPTH
+    root = _box(
+        (PEGBOARD_HOOK_ARM_WIDTH, root_y1 - root_y0, PEGBOARD_HOOK_ROOT_HEIGHT),
+        (0.0, (root_y0 + root_y1) / 2.0, low_z + PEGBOARD_HOOK_ROOT_HEIGHT / 2.0),
+    )
+    arm_y0 = root_y1 - overlap
+    arm_y1 = front_y + arm_length
+    arm = _box(
+        (PEGBOARD_HOOK_ARM_WIDTH, arm_y1 - arm_y0, thick),
+        (0.0, (arm_y0 + arm_y1) / 2.0, low_z + thick / 2.0),
+    )
+
+    # 45-degree upturn: starts inside the arm's far end, then rises and keeps
+    # leaning forward so a hung item cannot slide off.
+    lean = math.sqrt(0.5)
+    run = PEGBOARD_HOOK_UPTURN_LENGTH * lean
+    upturn = _prism_x([
+        (arm_y1 - overlap, low_z),
+        (arm_y1, low_z),
+        (arm_y1 + run, low_z + run),
+        (arm_y1 + run - thick * lean, low_z + run + thick * lean),
+        (arm_y1 - overlap, low_z + thick),
+    ], -half, half)
+    return {"base": base, "root": root, "arm": arm, "upturn": upturn}
+
+
+def make_pegboard_hook(standard_id: Any, arm_length_mm: float = PEGBOARD_HOOK_DEFAULT_ARM_LENGTH) -> trimesh.Trimesh:
+    """One printable hook: the unchanged board adapter + root + forward arm + upturn.
+
+    Built in adapter coordinates: the board faces -Y, the arm projects toward +Y.
+    """
+    return union(list(_hook_parts(standard_id, arm_length_mm).values()))
+
+
+def hook_print_transform() -> np.ndarray:
+    """Lay the hook on its side so the arm's layers run along its length.
+
+    Local to hook printing; adapter/receiver print orientation is untouched.
+    """
+    return trimesh.transformations.rotation_matrix(-math.pi / 2.0, (0.0, 1.0, 0.0))
+
+
+def pegboard_hook_count(value: Any = None) -> int:
+    if value is None or value == "":
+        return PEGBOARD_HOOK_DEFAULT_COUNT
+    if isinstance(value, bool) or isinstance(value, float) and not value.is_integer():
+        raise ValueError(f"Hook count must be a whole number from 1 to {PEGBOARD_HOOK_MAX_COUNT}.")
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Hook count must be a whole number from 1 to {PEGBOARD_HOOK_MAX_COUNT}.") from None
+    if not 1 <= count <= PEGBOARD_HOOK_MAX_COUNT:
+        raise ValueError(f"Hook count must be from 1 to {PEGBOARD_HOOK_MAX_COUNT}.")
+    return count
+
+
+def make_pegboard_hooks(
+    standard_id: Any,
+    count: int = PEGBOARD_HOOK_DEFAULT_COUNT,
+    arm_length_mm: float = PEGBOARD_HOOK_DEFAULT_ARM_LENGTH,
+) -> list[tuple[str, trimesh.Trimesh]]:
+    """`count` identical hooks, laid out flat on a plate and named pegboard_hook_N."""
+    count = pegboard_hook_count(count)
+    standard = pegboard_standard(standard_id)
+    template = make_pegboard_hook(standard.id, arm_length_mm)
+    template.apply_transform(hook_print_transform())
+    extent = template.bounds[1] - template.bounds[0]
+    gap = 5.0
+    per_row = 4
+    result = []
+    for index in range(count):
+        mesh = template.copy()
+        row, column = divmod(index, per_row)
+        mesh.apply_translation((
+            column * (float(extent[0]) + gap) - float(template.bounds[0][0]),
+            row * (float(extent[1]) + gap) - float(template.bounds[0][1]),
+            -float(template.bounds[0][2]),
+        ))
+        result.append((f"pegboard_hook_{index + 1}", mesh))
+    return result

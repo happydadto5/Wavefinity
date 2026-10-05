@@ -372,7 +372,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   drawBoreAxes(context, boreAxes, camera, project);
   draw3DDimensions(context, state.design?.box, camera, project, b4bAssembledEnvelope());
   addPreviewPickProxies(camera, point => project(iso(point, camera)), visibleGroups);
-  drawFrontMarker(context, camera, point => project(iso(point, camera)));
+  drawFrontMarker(context, camera, point => project(iso(point, camera)), width, height);
 }
 
 // A line up the centre of every hole in a leaned bore, arrow-tipped, so it's
@@ -481,6 +481,7 @@ function checkBinSizeChange() {
 // and fail to reach its drawn edges on every axis. See fix3d.md.
 function draw3DDimensions(context, box, camera, project, outerXYZ, options = null) {
   state.previewDimensionHandles = [];
+  widthPillBox = null;
   if (!box) return;
   // Fix 103 (R1): `options` is the structural variant. It supplies the
   // interior values to edit/label, per-axis interactivity and an optional
@@ -548,7 +549,8 @@ function draw3DDimensions(context, box, camera, project, outerXYZ, options = nul
     axisLabel("x", `Width ${fmt(outerX)} mm`),
     gap,
     over,
-    axisHandle("x", editBox.x, outerX)
+    axisHandle("x", editBox.x, outerX),
+    box => { widthPillBox = box; }
   );
 
   // 2. Depth (along Y on front ground)
@@ -605,11 +607,16 @@ function draw3DDimensions(context, box, camera, project, outerXYZ, options = nul
   );
 }
 
+// Screen-space box of the Width pill from the latest 3D dimension pass, so the
+// FRONT marker can step out of its way. Null when no Width pill was drawn.
+let widthPillBox = null;
+
 // `handle`, when given, registers a canvas-space hit region around the drawn
 // label into state.previewDimensionHandles/layoutDimensionHandles so a
 // pointerdown on the label can start a resize drag instead of orbiting the
 // camera or moving a feature - see hitDimensionHandle().
-function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, gap, over, handle = null) {
+function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, gap, over, handle = null,
+    onPillBox = null) {
   const dx = pEnd[0] - pStart[0];
   const dy = pEnd[1] - pStart[1];
   const span = Math.hypot(dx, dy);
@@ -709,6 +716,15 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
   context.fillText(label, 0, 0.5);
 
   context.restore();
+
+  if (onPillBox) {
+    // The visible pill only (no hit padding), as the axis-aligned box of the
+    // rotated badge.
+    const cosT = Math.abs(Math.cos(textAngle)), sinT = Math.abs(Math.sin(textAngle));
+    const boxW = bw * cosT + bh * sinT;
+    const boxH = bw * sinT + bh * cosT;
+    onPillBox({ x: mid[0] - boxW / 2, y: mid[1] - boxH / 2, width: boxW, height: boxH });
+  }
 
   if (handle) {
     // Generous hit region around the label itself (not the whole dimension
@@ -1029,7 +1045,7 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
   const outerXYZ = dimensionDisplayOverride(b4bAssembledEnvelope());
   draw3DDimensions(context, box, camera, project, outerXYZ);
   drawDimensionGhost3D(context, camera, project, box, outerXYZ);
-  drawFrontMarker(context, camera, point => project(iso(point, camera)));
+  drawFrontMarker(context, camera, point => project(iso(point, camera)), width, height);
 }
 
 // B4B's assembled_envelope_mm accounts for hinge/latch/handle/stacking
@@ -1146,7 +1162,13 @@ function clickedPreviewMesh(point) {
   return closest;
 }
 
-function drawFrontMarker(context, camera, project) {
+// Strict overlap: boxes that only share an edge do not collide.
+function screenBoxesOverlap(a, b) {
+  return a.x < b.x + b.width && b.x < a.x + a.width
+    && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+function drawFrontMarker(context, camera, project, viewWidth, viewHeight) {
   if (!state.design?.box || baseTrimEnabled()) return;
   const frontY = b4bEnabled()
     ? state.preview?.b4b?.assembled_bounds_mm?.[1]
@@ -1158,6 +1180,21 @@ function drawFrontMarker(context, camera, project) {
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillStyle = "#153f48";
-  context.fillText("FRONT", point[0], point[1]);
+  const markerW = context.measureText("FRONT").width;
+  const markerH = 13;
+  const markerBox = y => ({ x: point[0] - markerW / 2, y: y - markerH / 2, width: markerW, height: markerH });
+  let markerY = point[1];
+  const pill = widthPillBox;
+  if (pill && screenBoxesOverlap(markerBox(markerY), pill)) {
+    // Vertical moves only (X stays put): above the pill, then below it, each
+    // kept 4 px inside the viewport. If neither clears the pill, skip FRONT.
+    const inset = 4;
+    const lowest = inset + markerH / 2;
+    const highest = Number.isFinite(viewHeight) ? viewHeight - inset - markerH / 2 : Infinity;
+    const candidates = [pill.y - markerH / 2, pill.y + pill.height + markerH / 2]
+      .map(y => Math.min(Math.max(y, lowest), highest));
+    markerY = candidates.find(y => lowest <= highest && !screenBoxesOverlap(markerBox(y), pill));
+  }
+  if (markerY !== undefined) context.fillText("FRONT", point[0], markerY);
   context.restore();
 }

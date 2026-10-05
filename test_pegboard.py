@@ -15,17 +15,27 @@ from organizer_pegboard import (
     PegboardMountSpec,
     PEGBOARD_PROJECTION,
     _adapter_body_profile,
+    _hook_parts,
     _receiver_guide_profile,
     adapter_print_transform,
     apply_pegboard_mount_structure,
     make_board_adapter,
     make_board_adapters,
+    make_pegboard_hook,
+    make_pegboard_hooks,
     pegboard_catalog,
     pegboard_layout_for_bin,
     receiver_layout,
     resolve_pegboard_size,
 )
-from wavefinity_web import create_space_text_payload, pegboard_layouts_payload
+import wavefinity_web
+from organizer_geometry import union
+from wavefinity_web import (
+    POST_ROUTES,
+    create_space_text_payload,
+    pegboard_hooks_payload,
+    pegboard_layouts_payload,
+)
 
 
 class PegboardSizeTests(unittest.TestCase):
@@ -163,9 +173,128 @@ class PegboardPlacementTests(unittest.TestCase):
         }
 
 
+class PegboardHookGeometryTests(unittest.TestCase):
+    def test_hook_is_one_watertight_piece_for_both_standards(self) -> None:
+        for standard in ("standard", "skadis"):
+            hook = make_pegboard_hook(standard)
+            self.assertTrue(hook.is_watertight, standard)
+            self.assertEqual(len(hook.split(only_watertight=False)), 1, standard)
+
+    def test_hook_keeps_the_board_adapter_engagement_unchanged(self) -> None:
+        for standard in ("standard", "skadis"):
+            adapter = make_board_adapter(standard)
+            hook = make_pegboard_hook(standard)
+            # Board-facing side, width and height all match the adapter; only the
+            # +Y (forward) extent grows.
+            np.testing.assert_allclose(hook.bounds[0], adapter.bounds[0], atol=1e-6)
+            np.testing.assert_allclose(hook.bounds[1][[0, 2]], adapter.bounds[1][[0, 2]], atol=1e-6)
+            self.assertGreater(float(hook.bounds[1][1]), float(adapter.bounds[1][1]) + 50.0)
+            # Everything the adapter occupies is still in the hook.
+            self.assertAlmostEqual(float(union([hook, adapter]).volume), float(hook.volume), places=3)
+
+    def test_every_joint_overlaps_by_real_volume(self) -> None:
+        for standard in ("standard", "skadis"):
+            parts = _hook_parts(standard, 50.0)
+            for first, second in (("base", "root"), ("root", "arm"), ("arm", "upturn")):
+                a, b = parts[first], parts[second]
+                shared = float(a.volume + b.volume - union([a, b]).volume)
+                self.assertGreater(shared, 10.0, (standard, first, second))
+
+    def test_arm_projects_fifty_millimetres_forward_by_default(self) -> None:
+        for standard in ("standard", "skadis"):
+            parts = _hook_parts(standard, 50.0)
+            projection = float(parts["arm"].bounds[1][1] - parts["base"].bounds[1][1])
+            self.assertAlmostEqual(projection, 50.0, places=6)
+            self.assertAlmostEqual(float(parts["arm"].extents[0]), 10.0)
+            self.assertAlmostEqual(float(parts["arm"].extents[2]), 6.0)
+
+    def test_arm_length_is_bounded(self) -> None:
+        for bad in (0, 5, 500, float("nan")):
+            with self.assertRaises(ValueError):
+                make_pegboard_hook("standard", bad)
+
+    def test_hook_collection_is_counted_named_and_flat(self) -> None:
+        hooks = make_pegboard_hooks("skadis", 3)
+        self.assertEqual([name for name, _mesh in hooks], [f"pegboard_hook_{n}" for n in (1, 2, 3)])
+        for _name, mesh in hooks:
+            self.assertAlmostEqual(float(mesh.bounds[0][2]), 0.0, places=6)
+            self.assertTrue(mesh.is_watertight)
+        for count in (0, 9):
+            with self.assertRaises(ValueError):
+                make_pegboard_hooks("standard", count)
 
 
+class PegboardHookEndpointTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.calls: list[tuple[str, int]] = []
 
+        def fake_hooks(standard, count):
+            self.calls.append((standard, count))
+            return [(f"pegboard_hook_{n}", None) for n in range(1, count + 1)]
+
+        def fake_export(objects, output):
+            Path(output).write_bytes(b"3mf")
+            return [name for name, _parts in objects]
+
+        self.patches = [
+            patch.object(wavefinity_web, "make_pegboard_hooks", fake_hooks),
+            patch.object(wavefinity_web, "export_object_groups_3mf", fake_export),
+        ]
+        for one in self.patches:
+            one.start()
+            self.addCleanup(one.stop)
+
+    def test_route_is_registered_through_the_route_table(self) -> None:
+        self.assertIn("/api/pegboard/hooks", POST_ROUTES)
+
+    def test_local_reply_uses_the_generation_reply_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            reply = pegboard_hooks_payload({"standard": "skadis", "count": 2, "output": root})
+            self.assertEqual(self.calls, [("skadis", 2)])
+            self.assertEqual(reply["output"], str(Path(root).resolve()))
+            made = reply["result"]["pegboard_hooks"]
+            self.assertEqual((made["count"], made["standard"]), (2, "skadis"))
+            self.assertTrue(Path(made["output"]).is_file())
+
+    def test_default_count_is_four(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            pegboard_hooks_payload({"standard": "standard", "output": root})
+        self.assertEqual(self.calls, [("standard", 4)])
+
+    def test_unsupported_standard_or_count_is_rejected_before_any_work(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            for bad in ({}, {"standard": "metric"}, {"standard": "standard", "count": 0},
+                        {"standard": "standard", "count": 9}, {"standard": "standard", "count": "x"}):
+                with self.assertRaises(ValueError, msg=str(bad)):
+                    pegboard_hooks_payload({**bad, "output": root})
+        self.assertEqual(self.calls, [])
+
+    def test_hosted_reply_registers_files_via_generation_reply(self) -> None:
+        with patch.object(wavefinity_web, "HOSTED", True):
+            reply = pegboard_hooks_payload({"standard": "standard", "count": 1})
+        try:
+            self.assertEqual(len(reply["files"]), 1)
+            self.assertTrue(reply["files"][0]["url"].startswith("/api/export/"))
+            self.assertTrue(reply["files"][0]["name"].endswith(".3mf"))
+        finally:
+            for record in list(wavefinity_web.EXPORTS.values()):
+                wavefinity_web._remove_export(record)
+            wavefinity_web.EXPORTS.clear()
+
+
+class PegboardHookFrontendTests(unittest.TestCase):
+    def test_action_is_pegboard_only_and_uses_the_existing_save_path(self) -> None:
+        root = Path(__file__).resolve().parent / "web"
+        info = (root / "spaces" / "12-space-info.js").read_text(encoding="utf-8")
+        html = (root / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="space-pegboard-hooks"', html)
+        self.assertIn('apiSideEffect("/api/pegboard/hooks"', info)
+        self.assertNotIn('api("/api/pegboard/hooks"', info)
+        self.assertIn('saveGeneratedFiles(result', info)
+        self.assertIn('btnHooks.hidden = kind !== "pegboard"', info)
+        self.assertIn('btnHooks.addEventListener("click", SP.printPegboardHooks)', info)
+        self.assertNotIn("createObjectURL", info)
+        self.assertNotIn(".click()", info)
 
 
 if __name__ == "__main__":

@@ -265,6 +265,10 @@ Pegboard bins use a Space-controlled mounting system.
 
 Pegboard mounting metadata is controlled by the Space and should not be casually overwritten by unrelated bin edits.
 
+### Printable Pegboard hooks
+
+A Pegboard Space has a **Print Pegboard Hooks** button (hidden for other Space types). It saves one 3MF plate of 4 identical hooks for the Space's board standard (Standard Pegboard or SKÅDIS). Each hook is a single printable piece: the same board-side adapter the bins use, plus a 10 mm wide, 6 mm thick, 50 mm forward arm with a 45° upturn at the end. The hooks lie on their side on the plate. Saving follows the same rules as every other generated file (local output folder, or your chosen browser folder when hosted).
+
 ---
 
 # 3. Space lifecycle and Inventory
