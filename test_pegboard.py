@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,17 +18,27 @@ from organizer_pegboard import (
     PegboardMountSpec,
     PEGBOARD_PROJECTION,
     _adapter_body_profile,
+    _hook_parts,
     _receiver_guide_profile,
     adapter_print_transform,
     apply_pegboard_mount_structure,
     make_board_adapter,
     make_board_adapters,
+    make_pegboard_hook,
+    make_pegboard_hooks,
     pegboard_catalog,
     pegboard_layout_for_bin,
     receiver_layout,
     resolve_pegboard_size,
 )
-from wavefinity_web import create_space_text_payload, pegboard_layouts_payload
+import wavefinity_web
+from organizer_geometry import union
+from wavefinity_web import (
+    POST_ROUTES,
+    create_space_text_payload,
+    pegboard_hooks_payload,
+    pegboard_layouts_payload,
+)
 
 
 class PegboardSizeTests(unittest.TestCase):
@@ -163,9 +176,213 @@ class PegboardPlacementTests(unittest.TestCase):
         }
 
 
+class PegboardHookGeometryTests(unittest.TestCase):
+    def test_hook_is_one_watertight_piece_for_both_standards(self) -> None:
+        for standard in ("standard", "skadis"):
+            hook = make_pegboard_hook(standard)
+            self.assertTrue(hook.is_watertight, standard)
+            self.assertEqual(len(hook.split(only_watertight=False)), 1, standard)
+
+    def test_hook_keeps_the_board_adapter_engagement_unchanged(self) -> None:
+        for standard in ("standard", "skadis"):
+            adapter = make_board_adapter(standard)
+            hook = make_pegboard_hook(standard)
+            # Board-facing side, width and height all match the adapter; only the
+            # +Y (forward) extent grows.
+            np.testing.assert_allclose(hook.bounds[0], adapter.bounds[0], atol=1e-6)
+            np.testing.assert_allclose(hook.bounds[1][[0, 2]], adapter.bounds[1][[0, 2]], atol=1e-6)
+            self.assertGreater(float(hook.bounds[1][1]), float(adapter.bounds[1][1]) + 50.0)
+            # Everything the adapter occupies is still in the hook.
+            self.assertAlmostEqual(float(union([hook, adapter]).volume), float(hook.volume), places=3)
+
+    def test_every_joint_overlaps_by_real_volume(self) -> None:
+        for standard in ("standard", "skadis"):
+            parts = _hook_parts(standard, 50.0)
+            for first, second in (("base", "root"), ("root", "arm"), ("arm", "upturn")):
+                a, b = parts[first], parts[second]
+                shared = float(a.volume + b.volume - union([a, b]).volume)
+                self.assertGreater(shared, 10.0, (standard, first, second))
+
+    def test_arm_projects_fifty_millimetres_forward_by_default(self) -> None:
+        for standard in ("standard", "skadis"):
+            parts = _hook_parts(standard, 50.0)
+            projection = float(parts["arm"].bounds[1][1] - parts["base"].bounds[1][1])
+            self.assertAlmostEqual(projection, 50.0, places=6)
+            self.assertAlmostEqual(float(parts["arm"].extents[0]), 10.0)
+            self.assertAlmostEqual(float(parts["arm"].extents[2]), 6.0)
+
+    def test_arm_length_is_bounded(self) -> None:
+        for bad in (0, 5, 500, float("nan")):
+            with self.assertRaises(ValueError):
+                make_pegboard_hook("standard", bad)
+
+    def test_hook_collection_is_counted_named_and_flat(self) -> None:
+        hooks = make_pegboard_hooks("skadis", 3)
+        self.assertEqual([name for name, _mesh in hooks], [f"pegboard_hook_{n}" for n in (1, 2, 3)])
+        for _name, mesh in hooks:
+            self.assertAlmostEqual(float(mesh.bounds[0][2]), 0.0, places=6)
+            self.assertTrue(mesh.is_watertight)
+        for count in (0, 9):
+            with self.assertRaises(ValueError):
+                make_pegboard_hooks("standard", count)
 
 
+class PegboardHookEndpointTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.calls: list[tuple[str, int]] = []
 
+        def fake_hooks(standard, count):
+            self.calls.append((standard, count))
+            return [(f"pegboard_hook_{n}", None) for n in range(1, count + 1)]
+
+        def fake_export(objects, output):
+            Path(output).write_bytes(b"3mf")
+            return [name for name, _parts in objects]
+
+        self.patches = [
+            patch.object(wavefinity_web, "make_pegboard_hooks", fake_hooks),
+            patch.object(wavefinity_web, "export_object_groups_3mf", fake_export),
+        ]
+        for one in self.patches:
+            one.start()
+            self.addCleanup(one.stop)
+
+    def test_route_is_registered_through_the_route_table(self) -> None:
+        self.assertIn("/api/pegboard/hooks", POST_ROUTES)
+
+    def test_local_reply_uses_the_generation_reply_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            reply = pegboard_hooks_payload({"standard": "skadis", "count": 2, "output": root})
+            self.assertEqual(self.calls, [("skadis", 2)])
+            self.assertEqual(reply["output"], str(Path(root).resolve()))
+            made = reply["result"]["pegboard_hooks"]
+            self.assertEqual((made["count"], made["standard"]), (2, "skadis"))
+            self.assertTrue(Path(made["output"]).is_file())
+
+    def test_default_count_is_four(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            pegboard_hooks_payload({"standard": "standard", "output": root})
+        self.assertEqual(self.calls, [("standard", 4)])
+
+    def test_unsupported_standard_or_count_is_rejected_before_any_work(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            for bad in ({}, {"standard": "metric"}, {"standard": "standard", "count": 0},
+                        {"standard": "standard", "count": 9}, {"standard": "standard", "count": "x"}):
+                with self.assertRaises(ValueError, msg=str(bad)):
+                    pegboard_hooks_payload({**bad, "output": root})
+        self.assertEqual(self.calls, [])
+
+    def test_hosted_reply_registers_files_via_generation_reply(self) -> None:
+        with patch.object(wavefinity_web, "HOSTED", True):
+            reply = pegboard_hooks_payload({"standard": "standard", "count": 1})
+        try:
+            self.assertEqual(len(reply["files"]), 1)
+            self.assertTrue(reply["files"][0]["url"].startswith("/api/export/"))
+            self.assertTrue(reply["files"][0]["name"].endswith(".3mf"))
+        finally:
+            for record in list(wavefinity_web.EXPORTS.values()):
+                wavefinity_web._remove_export(record)
+            wavefinity_web.EXPORTS.clear()
+
+
+class PegboardHookFrontendTests(unittest.TestCase):
+    def test_action_is_pegboard_only_and_uses_the_existing_save_path(self) -> None:
+        root = Path(__file__).resolve().parent / "web"
+        info = (root / "spaces" / "12-space-info.js").read_text(encoding="utf-8")
+        html = (root / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="space-pegboard-hooks"', html)
+        self.assertIn('apiSideEffect("/api/pegboard/hooks"', info)
+        self.assertNotIn('api("/api/pegboard/hooks"', info)
+        self.assertIn('saveGeneratedFiles(result', info)
+        self.assertIn('btnHooks.hidden = kind !== "pegboard"', info)
+        self.assertIn('btnHooks.addEventListener("click", SP.printPegboardHooks)', info)
+        self.assertNotIn("createObjectURL", info)
+        self.assertNotIn(".click()", info)
+
+
+class PegboardHookHostedResaveTests(unittest.TestCase):
+    """Fix 118 Correction 1: a repeated hosted hook save must have a Replace/Cancel path."""
+
+    SCRIPT = r"""
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[1] + "/app/15-generate-dialogs.js", "utf8");
+const start = src.indexOf("const OWNED_OUTPUT_LABELS");
+const slice = src.slice(start, src.indexOf("function watchServerVersion"));
+const run = async (kind, folderFiles, replaceAnswer) => {
+  const log = { written: [], replaceDialogs: [], conflictDialogs: [], fetched: [] };
+  const state = { runtime: { hosted: true }, browserFolder: { handle: {} } };
+  const WFFileSystem = {
+    fileExists: async (_h, name) => name in folderFiles,
+    sha256: async (_h, name) => folderFiles[name],
+    sha256Blob: async blob => blob.hash,
+    writeBlob: async (_h, name) => { log.written.push(name); },
+  };
+  const fetch = async url => { log.fetched.push(url); return { ok: true, blob: async () => ({ hash: url.split("#")[1] }) }; };
+  const confirmReplaceOutputFiles = async (names, what) => { log.replaceDialogs.push({ names, what }); return replaceAnswer; };
+  const confirmReplaceConnectorFiles = async () => true;
+  const showFilenameConflictDialog = (names, hint) => log.conflictDialogs.push({ names, hint });
+  const fn = new Function("state", "WFFileSystem", "fetch", "confirmReplaceOutputFiles",
+    "confirmReplaceConnectorFiles", "showFilenameConflictDialog", "collectOutputs",
+    slice + "; return saveGeneratedFiles;");
+  const save = fn(state, WFFileSystem, fetch, confirmReplaceOutputFiles, confirmReplaceConnectorFiles,
+    showFilenameConflictDialog, () => []);
+  const files = [{ name: "Pegboard Hooks.3mf", url: "/api/export/t/Pegboard Hooks.3mf#new" }];
+  let error = null, saved = null;
+  try { saved = await save({ files }, { kind }); } catch (e) { error = e.message; }
+  return { ...log, error, saved };
+};
+(async () => {
+  const out = {
+    first: await run("pegboard_hooks", {}, true),
+    identical: await run("pegboard_hooks", { "Pegboard Hooks.3mf": "new" }, true),
+    replace: await run("pegboard_hooks", { "Pegboard Hooks.3mf": "old" }, true),
+    cancel: await run("pegboard_hooks", { "Pegboard Hooks.3mf": "old" }, false),
+    bin: await run("bin", { "Pegboard Hooks.3mf": "old" }, true),
+  };
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
+
+    def test_hook_policy_is_owned_and_never_falls_to_the_bin_rename_conflict(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is required")
+        web = Path(__file__).resolve().parent / "web"
+        done = subprocess.run([node, "-e", self.SCRIPT, str(web)], capture_output=True, text=True,
+                              timeout=60, encoding="utf-8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+        name = "Pegboard Hooks.3mf"
+        # First save: no collision, written, no dialogs.
+        self.assertEqual(out["first"]["written"], [name])
+        self.assertEqual(out["first"]["replaceDialogs"], [])
+        self.assertIsNone(out["first"]["error"])
+        # Byte-identical re-save: skipped silently, still reported as saved.
+        self.assertEqual(out["identical"]["written"], [])
+        self.assertEqual(out["identical"]["saved"], [name])
+        self.assertEqual(out["identical"]["replaceDialogs"], [])
+        self.assertEqual(out["identical"]["conflictDialogs"], [])
+        # Differing re-save: Pegboard-hook Replace/Cancel, then it is written.
+        self.assertEqual(out["replace"]["replaceDialogs"], [{"names": [name], "what": "Pegboard hook"}])
+        self.assertEqual(out["replace"]["written"], [name])
+        self.assertEqual(out["replace"]["conflictDialogs"], [])
+        self.assertIsNone(out["replace"]["error"])
+        # Cancel: nothing replaced, hook-specific message, never the rename demand.
+        self.assertEqual(out["cancel"]["written"], [])
+        self.assertEqual(out["cancel"]["error"], "Pegboard hook save cancelled. Nothing was replaced.")
+        self.assertEqual(out["cancel"]["conflictDialogs"], [])
+        # Ordinary bin collision keeps the bin-rename behavior.
+        self.assertEqual(out["bin"]["written"], [])
+        self.assertEqual(out["bin"]["replaceDialogs"], [])
+        self.assertEqual(len(out["bin"]["conflictDialogs"]), 1)
+        self.assertIn("Give the bin a different name", out["bin"]["error"])
+
+    def test_save_lifecycle_stays_single_and_hook_action_does_not_download_itself(self) -> None:
+        web = Path(__file__).resolve().parent / "web"
+        source = (web / "app" / "15-generate-dialogs.js").read_text(encoding="utf-8")
+        self.assertIn('pegboard_hooks: "Pegboard hook"', source)
+        self.assertEqual(source.count("async function saveGeneratedFiles("), 1)
+        self.assertNotIn("createObjectURL", source[source.index("async function saveGeneratedFiles("):source.index("function watchServerVersion")])
 
 
 if __name__ == "__main__":

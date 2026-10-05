@@ -505,8 +505,10 @@ function collectOutputs(value, found = []) {
   return [...new Set(found)];
 }
 
-// policy.kind: "bin" (default), "connector" or "structural". Ownership is
-// decided by the caller, never by the file name.
+// policy.kind: "bin" (default), "connector", "structural" or "pegboard_hooks".
+// Ownership is decided by the caller, never by the file name.
+const OWNED_OUTPUT_LABELS = { structural: "Storage Box", pegboard_hooks: "Pegboard hook" };
+
 async function saveGeneratedFiles(result, policy = {}) {
   if (!state.runtime.hosted) return collectOutputs(result.result);
   const files = result.files || [];
@@ -545,11 +547,12 @@ async function saveGeneratedFiles(result, policy = {}) {
       if (different.length && !(await confirmReplaceConnectorFiles(different))) {
         throw new Error("Connector save cancelled. Nothing was replaced.");
       }
-    } else if (policy.kind === "structural" && existing.length) {
-      // A Storage Box re-save reuses the same deterministic names. A
-      // byte-identical file is provably Wavefinity's own prior output and is
-      // left alone; a differing same-name file gets an explicit Replace /
-      // Cancel choice instead of a hard rename demand.
+    } else if (OWNED_OUTPUT_LABELS[policy.kind] && existing.length) {
+      // A Storage Box or Pegboard hooks re-save reuses the same deterministic
+      // names. A byte-identical file is provably Wavefinity's own prior output
+      // and is left alone; a differing same-name file gets an explicit Replace
+      // / Cancel choice instead of a hard rename demand.
+      const label = OWNED_OUTPUT_LABELS[policy.kind];
       for (const file of files) {
         if (!blobs.has(file.name)) {
           const response = await fetch(file.url);
@@ -564,8 +567,8 @@ async function saveGeneratedFiles(result, policy = {}) {
         ]);
         if (oldHash === newHash) skip.add(file.name); else different.push(file.name);
       }
-      if (different.length && !(await confirmReplaceOutputFiles(different, "Storage Box"))) {
-        throw new Error("Storage Box save cancelled. Nothing was replaced.");
+      if (different.length && !(await confirmReplaceOutputFiles(different, label))) {
+        throw new Error(`${label} save cancelled. Nothing was replaced.`);
       }
     } else if (foreign.length) {
       const hint = policy.kind === "structural"

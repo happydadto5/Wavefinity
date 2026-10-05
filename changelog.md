@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-05 — FRONT marker collision and printable Pegboard hooks (Fix 118)
+
+- 3D preview: the FRONT marker no longer sits on top of the Width label. It stays where it was when they do not overlap; when they do, it moves straight up (or down) just clear of the label, never sideways, and is hidden for that frame if there is no room. The 2D view is unchanged.
+- Pegboard Spaces get a **Print Pegboard Hooks** button that saves a plate of 4 printable hooks (Standard Pegboard or SKÅDIS): the existing board adapter plus a 50 mm forward arm with a 45° upturn, as one piece per hook.
+
 ## 2026-10-04 — Wavefinity dispatch runner launcher
 
 - Added `Start_Wavefinity_Dispatch_Runner.bat` in the Wavefinity folder so HPDesktop can restart the GitHub event runner by double-clicking it. The runner stays connected for future coder jobs; the old timed poller stays disabled.

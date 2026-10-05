@@ -109,6 +109,11 @@ SP.renderSpaceInfo = () => {
 
     const btnShow = document.getElementById("space-head-show");
     if (btnShow) btnShow.hidden = state.runtime.hosted;
+    const btnHooks = document.getElementById("space-pegboard-hooks");
+    if (btnHooks) {
+        btnHooks.hidden = kind !== "pegboard";
+        btnHooks.disabled = SP.pegboardHooksBusy;
+    }
     SP.renderStructuralActions();
     SP.updateCabinetWorkspace?.();
     // Fix 103: a mounted structural editor follows the accepted Space.
@@ -153,6 +158,39 @@ SP.newSpace = () => {
     SP.showTypeCards();
 };
 
+// Pegboard Spaces only: one plate of printable hooks for the board's standard,
+// saved through the same generate/save path as every other generated file.
+SP.pegboardHooksBusy = false;
+SP.printPegboardHooks = async () => {
+    if (SP.pegboardHooksBusy || state.activeSpace?.kind !== "pegboard") return;
+    if (state.runtime.hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
+    const context = DL.spaceContext();
+    const payload = {
+        standard: state.activeSpace.pegboard_standard,
+        count: 4,
+        output: state.output,
+    };
+    SP.pegboardHooksBusy = true;
+    SP.renderSpaceInfo();
+    try {
+        const result = await apiSideEffect("/api/pegboard/hooks", payload);
+        DL.requireSpaceContext(context);
+        const saved = await saveGeneratedFiles(result, { kind: "pegboard_hooks" });
+        DL.requireSpaceContext(context);
+        const names = [...new Set(saved.map(file => String(file).split(/[\\/]/).pop()))];
+        toast(`Saved Pegboard hooks to ${result.output || state.output}${names.length ? "\n" + names.join("\n") : ""}`, false, 7000);
+    } catch (error) {
+        if (DL.isStaleSpaceError(error)) {
+            toast("Pegboard hooks finished for the Space you left. Nothing was changed in the current Space.");
+        } else {
+            toast(error.message, true, 8000);
+        }
+    } finally {
+        SP.pegboardHooksBusy = false;
+        SP.renderSpaceInfo();
+    }
+};
+
 // Wire the Space Info Edit/Show Folder/New Space buttons for one
 // prefix only, so the normal Design controls (wired once at startup) and
 // the Drawer panel's dynamically-built copy (wired once when DP.build()
@@ -169,6 +207,8 @@ const wireInfoButtons = (prefix = "space-head") => {
     if (btnShow) btnShow.addEventListener("click", SP.showFolder);
     const btnNew = document.getElementById(prefix + "-new-space");
     if (btnNew) btnNew.addEventListener("click", SP.newSpace);
+    const btnHooks = document.getElementById("space-pegboard-hooks");
+    if (btnHooks) btnHooks.addEventListener("click", SP.printPegboardHooks);
     const btnSave = document.getElementById("space-structural-save");
     if (btnSave) btnSave.addEventListener("click", SP.saveStructural);
     const btnPrint = document.getElementById("space-structural-print");

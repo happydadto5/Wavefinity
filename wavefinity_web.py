@@ -287,7 +287,14 @@ from organizer_side_openings import (
     SIDE_OPENING_MIN_SIDE_MM,
     SIDE_OPENING_TOP_BRIDGE_MM,
 )
-from organizer_pegboard import pegboard_catalog, pegboard_layout_for_bin
+from organizer_engine import export_object_groups_3mf
+from organizer_pegboard import (
+    make_pegboard_hooks,
+    pegboard_catalog,
+    pegboard_hook_count,
+    pegboard_layout_for_bin,
+    pegboard_standard,
+)
 
 from dataclasses import replace
 import ipaddress
@@ -1748,6 +1755,28 @@ def _generation_reply(*, result: Any, output: Path, extra: dict[str, Any] | None
     }
 
 
+def pegboard_hooks_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Generate N printable Pegboard hooks (Standard or SKÅDIS) as one 3MF."""
+    if not payload.get("standard"):
+        raise ValueError("Choose a Pegboard standard (standard or skadis).")
+    standard = pegboard_standard(payload["standard"]).id
+    count = pegboard_hook_count(payload.get("count"))
+    output = _generation_output(payload)
+    output.mkdir(parents=True, exist_ok=True)
+    target = output / f"Pegboard hooks - {standard} x{count}.3mf"
+    with GEOMETRY_LOCK:
+        hooks = make_pegboard_hooks(standard, count)
+        export_object_groups_3mf([(name, [(name, mesh)]) for name, mesh in hooks], target)
+    result = {
+        "pegboard_hooks": {
+            "output": str(target.resolve()),
+            "count": count,
+            "standard": standard,
+        }
+    }
+    return _generation_reply(result=result, output=output)
+
+
 def _generate_bin_from_design_spec(output_dir: Path, design_spec: dict[str, Any]) -> list[Path]:
     """Fix 034 F2: generate a spec-only Inventory row's files on demand.
 
@@ -2802,6 +2831,7 @@ POST_ROUTES = {
     "/api/ai/repair-prompt": ai_repair_prompt_payload,
     "/api/design/inventory-preview": inventory_preview_payload,
     "/api/pegboard/layouts": pegboard_layouts_payload,
+    "/api/pegboard/hooks": pegboard_hooks_payload,
     "/api/feature/default": default_feature_payload,
     "/api/feature/draft": draft_payload,
     "/api/feature/fit": feature_fit_payload,
@@ -2853,6 +2883,7 @@ POST_ROUTES["/api/operation-status"] = operation_status_payload
 for _side_effect_path in (
     "/api/generate",
     "/api/connector",
+    "/api/pegboard/hooks",
     "/api/print",
     "/api/space/structural-generate",
     "/api/space/structural-print",
