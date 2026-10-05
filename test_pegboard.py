@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -295,6 +298,91 @@ class PegboardHookFrontendTests(unittest.TestCase):
         self.assertIn('btnHooks.addEventListener("click", SP.printPegboardHooks)', info)
         self.assertNotIn("createObjectURL", info)
         self.assertNotIn(".click()", info)
+
+
+class PegboardHookHostedResaveTests(unittest.TestCase):
+    """Fix 118 Correction 1: a repeated hosted hook save must have a Replace/Cancel path."""
+
+    SCRIPT = r"""
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[1] + "/app/15-generate-dialogs.js", "utf8");
+const start = src.indexOf("const OWNED_OUTPUT_LABELS");
+const slice = src.slice(start, src.indexOf("function watchServerVersion"));
+const run = async (kind, folderFiles, replaceAnswer) => {
+  const log = { written: [], replaceDialogs: [], conflictDialogs: [], fetched: [] };
+  const state = { runtime: { hosted: true }, browserFolder: { handle: {} } };
+  const WFFileSystem = {
+    fileExists: async (_h, name) => name in folderFiles,
+    sha256: async (_h, name) => folderFiles[name],
+    sha256Blob: async blob => blob.hash,
+    writeBlob: async (_h, name) => { log.written.push(name); },
+  };
+  const fetch = async url => { log.fetched.push(url); return { ok: true, blob: async () => ({ hash: url.split("#")[1] }) }; };
+  const confirmReplaceOutputFiles = async (names, what) => { log.replaceDialogs.push({ names, what }); return replaceAnswer; };
+  const confirmReplaceConnectorFiles = async () => true;
+  const showFilenameConflictDialog = (names, hint) => log.conflictDialogs.push({ names, hint });
+  const fn = new Function("state", "WFFileSystem", "fetch", "confirmReplaceOutputFiles",
+    "confirmReplaceConnectorFiles", "showFilenameConflictDialog", "collectOutputs",
+    slice + "; return saveGeneratedFiles;");
+  const save = fn(state, WFFileSystem, fetch, confirmReplaceOutputFiles, confirmReplaceConnectorFiles,
+    showFilenameConflictDialog, () => []);
+  const files = [{ name: "Pegboard Hooks.3mf", url: "/api/export/t/Pegboard Hooks.3mf#new" }];
+  let error = null, saved = null;
+  try { saved = await save({ files }, { kind }); } catch (e) { error = e.message; }
+  return { ...log, error, saved };
+};
+(async () => {
+  const out = {
+    first: await run("pegboard_hooks", {}, true),
+    identical: await run("pegboard_hooks", { "Pegboard Hooks.3mf": "new" }, true),
+    replace: await run("pegboard_hooks", { "Pegboard Hooks.3mf": "old" }, true),
+    cancel: await run("pegboard_hooks", { "Pegboard Hooks.3mf": "old" }, false),
+    bin: await run("bin", { "Pegboard Hooks.3mf": "old" }, true),
+  };
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
+
+    def test_hook_policy_is_owned_and_never_falls_to_the_bin_rename_conflict(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is required")
+        web = Path(__file__).resolve().parent / "web"
+        done = subprocess.run([node, "-e", self.SCRIPT, str(web)], capture_output=True, text=True,
+                              timeout=60, encoding="utf-8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+        name = "Pegboard Hooks.3mf"
+        # First save: no collision, written, no dialogs.
+        self.assertEqual(out["first"]["written"], [name])
+        self.assertEqual(out["first"]["replaceDialogs"], [])
+        self.assertIsNone(out["first"]["error"])
+        # Byte-identical re-save: skipped silently, still reported as saved.
+        self.assertEqual(out["identical"]["written"], [])
+        self.assertEqual(out["identical"]["saved"], [name])
+        self.assertEqual(out["identical"]["replaceDialogs"], [])
+        self.assertEqual(out["identical"]["conflictDialogs"], [])
+        # Differing re-save: Pegboard-hook Replace/Cancel, then it is written.
+        self.assertEqual(out["replace"]["replaceDialogs"], [{"names": [name], "what": "Pegboard hook"}])
+        self.assertEqual(out["replace"]["written"], [name])
+        self.assertEqual(out["replace"]["conflictDialogs"], [])
+        self.assertIsNone(out["replace"]["error"])
+        # Cancel: nothing replaced, hook-specific message, never the rename demand.
+        self.assertEqual(out["cancel"]["written"], [])
+        self.assertEqual(out["cancel"]["error"], "Pegboard hook save cancelled. Nothing was replaced.")
+        self.assertEqual(out["cancel"]["conflictDialogs"], [])
+        # Ordinary bin collision keeps the bin-rename behavior.
+        self.assertEqual(out["bin"]["written"], [])
+        self.assertEqual(out["bin"]["replaceDialogs"], [])
+        self.assertEqual(len(out["bin"]["conflictDialogs"]), 1)
+        self.assertIn("Give the bin a different name", out["bin"]["error"])
+
+    def test_save_lifecycle_stays_single_and_hook_action_does_not_download_itself(self) -> None:
+        web = Path(__file__).resolve().parent / "web"
+        source = (web / "app" / "15-generate-dialogs.js").read_text(encoding="utf-8")
+        self.assertIn('pegboard_hooks: "Pegboard hook"', source)
+        self.assertEqual(source.count("async function saveGeneratedFiles("), 1)
+        self.assertNotIn("createObjectURL", source[source.index("async function saveGeneratedFiles("):source.index("function watchServerVersion")])
 
 
 if __name__ == "__main__":
