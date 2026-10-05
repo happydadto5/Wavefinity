@@ -116,7 +116,7 @@
     snugness.id = id("lid-snugness");
     const latchCount = select([["auto", "Auto"], ["1", "1"], ["2", "2"]], box.latch_count || "auto");
     latchCount.id = id("latch-count");
-    const latchRow = labeled("# of latches", latchCount);
+    const latchRow = labeled("Number of latches", latchCount);
     const snugnessRow = labeled("Lid snugness", snugness);
     lidRow.append(labeled("Lid type", lidType), snugnessRow, latchRow);
     lidGroup.append(lidRow);

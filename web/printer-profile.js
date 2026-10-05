@@ -10,13 +10,13 @@
   let malformed = "";
   const listeners = new Set();
   const stateListeners = new Set();
-  const AXIS_NAMES = Object.freeze({ x: "Width (X)", y: "Depth (Y)", z: "Height (Z)" });
+  const AXIS_NAMES = Object.freeze({ x: "Width", y: "Depth", z: "Height" });
   const normalise = raw => {
     if (!raw || typeof raw !== "object") throw new Error("Enter printer build volume");
     const result = {};
     for (const key of ["x_mm", "y_mm", "z_mm"]) {
       const value = raw[key];
-      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) throw new Error(`Enter a positive printer ${AXIS_NAMES[key[0]]}`);
+      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) throw new Error(`Enter a positive number for printer ${AXIS_NAMES[key[0]].toLowerCase()}`);
       result[key] = value;
     }
     return result;

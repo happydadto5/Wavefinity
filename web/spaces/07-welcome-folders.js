@@ -135,7 +135,7 @@ SP.renderRecent = () => {
     const unavailable = one.missing || one.invalid || one.conflict;
     const space = one.folder_mode === "space";
     const kind = SP_KINDS[one.kind];
-    const meta = [one.conflict ? "duplicate Space identity" : one.invalid ? "metadata unavailable" : space ? `${kind?.label || "Space"} · SPACE` : "Design folder", one.summary_text || SP.sizeText(one.size), one.missing ? "folder not found" : ""]
+    const meta = [one.conflict ? "duplicate Space identity" : one.invalid ? "metadata unavailable" : space ? `${kind?.label || "Space"}` : "Design folder", one.summary_text || SP.sizeText(one.size), one.missing ? "folder not found" : ""]
       .filter(Boolean).join(" · ");
     const current = state.runtime.hosted
       ? (one.handle && state.browserFolder?.handle === one.handle ? " <em>current</em>" : "")

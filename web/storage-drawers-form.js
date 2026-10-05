@@ -30,7 +30,7 @@
         : [String(row.value ?? row.mm), String(row.label ?? row.name)];
       return [value, /\bmm\b/i.test(label) ? label : `${label} — ${value} mm`];
     });
-    if (!options.some(row => Number(row[0]) === Number(current))) options.push([String(current), `${current} mm — Existing`]);
+    if (!options.some(row => Number(row[0]) === Number(current))) options.push([String(current), `${current} mm — Current setting`]);
     return options;
   };
   const NAMED = (list, names, unit = "mm") => list.map((mm, index) => [String(mm),
@@ -150,9 +150,9 @@
     const style = select(block.cabinet_style, [["full", "Full"], ["open", "Open"]]);
     const rear = select(block.rear_support, [["cross", "Rear cross"], ["solid", "Rear solid"]]);
     const wallMounting = select(block.wall_mounting, [["off", "Off"], ["keyholes", "Keyholes"]]);
-    const keyholeCount = select(String(block.wall_mount_keyholes_per_drawer), [["2", "2"], ["4", "4"]]);
+    const keyholeCount = select(String(block.wall_mount_keyholes_per_drawer), [["2", "2 — left and right"], ["4", "4 — two rows, left and right"]]);
     const keyholeCountField = labeled("Keyholes per drawer level", keyholeCount);
-    keyholeCountField.title = "2 = left/right. 4 = left/right at upper and lower mounting rows.";
+    keyholeCountField.title = "2 keyholes: one left and one right. 4 keyholes: left and right on two rows.";
     const stack = select(String(block.stacking), [["false", "Not stackable"], ["true", "Stackable"]]);
     const frame = select(block.open_frame_width_mm, NAMED(rules.frameChoices, ["Compact", "Standard", "Strong"]));
     const frameField = labeled("Open frame width", frame);

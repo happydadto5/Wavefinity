@@ -265,7 +265,7 @@ SP.cabinetDelete = async drawerId => {
   }
   const ok = await appConfirmAction({
     title: `Delete Drawer ${index + 1}?`,
-    message: `Delete Drawer ${index + 1}? It is removed from the cabinet.`,
+    message: `Drawer ${index + 1} will be permanently removed from the cabinet.`,
     actionLabel: "Delete Drawer",
     danger: true,
   });
