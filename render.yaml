@@ -3,7 +3,7 @@ services:
     name: wavefinity
     runtime: python
     plan: free
-    autoDeploy: true
+    autoDeploy: false
     buildCommand: pip install -r requirements.txt && python -c "import wavefinity_web"
     startCommand: WAVEFINITY_DEPLOYMENT=hosted python wavefinity_web.py --host 0.0.0.0 --no-browser
     healthCheckPath: /api/health
