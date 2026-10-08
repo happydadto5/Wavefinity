@@ -717,7 +717,7 @@ DP.openInventoryRow = async id => {
 // state.cleanDesign: the structural preview owns its own data.
 DP.openStructuralTarget = async () => {
   if (!DP.structuralTargetEnabled) return false;
-  if (DP.designNavBlocked() || DP.mode !== "design") return false;
+  if (state.designMutationBusy || DP.mode !== "design") return false;
   if (typeof DL === "undefined" || !DP.structuralPreviewTargetKindFor(state.activeSpace)) return false;
   const outgoing = DP.getDesignTarget();
   // Only a real bound bin owns an autosave. An untouched unbound New Bin
