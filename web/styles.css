@@ -725,6 +725,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .bore-auto-row > label { min-width: 0; }
 /* Fix 096 F3: Bore Width/Length share one deliberate two-column row - no dead third column. */
 .bore-auto-row.bore-auto-row-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bore-auto-row .unit { float: none; margin-left: 4px; }
 @media (max-width: 460px) {
   .draft-fields .bore-group { grid-template-columns: 1fr; gap: 4px; }
   .bore-group-fields, .bore-group-fields.bore-hole-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
