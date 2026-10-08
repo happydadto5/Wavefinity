@@ -45,3 +45,23 @@ async function init() {
 }
 
 init();
+
+// Fix 124: Suppress browser autocomplete on all data-entry fields (page-wide)
+function suppressBrowserAutocomplete() {
+  document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])').forEach(el => {
+    if (!el.hasAttribute('autocomplete')) {
+      el.setAttribute('autocomplete', 'off');
+    }
+  });
+}
+// Run on initial load
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', suppressBrowserAutocomplete);
+} else {
+  suppressBrowserAutocomplete();
+}
+// Re-run when dynamic content is added (MutationObserver for modals/editors)
+new MutationObserver(suppressBrowserAutocomplete).observe(document.body, {
+  childList: true,
+  subtree: true
+});
