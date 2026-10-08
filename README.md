@@ -194,14 +194,14 @@ Project-wide coding and architecture guidance is centralized here for all agents
 | --- | --- |
 | Product behavior, architecture, code and project guidance | This Wavefinity repository and README |
 | Help Code workflow, role boundaries and testing limits | Helper `README.md`, `help-code-state.json` and its declared overrides |
-| Current coder assignment and startup/claim rules | Helper `reviews/code-chat.md` and `CODER.md` |
+| Current coder assignment and startup rules | Helper `reviews/code-chat.md` and `CODER.md` |
 | Exact implementation behavior and evidence | Assigned active Fix or fixlet in helper `fixes/`; its master controls shared ordering/status |
 | Permanent lifecycle ledger | Helper `fixes/Fix Master.md`, maintained by reviewers; coders neither read nor edit it |
 | Reviewer coordination | Helper `REVIEWER-CHAT.md`; use its current transport, not an old channel path |
 
 Use the helper's **current default branch**, freshly resolved through authenticated GitHub access. Read related authorities from the same resolved commit and record that SHA. Memory, old branches, copied plans, and unverified local files are not authority.
 
-- **`code chat` / `chat code`** (including obvious standalone near-matches such as `hat code`) wakes the coder: read helper `CODER.md` and `reviews/code-chat.md` first. Follow only the current assignment. Claim it in the helper **before any product-repository access**, as described below.
+- **`code chat` / `chat code`** (including obvious standalone near-matches such as `hat code` or `check code`) wakes the coder: fetch the helper's current default branch and read `CODER.md` and `reviews/code-chat.md` fresh. Follow only the current instruction and explicitly referenced contract.
 - **`chat`** wakes a reviewer: read helper state and `REVIEWER-CHAT.md`, then perform the reviewer work. It does not authorize coder implementation.
 - **`read fix 4`** means read helper `fixes/fix-004.md`; `Fix 35A` ordinarily uses `fixes/fix-035a.md`. For fixlet bundles, follow the current assignment/master's exact paths rather than inventing names. A read/review request does not itself start implementation.
 - An empty or unrelated cwd requires safe repository recovery, not a request for the PM to locate the code. If authoritative helper access actually fails, report **HELPER REPO ACCESS FAILED** with the concrete failure; never implement from a stale copy.
@@ -213,19 +213,9 @@ The helper protocol governs Help Code orchestration; this README governs product
 - **User is NOT a programmer**: avoid code jargon and long technical explanations unless asked.
 - **Show progress**: give a clear, general sense of progress in layman's terms.
 
-### 2. Branch, commit & push workflow
+### 2. Help Code implementation handoff
 
-Help Code uses one active coder and the assigned implementation branch. Detailed lifecycle rules stay in the helper protocol; the integration boundary here is:
-
-1. **Read and claim in the helper first.** Read the current assignment, active contract, status, and outbrief. Follow `CODER.md`'s collision/replacement rules. Atomically record the required status + Work started claim and successfully push it before opening/inspecting/checking out the product. If claim writing is blocked, use the documented reviewer-fallback process and wait for its explicit confirmation; do not begin implementation.
-2. **Recover a safe product workspace.** After the claim, read this README and project instructions, fetch current remote state, and create/continue the exact assigned branch at the contract's pinned baseline. Never silently substitute the latest `main` for a pinned baseline or reset/stash/delete unrelated work. An existing branch or stale status alone is not a blocker; incompatible owned work or another unfinished coder claim is.
-3. **Implement and verify the contract.** Use one coder sequentially, with no parallel implementation subagents. Stay inside the assigned scope, inspect the diff, and perform only the verification permitted by the active contract and helper protocol.
-4. **Push and report.** Push the assigned product branch, then append the outbrief to the active helper Fix's permitted outbrief location. Include stage (Original Implementation / Correction N), helper SHA, exact product branch/HEAD, actual provider/model/thinking or Unknown, changed files, evidence and limitations. Coders do not edit Fix Master or reviewer mailboxes. If the final outbrief write fails, preserve it in the completion message and report the write failure; this does not waive the earlier claim requirement.
-5. **Reviewers finish the lifecycle.** Reviewers compare the actual implementation with the current contract and accepted product baseline. Corrections continue on the assigned branch. Reviewers own acceptance, integration, archive, ledger updates and dependency release. The coder does not merge or call an unaccepted implementation complete. If `main` moves, reviewers reconcile it under the helper integration rules; do not force-push or silently replace the baseline.
-
-For planning/release, reviewers verify the active authority, prerequisites, exact branch/baseline, settled product decisions and required sign-offs before updating the current coder assignment. A historical READY file or stale ledger label never selects the coder's next job.
-
-The hosted app tracks `main`; fix branches remain isolated until outside review accepts them.
+The helper repository's fresh `CODER.md` and `reviews/code-chat.md` define the coder workflow and current assignment. This product README supplies product facts and generic project guidance; it does not select a Fix or define a parallel coder protocol. The coder resolves this repository from `help-code.config.json`, preserves unrelated local work, and follows the fresh helper protocol for preparing, editing, committing, pushing, outbriefing, and reporting. Reviewers perform acceptance and closure. A historical READY file or stale ledger label never selects the coder's next job.
 
 ### 3. Fast vibe-coding & testing policy
 
@@ -1859,9 +1849,9 @@ Project moderators are **@happydadto5** and trusted collaborator
 final approval authority.
 
 **After completing an implementation, commit all changes and push them to
-GitHub before reporting that the work is finished.** For Help Code, push the
-assigned `fixN` branch; explicitly non-Help-Code work follows the local
-workflow below.
+GitHub before reporting that the work is finished.** For Help Code, follow
+the freshly fetched helper coder protocol; explicitly non-Help-Code work
+follows the local workflow below.
 
 **When given an implementation plan, review it first.** Understand what it
 does and confirm that the execution is sound before beginning. If it is sound,
@@ -1875,8 +1865,8 @@ work is backed up. For a Help Code fix, verification is exactly what the active
 cloud fix requires. For explicitly non-Help-Code work, the generic Class A/B/C
 testing guidance above applies. Separate unrelated prompts into separate
 commits when practical. No feature branches or pull requests are needed for
-explicitly non-Help-Code local work; Help Code always uses its assigned `fixN`
-branch and outside completion review:
+explicitly non-Help-Code local work. Help Code follows the fresh helper
+protocol and outside completion review:
 
 ```powershell
 git add -A
@@ -1926,8 +1916,7 @@ session-pinning system because compatible open pages continue working.
 
 For explicitly non-Help-Code work, everyone commits to `main`, so the only rule
 that matters is: **pull before you start, push as soon as you are done.** Help
-Code work stays on its assigned `fixN` branch and follows the outside review
-workflow above.
+Code work follows the fresh helper protocol and outside review workflow above.
 
 ```powershell
 git pull --rebase        # before starting
@@ -1943,7 +1932,7 @@ If a non-Help-Code push is rejected because someone else pushed first, `git pull
 --rebase` then push again. If that surfaces a real conflict, resolve it, inspect
 the merged diff, and continue under the same Class A/B/C testing rule. Do not
 automatically run the full suite just because a rebase occurred. Help Code
-corrections continue on the assigned `fixN` branch under the active cloud fix.
+corrections follow the fresh helper instruction and active cloud Fix.
 
 Also worth knowing before editing: the **traps** section below, and that
 `.venv/`, `__pycache__/` and `generated/` are gitignored and should stay that
