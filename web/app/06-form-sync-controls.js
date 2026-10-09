@@ -865,7 +865,7 @@ function wireControls() {
   // Editing a part: "Save Part" finalises it and returns to the 10-part
   // palette; "Delete Part" removes the part being edited and does the same.
   // New Bin/Duplicate/Save/Load live at the bottom of the Designer.
-  $("#designer-new-bin").addEventListener("click", designerNewBin);
+  $("#designer-new-bin").addEventListener("click", () => designerNewBin());
   $("#designer-duplicate").addEventListener("click", designerDuplicate);
   $("#designer-undo")?.addEventListener("click", () => designerUndo());
   $("#designer-redo")?.addEventListener("click", () => designerRedo());
