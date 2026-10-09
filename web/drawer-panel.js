@@ -700,9 +700,11 @@ DP.openStructuralTarget = async () => {
     rowId: null, drawerId: null,
   });
   DP.setMode("design");
-  // Land on the structural subject's own view (3D, or its view-only 2D),
-  // never the outgoing bin's 2D canvas - mirrors SP.landOnStructuralDesign.
-  activatePreviewView(preferredDesignView());
+  // Land the Storage Drawers cabinet on its own 3D overview: the remembered
+  // bin-design view must not stick for the drawer cabinet (its 2D routes to
+  // the view-only Space canvas instead of the 3D overview). Other structural
+  // subjects keep the remembered-view behavior. The 2D tab stays reachable.
+  activatePreviewView(DP.structuralPreviewTargetKindFor(state.activeSpace) === "storage_drawers" ? "3d" : preferredDesignView());
   DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
   return true;
 };
