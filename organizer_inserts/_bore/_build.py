@@ -123,7 +123,7 @@ def bore_tool_clearance_zone(
 
 @feature(
     "bore", title="Bore", display="Bore — upright tools",
-    description="Small pockets for your stuff of vary sizes/shapes.",
+    description="Small pockets for your stuff of various sizes/shapes.",
     capabilities=("size", "along", "item"),
     item_profiles=BORE_ITEM_PROFILES,
     options=(

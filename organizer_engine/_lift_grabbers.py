@@ -220,7 +220,7 @@ def validate_lift_grabbers(box: BoxSpec) -> None:
     root_bite = embed - WAVE_AMPLITUDE
     if root_bite < LIFT_GRABBER_MIN_ROOT_BITE - 1e-9:
         raise ValueError(
-            f"this wall is too thin for Inside Handles to root into "
+            f"this wall is too thin for Inside Grip to root into "
             f"({root_bite:.2f} mm of bite; {LIFT_GRABBER_MIN_ROOT_BITE:g} mm "
             "needed). Choose a thicker wall."
         )
@@ -236,14 +236,14 @@ def validate_lift_grabbers(box: BoxSpec) -> None:
         if available < needed:
             checked_pairs.add(pair)
             raise ValueError(
-                f"{grabbers.size_label} Inside Handles do not fit on "
+                f"{grabbers.size_label} Inside Grip does not fit on "
                 f"this bin's {pair} walls. Choose a smaller size, a "
                 "different location, or make the bin larger."
             )
     bottom_z = box.z - LIFT_GRABBER_RIM_CLEARANCE - dims.height
     if bottom_z < box.base_thickness + LIFT_GRABBER_FLOOR_CLEARANCE:
         raise ValueError(
-            f"{grabbers.size_label} Inside Handles require a taller bin."
+            f"{grabbers.size_label} Inside Grip requires a taller bin."
         )
 
 

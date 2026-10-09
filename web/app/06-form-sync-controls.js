@@ -357,7 +357,7 @@ function formatHeightField() {
   if (!input || document.activeElement === input) return;
   const val = state.design?.box?.z;
   if (val == null) return;
-  input.value = `${fmt(val)}mm`;
+  input.value = `${fmt(val)} mm`;
 }
 
 
