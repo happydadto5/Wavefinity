@@ -341,6 +341,12 @@ function fmt(value) {
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
 }
 
+// Fix 1004: format a numeric option for display, but keep blank/unset blank
+// (fmt("") would render "0").
+function fmtBlank(value) {
+  return (value === "" || value === undefined || value === null) ? "" : fmt(value);
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, character => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",

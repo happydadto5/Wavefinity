@@ -236,7 +236,7 @@ function renderDraftFields() {
         const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
         const def = info.fields.find(f => f.key === key)?.default;
         const value = explicit ? one.options[key] : state.draftResolvedOptions?.[key] ?? def;
-        return field(label, `option:${key}`, value, opts);
+        return field(label, `option:${key}`, fmtBlank(value), opts);
       };
       const wallStyleShown = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style
         ?? info.fields.find(f => f.key === "wall_style")?.default;
@@ -302,7 +302,7 @@ function renderDraftFields() {
         ${field("Y count", "option:count_y", shownGy, { min: "0", step: "1", tip: "Walls dividing the bin front to back. 0 for none." })}
       </div><div class="pair triple">
         ${dividerThicknessField(shownThickness)}
-        ${field("Height", "option:height", shownHeight, { unit: "mm", step: "0.5", min: "0.1" })}
+        ${field("Height", "option:height", fmtBlank(shownHeight), { unit: "mm", step: "0.5", min: "0.1" })}
         ${wallStyleSelect(wallStyle)}
       </div></div>`;
     } else {
@@ -470,7 +470,7 @@ function renderDraftFields() {
     const mmKinds = new Set(["post", "pocket", "slot", "steps"]);
     if (mmKinds.has(info.kind) && option.key !== "angle") fieldOpts.unit = "mm";
     if (info.kind === "slot" && option.key === "angle") fieldOpts.unit = "°";
-    bodyHtml += field(labels[info.kind]?.[option.key] || option.label, `option:${option.key}`, shown, fieldOpts);
+    bodyHtml += field(labels[info.kind]?.[option.key] || option.label, `option:${option.key}`, fmtBlank(shown), fieldOpts);
   }
   // Three-across for the kinds whose leftover body fields would otherwise leave
   // a half-empty row (matches the Width / Length / Height row at the top).
