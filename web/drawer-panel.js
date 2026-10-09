@@ -573,32 +573,23 @@ DP.refreshDesignBinNav = () => {
   host.hidden = !show;
   if (!show) return;
   const currentId = target.kind === "bin" ? target.rowId : null;
+  // Fix 1000: dropdown-only navigation. Destinations are other editable bins
+  // plus the structural target when available; never the current target and
+  // never "New Bin".
+  const alternates = DP.designNavEditableRows().filter(one => one.id !== currentId);
+  const showStructural = structuralShown && !structuralSelected;
+  if (!alternates.length && !showStructural) { host.hidden = true; return; }
   select.innerHTML = "";
-  if (structuralShown) {
+  const placeholder = new Option("Switch bin…", "");
+  placeholder.selected = true;
+  select.append(placeholder);
+  if (showStructural) {
     const previewKind = DP.structuralPreviewTargetKindFor(state.activeSpace);
-    const opt = new Option(previewKind === "storage_drawers" ? "Storage Drawers"
-      : previewKind === "base_trim" ? "Base Trim" : "Storage Box", "__structural__");
-    if (structuralSelected) opt.selected = true;
-    select.append(opt);
+    select.append(new Option(previewKind === "storage_drawers" ? "Storage Drawers"
+      : previewKind === "base_trim" ? "Base Trim" : "Storage Box", "__structural__"));
   }
-  const unbound = new Option("New Bin", "");
-  if (!currentId && !structuralSelected) { unbound.selected = true; select.append(unbound); }
-  else if (structuralSelected) { select.append(unbound); }
-  for (const one of DP.designNavRows()) {
-    const editable = DP.editableSourceFor(one);
-    const opt = new Option(DL.label(one), one.id);
-    opt.disabled = !editable;
-    if (one.id === currentId) opt.selected = true;
-    select.append(opt);
-  }
-  if (currentId && !DP.designNavRows().some(one => one.id === currentId)) {
-    const missing = new Option("New Bin", "");
-    missing.selected = true; select.prepend(missing);
-  }
-  const order = DP.designNavEditableRows().map(one => one.id);
-  const idx = order.indexOf(currentId);
-  $("#design-bin-prev").disabled = DP.designNavBlocked() || structuralSelected || idx <= 0;
-  $("#design-bin-next").disabled = DP.designNavBlocked() || structuralSelected || idx < 0 || idx >= order.length - 1;
+  for (const one of alternates) select.append(new Option(DL.label(one), one.id));
+  select.disabled = DP.designNavBlocked();
 };
 
 DP.refreshDesignerDeleteBin = () => {
@@ -611,26 +602,6 @@ DP.refreshDesignerDeleteBin = () => {
   btn.disabled = DP.designNavBlocked();
 };
 
-DP.stepDesignBin = async dir => {
-  if (DP.designNavBlocked() || DP.mode !== "design") return;
-  if (DP.getDesignTarget().kind === "structural") return; // Fix 103
-  const order = DP.designNavEditableRows().map(one => one.id);
-  const idx = order.indexOf(state.designInventoryId);
-  if (idx < 0) return;
-  const target = order[idx + dir];
-  if (!target) return;
-  DP.designNavBusy = true;
-  DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
-  try {
-    await DP.openInventoryRow(target);
-  } finally {
-    DP.designNavBusy = false;
-    DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
-  }
-};
-
-$("#design-bin-prev").addEventListener("click", () => DP.stepDesignBin(-1));
-$("#design-bin-next").addEventListener("click", () => DP.stepDesignBin(1));
 $("#design-bin-select").addEventListener("change", async event => {
   const id = event.target.value;
   DP.refreshDesignBinNav();
@@ -647,22 +618,8 @@ $("#design-bin-select").addEventListener("change", async event => {
     }
     return;
   }
-  // Fix 103: structural Design exposes an explicit New Bin option; route it
-  // through the existing New Bin owner rather than leaving a visible selector
-  // choice that does nothing.
-  if (!id) {
-    if (DP.getDesignTarget().kind === "structural") {
-      DP.designNavBusy = true;
-      DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
-      try {
-        await designerNewBin();
-      } finally {
-        DP.designNavBusy = false;
-        DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
-      }
-    }
-    return;
-  }
+  // Fix 1000: the "Switch bin…" placeholder is inert.
+  if (!id) return;
   const one = DL.bin(id);
   if (!one || !DP.editableSourceFor(one)) return;
   DP.designNavBusy = true;
