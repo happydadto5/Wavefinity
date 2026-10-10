@@ -672,6 +672,13 @@ function syncSideOpeningRange(spec) {
   upper.max = String(maximum);
   lower.value = String(pair.lower);
   upper.value = String(pair.upper);
+  const box = state.design?.box || {};
+  const floorZ = number(box.base_thickness);
+  const usable = number(box.z) - floorZ;
+  const lowerMm = floorZ + usable * (number(spec.from_bottom_percent, 0) / 100);
+  const upperMm = number(box.z) - usable * (number(spec.from_top_percent, 0) / 100);
+  $("#side-opening-upper-mm").textContent = `${fmt(upperMm)} mm`;
+  $("#side-opening-lower-mm").textContent = `${fmt(lowerMm)} mm`;
   lower.setAttribute("aria-valuetext", `${fmt(pair.lower)}% from bottom`);
   upper.setAttribute("aria-valuetext", `${fmt(pair.upper)}% up from floor, ${fmt(100 - pair.upper)}% from top`);
   const fill = $("#side-opening-range-fill");

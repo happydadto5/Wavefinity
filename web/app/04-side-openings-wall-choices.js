@@ -4,7 +4,7 @@
 // (floor for bottom, rim for top); a higher percentage pulls it inward.
 const SIDE_OPENING_DEFAULTS = {
   enabled: false, shape: "curved", sides: [], size: "medium",
-  from_bottom_percent: 0, from_top_percent: 0,
+  from_bottom_percent: 10, from_top_percent: 15,
 };
 const SIDE_OPENING_SIDE_IDS = ["front", "back", "left", "right"];
 let sideOpeningAdjustmentNote = "";
