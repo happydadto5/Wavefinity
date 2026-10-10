@@ -245,7 +245,13 @@ function updateDraftStatusColor(hasError) {
 }
 
 function placedRowData() {
-  const editingFeatureIndex = state.draft
+  // Fix 1011: exactly one row may carry the "Currently editing" badge.
+  // state.modifierEditing is a single value (never a set), and while a
+  // modifier editor is open no feature row is editing - the draft panel is
+  // hidden. This makes zero-or-one structural, not dependent on every
+  // transition clearing every flag.
+  const editingModifier = state.modifierEditing;
+  const editingFeatureIndex = state.draft && !editingModifier
     ? (Number.isInteger(draftCommitIndex()) ? draftCommitIndex() : state.draftSourceIndex)
     : null;
   const modifierDetail = kind => {
