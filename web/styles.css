@@ -1807,7 +1807,7 @@ body.relocating > :not(dialog) { pointer-events: none; }
   grid-template-columns: minmax(140px, 1fr) auto;
   align-items: start;
   gap: 10px 12px;
-  margin: 0 0 14px;
+  margin: 3px 0 14px;
   padding: 0;
 }
 @media (max-width: 480px) {
@@ -1890,7 +1890,6 @@ body.structural-design-active .control-section[data-section="connector"],
 body.structural-design-active .control-section[data-section="build"] .part-name-row,
 body.structural-design-active #ordinary-size-row,
 body.structural-design-active #design-first-size-help,
-body.structural-design-active #bin-grid-help,
 body.structural-design-active #pegboard-mount-row,
 body.structural-design-active .mode-and-bin-options,
 body.structural-design-active #stack-note,
