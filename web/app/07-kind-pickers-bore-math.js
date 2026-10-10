@@ -278,6 +278,7 @@ async function addModifier(kind) {
 async function removeModifier(kind) {
   if (!modifierIsActive(kind)) {
     clearDraftSelection();
+    renderPlaced();
     return;
   }
   return withDeferredDraftSwitch(async () => {

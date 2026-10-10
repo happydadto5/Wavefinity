@@ -278,11 +278,11 @@ function placedRowData() {
     };
   });
   for (const kind of BOX_MODIFIER_KINDS) {
-    if (!modifierIsActive(kind)) continue;
+    if (!modifierIsActive(kind) && state.modifierEditing !== kind) continue;
     rows.push({
       type: "modifier", kind,
       title: partInfo(kind)?.title || kind,
-      detail: modifierDetail(kind),
+      detail: modifierIsActive(kind) ? modifierDetail(kind) : "Setting up",
       editing: state.modifierEditing === kind,
       selected: state.modifierEditing === kind,
       invalid: false,
