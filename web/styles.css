@@ -1822,16 +1822,28 @@ body.relocating > :not(dialog) { pointer-events: none; }
     width: 100%;
   }
 }
-/* Fix 081 B: New Bin / Duplicate Bin / AI Design form one compact group at
-   the upper-right of the Designer header, beside the Bin Name field. */
+/* H9: the five bin controls (switch bin, New Bin, Duplicate Bin, AI Design,
+   Delete Bin) read as one grouped box; Bin Name sits with the size fields
+   below as part of the bin design, not the controls. */
 .part-name-block {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) auto;
-  align-items: start;
-  gap: 10px 12px;
+  grid-template-columns: 1fr;
+  gap: 8px;
   margin: 3px 0 14px;
   padding: 0;
 }
+.bin-controls-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-dark);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.bin-controls-box .design-bin-nav { margin-bottom: 0; flex: 1 1 170px; }
+.bin-controls-box .designer-major-actions { flex: 99 1 auto; justify-content: flex-start; }
 @media (max-width: 480px) {
   .part-name-block { grid-template-columns: 1fr; }
   .designer-major-actions { justify-content: flex-start; }
@@ -1900,8 +1912,8 @@ body.relocating > :not(dialog) { pointer-events: none; }
 .storage-box-form .storage-box-capacity { margin: 0; }
 
 .design-bin-nav { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
-.design-bin-select { flex: 1; min-width: 0; }
-#designer-delete-bin { margin-left: auto; }
+.design-bin-select { flex: 1; min-width: 0; padding: 9px 10px; font-size: 13px; }
+/* margin removed - bin controls are grouped in a box */
 
 /* Fix 103 (Section C): structural Design. When a Storage Drawers cabinet or
    Storage Box case is the Design target, the ordinary bin editor sections hide

@@ -34,8 +34,7 @@
       </nav>
       <section id="space-head" class="space-head" aria-label="Space" hidden>
         <div id="space-head-view" class="space-head-view">
-          <div class="space-head-title"><strong id="space-head-name"></strong><span id="space-head-type" class="space-head-type"></span></div>
-          <div id="space-head-summary" class="ink"></div>
+          <div class="space-head-title"><strong id="space-head-name"></strong><span class="space-head-type-wrap"><span class="space-head-type-label">Type</span><span id="space-head-type" class="space-head-type"></span></span></div>
           <div id="space-actions" class="space-actions" role="group" aria-label="Space controls">
             <div class="button-row">
               <button id="space-head-open" class="button secondary dl-small major-action" type="button">Open Space…</button>
@@ -63,20 +62,22 @@
       <section class="control-section open" data-section="build">
         <div class="section-body">
           <div class="part-name-block">
-            <div id="design-bin-nav" class="design-bin-nav" role="group" aria-label="Switch bin" hidden>
-              <select id="design-bin-select" class="design-bin-select" aria-label="Switch to another bin"></select>
-            </div>
-            <label class="part-name-row"><span id="part-name-label">Bin Name</span>
-              <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
-            </label>
-            <div id="bin-actions" class="designer-major-actions" role="group" aria-label="Bin actions">
-              <button type="button" id="designer-new-bin" class="button secondary major-action">New Bin</button>
-              <button type="button" id="designer-duplicate" class="button secondary major-action">Duplicate Bin</button>
-              <button type="button" id="ai-help-open" class="button secondary major-action">AI Design</button>
-              <button type="button" id="designer-delete-bin" class="button danger major-action" hidden>Delete Bin</button>
+            <div id="bin-controls-box" class="bin-controls-box" role="group" aria-label="Bin controls">
+              <div id="design-bin-nav" class="design-bin-nav" role="group" aria-label="Switch bin" hidden>
+                <select id="design-bin-select" class="design-bin-select" aria-label="Switch to another bin"></select>
+              </div>
+              <div id="bin-actions" class="designer-major-actions" role="group" aria-label="Bin actions">
+                <button type="button" id="designer-new-bin" class="button secondary major-action">New Bin</button>
+                <button type="button" id="designer-duplicate" class="button secondary major-action">Duplicate Bin</button>
+                <button type="button" id="ai-help-open" class="button secondary major-action">AI Design</button>
+                <button type="button" id="designer-delete-bin" class="button danger major-action" hidden>Delete Bin</button>
+              </div>
             </div>
             <span id="stack-note" class="stack-note" hidden></span>
           </div>
+          <label class="part-name-row"><span id="part-name-label">Bin Name</span>
+            <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
+          </label>
           <div id="ordinary-size-row" class="field-grid three">
             <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
             <label><span id="y-size-label">Depth</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
