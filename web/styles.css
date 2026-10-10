@@ -987,6 +987,28 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
 #side-opening-lower::-moz-range-thumb { transform: translateX(-10px); }
 #side-opening-upper::-moz-range-thumb { transform: translateX(10px); }
 
+/* Fix 1016: the mm readout spans had no positioning and stacked at the top of
+   the 40px strip, painting under the slider thumbs. They now live in their
+   own in-flow flex column (Change 1) that participates in layout with real
+   reserved width - upper value at the top, lower value at the bottom of the
+   128px strip - in ink (live values, not placeholders). In-flow means the
+   column can never paint into the 14px flex gap or the wall-checkbox block,
+   at any panel width. */
+.side-opening-readout-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 128px;
+  margin: 8px 0;
+  padding: 2px 0;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* Fix 082 L3: four literal wall checkboxes sit beside the visual, a compact
    2x2 block rather than a full-width row. */
 .side-opening-wall-checks {
