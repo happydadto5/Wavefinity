@@ -1912,3 +1912,7 @@ body.structural-design-active .canvas-wrap[data-canvas="drawer"] .dl-hint { disp
 .structural-2d-badge { position: absolute; left: 12px; bottom: 12px; padding: 4px 10px; border-radius: 6px; background: rgba(18, 38, 46, 0.86); color: #fff; font-size: 12px; }
 .structural-2d-go { margin-left: 6px; padding: 2px 8px; border: 1px solid #fff; border-radius: 4px; background: transparent; color: #fff; font-size: 12px; cursor: pointer; }
 body:not(.structural-design-active) .structural-2d-badge { display: none; }
+
+/* Fix 1010: the primary with/without Connectors actions own bin output;
+   duplicate generate buttons stay in the DOM for JS references but are not shown. */
+#generate-all, #generate-bin { display: none; }
