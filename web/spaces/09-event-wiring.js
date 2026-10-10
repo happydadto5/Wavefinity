@@ -66,6 +66,8 @@ SP.wire = () => {
     if (SP.configureData) SP.run(SP.startUntyped);
     else SP.startMemoryOnly();
   });
+  const typeCardsBack = document.getElementById("space-type-cards-back");
+  if (typeCardsBack) typeCardsBack.addEventListener("click", () => { SP.configureData = null; SP.showHome(); });
   const spaceBack = document.getElementById("space-back");
   if (spaceBack) spaceBack.addEventListener("click", async () => {
     if (await SP.confirmDiscardSetup()) SP.showTypeCards();
