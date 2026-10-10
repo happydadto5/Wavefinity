@@ -13,7 +13,7 @@ window.WavefinityFeatureIcons = Object.freeze({
   scoop: '<path d="M4 9v16h24C20 25 14 18 14 9H4z"/>',
   text: '<path d="M6 7h20M16 7v18" stroke-linecap="round" stroke-linejoin="round"/>',
   lid_stacking: '<rect x="5" y="8" width="22" height="17" rx="2"/><path d="M3 8h26M9 4h14v4M9 28h14"/>',
-  inside_handles: '<path d="M5 6v20h22V6M8 12h6v5H8M24 12h-6v5h6"/>',
+  inside_handles: '<path d="M7 8v16h18V8"/><path d="M7 14h4v4H7z"/><path d="M25 14h-4v4h4z"/>',
   side_openings: '<path d="M5 5v22h22V5M10 5v9a6 6 0 0 0 12 0V5"/>',
   edge_mount: '<path d="M5 5v22M5 9h15v5H9v13M20 11h7v12h-7M23.5 15v4"/>',
 });
