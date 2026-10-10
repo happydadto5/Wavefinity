@@ -20,7 +20,6 @@ from organizer_engine import (
 )
 from organizer_stack import stack_enabled
 from organizer_inserts._bore import bore_reference_meshes
-from organizer_inserts._cradle import cradle_reference_meshes
 from organizer_inserts import (
     CRADLE_FLOOR_GAP,
     MIN_FEATURE_GAP,
@@ -248,8 +247,6 @@ def _mesh_preview_geometry(
 def _reference_preview_meshes(box: BoxSpec, one: Feature, base_z: float) -> list[trimesh.Trimesh]:
     if one.kind == "bore" and one.item is not None:
         return bore_reference_meshes(box, one, base_z)
-    if one.kind == "cradle" and one.item is not None:
-        return cradle_reference_meshes(box, one, base_z)
     if one.kind == "nest" and not one.contour:
         return []
     ref = one.reference_object
