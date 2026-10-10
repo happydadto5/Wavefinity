@@ -363,7 +363,7 @@ def default_feature(
         # New Dividers start with one wall on X and none on Y (X=1, Y=0). Older saved
         # Dividers have neither key and continue through the legacy one-axis
         # path in divider_defaults().
-        feature_options = {"count_x": 1, "count_y": 0, "wall_style": "wavy"}
+        feature_options = {"count_x": 1, "count_y": 0, "wall_style": "wavy", "thickness": 0.8}
     elif kind == "post":
         # A one-cell-wide cartridge cannot hold the normal 12 mm starter peg.
         # Size the starter diameter to both axes, then give it as much of the

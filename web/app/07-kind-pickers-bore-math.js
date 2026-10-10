@@ -1115,7 +1115,7 @@ function boreHeightMode(one) {
 }
 
 function wallStyleSelect(style) {
-  return `<label><span class="field-label">Walls</span><select data-draft="option:wall_style">
+  return `<label><span class="field-label">Wall type</span><select data-draft="option:wall_style">
     <option value="wavy" ${style === "wavy" ? "selected" : ""}>Wavy Walls</option>
     <option value="straight" ${style === "wavy" ? "" : "selected"}>Straight Walls</option>
   </select></label>`;

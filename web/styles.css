@@ -677,6 +677,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .draft-fields .editor-group .pair { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; align-items: start; }
 .draft-fields > .pair { grid-column: 1 / -1; gap: 9px; }
 .draft-fields .editor-group .pair.triple { grid-template-columns: repeat(3, 1fr); }
+.draft-fields .editor-group .pair.divider-xy-pair { gap: 4px; }
 /* Fix 096 F3: shared pair/triple rows collapse to one column on narrow screens. */
 @media (max-width: 620px) {
   .draft-fields .pair,

@@ -297,12 +297,12 @@ function renderDraftFields() {
       const shownThickness = opt.thickness ?? state.draftResolvedOptions?.thickness ?? 1.6;
       const shownHeight = opt.height ?? state.draftResolvedOptions?.height ?? "";
       const wallStyle = opt.wall_style ?? state.draftResolvedOptions?.wall_style ?? "straight";
-      html += `<div class="editor-group divider-layout"><span class="editor-group-label">Layout</span><div class="pair">
+      html += `<div class="editor-group divider-layout"><div class="pair divider-xy-pair">
         ${field("X count", "option:count_x", shownGx, { min: "0", step: "1", tip: "Walls dividing the bin left to right. 0 for none." })}
         ${field("Y count", "option:count_y", shownGy, { min: "0", step: "1", tip: "Walls dividing the bin front to back. 0 for none." })}
       </div><div class="pair triple">
         ${dividerThicknessField(shownThickness)}
-        ${field("Height", "option:height", fmtBlank(shownHeight), { unit: "mm", step: "0.5", min: "0.1" })}
+        ${field("Wall height", "option:height", fmtBlank(shownHeight), { unit: "mm", step: "0.5", min: "0.1" })}
         ${wallStyleSelect(wallStyle)}
       </div></div>`;
     } else {
@@ -494,7 +494,7 @@ function renderDraftFields() {
     const bottomMode = scoopConfig ? "scoop" : hasSlope ? "slope" : "flat";
     html += `<div class="editor-group divider-bottom-group">`;
     html += `<div class="divider-bottom-row"><label>Bottom type<select data-draft="option:bottom_mode">
-      <option value="flat" ${bottomMode === "flat" ? "selected" : ""}>Flat</option>
+      <option value="flat" ${bottomMode === "flat" ? "selected" : ""}>No bottom</option>
       <option value="slope" ${bottomMode === "slope" ? "selected" : ""}>Sloped</option>
       <option value="scoop" ${bottomMode === "scoop" ? "selected" : ""}>Scoop</option>
     </select></label>`;
