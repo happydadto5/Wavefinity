@@ -252,12 +252,23 @@ SP.openTypedSpacePreferredView = async () => {
     return false;
   }
   // Fix 103 (Section F): a structural Space opens on its structural Design.
-  const structuralKind = DP.structuralTargetEnabled ? DP.structuralKindFor(state.activeSpace) : null;
+  // Fix 1019: DP (drawer-panel.js) may be unavailable if its script failed to
+  // load — degrade gracefully instead of throwing "DP is not defined".
+  const dpAvailable = typeof DP !== "undefined";
+  const structuralKind = dpAvailable && DP.structuralTargetEnabled ? DP.structuralKindFor(state.activeSpace) : null;
   if (structuralKind) {
     if (!designTargetIsStructural()) {
       DP.setDesignTarget({ kind: "structural", structural: true, structuralKind, rowId: null, drawerId: null });
     }
     return DP.enter("design", true);
+  }
+  // Fix 1019 (Breaker): do NOT silently return true here. The app cannot run
+  // without DP (unguarded DP.mode / DP.getDesignTarget downstream), so a
+  // silent "success" just moves the cryptic ReferenceError to the user's next
+  // click. Surface Change 4's honest error instead and abort the open.
+  if (!dpAvailable) {
+    SP.showHome("Something didn't load properly. Try reloading the page.");
+    return false;
   }
   if (!(await DP.enter("space", true))) return false;
   const ordinary = DL.bins.filter(DL.isOrdinary);
@@ -353,8 +364,15 @@ SP.showHome = (message = null) => {
   SP.showOnly("welcome-home");
   const errorEl = document.getElementById("welcome-startup-error");
   if (errorEl) {
-    errorEl.textContent = message || "";
-    errorEl.hidden = !message;
+    // Fix 1019: never show a raw engine error ("X is not defined") — it means
+    // a script didn't load. Say so in plain language. Anchored to the
+    // engine's ReferenceError shape so a legitimate message that merely ends
+    // with those words is never swallowed.
+    const friendly = /^\w+ is not defined$/.test(String(message || "").trim())
+      ? "Something didn't load properly. Try reloading the page."
+      : message;
+    errorEl.textContent = friendly || "";
+    errorEl.hidden = !friendly;
   }
   SP.renderRecent();
   // Proactive, not just reactive: on a browser that cannot give writable

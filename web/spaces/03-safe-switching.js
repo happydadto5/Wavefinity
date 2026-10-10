@@ -114,6 +114,26 @@ SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
 // only from a hosted caller that has one to hand over.
 SP.applyFolder = async (info, options = {}) => {
   const { reset = true, initDesign = true } = options;
+  // Fix 1019 (G2M-0217): the primary typed-Space DP preflight lives HERE -
+  // before any reset or identity adoption. DP (drawer-panel.js) may be
+  // unavailable if its script failed to load, and the app cannot run without
+  // it, so a typed-Space activation is a hard, friendly abort at this
+  // boundary: throwing here leaves state.output / state.activeSpaceId /
+  // state.cabinetRecovery untouched, state.folderSelected false,
+  // setFolderState uncalled, and no resetDrawer work done - no newly adopted
+  // typed runtime identity or session, and none of the persistence below can
+  // run (SP.resetDesignSession, resume validation, DL.ensureLoaded, and
+  // persistSpaceDesignSource all live downstream in
+  // initializeDesignForActiveSpace, which is never reached). The condition
+  // mirrors that function's own trigger exactly (initDesign &&
+  // folder_mode === "space"), so untyped / design-folder opens - whose flow
+  // needs no DP - are untouched, and the SP.create typed-Space path never
+  // reaches here (Change 2's preflight fires first; create passes
+  // initDesign: false). The initializeDesignForActiveSpace guard (Change 3B)
+  // stays as defense-in-depth.
+  if (initDesign && info.folder_mode === "space" && typeof DP === "undefined") {
+    throw new Error("Something didn't load properly. Try reloading the page.");
+  }
   if (reset) {
     const ok = await SP.resetDrawer();
     if (!ok) return false;

@@ -400,6 +400,16 @@ SP.readSetupValues = async () => {
 
 SP.create = async () => {
   if (SP.isUpdate) return SP.updateSpace();
+  // Fix 1019: hard preflight - the app cannot run without DP (drawer-panel.js
+  // failed to load), so fail HERE: before the folder picker, before the
+  // safe-leave prompt, before any Space persistence, and before identity
+  // adoption. The failure path creates no Space metadata and adopts no
+  // half-open identity; the setup form stays open with a plain-language
+  // error instead of the cryptic "DP is not defined".
+  if (typeof DP === "undefined") {
+    SP.fail("Something didn't load properly. Try reloading the page.", "#space-create");
+    return;
+  }
   const values = await SP.readSetupValues();
   if (!values) return;
   let { kind, name, x, y, z, trimSize, extra = {} } = values;
@@ -691,6 +701,16 @@ SP.initializeDesignForActiveSpace = async () => {
   // Fix 103 (Section F): structural Spaces activate the structural target, not
   // an ordinary bin. The legacy row binding is cleared (the row, if any, stays
   // in Inventory); no starter design, form sync or ordinary preview follows.
+  // Fix 1019: DP (drawer-panel.js) may be unavailable if its script failed to
+  // load. Defense-in-depth only: the primary preflight (Change 3A, top of
+  // SP.applyFolder) throws before this function is ever reached on the
+  // typed-Space path, so this guard exists solely for a hypothetical future
+  // caller that bypasses applyFolder. The app cannot run without DP, so this
+  // is a hard, friendly abort: throw a plain-language error instead of the
+  // cryptic "DP is not defined" ReferenceError.
+  if (typeof DP === "undefined") {
+    throw new Error("Something didn't load properly. Try reloading the page.");
+  }
   const structuralKind = DP.structuralTargetEnabled ? DP.structuralKindFor(state.activeSpace) : null;
   if (structuralKind) {
     state.designInventoryId = null;
