@@ -528,7 +528,7 @@ const run = async (hosted) => {
         hosted, local = out["hosted"], out["local"]
         self.assertTrue(hosted["view"]["disabled"])
         self.assertFalse(hosted["view"]["saveDisabled"])
-        self.assertEqual(hosted["view"]["label"], "Print Storage Box + Bins")
+        self.assertEqual(hosted["view"]["label"], "Export print files")
         self.assertIn("local Wavefinity", hosted["view"]["title"])
         self.assertEqual(hosted["afterPrint"], [])                       # Print never calls generate/save
         self.assertEqual(hosted["afterSave"], ["/api/space/structural-generate"])

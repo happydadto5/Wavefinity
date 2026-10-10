@@ -197,7 +197,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 ### Storage Box interiors
 
 - Storage Box itself can contain **Dividers**.
-- **Make Inside Bin** confirms before starting one ordinary bin sized to fill the Storage Box interior.
+- **Make full interior bin** confirms before starting one ordinary bin sized to fill the Storage Box interior.
 - Designer gives an advisory physical-height warning for a bin, or for two identical stackable bins, when they exceed the case's closed-height allowance.
 - The existing Space arrangement determines which bins are inside the case and validates their physical stack height.
 
@@ -205,7 +205,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 
 - The Storage Box case is a Space-owned structural output.
 - **Save Storage Box** saves the case from the Space header.
-- **Print Storage Box + Bins** opens the case, placed Not Printed bins, and required Space connectors together in the slicer after file and printer-fit checks. Unplaced or already-Printed bins remain on their existing Inventory paths.
+- **Export print files** opens the case, placed Not Printed bins, and required Space connectors together in the slicer after file and printer-fit checks. Unplaced or already-Printed bins remain on their existing Inventory paths.
 - It is not an ordinary Designer Inventory row.
 - Printer fit is checked for every object export can emit (body, lid, handle, each latch, each stacking peg, front label), not against the assembled closed case; the message names the object that does not fit. One plan lists the exported objects for both export and the fit check; body and lid bounds come from plan numbers that never understate the real meshes, the rest are measured on their real print-pose meshes.
 
@@ -279,7 +279,7 @@ A Pegboard Space has a **Print Pegboard Hooks** button (hidden for other Space t
 - Edit Space.
 - Show Folder.
 - New Space.
-- Save Storage Box / Print Storage Box + Bins when in a Storage Box Space.
+- Save Storage Box / Export print files when in a Storage Box Space.
 - Save Base Trim / Print Surface + Bins when in a Surface Space.
 
 ## 3.2 Inventory

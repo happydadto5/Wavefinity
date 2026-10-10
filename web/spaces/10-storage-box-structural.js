@@ -294,7 +294,7 @@ SP.renderStructuralActions = () => {
   const print = document.getElementById("space-structural-print");
   const hosted = Boolean(state.runtime.hosted);
   save.textContent = `Save ${label}`;
-  print.textContent = kind === "storage_box" ? "Print Storage Box + Bins"
+  print.textContent = kind === "storage_box" ? "Export print files"
     : kind === "base_trim" ? "Print Surface + Bins" : `Print ${label}`;
   const summary = document.getElementById("space-structural-summary");
   if (summary) {
