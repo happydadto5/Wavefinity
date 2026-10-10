@@ -211,6 +211,54 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   }
 };
 
+// Fix 1018 (Andrew 2026-10-10): memory-only entry - "Design without a Space"
+// with no folder chosen means no folder at all. Everything stays in memory;
+// nothing is saved until the user downloads. Separate from SP.startUntyped
+// (the folder path) so the hosted collision "Choose another folder" re-entry
+// keeps its folder picker.
+//
+// The transition uses the same owners as every other folder/Space identity
+// change: SP.leaveSpaceSafely() settles a dirty Space/structural edit first
+// (Keep Editing or a failed save aborts here, exactly as when switching
+// folders); then the old Drawer state is cleared once, any in-flight preview
+// is invalidated, the old Space's resume checkpoint is flushed, and the
+// identity is torn down coherently - the memory-only equivalent of
+// SP.applyFolder()'s synchronous identity block. The persistent Recent list
+// (and the backend's remembered active folder - there is no "forget" endpoint,
+// and startup resuming the previously-active folder after a restart is
+// existing intended behavior) may still name old folders; the ACTIVE RUNTIME
+// identity below must not.
+SP.startMemoryOnly = () => SP.run(async () => {
+  SP.clearSetupContext();
+  const okToLeave = await SP.leaveSpaceSafely();
+  if (!okToLeave) return;
+  // The leave decision is already resolved - clear the old Drawer state
+  // exactly once, with no second prompt.
+  if (!(await SP.resetDrawer({ skipSafeLeave: true }))) return;
+  // Any preview still in flight belongs to the OUTGOING Space/folder, and
+  // the old Space's queued/in-flight resume checkpoint must land before ANY
+  // identity field below changes - same ordering as SP.applyFolder().
+  state.previewRequest += 1;
+  cancelPreviewWait();
+  await SP.flushOutgoingResumeCheckpoint();
+  SP.close();
+  // Coherent teardown to "no persisted folder identity". browserFolder,
+  // output, activeSpaceId, cabinetRecovery, and folderSelected are the
+  // fields SP.applyFolder() owns outright; setFolderState("design") clears
+  // the rest (folderMode, activeSpace, Space defaults, resume checkpoint,
+  // designInventoryId/designTarget) and disables the folder-inventory toggle
+  // (it keys off folderSelected).
+  state.browserFolder = null;
+  state.output = "";
+  state.activeSpaceId = null;
+  state.cabinetRecovery = null;
+  state.folderSelected = false;
+  setFolderState("design");
+  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
+  await loadFreshOrdinaryDesignForCurrentFolder();
+  toast("Designing without a saved folder. Your work stays in this session — use 'Save design file' to keep it.", false, 9000);
+});
+
 SP.startUntyped = async () => {
   // Reuse the folder onboarding already chose rather than asking a second
   // time: "I don't know yet" on the type cards is about this folder.

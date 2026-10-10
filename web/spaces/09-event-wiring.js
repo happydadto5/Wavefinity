@@ -32,10 +32,7 @@ SP.wire = () => {
   });
   document.getElementById("space-storage-use-existing")?.addEventListener("click", () => SP.applyStorageChange("use_existing"));
   const welcomeDesign = document.getElementById("welcome-design");
-  if (welcomeDesign) welcomeDesign.addEventListener("click", () => {
-    SP.clearSetupContext();
-    SP.run(SP.startUntyped);
-  });
+  if (welcomeDesign) welcomeDesign.addEventListener("click", SP.startMemoryOnly);
   const tutorialOpen = document.getElementById("space-tutorial-open");
   if (tutorialOpen) tutorialOpen.addEventListener("click", SP.showTutorial);
   const tutorialBack = document.getElementById("space-tutorial-back");
@@ -62,7 +59,13 @@ SP.wire = () => {
       });
   });
   const untypedStart = document.getElementById("space-untyped-start");
-  if (untypedStart) untypedStart.addEventListener("click", () => SP.run(SP.startUntyped));
+  if (untypedStart) untypedStart.addEventListener("click", () => {
+    // Fix 1018: with a folder already chosen (via enterSetupFor), adopt it as
+    // untyped; with no folder (Create New Space straight to type cards), go
+    // memory-only instead of asking for a folder.
+    if (SP.configureData) SP.run(SP.startUntyped);
+    else SP.startMemoryOnly();
+  });
   const spaceBack = document.getElementById("space-back");
   if (spaceBack) spaceBack.addEventListener("click", async () => {
     if (await SP.confirmDiscardSetup()) SP.showTypeCards();
