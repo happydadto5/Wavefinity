@@ -866,7 +866,12 @@ function applySpaceSizingDefaults(design, remembered = null) {
 function freshDesignForCurrentFolder() {
   const starter = clone(state.catalog.defaults.design);
   const remembered = spaceBinPreferences();
-  if (!remembered) return applySpaceSizingDefaults(starter);
+  if (!remembered) {
+    // Fix 1012: a fresh ordinary New Bin starts at 50x50 mm.
+    starter.box.x = 50;
+    starter.box.y = 50;
+    return applySpaceSizingDefaults(starter);
+  }
   return applySpaceSizingDefaults(mergeDesignDefaults(starter, remembered), remembered);
 }
 
