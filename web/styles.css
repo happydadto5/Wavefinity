@@ -453,7 +453,7 @@ button { color: inherit; }
 }
 
 .app-shell { display: grid; grid-template-columns: minmax(420px, min(var(--sidebar-width), calc(100vw - 448px))) 8px minmax(420px, 1fr); height: calc(100vh - 79px); }
-.controls { background: #eef2f3; overflow: auto; min-width: 0; min-height: 0; }
+.controls { background: #eef2f3; overflow: auto; min-width: 0; min-height: 0; padding-bottom: 250px; }
 .sidebar-resizer { position: relative; z-index: 4; cursor: col-resize; background: transparent; touch-action: none; }
 .sidebar-resizer::after { content: ""; position: absolute; inset: 0 3px; background: var(--line); transition: background .15s, inset .15s; }
 .sidebar-resizer:hover::after, .sidebar-resizer:focus::after, .sidebar-resizer.dragging::after { inset: 0 2px; background: var(--blue); }
@@ -1097,7 +1097,7 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
    active Design canvas itself - #error-panel below is secondary and only
    shown for additional actionable/multi-error detail. */
 .design-invalid-overlay {
-  position: absolute; left: 12px; right: 12px; top: 12px; z-index: 5;
+  position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 5;
   padding: 10px 14px; border-radius: 8px; pointer-events: none;
   background: rgba(255, 244, 242, .94); border: 1px solid #e0aaa5;
   box-shadow: 0 4px 14px rgba(126, 48, 43, .18);
