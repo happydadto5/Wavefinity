@@ -15,5 +15,5 @@ window.WavefinityFeatureIcons = Object.freeze({
   lid_stacking: '<rect x="5" y="8" width="22" height="17" rx="2"/><path d="M3 8h26M9 4h14v4M9 28h14"/>',
   inside_handles: '<path d="M7 8v16h18V8"/><path d="M7 14h4v4H7z"/><path d="M25 14h-4v4h4z"/>',
   side_openings: '<path d="M5 5v22h22V5M10 5v9a6 6 0 0 0 12 0V5"/>',
-  edge_mount: '<path d="M5 5v22M5 9h15v5H9v13M20 11h7v12h-7M23.5 15v4"/>',
+  edge_mount: '<rect x="20" y="7" width="6" height="18" fill="currentColor" stroke="none"/><path d="M7 12v10h11V12"/><path d="M18 12V4h8v7"/>',
 });
