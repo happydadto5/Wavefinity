@@ -171,20 +171,23 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 #space-mode-busy { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .space-mode-toggle button.pending { background: var(--teal-soft); color: var(--teal-dark); }
 .space-mode-toggle {
-  display: inline-flex; flex: 1; gap: 4px; border: 0; border-radius: 0;
+  display: flex; flex: 1; gap: 4px; border: 0; border-radius: 0;
   background: transparent; margin: 0;
+  border-bottom: 1px solid var(--line-dark);
+  padding: 0 8px;
 }
 .space-mode-toggle button {
-  flex: 1 1 0; border: 1px solid var(--line-dark); border-bottom: none;
-  border-radius: 8px 8px 0 0; padding: 7px 12px; background: #e6efee;
-  color: var(--muted); font-weight: 700; font-size: 12px; cursor: pointer;
-  margin: 0; text-align: center; transition: background 0.15s ease, color 0.15s ease;
+  flex: 0 0 auto; border: none; border-bottom: 3px solid transparent;
+  border-radius: 0; padding: 10px 20px 8px; background: transparent;
+  color: var(--muted); font-weight: 600; font-size: 14px; cursor: pointer;
+  margin: 0 0 -1px; text-align: center; transition: color 0.15s ease, border-color 0.15s ease;
 }
 .space-mode-toggle button:hover:not(.active) {
-  background: #dbe8e7; color: var(--ink);
+  background: transparent; color: var(--ink);
 }
 .space-mode-toggle button.active {
-  background: var(--panel); color: var(--ink); border-color: var(--line-dark);
+  background: transparent; color: var(--teal-dark); font-weight: 700;
+  border-bottom-color: var(--teal);
 }
 .space-mode-toggle button:focus-visible {
   outline: 2px solid var(--teal-dark); outline-offset: -2px; z-index: 1;
