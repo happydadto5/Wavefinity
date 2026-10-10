@@ -509,6 +509,7 @@ function updateDraftFromFields(event) {
   if (one.kind === "post" && changed === "count") renderDraftFields();
   updateSelectionButtons();
   renderLayout2D();
+  syncDraftFieldProblems();
   refreshDraftSoon();
 }
 

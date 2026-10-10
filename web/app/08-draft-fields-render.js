@@ -767,4 +767,96 @@ function renderDraftFields() {
     if (angleField) angleField.addEventListener("change", commitBoreAngleChange);
     if (directionField) directionField.addEventListener("change", commitBoreAngleChange);
   }
+  syncDraftFieldProblems();
+}
+
+// Fix 1008: local, visible validation for silently-invalid numeric fields.
+// Python stays authoritative; these messages sit beside the field, following
+// the edgeMountInputProblems() pattern. The out-of-range value is still what
+// the design (and so print) sees. Blank is automatic and valid for every
+// field here, so blank never produces a message.
+function draftFieldProblems() {
+  const problems = {};
+  const kind = state.draft?.kind;
+  const fields = [];
+  if (kind === "bore") {
+    fields.push({ key: "height", name: "Bore height", dataDraft: "option:height" });
+    // Walls Only styles render the depth as option:walls_depth instead of
+    // option:depth; only one of the two exists at a time.
+    const depthKey = $('#draft-fields input[data-draft="option:depth"]')
+      ? "option:depth" : "option:walls_depth";
+    fields.push({ key: "depth", name: "Bore depth", dataDraft: depthKey });
+  } else if (kind === "post") {
+    fields.push({ key: "height", name: "Post height", dataDraft: "option:height" });
+  } else if (kind === "divider") {
+    fields.push({ key: "height", name: "Divider height", dataDraft: "option:height" });
+  }
+  for (const { key, name, dataDraft } of fields) {
+    const input = $(`#draft-fields input[data-draft="${dataDraft}"]`);
+    if (!input) continue;
+    const raw = (input.value ?? "").trim();
+    if (raw === "") continue; // blank = automatic, valid
+    const value = Number(raw);
+    const min = Number(input.min || "0.1"); // verified: 0.1 for all four fields
+    const errorId = `draft-${key}-error`;
+    if (!Number.isFinite(value)) {
+      problems[key] = { message: `${name} must be a number — enter 0.1 mm or more.`, errorId, input };
+    } else if (value < min) {
+      problems[key] = { message: `${name} must be at least ${min} mm.`, errorId, input };
+    } else if (key === "depth") {
+      // Backend rule: depth no more than the height (+ 1e-9 tolerance).
+      const hRaw = ($('#draft-fields input[data-draft="option:height"]')?.value ?? "").trim();
+      let H = Number(hRaw) >= 0.1 ? Number(hRaw) : NaN;
+      if (!Number.isFinite(H)) {
+        const resolved = state.draftResolvedOptions?.height;
+        H = Number.isFinite(Number(resolved)) && Number(resolved) > 0 ? Number(resolved) : NaN;
+      }
+      if (Number.isFinite(H) && value > H + 1e-9) {
+        problems[key] = {
+          message: `Bore depth cannot be more than the bore height of ${fmt(H)} mm.`,
+          errorId, input,
+        };
+      }
+    }
+  }
+  // Dividers Y count: empty is valid (0 = none) — guidance only, never an error.
+  if (kind === "divider") {
+    const input = $('#draft-fields input[data-draft="option:count_y"]');
+    if (input && (input.value ?? "").trim() === "") {
+      problems.count_y = {
+        message: "Walls dividing the bin front to back. 0 for none.",
+        errorId: "draft-count_y-guidance", input, guidance: true,
+      };
+    }
+  }
+  return problems;
+}
+
+function syncDraftFieldProblems() {
+  const problems = draftFieldProblems();
+  const seen = new Set();
+  for (const [key, { message, errorId, input, guidance }] of Object.entries(problems)) {
+    seen.add(errorId);
+    let node = document.getElementById(errorId);
+    if (!node) {
+      node = document.createElement("p");
+      node.id = errorId;
+      node.className = guidance ? "inline-help" : "field-error";
+      if (!guidance) node.setAttribute("role", "alert");
+      node.hidden = true;
+      input.closest("label")?.appendChild(node);
+    }
+    node.textContent = message;
+    node.hidden = false;
+    if (!guidance) input.toggleAttribute("aria-invalid", true);
+  }
+  // Clear any error/guidance nodes from a previous check that no longer apply.
+  for (const id of ["draft-height-error", "draft-depth-error", "draft-count_y-guidance"]) {
+    if (seen.has(id)) continue;
+    const node = document.getElementById(id);
+    if (node) node.hidden = true;
+    const input = node?.closest("label")?.querySelector("input");
+    input?.toggleAttribute("aria-invalid", false);
+  }
+  return problems;
 }
