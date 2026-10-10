@@ -600,7 +600,7 @@ function renderDraftFields() {
   // Informational only - a legal fused part above the rim still generates
   // fine. No checkbox, no warning styling; just a plain note of the fact.
   html += `<p class="inline-help" data-draft-overhang hidden></p>`;
-  if (["pocket", "post", "slot", "steps", "nest"].includes(one.kind)) {
+  if (["pocket", "post", "slot", "steps"].includes(one.kind)) {
     const ready = one.kind !== "nest" || (one.contour && _nestMeasuredThickness(one.options) != null);
     let referenceFields = `<p class="inline-help">Reference only — does not resize this holder. Shown in 3D Preview.</p>`;
     if (one.reference_object) {

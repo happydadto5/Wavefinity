@@ -839,6 +839,11 @@ function nestFingerAccessVisible(holderStyle, assist) {
 // Fit, Bin and Outline (spec section 45). Broken out of renderDraftFields
 // only because it is long, not because it is reused elsewhere.
 function renderNestFields(one) {
+  // Fix 1020: the nest editor no longer offers a Reference object group, so a
+  // legacy design's stored reference_object would be an unviewable, unremovable
+  // ghost in 3D preview. Drop it from the draft the first time the nest editor
+  // opens (the draft is a copy — cancel keeps the stored design untouched).
+  if (one.reference_object) delete one.reference_object;
   const opt = one.options || {};
   const resolved = state.draftResolvedOptions || {};
   const val = (key, fallback) => (opt[key] !== undefined && opt[key] !== null ? opt[key] : (resolved[key] ?? fallback));
@@ -857,6 +862,7 @@ function renderNestFields(one) {
   let html = "";
 
   html += `<div class="photo-upload wide">
+    <p class="nest-requirements-note">See photo requirements below for important details.</p>
     <label class="button secondary photo-button" for="nest-photo-input">
       ${one.contour ? "Replace photo" : "Upload part photo"}
     </label>
@@ -877,20 +883,23 @@ function renderNestFields(one) {
   const shownRotation = ((number(one.rotation, 0) % 360) + 360) % 360;
   const standardRotation = [0, 90, 180, 270].some(value => Math.abs(value - shownRotation) < 1e-6);
   const spacing = opt.repeat_spacing_percent ?? 0;
-  html += `<fieldset class="wide editor-group"><legend>Copies</legend>
-    <div class="pair">
+  html += `<div class="pair">
       <label>Quantity<input type="number" min="1" max="20" step="1" data-draft="nest-count" value="${Math.max(1, Math.min(20, Math.round(number(one.count, 1))))}"></label>
       <label>Orientation<select data-draft="nest-orientation">
         ${standardRotation ? "" : `<option value="${escapeHtml(String(one.rotation))}" selected disabled>Current ${fmt(one.rotation)}° (existing)</option>`}
         ${[[0, "As scanned"], [90, "90°"], [180, "180°"], [270, "270°"]].map(([value, label]) => `<option value="${value}" ${standardRotation && shownRotation === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>
     </div>
-    ${plainCheckbox("nest-alternate", "Flip every other one", one.alternate_ends === true, { wide: true, help: "Turns every second copy 180° end-for-end." })}
-    <label class="wide">Space between nests<select data-draft="option:repeat_spacing_percent">
-      ${[[-100, "-100% (Minimum)"], [-75, "-75%"], [-50, "-50%"], [-25, "-25%"], [0, "Auto"], [25, "+25%"], [50, "+50%"], [75, "+75%"], [100, "+100%"]].map(([value, label]) => `<option value="${value}" ${Number(spacing) === value ? "selected" : ""}>${label}</option>`).join("")}
-    </select></label>
-    ${one.contour ? `<div class="pair"><button type="button" class="button secondary" data-action="duplicate-nest">Duplicate</button><button type="button" class="button secondary" data-action="edit-nest-outline">Edit outline</button></div>` : ""}
-  </fieldset>`;
+    <div class="pair">
+      <label title="Turns every second copy 180° end-for-end.">Alternate copies<select data-draft="nest-alternate">
+        <option value="no" ${one.alternate_ends === true ? "" : "selected"}>No</option>
+        <option value="flip" ${one.alternate_ends === true ? "selected" : ""}>Flip every other</option>
+      </select></label>
+      <label>Space between nests<select data-draft="option:repeat_spacing_percent">
+        ${[[-100, "-100% (Minimum)"], [-75, "-75%"], [-50, "-50%"], [-25, "-25%"], [0, "Auto"], [25, "+25%"], [50, "+50%"], [75, "+75%"], [100, "+100%"]].map(([value, label]) => `<option value="${value}" ${Number(spacing) === value ? "selected" : ""}>${label}</option>`).join("")}
+      </select></label>
+    </div>
+    ${one.contour ? `<div class="pair"><button type="button" class="button secondary" data-action="duplicate-nest">Duplicate</button><button type="button" class="button secondary" data-action="edit-nest-outline">Edit outline</button></div>` : ""}`;
 
   const autoCavity = 0.6 * toolThickness;
   const cavityDepth = cavityMode === "manual"
@@ -898,16 +907,15 @@ function renderNestFields(one) {
     : autoCavity;
   const cavityUnavailable = !hasMeasuredThickness && cavityMode !== "manual";
 
-  // Holder: the Nest type owns what follows, so it comes first.
-  html += `<div class="editor-group"><span class="editor-group-label">Holder</span>
+  // Nest type, Tool thickness and Cavity depth share one row — no "Holder" box
+  // (Fix 1020). Raised wall has no Cavity depth, so its row uses two columns.
+  html += `<div class="draft-triple${holderStyle === "recessed" ? "" : " draft-triple-two"}">
     <label>Nest type
       <select data-draft="option:holder_style">
         <option value="recessed" ${selected("recessed", holderStyle)}>Recessed cavity</option>
         <option value="raised_wall" ${selected("raised_wall", holderStyle)}>Raised wall</option>
       </select>
     </label>`;
-
-  html += `<div class="nest-primary-row">`;
 
   html += field(
     "Tool thickness",
@@ -955,11 +963,10 @@ function renderNestFields(one) {
     html += `</div>`;
   }
 
-  html += `</div></div>`;
+  html += `</div>`;
 
-  // Access. Push Out replaces Finger access, so while it is on the Finger
-  // access selector is not shown at all - it cannot even represent push_out.
-  html += `<div class="editor-group"><span class="editor-group-label">Access</span>`;
+  // Access (no box — Fix 1020). Push Out replaces Finger access, so while it
+  // is on the Finger access selector is not shown at all - it cannot even represent push_out.
   if (nestFingerAccessVisible(holderStyle, assist)) {
     html += `<label>Finger access
       <select data-draft="option:lift_assist">
@@ -1008,27 +1015,23 @@ function renderNestFields(one) {
     }
     html += `</details>`;
   }
-  html += `</div>`;
 
-  // Fit.
-  html += `<div class="editor-group"><span class="editor-group-label">Fit</span>`;
+  // Fit (no box — Fix 1020).
   html += field(
     "Fit clearance",
     "option:clearance",
     fmt(val("clearance", 0.6)),
     { unit: "mm", step: "0.1", min: "0" },
   );
-  html += `</div>`;
 
-  // Bin. Read straight from the stored option, never the resolved fallback:
-  // a legacy design with no stored preference must show as off here, not as
-  // on just because it happens to behave in a similar grow-only way.
-  html += `<div class="editor-group"><span class="editor-group-label">Bin</span>`;
+  // Bin (no box — Fix 1020). Read straight from the stored option, never the
+  // resolved fallback: a legacy design with no stored preference must show as
+  // off here, not as on just because it happens to behave in a similar
+  // grow-only way.
   html += toggle("option:auto_size", "Automatically size footprint to tool",
     "Grows or shrinks the bin Width and Length to fit this Nest and keeps it centered. "
     + "Bin height stays at the height you set.",
     opt.auto_size === true, { wide: true });
-  html += `</div>`;
 
   // Outline shape (Soften outline, manual point editing, zoom/pan, Finish
   // Editing) lives in the 2D view's own Outline editor panel now - editing
@@ -1169,9 +1172,6 @@ function updateReferenceAxis(draft, axis, raw) {
 function referenceAddReady() {
   if (!state.draft || state.draftIsNew || state.draftTouched ||
       !Number.isInteger(draftCommitIndex())) return false;
-  if (state.draft.kind === "nest") {
-    return Boolean(state.draft.contour && _nestMeasuredThickness(state.draft.options) > 0);
-  }
   if (!["pocket", "post", "slot", "steps"].includes(state.draft.kind)) return false;
   const resolved = state.referenceResolutionRequest === state.draftRequest
     ? state.draftResolvedOptions : null;

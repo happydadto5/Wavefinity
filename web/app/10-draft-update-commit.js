@@ -171,7 +171,7 @@ function updateDraftFromFields(event) {
       const angle = number(get("nest-orientation"), NaN);
       if ([0, 90, 180, 270].includes(angle)) one.rotation = angle;
     }
-    if (changed === "nest-alternate") one.alternate_ends = event.currentTarget?.checked === true;
+    if (changed === "nest-alternate") one.alternate_ends = event.currentTarget?.value === "flip";
     if (changed === "option:repeat_spacing_percent") {
       const spacing = Math.round(number(get("option:repeat_spacing_percent"), NaN));
       if ([-100, -75, -50, -25, 0, 25, 50, 75, 100].includes(spacing)) one.options.repeat_spacing_percent = spacing;

@@ -75,16 +75,16 @@ button { color: inherit; }
 .photo-upload .nest-cavity-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .photo-upload fieldset.wide { grid-column: 1 / -1; border: 0; padding: 0; margin: 0; }
 .photo-upload fieldset.wide legend { font-size: 11px; font-weight: 650; color: var(--teal-dark); padding: 0; margin-bottom: 3px; }
+.photo-upload .nest-requirements-note {
+  grid-column: 1 / -1;
+  margin: 0 0 2px;
+  color: var(--teal-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
 .nest-editor .editor-title {
   min-height: 0;
   margin-bottom: 4px;
-}
-
-.nest-primary-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  align-items: start;
 }
 
 .nest-cavity-column {
@@ -442,10 +442,6 @@ button { color: inherit; }
 }
 
 @media (max-width: 760px) {
-  .nest-primary-row {
-    grid-template-columns: 1fr;
-  }
-
   .nest-scan-controls {
     inset: 0 0 0 auto;
     width: 40%;
@@ -654,6 +650,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .draft-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .draft-fields .wide { grid-column: 1 / -1; }
 .draft-fields .draft-triple { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; align-items: start; }
+.draft-fields .draft-triple.draft-triple-two { grid-template-columns: repeat(2, 1fr); }
 /* Compact inline toggle - the space-saving replacement for the full-width
    check-card. The former description rides in a title tooltip. */
 .draft-fields .editor-toggle {
@@ -682,6 +679,8 @@ input[type="number"]::-webkit-inner-spin-button {
 /* Fix 096 F3: shared pair/triple rows collapse to one column on narrow screens. */
 @media (max-width: 620px) {
   .draft-fields .pair,
+  .draft-fields .draft-triple,
+  .draft-fields .draft-triple.draft-triple-two,
   .draft-fields .editor-group .pair.triple {
     grid-template-columns: 1fr;
   }
