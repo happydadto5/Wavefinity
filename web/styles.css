@@ -771,6 +771,7 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
    not a cramped Bin Name row - they share the same rendered size as the
    Space header's Open Space / Edit Space buttons. */
 .designer-major-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin: 0; }
+.bin-actions-spacer { flex: 1 1 auto; }
 .major-action { flex: 0 0 auto; white-space: nowrap; }
 .placed-item-content {
   flex: 1; min-width: 0; border: 0; background: none; padding: 0; text-align: left;
@@ -1913,6 +1914,7 @@ body.relocating > :not(dialog) { pointer-events: none; }
 
 .design-bin-nav { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
 .design-bin-select { flex: 1; min-width: 0; padding: 9px 10px; font-size: 13px; }
+.design-bin-select-label { font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
 /* margin removed - bin controls are grouped in a box */
 
 /* Fix 103 (Section C): structural Design. When a Storage Drawers cabinet or

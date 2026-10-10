@@ -580,7 +580,10 @@ DP.refreshDesignBinNav = () => {
   const showStructural = structuralShown && !structuralSelected;
   if (!alternates.length && !showStructural) { host.hidden = true; return; }
   select.innerHTML = "";
-  const placeholder = new Option("Switch bin…", "");
+  // H8: show the current bin's name instead of generic placeholder.
+  // The value stays empty so it's inert (the change handler returns on empty id).
+  const currentBin = target.kind === "bin" && currentId ? DL.bin(currentId) : null;
+  const placeholder = new Option(currentBin ? DL.label(currentBin) : "Switch bin…", "");
   placeholder.selected = true;
   select.append(placeholder);
   if (showStructural) {
