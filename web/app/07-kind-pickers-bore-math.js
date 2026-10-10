@@ -329,6 +329,11 @@ function flushModifierForm() {
   }
 
   noteCommittedDesignChange(previousDesign);
+  // Fix 1017: a successful flush means no modifier is being edited anymore.
+  // Without this, selectedFeature()/selectKind() leave a stale flag behind,
+  // and the Fix 1011 single-badge gate points the badge and the Done/Delete
+  // row at the modifier the user just left (Delete would remove it).
+  state.modifierEditing = null;
   return true;
 }
 
