@@ -496,7 +496,7 @@ function renderDraftFields() {
     html += `<div class="divider-bottom-row"><label>Bottom type<select data-draft="option:bottom_mode">
       <option value="flat" ${bottomMode === "flat" ? "selected" : ""}>Flat</option>
       <option value="slope" ${bottomMode === "slope" ? "selected" : ""}>Sloped</option>
-      <option value="scoop" ${bottomMode === "scoop" ? "selected" : ""}>Curved</option>
+      <option value="scoop" ${bottomMode === "scoop" ? "selected" : ""}>Scoop</option>
     </select></label>`;
 
     if (hasSlope) {
@@ -513,7 +513,7 @@ function renderDraftFields() {
         ? number(scoopConfig.depth, 60) : number(state.draftResolvedOptions?.curved_default_depth, 60);
       const depthChoices = [10, 20, 30, 40, 50, 60, 70, 80, 90];
       const legacyDepth = depthChoices.includes(scoopDepth) ? "" : `<option value="${escapeHtml(scoopDepth)}" selected>${escapeHtml(scoopDepth)}% — Existing</option>`;
-      html += `<label title="Every Divider compartment uses the same curved depth, starting at its front floor edge.">Curved depth<select data-divider-scoop-depth>${depthChoices.map(depth =>
+      html += `<label title="Every Divider compartment uses the same scoop depth, starting at its front floor edge.">Scoop depth<select data-divider-scoop-depth>${depthChoices.map(depth =>
         `<option value="${depth}" ${depth === scoopDepth ? "selected" : ""}>${depth}%</option>`).join("")}${legacyDepth}</select></label>`;
     } else {
       html += `<div class="divider-bottom-empty" aria-hidden="true"></div>`;

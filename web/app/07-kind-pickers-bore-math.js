@@ -740,11 +740,12 @@ function dividerThicknessField(value, key = "option:thickness") {
 }
 
 function scoopDepthField(key, value, options = {}) {
-  return field("Scoop height", key, value, {
+  const html = field("Scoop height", key, value, {
     unit: "% of bin height", step: "1", min: "1", max: "100",
     tip: options.tip || "The scoop always spans the full usable bin width and starts at the front floor edge.",
     dataAttribute: options.dataAttribute,
   });
+  return html.replace('<label class="', '<label class="scoop-height-field ');
 }
 
 // Compact inline checkbox - the space-saving replacement for the full-width
