@@ -779,7 +779,7 @@ function reseedCabinetStarterAfterLayoutLoad() {
   if (typeof refreshPreview === "function") refreshPreview();
 }
 
-function applySpaceSizingDefaults(design, remembered = null) {
+function applySpaceSizingDefaults(design, remembered = null, keepStarterXY = false) {
   if (state.folderMode !== "space" || !state.activeSpace) return design;
 
   const kind = state.activeSpace.kind;
@@ -805,8 +805,15 @@ function applySpaceSizingDefaults(design, remembered = null) {
   const startX = Math.min(4, Math.max(1, spaceXUnits));
   const startY = Math.min(4, Math.max(1, spaceYUnits));
 
-  design.box.x = (rememberedUnits("x", spaceXUnits) ?? startX) * unit;
-  design.box.y = (rememberedUnits("y", spaceYUnits) ?? startY) * unit;
+  if (keepStarterXY) {
+    // Fix 1015: no Space default size (Andrew 2026-10-10), but the bin must
+    // still fit the Space — a capacity cap is a constraint, not a default.
+    design.box.x = Math.max(unit, Math.min(design.box.x, spaceXUnits * unit));
+    design.box.y = Math.max(unit, Math.min(design.box.y, spaceYUnits * unit));
+  } else {
+    design.box.x = (rememberedUnits("x", spaceXUnits) ?? startX) * unit;
+    design.box.y = (rememberedUnits("y", spaceYUnits) ?? startY) * unit;
+  }
 
   if (kind === "drawer") {
     design.box.z = Math.min(
@@ -867,10 +874,13 @@ function freshDesignForCurrentFolder() {
   const starter = clone(state.catalog.defaults.design);
   const remembered = spaceBinPreferences();
   if (!remembered) {
-    // Fix 1012: a fresh ordinary New Bin starts at 50x50 mm.
-    starter.box.x = 50;
-    starter.box.y = 50;
-    return applySpaceSizingDefaults(starter);
+    // Fix 1012/1015: a fresh ordinary New Bin starts at 48x48 mm
+    // (grid-stable; 50 would snap to 48 on first edit — Andrew 2026-10-10).
+    // Spaces have no default size of their own; the bin default stands
+    // in Space mode too.
+    starter.box.x = 48;
+    starter.box.y = 48;
+    return applySpaceSizingDefaults(starter, null, true);
   }
   return applySpaceSizingDefaults(mergeDesignDefaults(starter, remembered), remembered);
 }
