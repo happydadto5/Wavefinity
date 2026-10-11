@@ -1249,4 +1249,4 @@ async function commitReferenceEdit() {
     $("#draft-status").textContent = friendlyError(error);
     $("#draft-status").classList.add("error");
   }
-}
+}
