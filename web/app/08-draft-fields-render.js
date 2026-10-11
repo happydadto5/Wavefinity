@@ -197,11 +197,21 @@ function renderDraftFields() {
         + "before it hits its stop. Blank reaches the normal bin floor.";
       // Fix 081 D: Bore angle is now one of exactly eight fixed degrees
       // (never a free-typed number), defaulting to 90° - upright.
-      const boreAngleSteps = [20, 30, 40, 50, 60, 70, 80, 90];
+      const boreAngleSteps = [25, 30, 40, 50, 60, 70, 80, 90];
       const boreAngleField = () => {
         const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, "angle");
-        const stored = explicit ? one.options.angle
+        let stored = explicit ? one.options.angle
           : state.draftResolvedOptions?.angle ?? info.fields.find(f => f.key === "angle")?.default ?? 0;
+        // Fix 1063: a saved design may still carry the old 70-degree cap's
+        // lean in (65, 70]. Normalize it to the 65-degree cap here so the
+        // 25-degree preset the dropdown selects and the stored canonical
+        // value always agree; the backend load boundary does the same.
+        const storedLean = number(stored, 0);
+        if (explicit && storedLean > 65 && storedLean <= 70 + 1e-9) {
+          one.options.angle = 65;
+          stored = 65;
+          toast(`Saved Bore lean ${fmt(storedLean)}° is above the 65° limit; using 65° (Bore angle 25°).`, true, 4500);
+        }
         const shown = 90 - number(stored, 0);
         const nearest = boreAngleSteps.reduce((best, value) =>
           Math.abs(value - shown) < Math.abs(best - shown) ? value : best, boreAngleSteps[0]);

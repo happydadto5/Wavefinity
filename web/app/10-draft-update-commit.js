@@ -364,9 +364,9 @@ function updateDraftFromFields(event) {
       // itself is never interrupted (Fix 078).
       if (info.kind === "bore" && key === "angle") {
         const previousCanonicalAngle = number(one.options.angle, 0);
-        const displayedAngle = Math.min(90, Math.max(20, value));
+        const displayedAngle = Math.min(90, Math.max(25, value));
         if (event?.type === "change" && Math.abs(displayedAngle - value) > 1e-9) {
-          toast(`Bore angle must be between 20° and 90°; using ${fmt(displayedAngle)}°.`, true, 4500);
+          toast(`Bore angle must be between 25° and 90°; using ${fmt(displayedAngle)}°.`, true, 4500);
         }
         value = 90 - displayedAngle;
         // A first transition from upright to angled with no explicit

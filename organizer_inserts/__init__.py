@@ -148,6 +148,7 @@ from ._bore import (
     build_bore,
     bore_defaults,
     normalize_bore_modes,
+    normalize_legacy_bore_tilt,
     bore_hole_axes,
 )
 from ._post import build_post, post_defaults

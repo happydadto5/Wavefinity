@@ -43,6 +43,7 @@ from organizer_features.stack import (
 )
 from organizer_inserts import (
     BASE_PLATE,
+    BORE_MAX_TILT,
     CARTRIDGE_PITCH,
     CONNECTOR_EDGE_KEEP_OUT,
     EDITOR_SNAP,
@@ -57,6 +58,7 @@ from organizer_inserts import (
     Layout,
     Zone,
     normalize_bore_modes,
+    normalize_legacy_bore_tilt,
     build_features,
     connector_keep_out,
     is_text,
@@ -714,8 +716,11 @@ def design_to_dict(
         # separates ordinary lids from direct vertical stacking. Version 7 is
         # written only with an ordinary lid: it adds the lid fit preset and
         # the explicit lid label Inlay depth / Raised height.
-        "version": 7 if lid.enabled else (
-            6 if stack.mode == "direct" else (3 if b4b.enabled else 1)),
+        # Version 8 (Fix 1063): the Straight Bore lean cap is 65 degrees.
+        # A version-8 design carrying a lean above 65 is rejected at load,
+        # never silently rewritten; versions 1-7 migrate a (65, 70] lean
+        # down to 65 at the load boundary.
+        "version": 8,
         "box": box_block,
         "label": label,
         "label_position": label_position(label_location),
@@ -725,11 +730,37 @@ def design_to_dict(
     }
 
 
+def _bore_tilt_for_version(
+    box: BoxSpec, one: Feature, base_z: float, mode: str, design_version: int
+) -> Feature:
+    """Fix 1063 provenance boundary for the Straight Bore lean cap.
+
+    Legacy saved designs (version < 8) may still carry the old 70-degree
+    cap's lean in (65, 70]: migrate it down to the 65-degree cap at the
+    load boundary. Current designs (version 8) are never silently
+    rewritten: a lean above the cap fails loudly here, before any backend
+    validation runs.
+    """
+    one = normalize_bore_modes(box, one, base_z, mode)
+    if design_version >= 8:
+        try:
+            lean = float(one.options.get("angle", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return one
+        if lean > BORE_MAX_TILT + 1e-9:
+            raise ValueError(
+                f"bore lean angle {lean:g} exceeds the {BORE_MAX_TILT:g}-degree "
+                "limit for current designs"
+            )
+        return one
+    return normalize_legacy_bore_tilt(one)
+
+
 def design_from_dict(
     data: dict, *, validate_layout: bool = True
 ) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     design_version = data.get("version", 1)
-    if design_version not in (1, 2, 3, 4, 5, 6, 7):
+    if design_version not in (1, 2, 3, 4, 5, 6, 7, 8):
         raise ValueError(f"unsupported design version {data.get('version')!r}")
     raw = data["box"]
     stack_raw = raw.get("stack")
@@ -1006,7 +1037,7 @@ def design_from_dict(
             zone=scoop_zone(box, one, base_z, layout.mode, layout.snap),
         )
         if one.kind == "scoop" else
-        normalize_bore_modes(box, one, base_z, layout.mode)
+        _bore_tilt_for_version(box, one, base_z, layout.mode, design_version)
         for one in layout.features
     ))
     label = str(data.get("label", ""))

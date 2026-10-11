@@ -22,6 +22,7 @@ from ._consts import (
     HEX_BIT_CLEARANCE,
     HEX_BIT_HOLD,
     BORE_TILTED_WALL,
+    BORE_MAX_TILT,
     normalize_bore_style,
     is_walls_only,
     is_wavy_style,
@@ -158,6 +159,35 @@ def normalize_bore_modes(
     if zone is one.zone and options == one.options:
         return one
     return replace(one, zone=zone, options=options)
+
+
+# Fix 1063: the 70-degree cap predates the support-free manufacturing
+# invariant. A legacy saved design (version < 8) may still carry a lean in
+# (65, 70]; normalize it to the 65-degree cap at the load boundary so the
+# UI, the canonical stored state and backend validation always agree.
+# Current designs (version 8) never reach this normalization: a lean above
+# the cap is rejected outright at load instead, never silently rewritten.
+LEGACY_BORE_TILT_CAP = 70.0  # steepest lean any saved design could ever hold
+
+
+def normalize_legacy_bore_tilt(one: Feature) -> Feature:
+    """Clamp a saved Bore's legacy (65, 70] lean down to BORE_MAX_TILT.
+
+    Anything at or below the cap, and any non-Bore feature, is returned
+    untouched. Values above the old 70-degree cap are left for backend
+    validation to reject - they were never legal.
+    """
+    if one.kind != "bore":
+        return one
+    try:
+        lean = float(one.options.get("angle", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return one
+    if BORE_MAX_TILT < lean <= LEGACY_BORE_TILT_CAP + 1e-9:
+        options = dict(one.options)
+        options["angle"] = BORE_MAX_TILT
+        return replace(one, options=options)
+    return one
 
 
 def _envelope_counts(

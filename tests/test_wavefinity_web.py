@@ -268,6 +268,62 @@ class ObjectReferenceWebTests(unittest.TestCase):
         with patch.object(wavefinity_web, "bore_reference_top", side_effect=lambda box, *_: box.z + 10):
             self.assertIsNone(wavefinity_web._ai_space_cap_violation(design, clear_space))
 
+    def test_legacy_bore_lean_migrates_but_current_design_rejects(self):
+        # Fix 1063 correction 2: the design version is the provenance
+        # boundary. Version <= 7 is a legacy saved design: a (65, 70] lean
+        # migrates to the canonical 65 and previews/generates successfully.
+        # Version 8 is a current/new design: 68 is rejected at load, never
+        # silently rewritten.
+        from organizer_app import design_to_dict
+        from organizer_inserts._bore._grid import _bore_grid
+
+        def bore_design(lean, version):
+            design = default_design()
+            design["version"] = version
+            design["box"].update({"x": 128, "y": 128, "z": 80})
+            feature = default_feature_payload({"design": design, "kind": "bore"})["feature"]
+            feature["zone"] = [-22, -22, 22, 22]
+            feature["item"]["segments"] = [{"length": 50, "diameter": 16}]
+            feature["options"] = {"bore_style": "base_straight", "height": 28,
+                                  "depth": 20, "angle": lean,
+                                  "columns": 1, "rows": 1}
+            design["layout"]["features"] = [feature]
+            return design
+
+        # (1) A genuinely legacy saved design (v7) with 68/70 migrates to
+        # canonical 65 and previews successfully.
+        for legacy_lean in (68.0, 70.0):
+            design = bore_design(legacy_lean, 7)
+            box, layout, *_ = design_from_dict(design)
+            loaded = layout.features[0]
+            self.assertEqual(loaded.options["angle"], 65.0)
+            # The Designer shows 90 minus the stored lean: 25 degrees.
+            self.assertEqual(90 - loaded.options["angle"], 25)
+            # The canonical saved form carries 65 (stamped version 8), not
+            # the legacy value.
+            saved = design_to_dict(box, layout, "", "", "bottom", False)
+            self.assertEqual(saved["layout"]["features"][0]["options"]["angle"], 65.0)
+            self.assertEqual(saved["version"], 8)
+            # Backend validation accepts it and sees no hidden >65 lean.
+            grid = _bore_grid(box, loaded, base_height(box, layout.mode))
+            self.assertLessEqual(grid["angle"], 65.0)
+            # Preview - the same backend path generation uses - succeeds and
+            # reports the normalized canonical design.
+            result = preview_payload({"design": design, "client_id": "legacy-tilt",
+                                      "generation": 1})
+            self.assertTrue(result["fits"])
+            self.assertFalse(result["draft_error"])
+            self.assertEqual(
+                result["design"]["layout"]["features"][0]["options"]["angle"], 65.0)
+
+        # (2) A current/new API design (v8) with 68 is rejected at load,
+        # never silently rewritten to 65.
+        design = bore_design(68.0, 8)
+        with self.assertRaisesRegex(ValueError, "exceeds the 65-degree limit"):
+            design_from_dict(design)
+        # The input dict was not mutated: still 68, not rewritten to 65.
+        self.assertEqual(design["layout"]["features"][0]["options"]["angle"], 68.0)
+
     def test_text_duplicate_endpoint_now_serves_photo_nest_only(self):
         # Fix 082 J retires Text's own Duplicate to rim; the shared endpoint
         # rejects a Text index instead of cloning it to a rim side.

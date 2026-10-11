@@ -30,7 +30,7 @@ HEX_BIT_FIXED = {
 }
 BORE_MOUTH_CHAMFER = 0.6  # 45-degree lead-in at each hole mouth
 WALL_ONLY_FOOT = 0.5
-BORE_MAX_TILT = 70.0      # steepest lean off vertical the hole geometry still allows
+BORE_MAX_TILT = 65.0      # steepest lean off vertical the hole geometry still allows
 BORE_TILTED_WALL = 3.0    # thicker default wall once a bore is leaned
 
 

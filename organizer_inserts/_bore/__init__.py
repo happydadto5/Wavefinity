@@ -105,6 +105,7 @@ from ._walls import (
 from ._settings import (
     bore_defaults,
     normalize_bore_modes,
+    normalize_legacy_bore_tilt,
     _envelope_counts,
     _wall_only_grid,
     bore_envelope_zone,
