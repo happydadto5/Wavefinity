@@ -10,7 +10,8 @@ from organizer_engine import BoxSpec
 from organizer_geometry import _extrude_polygon, difference, union
 
 from ._consts import WALL_ONLY_FOOT, FLOOR_OVERTRAVEL, JOIN_BAND
-from ._walls import _wall_only_ring, _union, _polygons, _join_tabs, _tab_meshes
+from ._walls import _wall_only_ring, _union
+from .._walljoin import _join_tabs, _polygons, _tab_meshes
 from ._grid import _bore_hole_centres
 
 

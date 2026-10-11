@@ -210,156 +210,17 @@ def _union(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
     return meshes[0] if len(meshes) == 1 else union(meshes)
 
 
-def _polygons(shape) -> list[Polygon]:
-    """The area pieces of a shapely result, ignoring stray lines and points."""
-    if shape.is_empty:
-        return []
-    if isinstance(shape, Polygon):
-        return [shape]
-    return [piece for piece in getattr(shape, "geoms", ())
-            if isinstance(piece, Polygon) and not piece.is_empty]
-
-
-WEB_COINCIDENCE_TOL = 2e-3
-WEB_WIDTH_NUDGES = (0.0, 0.007, -0.007, 0.019, -0.019, 0.041, -0.041)
-
-
-def _ring_points(shape) -> np.ndarray:
-    points = []
-    for piece in _polygons(shape):
-        for ring in (piece.exterior, *piece.interiors):
-            points.append(np.asarray(ring.coords)[:, :2])
-    return np.vstack(points) if points else np.empty((0, 2))
-
-
-def _web_is_clean(web, *shapes) -> bool:
-    """No web edge grazes a neighbouring vertex closely enough to leave a sliver.
-
-    A web side that passes a hair (under a couple of microns) from a sleeve
-    vertex makes a boolean union with sub-micron faces that export rounding
-    can turn into a broken solid.
-    """
-    edge = web.boundary.buffer(WEB_COINCIDENCE_TOL)
-    for shape in shapes:
-        points = _ring_points(shape)
-        if len(points) and shapely.contains_xy(edge, points[:, 0], points[:, 1]).any():
-            return False
-        lines = shape.boundary.buffer(WEB_COINCIDENCE_TOL)
-        corners = _ring_points(web)
-        if len(corners) and shapely.contains_xy(lines, corners[:, 0], corners[:, 1]).any():
-            return False
-    return True
-
-
-def _web_polygon(points, width: float, avoid, limit, keep_clear) -> list[Polygon]:
-    """A slender web along ``points``; ``width`` is nudged only to avoid slivers."""
-    chosen: list[Polygon] = []
-    for nudge in WEB_WIDTH_NUDGES:
-        web = LineString(points).buffer(max(0.4, width + nudge) / 2.0, cap_style=2, join_style=2)
-        web = web.difference(keep_clear).intersection(limit)
-        chosen = [part for part in _polygons(web) if part.area > 1e-6]
-        if all(_web_is_clean(part, *avoid) for part in chosen):
-            break
-    return chosen
-
-
-def _join_tabs(
-    box: BoxSpec, material, keep_clear, fill: float, hug: bool = False,
-    web_width: float = BORE_WALL, wavy: bool = False, avoid: tuple = (),
-) -> list[Polygon]:
-    """Blends that carry ``material`` straight into any bin wall it reaches.
-
-    ``material`` is the Bore's plan-view footprint and ``keep_clear`` the area
-    that must stay open (every hole and its wavy wall). Each side of the usable
-    floor that the material touches gets a tab running from ``fill`` inside the
-    wall out through the bin's wavy inner face, so the sleeve fuses into the
-    wall instead of stopping a hair short of it. Tabs never come within
-    ``JOIN_SKIN`` of the bin's outside face, so the exterior stays as it was.
-
-    ``hug`` (a Walls Only Bore whose bin is sized around it) also bridges a gap
-    of up to one grid step: the bin can only grow in whole steps, so the sleeves
-    are carried the rest of the way to the wall on every side.
-    """
-    whole = Zone.whole(box)
-    limit = wavy_outer_polygon(box).buffer(-JOIN_SKIN)
-    reach = box.wall_depth + 2.0 * WAVE_AMPLITUDE
-    x0, y0, x1, y1 = material.bounds
-    big = 1.0e3
-    reachable = HUG_REACH if hug else JOIN_TOUCH
-    sides = (
-        (whole.x1 - x1,
-         lambda d: shapely_box(whole.x1 - d - JOIN_BAND, -big, whole.x1 + big, big),
-         lambda b, d: shapely_box(whole.x1 - d - fill, b[1], whole.x1 + reach, b[3])),
-        (x0 - whole.x0,
-         lambda d: shapely_box(-big, -big, whole.x0 + d + JOIN_BAND, big),
-         lambda b, d: shapely_box(whole.x0 - reach, b[1], whole.x0 + d + fill, b[3])),
-        (whole.y1 - y1,
-         lambda d: shapely_box(-big, whole.y1 - d - JOIN_BAND, big, whole.y1 + big),
-         lambda b, d: shapely_box(b[0], whole.y1 - d - fill, b[2], whole.y1 + reach)),
-        (y0 - whole.y0,
-         lambda d: shapely_box(-big, -big, big, whole.y0 + d + JOIN_BAND),
-         lambda b, d: shapely_box(b[0], whole.y0 - reach, b[2], whole.y0 + d + fill)),
-    )
-    tabs: list[Polygon] = []
-    if hug:
-        # One narrow gap bridge per reachable wall and connected sleeve
-        # cluster. Material already meeting the wall keeps the old local weld.
-        for cluster in _polygons(material):
-            x0, y0, x1, y1 = cluster.bounds
-            walls = (
-                (whole.x1 - x1, "right"), (x0 - whole.x0, "left"),
-                (whole.y1 - y1, "back"), (y0 - whole.y0, "front"),
-            )
-            for gap, side in walls:
-                if gap <= JOIN_TOUCH or gap > HUG_REACH + 1e-9:
-                    continue
-                if side in ("right", "left"):
-                    edge = x1 if side == "right" else x0
-                    segment = cluster.intersection(shapely_box(
-                        edge - 0.01, y0 - 0.01, edge + 0.01, y1 + 0.01))
-                    anchor = segment.representative_point().y if not segment.is_empty else cluster.representative_point().y
-                    direction = 1 if side == "right" else -1
-                    start = edge - direction * fill
-                    end = (whole.x1 if direction > 0 else whole.x0) + direction * reach
-                    # A straight web is one plain rectangle; only a wavy one is sampled.
-                    steps = max(2, math.ceil(abs(end - start) / (WAVE_LENGTH / WAVE_SAMPLES_PER_CYCLE))) if wavy else 1
-                    points = [(start + (end - start) * i / steps,
-                               anchor + (wave_value(start + (end - start) * i / steps) - wave_value(start)) if wavy else anchor)
-                              for i in range(steps + 1)]
-                else:
-                    edge = y1 if side == "back" else y0
-                    segment = cluster.intersection(shapely_box(
-                        x0 - 0.01, edge - 0.01, x1 + 0.01, edge + 0.01))
-                    anchor = segment.representative_point().x if not segment.is_empty else cluster.representative_point().x
-                    direction = 1 if side == "back" else -1
-                    start = edge - direction * fill
-                    end = (whole.y1 if direction > 0 else whole.y0) + direction * reach
-                    steps = max(2, math.ceil(abs(end - start) / (WAVE_LENGTH / WAVE_SAMPLES_PER_CYCLE))) if wavy else 1
-                    points = [(anchor + (wave_value(start + (end - start) * i / steps) - wave_value(start)) if wavy else anchor,
-                               start + (end - start) * i / steps)
-                              for i in range(steps + 1)]
-                tabs.extend(_web_polygon(points, web_width, (material, keep_clear, limit, *avoid), limit, keep_clear))
-    for gap, band, make in sides:
-        if gap > reachable + 1e-9:
-            continue
-        if hug and gap > JOIN_TOUCH:
-            continue
-        span = gap if gap > JOIN_TOUCH else 0.0
-        for piece in _polygons(material.intersection(band(span))):
-            tab = make(piece.bounds, span).difference(keep_clear).intersection(limit)
-            tabs.extend(part for part in _polygons(tab) if part.area > 1e-6)
-    return tabs
-
-
-def _tab_meshes(
-    tabs: list[Polygon], height: float, base_z: float,
-) -> list[trimesh.Trimesh]:
-    meshes = []
-    for tab in tabs:
-        mesh = _extrude_polygon(tab, height)
-        mesh.apply_translation((0.0, 0.0, base_z))
-        meshes.append(mesh)
-    return meshes
+# Wall-join geometry lives in the shared module now; re-exported here so
+# existing ``from ._walls import _join_tabs`` call sites keep working.
+from .._walljoin import (
+    _join_tabs,
+    _polygons,
+    _ring_points,
+    _tab_meshes,
+    _web_is_clean,
+    _web_polygon,
+    WEB_COINCIDENCE_TOL,
+    WEB_WIDTH_NUDGES,)
 
 
 def _access_top_limit(box: BoxSpec) -> float | None:
