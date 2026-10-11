@@ -235,6 +235,7 @@ from organizer_app_impl._filenames import (
     _box_spec,
     _connector_spec,
     _part_result,
+    check_filename_bytes,
     box_filename,
     edge_mount_label_filename,
     pegboard_adapter_filename,
@@ -323,6 +324,9 @@ def generate_b4b_files(
     if auto_timestamp and (target.exists() or not clean_label(part_name)):
         ts = datetime.now().strftime("%m%d%y%H%M%S")
         target = target.with_name(f"{target.stem} {ts}{target.suffix}")
+    # Same filename-boundary rule as the ordinary-bin exporter (Change 3):
+    # the b4b_filename prefix/suffix and the timestamp branch all count.
+    check_filename_bytes(target.name)
 
     # non-label parts must each be one clean solid; labels are one prism per
     # letter, so they get the relaxed check
@@ -551,6 +555,12 @@ def generate_organizer_files(
                 ts = datetime.now().strftime("%m%d%y%H%M%S")
                 stem = target.stem
                 target = output_dir / f"{stem} {ts}{target.suffix}"
+        # The real filename boundary: validate the exact final on-disk
+        # component (after the timestamp branch), UTF-8 encoded. A long or
+        # emoji-heavy bin name raises a clean ValueError here instead of
+        # OSErroring on write. Reject, never truncate - the audit asks for
+        # validation, and stored names must never be silently mutated.
+        check_filename_bytes(target.name)
         return target
 
     if layout.mode == "fused":

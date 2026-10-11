@@ -18,7 +18,7 @@ from shapely import affinity
 from shapely.geometry import Polygon, box as polygon_box
 from shapely.ops import unary_union
 
-from organizer_app import clean_label
+from organizer_app import clean_label, check_filename_bytes
 from organizer_engine import (
     BASE_UNIT,
     WAVE_AMPLITUDE,
@@ -758,6 +758,11 @@ def generate_base_trim_files(
     if auto_timestamp and (not clean_label(part_name) or any(path.exists() for path in targets)):
         timestamp = datetime.now().strftime("%m%d%y%H%M%S")
         targets = [path.with_name(f"{path.stem} {timestamp}{path.suffix}") for path in targets]
+    # Real filename boundary for Base Trim pieces: the piece suffixes
+    # (" Part 99 of 99.3mf") and the timestamp branch both add bytes on top
+    # of the part-name stem, so every final target is checked, not the stem.
+    for target in targets:
+        check_filename_bytes(target.name)
     parts = []
     for (plan, mesh), target in zip(made, targets):
         exported = mesh.copy()

@@ -236,3 +236,27 @@ def part_name_seed(text: str) -> str:
     if not tidy or SIZE_LIKE.match(tidy):
         return ""
     return tidy
+
+
+#: Filename-component limit, in bytes, on the filesystems Wavefinity targets
+#: (ext4, APFS and NTFS all cap the final component at 255 bytes).
+MAX_FILENAME_BYTES = 255
+
+
+def check_filename_bytes(filename: str) -> None:
+    """Reject a generated filename that exceeds the filesystem component limit.
+
+    Measured on the exact final filename string as the exporter writes it -
+    sanitised via :func:`clean_label`, with the exporter's prefix and suffix
+    included - UTF-8 encoded. A name can be short in characters and still
+    overflow in bytes (emoji take up to 4 bytes each), so this must be a
+    byte check, never a ``len()`` check. The only caller-controlled portion
+    of any generated filename is the bin name, so the message names it.
+    Raises ``ValueError`` so the web layer maps it to a clean HTTP 400.
+    """
+    byte_len = len(filename.encode("utf-8"))
+    if byte_len > MAX_FILENAME_BYTES:
+        raise ValueError(
+            f"bin name produces a {byte_len}-byte filename; the limit is "
+            f"{MAX_FILENAME_BYTES} bytes including the export prefix/suffix"
+        )

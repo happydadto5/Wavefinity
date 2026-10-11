@@ -51,6 +51,7 @@ from ._common import (
 from ._filenames import (
     _part_result,
     box_filename,
+    check_filename_bytes,
     connector_filename,
     CORNER_WAYS_NAMES,
     validate_corner_quantity,
@@ -186,6 +187,10 @@ def _promote_staged_set(output_dir: Path, staged: list[Path], *, auto_timestamp:
             if not has_name or final.exists() or final.name in seen:
                 stamp = datetime.now().strftime("%m%d%y%H%M%S")
                 final = output_dir / f"{final.stem} {stamp}{final.suffix}"
+        # The transactional API path validates the staged name at write time
+        # (Change 3), but the timestamp branch adds bytes here, so the final
+        # on-disk component gets its own byte-budget check at this boundary.
+        check_filename_bytes(final.name)
         if final.name in seen:
             raise RuntimeError(f"generated filenames collide: {final.name}")
         seen.add(final.name)
