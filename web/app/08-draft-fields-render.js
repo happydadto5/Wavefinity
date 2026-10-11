@@ -27,7 +27,7 @@ function renderDraftFields() {
   if (one.kind === "scoop") {
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, "depth");
     const shown = explicit ? one.options.depth : state.draftResolvedOptions?.depth ?? 60;
-    html += scoopDepthField("option:depth", shown);
+    html += scoopDepthField("option:depth", fmtBlank(shown));
   }
   if (one.kind === "nest") {
     html += renderNestFields(one);
@@ -72,7 +72,7 @@ function renderDraftFields() {
         const suffix = tooThin ? " (base too thin)" : "";
         return `<option value="${choice.value}" ${Math.abs(depthShown - choice.value) < 1e-6 ? "selected" : ""} ${tooThin ? "disabled" : ""}>${choice.label}${suffix}</option>`;
       }).join("")}
-      ${knownDepth ? "" : `<option value="${depthShown}" selected>${depthShown} mm — Existing</option>`}
+      ${knownDepth ? "" : `<option value="${fmt(depthShown)}" selected>${fmt(depthShown)} mm — Existing</option>`}
       </select></label>`;
     textGroup += `<div class="pair triple">${styleLabel}${letterField}${depthSelectLabel}</div>`;
     if (textLevel === "rim") {
@@ -559,14 +559,14 @@ function renderDraftFields() {
         ? number(opt.bottom_angle, 45)
         : number(state.draftResolvedOptions?.bottom_angle, 20);
       const angleChoices = [10, 20, 30, 40, 45, 50, 60, 70, 80];
-      const legacyAngle = angleChoices.includes(angleVal) ? "" : `<option value="${escapeHtml(angleVal)}" selected>${escapeHtml(angleVal)}° — Existing</option>`;
+      const legacyAngle = angleChoices.includes(angleVal) ? "" : `<option value="${escapeHtml(fmt(angleVal))}" selected>${escapeHtml(fmt(angleVal))}° — Existing</option>`;
       html += `<label>Slope angle<select data-draft="option:bottom_angle">${angleChoices.map(angle =>
         `<option value="${angle}" ${angle === angleVal ? "selected" : ""}>${angle}°</option>`).join("")}${legacyAngle}</select></label>`;
     } else if (scoopConfig) {
       const scoopDepth = Object.prototype.hasOwnProperty.call(scoopConfig, "depth")
         ? number(scoopConfig.depth, 60) : number(state.draftResolvedOptions?.curved_default_depth, 60);
       const depthChoices = [10, 20, 30, 40, 50, 60, 70, 80, 90];
-      const legacyDepth = depthChoices.includes(scoopDepth) ? "" : `<option value="${escapeHtml(scoopDepth)}" selected>${escapeHtml(scoopDepth)}% — Existing</option>`;
+      const legacyDepth = depthChoices.includes(scoopDepth) ? "" : `<option value="${escapeHtml(fmt(scoopDepth))}" selected>${escapeHtml(fmt(scoopDepth))}% — Existing</option>`;
       html += `<label title="Every Divider compartment uses the same scoop depth, starting at its front floor edge.">Scoop depth<select data-divider-scoop-depth>${depthChoices.map(depth =>
         `<option value="${depth}" ${depth === scoopDepth ? "selected" : ""}>${depth}%</option>`).join("")}${legacyDepth}</select></label>`;
     } else {
