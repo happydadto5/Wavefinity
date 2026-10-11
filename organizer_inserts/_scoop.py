@@ -139,10 +139,32 @@ def build_scoop(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trim
     """A full-zone curved retrieval ramp rising up the wall."""
     zone = spec_feature.zone
     settings = scoop_settings(box, spec_feature.options, base_z)
-    return [build_scoop_region(
+    _wj_solids = [build_scoop_region(
         (zone.x0, zone.y0, zone.x1, zone.y1), base_z, settings.height,
         spec_feature.along,
     )]
+    from ._walljoin import (
+        _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+    )
+    from ._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
+    from shapely.geometry import Polygon
+    if spec_feature.options.get(WALL_JOIN_FLAG):
+        # Fuse the scoop into the wall where the ramp meets it at full height.
+        # The ramp reaches full height at the low-Y edge (front) for along="x",
+        # and at the low-X edge (left) for along="y". The sides and low edge
+        # are lower than the tab height, so tabs there would wall off the scoop
+        # or seal the finger opening. Restricting to the full-height side keeps
+        # tabs at full part height.
+        # Keep-clear: empty (the ramp is solid in plan view).
+        _wj_material = _footprint_from_solids(_wj_solids)
+        _wj_keep_clear = Polygon()  # empty
+        _wj_tabs = _join_tabs(
+            box, _wj_material, _wj_keep_clear, JOIN_BAND,
+            sides=_joined_sides(box, _wj_material, "scoop",
+                                spec_feature.along),
+        )
+        _wj_solids.extend(_tab_meshes(_wj_tabs, settings.height, base_z))
+    return _wj_solids
 
 
 register_setting_interactions("scoop", (

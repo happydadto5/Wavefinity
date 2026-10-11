@@ -160,6 +160,28 @@ def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
 
     inner = union(cavity_parts) if len(cavity_parts) > 1 else col
     pocket = difference([outer_solid, inner])
+    from ._walljoin import (
+        _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+    )
+    from ._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
+    if spec_feature.options.get(WALL_JOIN_FLAG):
+        # Fuse the pocket walls into any side wall they reach.
+        # Keep-clear: the actual cavity cutter plan footprint (must stay open
+        # for parts). When rounding > 0 the rounded upper slices and the top
+        # cutter are part of cavity_parts, so the footprint already includes
+        # the wider rounded cavity mouth - a wall-join tab can never intrude
+        # into it. When rounding == 0, cavity_parts is just the core column,
+        # whose footprint is exactly the inner_poly footprint as before.
+        _wj_material = _footprint_from_solids([pocket])
+        _wj_keep_clear = _footprint_from_solids(cavity_parts)
+        _wj_tabs = _join_tabs(
+            box, _wj_material, _wj_keep_clear, JOIN_BAND,
+            sides=_joined_sides(box, _wj_material, "pocket",
+                                spec_feature.along),
+        )
+        _wj_result = [pocket]
+        _wj_result.extend(_tab_meshes(_wj_tabs, height, base_z))
+        return _wj_result
     return [pocket]
 
 

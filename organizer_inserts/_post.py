@@ -96,6 +96,22 @@ def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             )
             post.apply_translation((centre_x + offset_x, centre_y + offset_y, base_z))
             posts.append(post)
+    from ._walljoin import (
+        _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+    )
+    from ._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
+    from shapely.geometry import Polygon
+    if spec_feature.options.get(WALL_JOIN_FLAG):
+        # Fuse the posts into any side wall they reach.
+        # Keep-clear: empty (posts are solid).
+        _wj_material = _footprint_from_solids(posts)
+        _wj_keep_clear = Polygon()  # empty
+        _wj_tabs = _join_tabs(
+            box, _wj_material, _wj_keep_clear, JOIN_BAND,
+            sides=_joined_sides(box, _wj_material, "post",
+                                spec_feature.along),
+        )
+        posts.extend(_tab_meshes(_wj_tabs, height, base_z))
     return posts
 
 

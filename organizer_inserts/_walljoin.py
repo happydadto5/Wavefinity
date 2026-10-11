@@ -48,6 +48,74 @@ WEB_COINCIDENCE_TOL = 2e-3
 WEB_WIDTH_NUDGES = (0.0, 0.007, -0.007, 0.019, -0.019, 0.041, -0.041)
 
 
+def _footprint_from_solids(solids) -> "Polygon":
+    """Exact plan-view footprint of trimesh solids: union of projected faces.
+
+    Every triangle of every solid is projected to XY and the projected
+    triangles are unioned. For a closed solid the projection of its surface
+    is the projection of its volume, so this is the exact plan footprint -
+    concavities included. (A convex hull would claim XY material where none
+    exists and invent wall contact.) Degenerate projections (vertical faces
+    collapsing to lines) are skipped via a shoelace-area epsilon; dropping
+    a zero-area projection loses nothing because neighbouring faces cover
+    the same region.
+    """
+    from shapely import polygons
+    from shapely.ops import unary_union
+    batches = []
+    for s in solids:
+        tris = np.asarray(s.triangles, dtype=float)
+        if tris.shape[0] == 0:
+            continue
+        xy = tris[:, :, :2]
+        x0, y0 = xy[:, 0, 0], xy[:, 0, 1]
+        x1, y1 = xy[:, 1, 0], xy[:, 1, 1]
+        x2, y2 = xy[:, 2, 0], xy[:, 2, 1]
+        twice_area = abs(
+            x0 * (y1 - y2) + x1 * (y2 - y0) + x2 * (y0 - y1))
+        kept = xy[twice_area >= 2e-12]
+        if len(kept):
+            batches.append(polygons(kept))
+    if not batches:
+        return Polygon()
+    return unary_union(np.concatenate(batches))
+
+
+def _joined_sides(box, material, kind, along, hug=False) -> tuple:
+    """Side names whose wall the plan-view ``material`` actually reaches.
+
+    Single source of truth for the kind-specific side restrictions, shared
+    by tab generation (this fixlet) and the layout reach allowance (Fused
+    Walls 4) so the two can never disagree. A side counts as reached when
+    the material's gap to that wall is within reach (``HUG_REACH`` in hug
+    mode, ``JOIN_TOUCH`` otherwise) - the same test ``_join_tabs`` uses
+    before generating a tab. Scoops only fuse on their full-height side
+    ("front" for along="x", "left" for along="y"); steps only on their high
+    end ("back" for along="x", "right" for along="y"); every other kind may
+    join any side it reaches. Empty material reaches nothing.
+    """
+    reachable = HUG_REACH if hug else JOIN_TOUCH
+    if material.is_empty:
+        return ()
+    whole = Zone.whole(box)
+    x0, y0, x1, y1 = material.bounds
+    gaps = {
+        "right": whole.x1 - x1,
+        "left": x0 - whole.x0,
+        "back": whole.y1 - y1,
+        "front": y0 - whole.y0,
+    }
+    if kind == "scoop":
+        allowed = ("front",) if along == "x" else ("left",)
+    elif kind == "steps":
+        allowed = ("back",) if along == "x" else ("right",)
+    else:
+        allowed = ("right", "left", "back", "front")
+    return tuple(
+        side for side in allowed if gaps[side] <= reachable + 1e-9
+    )
+
+
 def _ring_points(shape) -> np.ndarray:
     points = []
     for piece in _polygons(shape):

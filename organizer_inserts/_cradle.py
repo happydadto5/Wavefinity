@@ -292,7 +292,34 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     # Neighbours whose blocks touch or overlap (spacing up to one side wall)
     # come out as one continuous body; wider spacing splits them apart.
     if count > 1 and not alternating and spacing <= side_wall + 1e-9:
-        return [_body(centre_across, used, seats, offset_shift)]
+        _wj_solids = [_body(centre_across, used, seats, offset_shift)]
+        from ._walljoin import (
+            _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+        )
+        from ._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
+        from shapely.geometry import box as shapely_box
+        from shapely.ops import unary_union
+        if spec_feature.options.get(WALL_JOIN_FLAG):
+            # Fuse the continuous cradle body into any side wall it reaches.
+            # Keep-clear: the plan-view channel mouths (same as Change 3).
+            # (alternating is False here, so shift is offset_shift for all.)
+            _wj_material = _footprint_from_solids(_wj_solids)
+            _wj_channels = []
+            for seat in seats:
+                _cx0 = centre_along + offset_shift - (length + 2.0) / 2.0
+                _cx1 = centre_along + offset_shift + (length + 2.0) / 2.0
+                _cy0, _cy1 = seat - radius, seat + radius
+                if along == "x":
+                    _wj_channels.append(shapely_box(_cx0, _cy0, _cx1, _cy1))
+                else:
+                    _wj_channels.append(shapely_box(_cy0, _cx0, _cy1, _cx1))
+            _wj_keep_clear = unary_union(_wj_channels)
+            _wj_tabs = _join_tabs(
+                box, _wj_material, _wj_keep_clear, JOIN_BAND,
+                sides=_joined_sides(box, _wj_material, "cradle", along),
+            )
+            _wj_solids.extend(_tab_meshes(_wj_tabs, trough_height, base_z))
+        return _wj_solids
 
     solids: list[trimesh.Trimesh] = []
     for index, seat in enumerate(seats):
@@ -301,6 +328,40 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
             if alternating else offset_shift
         )
         solids.append(_body(seat, body, [seat], shift))
+    from ._walljoin import (
+        _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+    )
+    from ._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
+    from shapely.geometry import box as shapely_box
+    from shapely.ops import unary_union
+    if spec_feature.options.get(WALL_JOIN_FLAG):
+        # Fuse the cradle rails into any side wall they reach.
+        # Keep-clear: the plan-view channel mouths. Each trough's half-cylinder
+        # channel (radius, length+2.0) is open through the block's top and ends;
+        # a tab at the block edge would otherwise plug the channel mouth and
+        # stop the tool seating. The channel rectangles are built from the
+        # seat plan (seat, shift, centre_along, length, radius, along).
+        # NOTE: the continuous-body early-return path above also gets tabs (Change 3b).
+        _wj_material = _footprint_from_solids(solids)
+        _wj_channels = []
+        for index, seat in enumerate(seats):
+            shift = (
+                (alternate_shift if index % 2 else -alternate_shift)
+                if alternating else offset_shift
+            )
+            _cx0 = centre_along + shift - (length + 2.0) / 2.0
+            _cx1 = centre_along + shift + (length + 2.0) / 2.0
+            _cy0, _cy1 = seat - radius, seat + radius
+            if along == "x":
+                _wj_channels.append(shapely_box(_cx0, _cy0, _cx1, _cy1))
+            else:
+                _wj_channels.append(shapely_box(_cy0, _cx0, _cy1, _cx1))
+        _wj_keep_clear = unary_union(_wj_channels)
+        _wj_tabs = _join_tabs(
+            box, _wj_material, _wj_keep_clear, JOIN_BAND,
+            sides=_joined_sides(box, _wj_material, "cradle", along),
+        )
+        solids.extend(_tab_meshes(_wj_tabs, trough_height, base_z))
     return solids
 
 

@@ -177,7 +177,43 @@ def build_divider(
             box, spec_feature, base_z, options, grid_x, grid_y,
             full_span_cavity=full_span_cavity,
         )
-        solids.extend(_divider_scoops(box, spec_feature, base_z))
+        _wj_scoop_solids = _divider_scoops(box, spec_feature, base_z)
+        from .._walljoin import (
+            _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+        )
+        from .._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
+        if spec_feature.options.get(WALL_JOIN_FLAG):
+            # Fuse grid divider walls into any side wall they reach.
+            # Full-span grids hug the wavy wall; non-full-span grid walls
+            # ending at zone edges get tabs like standard dividers.
+            # Keep-clear: empty (dividers are solid walls).
+            # The divider scoops are ramps: restrict them to the full-height
+            # side only (front; _divider_scoops hardcodes along="x"), like
+            # standalone scoops (Change 6). They are tabulated separately so
+            # the unrestricted wall tabs don't wall off the scoop sides, and
+            # meshed at the scoop's own height (not the divider's).
+            _wj_keep_clear = Polygon()  # empty
+            _wj_material = _footprint_from_solids(solids)
+            _wj_wall_tabs = _join_tabs(
+                box, _wj_material, _wj_keep_clear, JOIN_BAND,
+                sides=_joined_sides(box, _wj_material, "divider",
+                                    spec_feature.along),
+            )
+            solids.extend(_tab_meshes(
+                _wj_wall_tabs, options["height"], base_z))
+            if _wj_scoop_solids:
+                _wj_scoop_material = _footprint_from_solids(_wj_scoop_solids)
+                _wj_scoop_tabs = _join_tabs(
+                    box, _wj_scoop_material, _wj_keep_clear, JOIN_BAND,
+                    sides=_joined_sides(box, _wj_scoop_material,
+                                        "scoop", "x"),
+                )
+                _wj_scoop_height = scoop_settings(
+                    box, spec_feature.options.get("scoop"), base_z,
+                    allow_legacy_height=False).height
+                solids.extend(_tab_meshes(
+                    _wj_scoop_tabs, _wj_scoop_height, base_z))
+        solids.extend(_wj_scoop_solids)
         return solids
     thickness = options["thickness"]
     height = options["height"]
@@ -239,7 +275,40 @@ def build_divider(
     for _text_label, text_solid, raised in divider_division_texts(box, spec_feature, base_z):
         if raised:
             solids.append(text_solid)
-    solids.extend(_divider_scoops(box, spec_feature, base_z))
+    _wj_scoop_solids = _divider_scoops(box, spec_feature, base_z)
+    from .._walljoin import (
+        _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+    )
+    from .._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
+    if spec_feature.options.get(WALL_JOIN_FLAG):
+        # Fuse the divider walls into any side wall they reach.
+        # Material: union of the built divider solids' plan-view footprints
+        # (walls, sloped bottoms, raised division labels - not the scoops).
+        # Keep-clear: empty (dividers are solid walls).
+        # The divider scoops are ramps: tabulated front-only at their own
+        # height (same as the grid path, Change 2b), so a full-height wall
+        # tab can never wall off a scoop opening. Scoop solids are appended
+        # after the tab block so they are never tabulated as walls.
+        # NOTE: the grid-divider early-return path above also gets tabs (Change 2b).
+        _wj_keep_clear = Polygon()  # empty
+        _wj_material = _footprint_from_solids(solids)
+        _wj_wall_tabs = _join_tabs(
+            box, _wj_material, _wj_keep_clear, JOIN_BAND,
+            sides=_joined_sides(box, _wj_material, "divider", along),
+        )
+        solids.extend(_tab_meshes(_wj_wall_tabs, height, base_z))
+        if _wj_scoop_solids:
+            _wj_scoop_material = _footprint_from_solids(_wj_scoop_solids)
+            _wj_scoop_tabs = _join_tabs(
+                box, _wj_scoop_material, _wj_keep_clear, JOIN_BAND,
+                sides=_joined_sides(box, _wj_scoop_material, "scoop", "x"),
+            )
+            _wj_scoop_height = scoop_settings(
+                box, spec_feature.options.get("scoop"), base_z,
+                allow_legacy_height=False).height
+            solids.extend(_tab_meshes(
+                _wj_scoop_tabs, _wj_scoop_height, base_z))
+    solids.extend(_wj_scoop_solids)
     return solids
 
 

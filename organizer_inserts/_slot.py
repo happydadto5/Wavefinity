@@ -98,7 +98,28 @@ def build_slot(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         cutter.apply_transform(trimesh.transformations.rotation_matrix(rad, (1, 0, 0) if along == "x" else (0, 1, 0)))
         cutter.apply_translation((centre_x, c_cross + cut_shift, cut_mid_z) if along == "x" else (c_cross + cut_shift, centre_y, cut_mid_z))
         cutters.append(cutter)
-    return [difference([block, union(cutters) if len(cutters) > 1 else cutters[0]])]
+    _wj_solids = [difference([block, union(cutters) if len(cutters) > 1 else cutters[0]])]
+    from ._walljoin import (
+        _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+    )
+    from ._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
+    if spec_feature.options.get(WALL_JOIN_FLAG):
+        # Fuse the slot rack into any side wall it reaches.
+        # Keep-clear: the plan-view slot openings. Each cutter (tilted slot
+        # void) is projected exactly - the union of its projected face
+        # triangles, which is the true shadow of the tilted void, lean angle
+        # included - so tabs are differenced against the real openings and
+        # cannot bridge the outer slot mouths. The slot mouths sit `wall`
+        # (min 0.1 mm) from the block edge, so an empty keep-clear would let
+        # the 1.2 mm tab clip them when wall < 1.2.
+        _wj_material = _footprint_from_solids(_wj_solids)
+        _wj_keep_clear = _footprint_from_solids(cutters)
+        _wj_tabs = _join_tabs(
+            box, _wj_material, _wj_keep_clear, JOIN_BAND,
+            sides=_joined_sides(box, _wj_material, "slot", along),
+        )
+        _wj_solids.extend(_tab_meshes(_wj_tabs, height, base_z))
+    return _wj_solids
 
 
 register_setting_interactions("slot", (

@@ -84,4 +84,24 @@ def build_steps(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trim
         solid = _extrude_xz_profile(poly, width)
         solid.apply_translation((0.0, zone.centre[1], 0.0))
 
-    return [solid]
+    _wj_solids = [solid]
+    from ._walljoin import (
+        _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+    )
+    from ._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
+    if spec_feature.options.get(WALL_JOIN_FLAG):
+        # Fuse the steps into the wall at their high end only. The staircase
+        # rises from the low end (at base_z) to the high end (at full height);
+        # a full-height tab at the low end would bury the low steps. The high
+        # end meets the wall at full height, so the tab matches the part.
+        # along="x": steps rise along y from front (low) to back (high).
+        # along="y": steps rise along x from left (low) to right (high).
+        # Keep-clear: empty (treads are horizontal; tabs are vertical at the wall).
+        _wj_material = _footprint_from_solids(_wj_solids)
+        _wj_keep_clear = Polygon()  # empty
+        _wj_tabs = _join_tabs(
+            box, _wj_material, _wj_keep_clear, JOIN_BAND,
+            sides=_joined_sides(box, _wj_material, "steps", along),
+        )
+        _wj_solids.extend(_tab_meshes(_wj_tabs, height, base_z))
+    return _wj_solids
