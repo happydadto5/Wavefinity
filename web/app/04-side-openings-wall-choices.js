@@ -98,7 +98,7 @@ function modifierConflicts(design) {
     if (openSides.has(rimSide)) conflicts.push({
       key: `side-opening:rim-label:${rimSide}`,
       message: `The ${MODIFIER_SIDE_LABEL[rimSide]} wall already has a Side Opening. ` +
-        "Put the rim Text on another wall or remove that Side Opening.",
+        "Put the rim Label on another wall or remove that Side Opening.",
     });
   }
 
@@ -237,7 +237,7 @@ function sideOpeningWallBlockedReason(side, design = state.design) {
     return "Inside Grip is on this wall";
   if ((box.edge_mount?.label_enabled || box.edge_mount?.holes_enabled) &&
       box.edge_mount.side === side) return "Edge Mount is on this wall";
-  if (rimLabelSidesForDesign(design).has(side)) return "rim Text is on this wall";
+  if (rimLabelSidesForDesign(design).has(side)) return "rim Label is on this wall";
   return "";
 }
 
@@ -609,7 +609,7 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
   if (select.dataset.choices !== signature) {
     select.replaceChildren();
     if (!isB4B && !verticalStack) {
-      select.add(new Option("Standard", "standard"));
+      select.add(new Option(`${number(ordinaryRules.default_mm ?? 0.8).toFixed(1)} mm — Default`, "standard"));
     }
     select.append(...numericChoices.map(choice => new Option(
       `${number(choice.value).toFixed(1)} mm — ${choice.label}`,

@@ -199,7 +199,7 @@ An object's own length, its insertion depth, and the bin's height are three diff
 
 ### Bore angle terminology
 
-The generated prompt's `options.angle` is the canonical, persisted value: degrees of lean **away from vertical**, 0 = upright, up to a current maximum around 70. The Wavefinity Designer itself shows a different, human-facing **"Bore angle"** field running 90 (upright) down to 20 (steepest lean), where `displayed_bore_angle = 90 - options.angle`. Always return the canonical `options.angle` value, not the displayed one. When leaning a Bore with no object-specific reason for a direction, prefer `options.angle_towards` "back", or the side opposite the design's one allowed rim Text's `rim_side` if the design has one.
+The generated prompt's `options.angle` is the canonical, persisted value: degrees of lean **away from vertical**, 0 = upright, up to a current maximum around 70. The Wavefinity Designer itself shows a different, human-facing **"Bore angle"** field running 90 (upright) down to 20 (steepest lean), where `displayed_bore_angle = 90 - options.angle`. Always return the canonical `options.angle` value, not the displayed one. When leaning a Bore with no object-specific reason for a direction, prefer `options.angle_towards` "back", or the side opposite the design's one allowed rim Label's `rim_side` if the design has one.
 
 ## Post
 
@@ -264,11 +264,12 @@ Typical control:
 
 Wavefinity enforces compatibility with nearby shell features.
 
-## Text
+## Label
 
-Centered lettering on the base or rim.
+Centered lettering on the base or rim. (User-facing name; the internal feature
+kind remains `text` and the words option key remains `options.text`.)
 
-Current Text Types:
+Current Label Types:
 
 - **On base — Inlaid**
 - **On base — Raised**
@@ -277,7 +278,7 @@ Current Text Types:
 
 Typical controls:
 
-- text;
+- label name;
 - letter height;
 - inlay depth / raised height;
 - quarter-turn rotation;
@@ -285,9 +286,9 @@ Typical controls:
 
 The generated prompt supplies the exact legal relief values.
 
-Text is automatically centered. Internal transport/editor fields that are not user choices must not be invented.
+Lettering is automatically centered. Internal transport/editor fields that are not user choices must not be invented.
 
-**A design may contain at most one rim Text feature in total, not one per rim side.** A returned design with more than one rim Text is a semantic-answer defect and is rejected before it can be applied, the same as any other repairable defect.
+**A design may contain at most one rim Label in total, not one per rim side.** A returned design with more than one rim Label is a semantic-answer defect and is rejected before it can be applied, the same as any other repairable defect.
 
 ---
 
@@ -426,7 +427,7 @@ Typical screw-mount controls:
 - distance from top;
 - automatic/custom spacing.
 
-Wavefinity checks Edge Mount against lids, direct stacking, rim Text, Side Openings, Inside Grip, and other incompatible wall use.
+Wavefinity checks Edge Mount against lids, direct stacking, rim Label, Side Openings, Inside Grip, and other incompatible wall use.
 
 ---
 
@@ -434,7 +435,7 @@ Wavefinity checks Edge Mount against lids, direct stacking, rim Text, Side Openi
 
 Wavefinity has multiple distinct label systems. Do not merge them into one generic label concept.
 
-## Text feature
+## Label feature
 
 - Ordinary bin base or rim.
 - Inlaid or Raised.
@@ -536,9 +537,9 @@ The running Wavefinity validator is authoritative. Important classes of conflict
 
 - Removable insert vs shell features that must be built into the bin wall.
 - Side Openings vs Inside Grip.
-- Side Openings vs rim Text.
+- Side Openings vs rim Label.
 - Side Openings vs Edge Mount.
-- Edge Mount vs rim Text on the same wall.
+- Edge Mount vs rim Label on the same wall.
 - Separate Edge Mount label vs lid.
 - Separate Edge Mount label vs direct stacking.
 - Edge Mount screw access vs Inside Grip.

@@ -120,7 +120,7 @@ def _ai_generic_fields(part: dict[str, Any], starter: dict[str, Any],
     """
     caps = set(part["capabilities"]) - _AI_GENERIC_FIELD_EXCLUSIONS.get(part["kind"], set())
     kind = part["kind"]
-    zone_note = ("Text's zone is derived from its lettering: copy the example's zone and do not tune it."
+    zone_note = ("Label's zone is derived from its lettering: copy the example's zone and do not tune it."
                  if kind == "text" else
                  "Width is x1-x0 and depth is y1-y0; make it large enough for the count and item size.")
     fields: dict[str, Any] = {
@@ -352,7 +352,7 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "- Keep every field listed in space_controlled_fields exactly as it is in the current design.",
         cap_line,
         "- design.part_name must be a short, descriptive, non-blank name (1-80 characters) for what the bin holds - for example \"Lipstick\" or \"Hex Drivers\", never a generic \"Bin\" or dimensions-only text. Existing Inventory names, when supplied below, are advisory: avoid an obvious duplicate, but Wavefinity enforces final uniqueness itself, so do not invent your own numbering suffix.",
-        "- A design may contain at most one rim Text feature in total, not one per rim side.",
+        "- A design may contain at most one rim Label in total, not one per rim side.",
         "- Bore: when Base - Straight Walls vs Base - Wavy Walls, or Straight Walls Only vs Wavy Walls Only, are otherwise equally suitable, prefer the wavy one. Choose the correct structural family (Base vs Walls Only) first; never switch families merely to get \"wavy\".",
         "- Bore: an object's length, its insertion depth (Base styles: options.depth; Walls Only: options.walls_depth), and the bin's own height are three different numbers - do not set the insertion depth equal to the object's full length just because that is the length you were given. For an upright hand-retrieved object, plan for roughly 30 mm of it to remain grippable above the bin rim; in a capped Space (see above) this preference never overrides the hard cap.",
         "- Bore angle: the Designer's user-facing \"Bore angle\" runs 90 (upright) down to 20 (steepest lean). This JSON's canonical options.angle is the same lean measured the other way: 0 (upright) up to 70 (steepest) - displayed_bore_angle = 90 - options.angle. When you lean a Bore with no object-specific reason for a direction, prefer options.angle_towards \"back\", or the side opposite the design's one rim Text's rim_side if the design has one.",
@@ -472,7 +472,7 @@ def _ai_semantic_violation(raw: Any) -> str | None:
             rim_text_count += 1
             # Fix 078: a design may contain at most one rim Text total.
             if rim_text_count > 1:
-                return "a design may contain at most one rim Text; remove the extra rim Text"
+                return "a design may contain at most one rim Label; remove the extra rim Label"
         violation = _ai_item_profile_violation(kind, feature.get("item"))
         if violation:
             return violation

@@ -505,6 +505,7 @@ input[type="number"]::-webkit-inner-spin-button {
   line-height: 1.4;
 }
 .unit { float: right; color: var(--muted); font-weight: 450; }
+.letter-height-field .unit { float: none; margin-left: 4px; }
 .scoop-height-field .unit { float: none; margin-left: 4px; }
 .slot-rack-fields .unit { float: none; margin-left: 4px; }
 .post-unit-fields .unit { float: none; margin-left: 4px; }

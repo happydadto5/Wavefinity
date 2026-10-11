@@ -279,7 +279,7 @@ function updateDraftFromFields(event) {
       syncForm();
       renderDraftFields();
       updateGenerateAvailability();
-      toast(`Only one Text can use the ${destination === "base" ? "base" : "same rim side"}. Change Style or remove the other Text.`, true, 6000);
+      toast(`Only one Label can use the ${destination === "base" ? "base" : "same rim side"}. Change Style or remove the other Label.`, true, 6000);
       return;
     }
     syncRimLabelFromFeatures();
@@ -563,7 +563,7 @@ async function refreshDraft() {
   // lettering in the preview. The existing valid bin keeps showing as-is.
   if (isBlankTextDraft(state.draft)) {
     ++state.draftRequest;
-    $("#draft-status").textContent = "Type the words this Text should say.";
+    $("#draft-status").textContent = "Type the words this Label should say.";
     $("#draft-status").classList.remove("error");
     state.fitError = false;
     return await refreshPreview();
@@ -607,7 +607,7 @@ async function refreshDraft() {
     const textCap = Number(result.resolved_options?.cap_height ?? result.feature?.options?.cap_height);
     if (!(await allowSmallTextEdit(textCap, request, draft))) {
       if (request !== state.draftRequest) return;
-      $("#draft-status").textContent = "Text needs to be smaller than 5 mm to fit here.";
+      $("#draft-status").textContent = "Label needs to be smaller than 5 mm to fit here.";
       $("#draft-status").classList.remove("error");
       return await refreshPreview();
     }
@@ -827,12 +827,12 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
       design: state.design, feature: draftAtCheck, index,
     });
     if (request !== state.draftRequest || state.draft !== draftAtCheck) {
-      throw new Error("The Text changed while it was being saved. Try again.");
+      throw new Error("The Label changed while it was being saved. Try again.");
     }
     const cap = Number(checked.resolved_options?.cap_height ?? checked.feature?.options?.cap_height);
     await allowSmallTextEdit(cap, request, draftAtCheck);
     if (request !== state.draftRequest || state.draft !== draftAtCheck) {
-      throw new Error("The Text changed while it was being saved. Try again.");
+      throw new Error("The Label changed while it was being saved. Try again.");
     }
     if ((state.draft.options.cap_height == null || state.draft.options.cap_height === "") &&
         checked.feature?.options?.cap_height != null) {

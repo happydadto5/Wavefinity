@@ -838,7 +838,7 @@ function renderLayoutText(context, feature, toCanvas, scale, isDraft = false) {
     context.font = 'italic 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillText("Text", centerCanvas[0], centerCanvas[1]);
+    context.fillText("Label", centerCanvas[0], centerCanvas[1]);
     context.restore();
     return;
   }

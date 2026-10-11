@@ -133,7 +133,7 @@ def summarize_interior_parts(layout: Layout, scoop: bool = False) -> str:
             txt = str(opts.get("text", "")).strip()
             if opts.get("level") == "rim":
                 continue  # Shell lettering, not part of the removable insert.
-            name = f'Text ("{txt}")' if txt else "Text"
+            name = f'Label ("{txt}")' if txt else "Label"
         else:
             name = kind.capitalize()
         counts[name] = counts.get(name, 0) + 1
@@ -1039,7 +1039,7 @@ def design_from_dict(
             legacy_text = any(raw.get("kind") == "text"
                               and not raw.get("options", {}).get("text_v2")
                               for raw in data.get("layout", {}).get("features", ()))
-            if not (str(error).startswith("Only one Text is allowed")
+            if not (str(error).startswith("Only one Label is allowed")
                     or (legacy_text and "will not fit the bin" in str(error))):
                 raise
     return (box, layout, label, str(data.get("part_name", "")), location, scoop)

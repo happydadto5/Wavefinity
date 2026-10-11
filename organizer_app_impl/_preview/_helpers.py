@@ -471,7 +471,7 @@ def validate_customization_clearance(
             handle_conflict = inside_handle_conflict(box, one, base_z, mode)
             if handle_conflict is not None:
                 raise ValueError(
-                    f"rim Text on {one.options.get('rim_side', 'back')} overlaps the "
+                    f"rim Label on {one.options.get('rim_side', 'back')} overlaps the "
                     f"{handle_conflict}; choose another rim side or move the handle"
                 )
             continue
@@ -517,6 +517,6 @@ def validate_rim_text_divider_clearance(box: BoxSpec, features: Iterable[Feature
                 z = a[0][2] < b[1][2] and b[0][2] < a[1][2]
                 if xy and z:
                     raise ValueError(
-                        "rim Text overlaps a Divider rim label shelf; move the Text "
+                        "rim Label overlaps a Divider rim label shelf; move the Label "
                         "to another rim side or turn off one label system"
                     )

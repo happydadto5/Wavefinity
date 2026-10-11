@@ -36,7 +36,7 @@ function renderDraftFields() {
     const textLevel = one.options?.level === "rim" ? "rim" : "base";
     const textType = `${textLevel}_${one.options?.raised === true ? "raised" : "inlaid"}`;
     const textInput = `<input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">`;
-    let textGroup = `<label>Text${textInput}</label>`;
+    let textGroup = `<label>Label name${textInput}</label>`;
     // At most one rim Text is allowed per bin (Fix 078). Another Text's At-rim
     // choices are disabled once one rim Text already exists elsewhere. Shared
     // conditional-state explanation rule: the disabled choice names its
@@ -59,7 +59,7 @@ function renderDraftFields() {
     const depthTip = one.options?.raised === true
       ? "How far the letters project above their receiving surface."
       : "Letters are recessed into the surface by this depth.";
-    const letterField = field("Letter height", "option:cap_height", String(Math.floor(number(capShown, 15))), { unit: "mm", step: "1" });
+    const letterField = field("Letter height", "option:cap_height", String(Math.floor(number(capShown, 15))), { unit: "mm", step: "1" }).replace('<label class="', '<label class="letter-height-field ');
     const depthChoices = textDepthChoices(info);
     const minimumBacking = number(textBackingRules().min_backing_mm, NaN);
     const receiving = textLevel === "base" ? baseTextReceivingThickness() : NaN;
@@ -98,7 +98,7 @@ function renderDraftFields() {
     const widthLabel = isPocket ? "Inside width" : one.kind === "slot" ? "Rack width" : "Width";
     const depthLabel = isPocket || isBore ? (isPocket ? "Inside length" : "Length")
       : one.kind === "slot" ? "Rack length"
-      : one.kind === "text" ? "Text box depth"
+      : one.kind === "text" ? "Label box depth"
       : "Depth";
     if (isBore) {
       const draftProfile = one.item?.profile || "round";

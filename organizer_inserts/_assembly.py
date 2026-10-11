@@ -317,7 +317,7 @@ def resolve_text_features(
             if fitted.options.get("level") == "rim" and text_of(fitted):
                 cap = math.floor(rim_text_geometry(box, fitted)[2])
                 if cap <= 0:
-                    raise ValueError("rim Text has no room for a printable whole-millimetre letter height")
+                    raise ValueError("rim Label has no room for a printable whole-millimetre letter height")
                 fitted = replace(fitted, options={**fitted.options, "cap_height": float(cap)})
             resolved[index] = fitted
             continue
@@ -329,7 +329,7 @@ def resolve_text_features(
             if automatic and text_of(fitted):
                 cap = math.floor(rim_text_geometry(box, fitted)[2])
                 if cap <= 0:
-                    raise ValueError("rim Text has no room for a printable whole-millimetre letter height")
+                    raise ValueError("rim Label has no room for a printable whole-millimetre letter height")
                 fitted = replace(fitted, options={**fitted.options, "cap_height": float(cap)})
             resolved[index] = fitted
             continue

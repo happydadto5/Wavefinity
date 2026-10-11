@@ -564,7 +564,7 @@ Typing directly into **Bore angle** (for example replacing 20 with 90) works
 normally and is never interrupted mid-keystroke; the dependent **Angle
 towards** control only updates once a typed value is committed (Enter, Tab,
 or clicking away). A first lean with no direction chosen yet defaults to
-**Back**, or the side opposite the bin's one rim Text if it has one; picking
+**Back**, or the side opposite the bin's one rim Label if it has one; picking
 a direction by hand always wins after that. If a committed angle or
 direction change would require a bigger bin, Wavefinity asks
 **"Angled option will require a bigger bin. OK to size bin?"** before
@@ -667,24 +667,24 @@ Compatibility logic protects nearby shell features such as front Inside Grips.
 
 ---
 
-## 6.9 Text
+## 6.9 Label
 
 **Purpose:** Add centered lettering to the bin base or rim.
 
-A new Text always starts blank: no placeholder word is ever pre-filled, and
+A new Label always starts blank: no placeholder word is ever pre-filled, and
 opening the editor with nothing typed yet creates no Inventory row and shows
 no error — it becomes a real part of the design only once real lettering is
-entered. A brand-new Text also always starts **On base — Inlaid** at **0°**,
-regardless of what style or rotation the last Text in this Space used.
+entered. A brand-new Label also always starts **On base — Inlaid** at **0°**,
+regardless of what style or rotation the last Label in this Space used.
 
-### Text editor fields
+### Label editor fields
 
-- **Words** — the lettering itself;
+- **Label name** — the lettering itself;
 - **Style** — one of the four choices below;
 - **Letter height** (mm, whole numbers);
 - **Inlay depth** / **Raised height** (label follows Style);
-- **Rotate** — a dropdown of **0°, 90°, 180°, 270°** (base Text only; 0° is
-  straight across/unrotated); rim Text has no Rotate control since its
+- **Rotate** — a dropdown of **0°, 90°, 180°, 270°** (base Label only; 0° is
+  straight across/unrotated); rim Label has no Rotate control since its
   orientation always follows its rim side.
 
 ### Style
@@ -694,14 +694,14 @@ regardless of what style or rotation the last Text in this Space used.
 - **At rim — Inlaid**
 - **At rim — Raised**
 
-### Text rules
+### Label rules
 
-- Text is centered automatically.
-- One On-base Text can be used per bin.
-- A bin may contain **at most one rim Text total** (Fix 078), not one per rim side. Once a rim Text exists, every other Text's At-rim choices are unavailable; the existing rim Text can still change its own side. A legacy design saved with more than one rim Text remains loadable so it can be corrected, but Preview/Generate reports it invalid until only one remains. Text no longer offers its own Duplicate action (Fix 082); Photo Nest's separate Duplicate is unaffected.
+- Lettering is centered automatically.
+- One On-base Label can be used per bin.
+- A bin may contain **at most one rim Label total** (Fix 078), not one per rim side. Once a rim Label exists, every other Label's At-rim choices are unavailable; the existing rim Label can still change its own side. A legacy design saved with more than one rim Label remains loadable so it can be corrected, but Preview/Generate reports it invalid until only one remains. Label no longer offers its own Duplicate action (Fix 082); Photo Nest's separate Duplicate is unaffected.
 - Current relief choices are 0.2, 0.4, 0.6, and 0.8 mm.
-- Inlaid text is represented in the preview without changing the visible exterior envelope incorrectly.
-- **Letter height auto-fits down to 5 mm without asking.** Below 5 mm is a recommendation, not a hard limit (Fix 082): if the text only fits smaller than that, a one-time-per-Space dialog reads exactly "Text below 5mm isn't recommended" with an OK to proceed; once acknowledged, that Space does not ask again, and the smaller size stays valid through Preview, Save/Reopen and Generate/Export. Outside a typed Space, OK permits only that one action.
+- Inlaid lettering is represented in the preview without changing the visible exterior envelope incorrectly.
+- **Letter height auto-fits down to 5 mm without asking.** Below 5 mm is a recommendation, not a hard limit (Fix 082): if the text only fits smaller than that, a one-time-per-Space dialog reads "Label height will be adjusted to smaller than the recommended 5 mm to accommodate your text." with an OK to proceed; once acknowledged, that Space does not ask again, and the smaller size stays valid through Preview, Save/Reopen and Generate/Export. Outside a typed Space, OK permits only that one action.
 
 ---
 
@@ -850,7 +850,7 @@ Multiple selected walls can receive openings where legal.
 Wavefinity prevents Side Openings from occupying wall regions needed by incompatible features such as:
 
 - Inside Grip;
-- rim Text;
+- rim Label;
 - Edge Mount;
 - lid/stack bridges.
 
@@ -911,7 +911,7 @@ Label thickness and inlay/text depth are never silently clamped or reduced: an o
 
 Wavefinity checks conflicts between Edge Mount and:
 
-- rim labels/Text;
+- rim labels/Label;
 - Separate Edge Mount labels and lids;
 - Separate Edge Mount labels and direct stacking;
 - Side Openings;
@@ -926,7 +926,7 @@ Wavefinity has several distinct label systems. They should remain separate in th
 
 | Label system | Where it appears | Main choices |
 | --- | --- | --- |
-| **Text feature** | Ordinary bin base or rim | Base/Rim, Inlaid/Raised, depth/height, letter height, rotation, rim side |
+| **Label** | Ordinary bin base or rim | Base/Rim, Inlaid/Raised, depth/height, letter height, rotation, rim side |
 | **Divider labels** | Individual Divider compartments | No label / On base / Rim level; per-compartment text |
 | **Lid label** | Ordinary-bin lid | On/Off, text, horizontal/vertical, Inlaid/Raised, relief |
 | **Edge Mount label** | Outside edge of ordinary bin | None / Separate Part / Integrated, text, flip, length, depth/style, projection/thickness |
@@ -949,8 +949,8 @@ Because multiple label systems can occupy the same wall/rim, Wavefinity explicit
 
 Examples include:
 
-- rim Text vs Side Opening;
-- rim Text vs Separate Edge Mount label on the same side;
+- rim Label vs Side Opening;
+- rim Label vs Separate Edge Mount label on the same side;
 - Separate Edge Mount label vs lid;
 - Separate Edge Mount label vs direct stacking.
 
@@ -1195,7 +1195,7 @@ The prompt contains:
 - the user's object description;
 - current bin context;
 - current typed-Space constraints when applicable;
-- an authoritative capability manifest naming, for every current palette-visible part, the exact current Designer control for each field the AI may set (not merely that a capability exists) -- footprint zone, quantity (and what Auto means), run direction, alternate ends, and the stored item's shape/length/diameter/fit (Bore offers all six shapes including the fixed hex-bit sizes; Cradle is always round) -- with legacy/derived fields (for example Bore's older orientation field, Divider's older single-axis quantity, Post's engine-only grid override, Cradle's derived floor gap/rib thickness, Text's unused font field) explained as structure to preserve, never offered as a second control for the same behavior;
+- an authoritative capability manifest naming, for every current palette-visible part, the exact current Designer control for each field the AI may set (not merely that a capability exists) -- footprint zone, quantity (and what Auto means), run direction, alternate ends, and the stored item's shape/length/diameter/fit (Bore offers all six shapes including the fixed hex-bit sizes; Cradle is always round) -- with legacy/derived fields (for example Bore's older orientation field, Divider's older single-axis quantity, Post's engine-only grid override, Cradle's derived floor gap/rib thickness, Label's unused font field) explained as structure to preserve, never offered as a second control for the same behavior;
 - legal modifier families, with a canonical example of each Lid & Stacking configuration (Stackable Bin, Stackable Lid, Lid with Handle);
 - important compatibility rules;
 - the current bin's interior bounds as a reference only: if the AI changes the bin size, every part must fit the interior of the design it returns;
@@ -1223,7 +1223,7 @@ Before applying an answer, Wavefinity checks:
 - active Space constraints, including the Pegboard minimum bin sizes New Bin already uses;
 - the manifest's own public-control rules: an item shape not legal for that part, a Cradle item that is not plain round, a Bore item with the wrong fit clearance, a hex-bit item that is not exactly the fixed preset or is leaned, or an answer that tries to set a part's layout through a legacy/derived field instead of its current control;
 - (Fix 078) a non-blank, 1–80 character `part_name`;
-- (Fix 078) at most one rim Text feature in the returned design;
+- (Fix 078) at most one rim Label in the returned design;
 - (Fix 078) in a capped Space (Drawer, Storage Box), that no Bore-held object's computed top exceeds the Space's height — Surface and Pegboard have no such cap.
 
 Both **Modify Current Bin** and **Generate as New Bin** run this identical proof before either may change anything; the button clicked is only the adoption choice, never a shortcut around validation.
@@ -1285,7 +1285,7 @@ The generated prompt states the active Space type and either a hard cap (Drawer 
 This is a high-level checklist, not a replacement for the real validator.
 
 - **Removable insert** is incompatible with shell features that must be physically built into the bin wall, such as Inside Grip.
-- **Side Openings**, **Inside Grip**, **rim Text**, and **Edge Mount** can conflict when they need the same wall area.
+- **Side Openings**, **Inside Grip**, **rim Label**, and **Edge Mount** can conflict when they need the same wall area.
 - **Separate Edge Mount labels** can conflict with lids and direct stacking.
 - **Lids/stacking** can require minimum wall/base strength.
 - **Raised lid labels** cannot occupy stacking contact areas.

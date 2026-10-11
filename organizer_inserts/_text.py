@@ -199,7 +199,7 @@ def rim_text_geometry(box: BoxSpec, one: Feature):
     side = str(one.options.get("rim_side") or "back").lower()
     label = text_of(one)
     if not label:
-        raise ValueError("rim Text needs lettering")
+        raise ValueError("rim Label needs lettering")
     shelf_zone = top_label_zone(box, side)
     turns = {"back": 0, "front": 2, "left": 1, "right": 3}[side]
     raw_height = one.options.get("cap_height")
@@ -213,19 +213,19 @@ def rim_text_geometry(box: BoxSpec, one: Feature):
     scale = min(1.0, available_x / (x1 - x0), available_y / (y1 - y0))
     cap = wanted * scale
     if cap <= 0:
-        raise ValueError("rim Text does not fit its selected side")
+        raise ValueError("rim Label does not fit its selected side")
     glyph = _oriented_text(label, cap, turns)
     cx, cy = shelf_zone.centroid.coords[0]
     glyph = affinity.translate(glyph, xoff=cx, yoff=cy)
     depth = text_depth(one)
     if depth not in TEXT_DEPTH_CHOICES:
         if depth <= 0:
-            raise ValueError("Text depth or height must be positive")
+            raise ValueError("Label depth or height must be positive")
     raised = text_is_raised(one)
     safe_top = top_label_surface_z(box)
     surface = safe_top - depth if raised else safe_top
     if surface - TOP_LABEL_LEDGE_DEPTH < box.base_thickness:
-        raise ValueError("rim Text needs more shelf backing; increase bin height")
+        raise ValueError("rim Label needs more shelf backing; increase bin height")
     ledge = make_top_label_ledge(box, side)
     if raised:
         ledge.apply_translation((0, 0, -depth))
@@ -260,13 +260,13 @@ def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
 
 
 @feature(
-    TEXT_KIND, title="Text", display="Text — centered lettering",
+    TEXT_KIND, title="Label", display="Label — centered lettering",
     description="Centered lettering on the base or rim, Inlaid or Raised.",
     capabilities=("text",),
     options=(
         OptionDefinition("Letter height", "cap_height", "", note="positive finite mm; blank = biggest whole-mm height up to 15 mm that fits (set text_v2 = true when giving a value)"),
         OptionDefinition("Inlay depth / Raised height", "depth", "0.4", choices=tuple((f"{value:g}", f"{value:g} mm") for value in TEXT_DEPTH_CHOICES), note="mm; recessed depth or raised height of the lettering"),
-        OptionDefinition("Text", "text", "", "string", False, note="the words to print; required"),
+        OptionDefinition("Label name", "text", "", "string", False, note="the words to print; required"),
         OptionDefinition("Font", "font", "", "string", False, legacy=True, note="not a current Designer control; every Text part uses the one built-in font"),
         OptionDefinition("Raised", "raised", False, "boolean", False, note="true = raised lettering, false = recessed inlay"),
         OptionDefinition("Quarter turns", "quarter_turns", 0, "integer", False, minimum=0, maximum=3, note="90-degree turns of the lettering (base text only)"),

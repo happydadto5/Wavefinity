@@ -404,9 +404,9 @@ def check_layout(
             continue
         destination = "rim" if one.options.get("level") == "rim" else "base"
         if destination in text_destinations:
-            message = ("Only one rim Text is allowed; change the existing rim Text or use Base Text"
+            message = ("Only one rim Label is allowed; change the existing rim Label or use Base Label"
                        if destination == "rim" else
-                       "Only one Text is allowed on the base; change its Style or remove a duplicate")
+                       "Only one Label is allowed on the base; change its Style or remove a duplicate")
             raise ValueError(message)
         text_destinations.add(destination)
     bore_tool_paths: dict[int, Zone | None] = {}

@@ -276,7 +276,7 @@ function placedRowData() {
     const isRim = one.kind === "text" && one.options?.level === "rim";
     return {
       type: "feature", index, kind: one.kind,
-      title: isRim ? "Text (Rim Level)" : partInfo(one.kind)?.title || one.kind,
+      title: isRim ? "Label (Rim Level)" : partInfo(one.kind)?.title || one.kind,
       detail: isRim ? one.options?.text || "Rim label" : `${fmt(width)} × ${fmt(depth)} mm`,
       editing: index === editingFeatureIndex,
       selected: index === state.selected,

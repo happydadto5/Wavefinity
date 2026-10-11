@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-10 — Bin design screen cleanup: Text is now Label (Fix 1029)
+
+- The **Text** part is now called **Label** everywhere you read it: the palette, the editor (the words field is **Label name**, the depth field is **Label box depth**), the empty-preview placeholder, the small-size dialog, messages, the interior-parts summary and the manual. Saved designs are unchanged and load as before.
+- Base thickness now shows **0.8 mm — Default** instead of **Standard**, matching the wall thickness list.
+- Letter height's **mm** now sits next to its label instead of floating to the right.
+
 ## 2026-10-05 — Startup ensures the NN Poller is running (Fix 119 Packet B)
 
 - `Start_Wavefinity_Dispatch_Runner.bat` is now a small best-effort shim that runs NN's `start-poller-unified.ps1 -NoPrompt -EnsureRunning` (NN checkout from `WAVEFINITY_NN_DIR`, else `%USERPROFILE%\nn`). It starts no Scheduled Task, has no dispatch logic and never pauses; a healthy Poller is left alone. Failures are logged to `%LOCALAPPDATA%\Wavefinity\ensure-nn-poller.log`.

@@ -2061,14 +2061,14 @@ class TextPartTests(unittest.TestCase):
     def test_two_base_text_parts_cannot_share_a_bin(self) -> None:
         left = text_part("M3", zone=Zone(-40.0, 4.0, -10.0, 16.0))
         right = text_part("M4", zone=Zone(10.0, 4.0, 40.0, 16.0))
-        with self.assertRaisesRegex(ValueError, "Only one Text"):
+        with self.assertRaisesRegex(ValueError, "Only one Label"):
             check_layout(BIN, [left, right], base_z=BIN.base_thickness)
 
     def test_two_rim_text_parts_on_different_sides_cannot_share_a_bin(self) -> None:
         # Fix 078: at most one rim Text total, not one per rim side.
         back = text_part("M3", zone=Zone(-20.0, 6.0, 20.0, 15.0), level="rim", rim_side="back")
         front = text_part("M4", zone=Zone(-20.0, -15.0, 20.0, -6.0), level="rim", rim_side="front")
-        with self.assertRaisesRegex(ValueError, "Only one rim Text"):
+        with self.assertRaisesRegex(ValueError, "Only one rim Label"):
             check_layout(BIN, [back, front], base_z=BIN.base_thickness)
 
     def test_overlapping_text_and_holder_is_refused(self) -> None:

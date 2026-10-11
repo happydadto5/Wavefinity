@@ -150,7 +150,7 @@ def preview_geometry(
         validate_edge_mount_label_conflicts(box, text_of(rim_text), side)
         handle_conflict = inside_handle_conflict(box, rim_text, base_height(box, mode), mode)
         if handle_conflict:
-            raise ValueError(f"rim Text on {side} overlaps the {handle_conflict}; choose another rim side")
+            raise ValueError(f"rim Label on {side} overlaps the {handle_conflict}; choose another rim side")
     if not active_rim:
         validate_edge_mount_label_conflicts(box, "", "bottom")   # lid / stack rules need no label
 
@@ -309,8 +309,8 @@ def preview_geometry(
         destination = "rim" if one.options.get("level") == "rim" else "base"
         if destination in destinations:
             feature_errors.append(
-                "Only one rim Text is allowed; remove a duplicate" if destination == "rim"
-                else "Only one Text is allowed on the base; remove a duplicate"
+                "Only one rim Label is allowed; remove a duplicate" if destination == "rim"
+                else "Only one Label is allowed on the base; remove a duplicate"
             )
             invalid_feature_indexes.extend((destinations[destination], index))
         destinations[destination] = index
@@ -318,8 +318,8 @@ def preview_geometry(
         destination = "rim" if draft.options.get("level") == "rim" else "base"
         if destination in destinations and destinations[destination] != selected:
             draft_error = (
-                "Only one rim Text is allowed; change the existing rim Text or use Base Text" if destination == "rim"
-                else "Only one Text is allowed on the base; change Style or remove the other Text"
+                "Only one rim Label is allowed; change the existing rim Label or use Base Label" if destination == "rim"
+                else "Only one Label is allowed on the base; change Style or remove the other Label"
             )
     reserved = _customization_zones(box, tidy, location, scoop, mode)
 

@@ -347,7 +347,7 @@ class WebApplicationTests(unittest.TestCase):
             for rule in interactions
         ))
         self.assertTrue(parts["text"]["flags"]["text"])
-        self.assertEqual(parts["text"]["title"], "Text")
+        self.assertEqual(parts["text"]["title"], "Label")
         self.assertTrue(parts["cradle"]["flags"]["alternate"])
         self.assertFalse(parts["nest"]["flags"]["alternate"])
         self.assertTrue(parts["nest"]["flags"]["photo"])
@@ -1210,7 +1210,7 @@ class WebApplicationTests(unittest.TestCase):
             )["design"]
         feature = default_feature_payload({"design": design, "kind": "text"})["feature"]
         feature["options"]["text"] = "M4"
-        with self.assertRaisesRegex(ValueError, "Only one Text"):
+        with self.assertRaisesRegex(ValueError, "Only one Label"):
             apply_feature_payload({"design": design, "feature": feature})
 
     def test_legacy_multiple_rim_texts_remain_loadable_but_preview_rejects_them(self):
@@ -1224,7 +1224,7 @@ class WebApplicationTests(unittest.TestCase):
         _box, layout, *_rest = design_from_dict(design, validate_layout=False)
         self.assertEqual(len(layout.features), 2)
         self.assertEqual(json.dumps(design, sort_keys=True), before)
-        with self.assertRaisesRegex(ValueError, "Only one rim Text"):
+        with self.assertRaisesRegex(ValueError, "Only one rim Label"):
             preview_payload({"design": design})
         self.assertEqual(json.dumps(design, sort_keys=True), before)
 
@@ -2459,7 +2459,7 @@ class AiHelpBackendTests(unittest.TestCase):
             {"kind": "text", "zone": [-20, 6, 20, 15], "options": {"text": "A", "level": "rim", "rim_side": "back"}},
             {"kind": "text", "zone": [-20, -15, 20, -6], "options": {"text": "B", "level": "rim", "rim_side": "front"}},
         ]
-        with self.assertRaisesRegex(ValueError, "one rim Text"):
+        with self.assertRaisesRegex(ValueError, "one rim Label"):
             wavefinity_web.ai_candidate_payload({"design": base})
 
     def test_ai_candidate_enforces_the_capped_space_object_height_ceiling(self) -> None:

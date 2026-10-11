@@ -351,8 +351,8 @@ async function acknowledgeSmallText() {
   const context = inSpace ? DL.spaceContext() : null;
   if (inSpace && DL.layout.settings?.text_small_size_ack === true) return true;
   await appConfirm({
-    title: "Small Text Size",
-    message: "Text height will be adjusted to smaller than the recommended 5 mm to accommodate your text.",
+    title: "Small Label Size",
+    message: "Label height will be adjusted to smaller than the recommended 5 mm to accommodate your text.",
     primaryLabel: "OK",
     cancelLabel: null,
     dismissible: false,
@@ -373,7 +373,7 @@ async function acknowledgeSmallText() {
 async function allowSmallTextEdit(cap, request, draft) {
   if (draft?.kind !== "text") return true;
   if (!Number.isFinite(cap) || cap <= 0) {
-    throw new Error("Could not determine a printable Letter height for this Text.");
+    throw new Error("Could not determine a printable Letter height for this Label.");
   }
   if (cap >= 5) return true;
   const index = draftCommitIndex();
