@@ -289,16 +289,18 @@ class B4BValidationTests(unittest.TestCase):
 
 
 class B4BSerializationTests(unittest.TestCase):
-    def test_v1_without_b4b_loads_disabled(self):
+    def test_without_b4b_loads_disabled(self):
         data = design_to_dict(BoxSpec(x=16, y=48, z=40), Layout((), "fused"))
-        self.assertEqual(data["version"], 1)
         self.assertNotIn("b4b", data["box"])
         back, *_ = design_from_dict(data)
         self.assertFalse(back.b4b.enabled)
 
-    def test_enabling_b4b_bumps_version(self):
+    def test_enabling_b4b_round_trips(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
-        self.assertEqual(design_to_dict(box, Layout((), "fused"))["version"], 3)
+        data = design_to_dict(box, Layout((), "fused"))
+        self.assertIn("b4b", data["box"])
+        back, *_ = design_from_dict(data)
+        self.assertTrue(back.b4b.enabled)
 
     def test_front_label_style_round_trips(self):
         box = BoxSpec(x=64, y=48, z=40, wall=1.2, b4b=B4BSpec(

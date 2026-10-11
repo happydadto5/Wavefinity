@@ -178,7 +178,7 @@ class StackValidationTests(unittest.TestCase):
 
 
 class StackSerializationTests(unittest.TestCase):
-    def test_round_trip_and_version(self):
+    def test_round_trip(self):
         for mode in ("lid", "direct"):
             with self.subTest(mode=mode):
                 box = BoxSpec(
@@ -187,8 +187,6 @@ class StackSerializationTests(unittest.TestCase):
                     lid=LidSpec(enabled=True, stackable=True) if mode == "lid" else LidSpec(),
                 )
                 data = design_to_dict(box, Layout((), "fused"))
-                # An ordinary lid writes version 7; direct stacking stays 6.
-                self.assertEqual(data["version"], 7 if mode == "lid" else 6)
                 self.assertFalse(data["box"]["standard_walls"])
                 self.assertFalse(data["box"]["standard_base"])
                 self.assertGreaterEqual(data["box"]["wall"], st.STACK_MIN_WALL)

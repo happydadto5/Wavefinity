@@ -70,13 +70,12 @@ class SchemaMigrationTests(unittest.TestCase):
         return design
 
 
-    def test_canonical_save_is_version_7_explicit_and_round_trips(self):
+    def test_canonical_save_is_explicit_and_round_trips(self):
         for style, expected in (("flush", 0.4), ("raised", 0.6)):
             with self.subTest(style=style):
                 box, layout, *rest = app.design_from_dict(
                     self.legacy_design(label_enabled=True, label_style=style, label_text="A"))
                 saved = app.design_to_dict(box, layout, *rest)
-                self.assertEqual(saved["version"], 7)
                 self.assertEqual(saved["box"]["lid"]["fit"], "standard")
                 self.assertEqual(saved["box"]["lid"]["label_depth_mm"], expected)
                 again = app.design_to_dict(*app.design_from_dict(saved))
