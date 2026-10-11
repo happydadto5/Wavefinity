@@ -347,11 +347,14 @@ function renderDraftFields() {
       // X/Y quantities make the direction choice meaningless (no geometry effect).
       const manualXY = postOpt != null && ((postOpt.count_x != null && postOpt.count_x !== "") || (postOpt.count_y != null && postOpt.count_y !== ""));
       const directionLabel = info.kind === "steps" ? "Shelf direction" : "Runs along";
-      const runsAlong = info.flags.along && !["divider", "bore"].includes(info.kind) && !qtyZero && !manualXY
+      const runsAlongApplies = info.flags.along && !["divider", "bore"].includes(info.kind) && !qtyZero;
+      const runsAlong = runsAlongApplies && !manualXY
         ? `<fieldset><legend>${directionLabel}</legend><div class="segmented two">
           <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
           <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
         </div></fieldset>`
+        : runsAlongApplies && manualXY
+        ? `<span class="muted">Direction follows your X/Y quantities.</span>`
         : "";
       const hasOrientationControls = Boolean(info.flags.qty || repeatFieldsHtml || runsAlong || info.flags.alternate);
       if (hasOrientationControls) {
