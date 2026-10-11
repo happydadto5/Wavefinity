@@ -652,6 +652,33 @@ function syncWallControls() {
   }
 }
 
+// Fix 1066: renders "Storage Box is 120mm inside" / "Storage Drawer is
+// 85mm inside" below the bin Height field when the active space is a
+// storage box or storage drawer. Hidden for all other space kinds.
+// For drawer cabinets, reflects the currently active drawer's interior.
+function syncContainerInsideHint() {
+  const hint = $("#container-inside-hint");
+  if (!hint) return;
+  let text = null;
+  if (state.folderMode === "space" && state.activeSpace) {
+    const kind = state.activeSpace.kind;
+    if (kind === "box") {
+      text = `Storage Box is ${fmt(state.activeSpace.z)}mm inside`;
+    } else if (kind === "drawer" || kind === "storage_drawers") {
+      const z = kind === "storage_drawers" && typeof cabinetActiveLimits === "function"
+        ? (cabinetActiveLimits().z ?? state.activeSpace.z)
+        : state.activeSpace.z;
+      if (Number.isFinite(Number(z))) text = `Storage Drawer is ${fmt(Number(z))}mm inside`;
+    }
+  }
+  if (text) {
+    hint.textContent = text;
+    hint.hidden = false;
+  } else {
+    hint.hidden = true;
+  }
+}
+
 function syncForm() {
   // Fix 060 Correction 3: syncForm() is also called for routine same-design
   // refreshes (modifier apply/rollback, Nest operations, preview auto-grow,
@@ -677,6 +704,9 @@ function syncForm() {
   } else {
     formatHeightField();
   }
+  // Fix 1066: show the container's interior height below the Height field
+  // so the user knows what will just fit inside (storage box/drawer only).
+  syncContainerInsideHint();
   populateWallChoices(box);
   syncWallControls();
   populateBaseChoices(box);
