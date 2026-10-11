@@ -343,8 +343,11 @@ function renderDraftFields() {
       }
       // "Runs along direction" is meaningless with no posts (Andrew, raw capture).
       const qtyZero = postOpt != null && (number(postQx, 1) === 0 || number(postQy, 1) === 0);
+      // Andrew, 2026-10-10: hide "Runs along" in manual X/Y mode - explicit
+      // X/Y quantities make the direction choice meaningless (no geometry effect).
+      const manualXY = postOpt != null && ((postOpt.count_x != null && postOpt.count_x !== "") || (postOpt.count_y != null && postOpt.count_y !== ""));
       const directionLabel = info.kind === "steps" ? "Shelf direction" : "Runs along";
-      const runsAlong = info.flags.along && !["divider", "bore"].includes(info.kind) && !qtyZero
+      const runsAlong = info.flags.along && !["divider", "bore"].includes(info.kind) && !qtyZero && !manualXY
         ? `<fieldset><legend>${directionLabel}</legend><div class="segmented two">
           <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
           <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
