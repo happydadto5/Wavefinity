@@ -443,6 +443,10 @@ async function selectKind(kind, reset = false) {
   // give the user the chance to keep unsaved work first.
   const keepsSameDraft = !reset && state.draft?.kind === kind;
   const switchGuard = keepsSameDraft ? null : await deferredDraftSwitch();
+  // Fix 1049: token for the "Loading shape…" clear in the finally below.
+  // Declared before the try so the finally can read it on every exit,
+  // including the early returns before the kindRequest increment.
+  let loadingRequest = 0;
   try {
   if (switchGuard && !switchGuard.proceed) return;
   if (!keepsSameDraft && state.draft?.kind === "nest") resetNestPhotoSession();
@@ -474,6 +478,7 @@ async function selectKind(kind, reset = false) {
     return;
   }
   $("#draft-status").textContent = "Loading shape…";
+  loadingRequest = request;
   try {
     const result = await api("/api/feature/default", {
       design: state.design,
@@ -545,6 +550,15 @@ async function selectKind(kind, reset = false) {
     toast(error.message, true);
   }
   } finally {
+    // Fix 1049: "Loading shape…" must clear on every exit - success, error,
+    // and early-return - not only on the paths that reach refreshDraft().
+    // Only the owning (non-stale) request clears, and only while the loader
+    // text is still showing, so error messages and a newer request's
+    // indicator are never wiped.
+    if (loadingRequest && loadingRequest === state.kindRequest &&
+        $("#draft-status").textContent === "Loading shape…") {
+      $("#draft-status").textContent = "";
+    }
     switchGuard?.finish();
   }
 }
