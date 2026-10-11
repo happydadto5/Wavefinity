@@ -198,7 +198,8 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 
 - Storage Box itself can contain **Dividers**.
 - **Make full interior bin** confirms before starting one ordinary bin sized to fill the Storage Box interior.
-- Designer gives an advisory physical-height warning for a bin, or for two identical stackable bins, when they exceed the case's closed-height allowance.
+- Designer warns when a bin, or two identical stackable bins, exceeds the usable inside height. Lid snugness adds clearance for the lid, never bin capacity.
+- Direct Save, Generate and Print in a Storage Box Space block a design whose physical height exceeds the usable inside height, or whose height cannot be verified. For a stackable/lidded design, this measures one closed design, including its foot, handle and raised lettering; the two-bin preview remains a planning warning.
 - The existing Space arrangement determines which bins are inside the case and validates their physical stack height.
 
 ### Ownership

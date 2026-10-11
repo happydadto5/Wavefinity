@@ -601,8 +601,8 @@ function updateStorageBoxHeightWarning(warning) {
   if (!element) return;
   element.hidden = !warning;
   element.textContent = !warning ? "" : warning.kind === "two_bins"
-    ? `Two of these bins would stack to ${fmt(warning.height_mm)} mm; this Storage Box has ${fmt(warning.cap_mm)} mm of usable closed height.`
-    : `This bin is ${fmt(warning.height_mm)} mm tall; this Storage Box has ${fmt(warning.cap_mm)} mm of usable closed height. It may not fit when the lid is closed.`;
+    ? `Two of these bins would stack to ${fmt(warning.height_mm)} mm; this Storage Box is ${fmt(warning.cap_mm)} mm inside.`
+    : `This bin is ${fmt(warning.height_mm)} mm tall; this Storage Box is ${fmt(warning.cap_mm)} mm inside. It may not fit when the lid is closed.`;
 }
 
 // `persistResume: false` (Fix 032 Correction 4, C4.2) renders a normal,

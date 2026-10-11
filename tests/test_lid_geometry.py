@@ -233,5 +233,20 @@ class PersistenceAndPlanningTests(unittest.TestCase):
 
 
 
+class Fix1069LidGeometryPreservedTests(unittest.TestCase):
+    def test_lid_keeps_headroom_while_payload_cap_is_interior_z(self):
+        import organizer_b4b as b4b
+        from organizer_engine import B4BSpec, BoxSpec
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, lid_headroom_mm=1.0))
+        eff = b4b.b4b_effective_box(box)
+        # Payload authority is the interior Z, not Z + headroom.
+        self.assertEqual(b4b.b4b_max_child_height(box), eff.z)
+        self.assertEqual(b4b.b4b_max_child_height(box), 40)
+        # But the lid itself still realises its headroom: the underside datum
+        # keeps the full 1.0 mm of lid clearance above the interior.
+        self.assertAlmostEqual(
+            b4b.b4b_lid_underside_z(box), eff.base_thickness + eff.z + 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

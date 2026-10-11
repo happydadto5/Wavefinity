@@ -101,6 +101,10 @@ async function generateParts(target) {
       output: state.output,
       connector: state.connector,
       keep_log: designRowId ? false : state.keepLog,
+      // Fix 1069: carry the active Space so direct Save in a Storage Box Space
+      // is hard-blocked when the bin/closed stack exceeds the interior Z.
+      // Standalone designs (no Space) send null and are unaffected.
+      space: state.folderMode === "space" ? (state.activeSpace ?? null) : null,
     };
 
     // Fix 032 Correction 1: flush the exact pre-operation resume checkpoint
@@ -318,6 +322,9 @@ async function printModel(target = "bin", initiatingButton = null) {
       target: target,
       keep_log: designRowId ? false : state.keepLog,
       design_row_id: designRowId || undefined,
+      // Fix 1069: carry the active Space so direct Print STL in a Storage Box
+      // Space is hard-blocked when the bin/closed stack exceeds the interior Z.
+      space: state.folderMode === "space" ? (state.activeSpace ?? null) : null,
     };
     // R67: only a request. The server reuses the existing Printed file(s)
     // when it can prove the design is unchanged, else it generates as usual.

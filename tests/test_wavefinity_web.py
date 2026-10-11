@@ -2649,5 +2649,75 @@ class AiHelpBackendTests(unittest.TestCase):
             wavefinity_web.ai_repair_prompt_payload({"request_id": "", "context_fingerprint": "x", "response": "y"})
 
 
+class Fix1069StorageBoxGenerateBlockTests(unittest.TestCase):
+    def _ctx(self, z, headroom=1.0, kind="box", stack=None):
+        from organizer_engine import BoxSpec
+        from organizer_inserts import Layout
+        box = BoxSpec(48, 48, z) if stack is None else BoxSpec(48, 48, z, stack=stack)
+        space = {"kind": kind, "z": 40, "storage_box": {"lid_headroom_mm": headroom}}
+        return space, box, Layout()
+
+    def _block(self, space, box, layout):
+        return wavefinity_web._block_storage_box_overheight(space, box, layout, None, "t", None)
+
+    def test_exact_interior_height_passes(self):
+        space, box, layout = self._ctx(40.0)
+        self.assertIsNone(self._block(space, box, layout))
+
+    def test_one_hundredth_over_is_blocked(self):
+        space, box, layout = self._ctx(40.01)
+        with self.assertRaises(ValueError) as ctx:
+            self._block(space, box, layout)
+        self.assertIn("40.000 mm inside", str(ctx.exception))
+
+    def test_headroom_never_adds_capacity(self):
+        for headroom in (0.5, 1.0, 2.0):
+            with self.subTest(headroom=headroom):
+                space, box, layout = self._ctx(40.01, headroom=headroom)
+                with self.assertRaises(ValueError):
+                    self._block(space, box, layout)
+
+    def test_stackable_bin_within_interior_still_generates(self):
+        # G2M-0322: the legality gate measures the ONE generated design's
+        # physical envelope (closed_height_mm from stack_summary), never the
+        # two-bin planning sum (closed_height_mm + pitch_mm). A stackable bin
+        # whose closed envelope fits the interior must still generate even
+        # though two of them would not stack inside.
+        from organizer_engine import StackSpec
+        space, box, layout = self._ctx(25.0, stack=StackSpec(mode="lid"))
+        self.assertIsNone(self._block(space, box, layout))
+
+    def test_stack_exceeding_interior_is_blocked(self):
+        # A stackable bin whose closed envelope exceeds the interior Z is
+        # still hard-blocked by the same gate.
+        from organizer_engine import StackSpec, BoxSpec
+        from organizer_inserts import Layout
+        space = {"kind": "box", "z": 39, "storage_box": {"lid_headroom_mm": 1.0}}
+        box = BoxSpec(48, 48, 40, stack=StackSpec(mode="lid"))
+        with self.assertRaises(ValueError) as ctx:
+            self._block(space, box, Layout())
+        self.assertIn("stack", str(ctx.exception))
+        self.assertIn("39.000 mm inside", str(ctx.exception))
+
+    def test_standalone_and_other_spaces_unaffected(self):
+        from organizer_engine import BoxSpec
+        from organizer_inserts import Layout
+        box, layout = BoxSpec(48, 48, 41.0), Layout()
+        for space in (None, {"kind": "drawer", "z": 40}, {"kind": "surface", "z": 40}):
+            with self.subTest(space=(space or {}).get("kind")):
+                self.assertIsNone(self._block(space, box, layout))
+
+    def test_uncomputable_envelope_fails_closed(self):
+        # G2M-0320: a Storage Box payload whose physical envelope cannot be
+        # computed blocks generation instead of slipping through.
+        from organizer_engine import BoxSpec
+        from organizer_inserts import Layout
+        space = {"kind": "box", "z": 40, "storage_box": {"lid_headroom_mm": 1.0}}
+        with self.assertRaises(ValueError) as ctx:
+            wavefinity_web._block_storage_box_overheight(
+                space, "not-a-box", Layout(), None, "t", None)
+        self.assertIn("Cannot verify", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

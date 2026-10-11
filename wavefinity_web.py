@@ -1351,7 +1351,7 @@ def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
     storage_box_height_warning = None
     raw_space = payload.get("space")
     if isinstance(raw_space, dict) and raw_space.get("kind") in ("portable", "box"):
-        cap = float(raw_space["z"]) + normalise_storage_box(raw_space.get("storage_box"))["lid_headroom_mm"]
+        cap = float(raw_space["z"])
         if stack_block is not None and stack_block["enabled"]:
             height = stack_block["closed_height_mm"] + stack_block["pitch_mm"]
             warning_kind = "two_bins"
@@ -1448,6 +1448,60 @@ def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
     }
 
 
+def _block_storage_box_overheight(raw_space, box, layout, label, part_name, scoop) -> None:
+    """Fix 1069: hard legality gate for direct STL generation in a Storage Box Space.
+
+    Raises ValueError when the bin/closed stack's actual physical top exceeds the
+    Space's interior Z (space.z) - the same threshold the preview warning uses.
+    The measured top is the physical envelope of the ONE generated design:
+    closed_height_mm from stack_summary for stack/lid designs (the documented
+    detached physical envelope: interlocking foot depth plus the tallest thing
+    above the lid), or stack_part_height() ("detached physical height,
+    including the interlocking foot depth") for a single part - the system's
+    physical model of what the generator builds, not raw box.z. The two-bin
+    sum (closed_height_mm + pitch_mm) is a planning height, not the one
+    design's envelope: it stays only in the preview "would two of these
+    stack?" copy (Change 5), never in this legality gate.
+    Lid headroom is lid-fit geometry, never payload. Non-Storage-Box Spaces and
+    standalone designs (no Space) are unaffected. Fail-closed: if the physical
+    envelope cannot be computed for a Storage Box payload, generation is blocked
+    rather than silently allowed.
+    """
+    if not isinstance(raw_space, dict) or raw_space.get("kind") not in ("portable", "box"):
+        return
+    cap_z = float(raw_space["z"])
+    try:
+        stack_block = stack_summary(box) if (stack_enabled(box) or lid_enabled(box)) else None
+        if stack_block is not None and stack_block["enabled"]:
+            # G2M-0322: legality measures the ONE generated design's physical
+            # envelope - closed_height_mm alone. Never add pitch_mm here: the
+            # two-bin sum is a planning height, not one design's envelope.
+            top = stack_block["closed_height_mm"]
+            kind = "stack"
+        else:
+            record = inventory_bin_record(box, layout, None, label, part_name, scoop)
+            if stack_block is not None and lid_enabled(box):
+                top = stack_block["closed_height_mm"]
+            else:
+                top = stack_part_height(record)
+            kind = "bin"
+        top = float(top)
+        if not math.isfinite(top):
+            raise ValueError("Physical height is not finite")
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        # Fix 1069 (G2M-0320): fail closed - an unverifiable envelope in a
+        # Storage Box Space blocks generation instead of slipping through.
+        raise ValueError(
+            f"Cannot verify this design fits in the {cap_z:.3f} mm Storage Box interior; "
+            "generation blocked."
+        ) from exc
+    if top is not None and top > cap_z + 1e-6:
+        raise ValueError(
+            f"This {kind} is {top:.3f} mm tall, but this Storage Box is {cap_z:.3f} mm inside. "
+            "Shorten it so it fits under the lid."
+        )
+
+
 def generate_payload(
     payload: dict[str, Any],
     *,
@@ -1466,6 +1520,10 @@ def generate_payload(
             )
         return _generation_reply(result=result, output=output)
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    # Fix 1069: in a Storage Box Space, direct Save/Generate/Print STL is
+    # hard-blocked when the bin/closed stack's physical top exceeds the
+    # interior Z. Standalone designs (no Space) are unaffected.
+    _block_storage_box_overheight(payload.get("space"), box, layout, label, part_name, scoop)
     output = _generation_output(payload)
     auto_timestamp = bool(payload.get("auto_timestamp", False))
     requested_inventory = bool(payload.get("keep_log", False))

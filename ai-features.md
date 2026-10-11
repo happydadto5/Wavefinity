@@ -75,6 +75,7 @@ Pocket, Post, Slot and Steps may include an optional `reference_object` with pos
 
 - Ordinary bins may be designed to fit inside a Storage Box Space.
 - The AI result is still an ordinary bin, not the Storage Box case itself.
+- Save, Generate and Print in a Storage Box Space require the generated bin or closed design to fit the interior height, including its foot, handle and raised lettering. Unverifiable height blocks generation. Lid snugness does not add capacity; designs without a Space are unaffected.
 - Hard object-height cap: the Storage Box Space's own height.
 
 ## Storage Drawers
