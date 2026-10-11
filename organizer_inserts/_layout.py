@@ -55,7 +55,48 @@ def _wall_only_physical_zone(box: BoxSpec, one: Feature, base_z: float) -> Zone:
                 one.zone.x1 + WALL_ONLY_FOOT, one.zone.y1 + WALL_ONLY_FOOT)
 
 
-def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
+def _widen_joined_sides(box: BoxSpec, one: Feature, solids, base: Zone) -> Zone:
+    """Widen ``base`` by the wall-join allowance, but only on the sides the
+    feature's real built material actually reaches.
+
+    ``solids`` are the feature's built trimesh solids, exactly as its builder
+    returned them (join tabs included - a tab only ever extends a side the
+    pre-tab material already reached, and never extends the perpendicular
+    span, so the joined-side set computed from them is identical to the
+    pre-tab set). Each joined side is widened to the WALL edge -
+    ``Zone.whole(box)`` ± (``box.wall_depth + 2.0 * WAVE_AMPLITUDE``) - the
+    exact outer bound FW3's ``_join_tabs`` can create (right:
+    ``whole.x1 + reach``; left: ``whole.x0 - reach``; back:
+    ``whole.y1 + reach``; front: ``whole.y0 - reach``), never from
+    ``one.zone``: a valid fused feature's material may stop up to
+    ``JOIN_TOUCH`` short of the wall and still be joined from the physical
+    wall, so zone-edge widening would false-positive on those tabs. Every
+    other side keeps ``base`` untouched, so each kind's existing reach is
+    preserved exactly there. Side restrictions come from
+    ``_joined_sides`` (Fused Walls 3 - the same helper tab generation uses):
+    a scoop earns only its full-height side, steps only their high end. A
+    fused part that reaches no wall earns zero additional reach - ``base``
+    is returned unchanged. ``solids`` may be None (or empty) for callers
+    without built geometry; the reach then stays at ``base`` (fail-closed).
+    """
+    from ._walljoin import _footprint_from_solids, _joined_sides
+    join_reach = box.wall_depth + 2.0 * WAVE_AMPLITUDE
+    whole = Zone.whole(box)
+    joined = _joined_sides(
+        box, _footprint_from_solids(solids or []), one.kind, one.along)
+    x0, y0, x1, y1 = base.x0, base.y0, base.x1, base.y1
+    if "left" in joined:
+        x0 = min(x0, whole.x0 - join_reach)
+    if "right" in joined:
+        x1 = max(x1, whole.x1 + join_reach)
+    if "front" in joined:
+        y0 = min(y0, whole.y0 - join_reach)
+    if "back" in joined:
+        y1 = max(y1, whole.y1 + join_reach)
+    return Zone(x0, y0, x1, y1)
+
+
+def _feature_reach(box: BoxSpec, one: Feature, base_z: float, solids=None) -> Zone:
     """How far a feature's own built geometry may legitimately extend.
 
     For an ordinary feature this is simply its stored zone - the builder is
@@ -71,6 +112,15 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
     physical envelope - the one bound nothing can legitimately cross; a
     leaning divider reaches further still on the cross axis, by however far
     its own lean carries it.
+
+    ``solids`` are the feature's built trimesh solids (as returned by its
+    builder). When supplied and the feature carries ``WALL_JOIN_FLAG``, the
+    wall-join allowance widens the reach only on the sides the real built
+    material actually reaches - never a four-sided blanket - and on each
+    joined side the reach runs to the wall edge (``Zone.whole(box)``) plus
+    ``box.wall_depth + 2.0 * WAVE_AMPLITUDE``, the exact outer bound the
+    FW3 join tabs can create. A fused part that reaches no wall gets zero
+    additional reach.
     """
     if one.kind == "nest" and one.contour:
         # Shapely/earcut round-tripping can move a boundary by sub-micron
@@ -80,8 +130,17 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
                     one.zone.x1 + epsilon, one.zone.y1 + epsilon)
     if one.kind == "pocket":
         epsilon = POCKET_CHAMFER + 0.01
-        return Zone(one.zone.x0 - epsilon, one.zone.y0 - epsilon,
+        base = Zone(one.zone.x0 - epsilon, one.zone.y0 - epsilon,
                     one.zone.x1 + epsilon, one.zone.y1 + epsilon)
+        if one.options.get(WALL_JOIN_FLAG):
+            # A fused pocket that joins the bin wall blends into it through
+            # the wall's wavy inner face - at most to the wall-edge outer
+            # bound the join tabs can create, and only on the sides the
+            # real built material reaches (never a four-sided blanket).
+            # The chamfer epsilon is kept as the floor via min/max: the
+            # result is never narrower than today's reach.
+            return _widen_joined_sides(box, one, solids, base)
+        return base
     if is_text(one):
         # Lettering is fitted to fill its zone, so its bounds land exactly on
         # it; leave room for the rounding that puts them there.
@@ -100,6 +159,14 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
                     one.zone.x1 + reach, one.zone.y1 + reach)
     if one.kind == "bore" and is_walls_only(_bore_style(one)):
         return _wall_only_physical_zone(box, one, base_z)
+    if one.options.get(WALL_JOIN_FLAG) and one.kind in (
+            "cradle", "post", "scoop", "slot", "steps"):
+        # A fused interior part that may join the bin wall: the wall-join
+        # allowance applies only on the sides the real built material
+        # reaches - never a four-sided blanket. Same wall-based per-side
+        # outer bound the FW3 join tabs can create; every other side keeps
+        # exactly one.zone.
+        return _widen_joined_sides(box, one, solids, one.zone)
     if one.kind != "divider":
         return one.zone
     zone = one.zone
@@ -140,6 +207,16 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
         zone = Zone(zone.x0, zone.y0 - margin, zone.x1, zone.y1 + margin)
     else:
         zone = Zone(zone.x0 - margin, zone.y0, zone.x1 + margin, zone.y1)
+    if one.options.get(WALL_JOIN_FLAG):
+        # A fused divider that may join the wall: union its own reach with
+        # the wall-join allowance on only the sides the real built material
+        # reaches (never a four-sided blanket) - never narrower than its own
+        # reach. The footprint includes the divider scoop solids; a scoop
+        # reaching a non-front side earns no tab there (scoops are tabulated
+        # front-only), and scoop solids sit inside the divider's own zone
+        # and reach envelope, so the extra allowance on such a side is
+        # vacuous - it cannot mask a real out-of-zone error.
+        zone = _widen_joined_sides(box, one, solids, zone)
     return zone
 
 

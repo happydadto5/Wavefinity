@@ -200,7 +200,11 @@ def build_features(
             from ._core import Zone
             reach = Zone(*top_label_zone(box, one.options.get("rim_side", "back")).bounds)
         else:
-            reach = _feature_reach(box, one, base_z)
+            # The built solids ride along so _feature_reach can grant the
+            # wall-join allowance only on the sides the real material
+            # actually reaches (Fused Walls 4). GPT requires real material -
+            # never the feature's zone as a proxy.
+            reach = _feature_reach(box, one, base_z, made)
 
         if recessed_deck_footprint is not None:
             x0, y0, x1, y1 = recessed_deck_footprint.bounds
