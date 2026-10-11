@@ -307,6 +307,16 @@ DP.wire = () => {
     const id = event.target.dataset.fillCandidate;
     if (id) DL.toggleFillCandidate(id);
   });
+  // Fix 1056: spacer candidates are keyboard-toggleable too - same
+  // checkbox-row pattern as fill candidates above, mutating the same
+  // selection set the 3D canvas clicks use (DL.toggleSpacerCandidate).
+  $("#dl-sp-plan-truth").addEventListener("change", event => {
+    const id = event.target.dataset.spacerCandidate;
+    if (!id) return;
+    DL.toggleSpacerCandidate(id);
+    DV.paint();
+    $(`#dl-sp-plan-truth input[data-spacer-candidate="${CSS.escape(id)}"]`)?.focus();
+  });
 
   $("#dl-batch-select-needed").addEventListener("click", () => DP.selectAllNotPrinted());
   $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllPrintable());
@@ -1076,9 +1086,10 @@ DP.renderSpacerPlanTruth = () => {
       const sideLabel = side.charAt(0).toUpperCase() + side.slice(1);
       const typeLabel = c.resolved_type === "flexible" ? "Flexible (unvalidated)" : "Rigid";
       const reason = c.will_fallback && c.fallback_reason ? ` — ${escapeHtml(c.fallback_reason)}` : "";
-      const selected = DL.spacerSelected && DL.spacerSelected.has(c.id) ? " (selected)" : "";
-      return `<p class="dl-note">${escapeHtml(sideLabel)} spacer · gap ${fmt(c.measured_gap)} mm → `
-        + `${typeLabel} · prints ${fmt(c.printed_w)} × ${fmt(c.printed_d)} mm${reason}${selected}</p>`;
+      const checked = DL.spacerSelected && DL.spacerSelected.has(c.id) ? " checked" : "";
+      return `<label class="checkbox-row"><span>${escapeHtml(sideLabel)} spacer · gap ${fmt(c.measured_gap)} mm → `
+        + `${typeLabel} · prints ${fmt(c.printed_w)} × ${fmt(c.printed_d)} mm${reason}</span>`
+        + `<input type="checkbox" data-spacer-candidate="${escapeHtml(c.id)}"${checked}></label>`;
     }).join("");
   box.innerHTML = notesHtml + headHtml + candHtml;
 };
@@ -1199,6 +1210,24 @@ DP.renderStats = () => {
     } else {
       refreshNode.disabled = busy;
       refreshNode.title = "Delete placed spacers, re-plan, and place replacements";
+    }
+  }
+  // Fix 1056: a plan with nothing selected is an enabled silent no-op -
+  // the click fires a backend round-trip ending in a cryptic "Nothing to
+  // fill" toast. Disable with a visible reason instead (Fix 019 Item 4).
+  // When there is no plan at all, the button keeps its guiding
+  // "No spacer plan to place…" toast and stays enabled.
+  const generateNode = $("#dl-sp-generate");
+  if (generateNode && !nothingPlaced && !spacerReasonCurrent()) {
+    const needsSelection = Boolean(DL.spacerPlan);
+    const hasSelection = DL.spacerSelected && DL.spacerSelected.size > 0;
+    if (needsSelection && !hasSelection) {
+      generateNode.disabled = true;
+      generateNode.title = "Select at least one spacer candidate first.";
+      spacerReason("Select at least one spacer candidate first.");
+    } else {
+      generateNode.disabled = busy;
+      generateNode.title = "Generate and place the selected spacer candidates";
     }
   }
   const hasPlacedSpacers = DL.drawer().placements.some(
