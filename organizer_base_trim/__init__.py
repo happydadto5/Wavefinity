@@ -35,7 +35,7 @@ from organizer_geometry import (
     intersection,
     union,
 )
-from organizer_product_rules import (
+from organizer_engine.product_rules import (
     SURFACE_TRIM_HEIGHTS,
     SURFACE_TRIM_PRESETS,
 )

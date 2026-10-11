@@ -15,8 +15,8 @@ import numpy as np
 from shapely.geometry import Point
 
 import organizer_app as app
-import organizer_lid_handle as handles
-import organizer_stack as st
+import organizer_features.lid_handle as handles
+import organizer_features.stack as st
 from organizer_drawer import stack_part_height
 from organizer_engine import (
     BoxSpec, LID_FIT_MM, LidSpec, StackSpec, wavy_cavity_polygon, wavy_outer_polygon,

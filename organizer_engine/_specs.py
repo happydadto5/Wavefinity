@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
-from organizer_pegboard import PegboardMountSpec
+from organizer_features.pegboard import PegboardMountSpec
 
 
 # --------------------------------------------------------------------------- #
@@ -593,7 +593,7 @@ class EdgeMountSpec:
     """Optional modifier that lets an ordinary bin mount vertically to the
     outside face of a cart, table, shelf or workbench.  Default off; inert
     for every existing design.  Geometry, validation and planning live in
-    ``organizer_edge_mount.py`` - this is only the saved shape of the data."""
+    ``organizer_features.edge_mount`` - this is only the saved shape of the data."""
 
     side: str = "front"
 
@@ -651,7 +651,7 @@ class SideOpeningSpec:
 
     Not an interior part - it modifies the bin body itself, like
     ``LidSpec``.  Default off; inert for every existing design.  Geometry,
-    validation and cutter generation live in ``organizer_side_openings.py`` -
+    validation and cutter generation live in ``organizer_features.side_openings`` -
     this is only the saved shape of the data."""
 
     enabled: bool = False

@@ -13,9 +13,9 @@ import trimesh
 
 from organizer_app import clean_label
 from organizer_engine import export_mesh, export_text_body_3mf, validate_3mf
-from organizer_printer_profile import component_fit, normalise_printer_profile, orientation_transform
-from organizer_storage_drawers import normalise_storage_drawers_definition
-from organizer_storage_drawer_geometry import resolve_storage_drawers_plan
+from organizer_outputs.printer_profile import component_fit, normalise_printer_profile, orientation_transform
+from organizer_storage.drawers import normalise_storage_drawers_definition
+from organizer_storage.drawer_geometry import resolve_storage_drawers_plan
 
 STRUCTURAL_OUTPUT_KEY = "storage_drawers"
 # Version 3: Fix 096 wall-mount settings participate in structural currentness.

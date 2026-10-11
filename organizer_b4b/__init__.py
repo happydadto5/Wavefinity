@@ -37,7 +37,7 @@ from organizer_engine import (
     text_prism,
     wave_value,
 )
-from organizer_product_rules import (
+from organizer_engine.product_rules import (
     B4B_LATCHED_MIN_HEIGHT,
     B4B_MIN_FIELD_XY,
 )

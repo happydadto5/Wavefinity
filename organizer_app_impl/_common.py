@@ -91,7 +91,7 @@ def validate_side_opening_label(box: BoxSpec, label: str, label_location: str) -
 
     The rim label's text/side live outside ``BoxSpec`` (they are generation
     parameters, not saved box fields), so this conflict is checked here
-    rather than inside ``organizer_side_openings.validate_side_openings``.
+    rather than inside ``organizer_features.side_openings.validate_side_openings``.
     """
     if not box.side_openings.enabled or not clean_label(label):
         return

@@ -239,7 +239,7 @@ class ObjectReferenceWebTests(unittest.TestCase):
             result["design"], {"kind": "drawer", "z": math.ceil(top * 1000) / 1000}))
 
     def test_stacked_bore_manual_and_ai_use_the_same_physical_body(self):
-        from organizer_stack import stack_effective_box
+        from organizer_features.stack import stack_effective_box
         design = default_design()
         design["box"].update({"x": 128, "y": 128, "z": 80, "stack": {"mode": "direct"}})
         feature = default_feature_payload({"design": design, "kind": "bore"})["feature"]

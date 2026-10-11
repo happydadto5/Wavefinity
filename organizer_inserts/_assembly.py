@@ -106,7 +106,7 @@ def build_features(
     than added to it. The exporter collects it through :func:`build_texts`;
     the preview asks for it here so it can draw it in place.
     """
-    from organizer_stack import STACK_PLUG_DEPTH, stack_enabled
+    from organizer_features.stack import STACK_PLUG_DEPTH, stack_enabled
 
     features = list(features)
     check_layout(box, features, bounds, base_z, mode)

@@ -18,8 +18,8 @@ from organizer_engine import (
     lid_spec,
     lid_stackable,
 )
-from organizer_pegboard import pegboard_standard
-from organizer_stack import stack_effective_box
+from organizer_features.pegboard import pegboard_standard
+from organizer_features.stack import stack_effective_box
 from organizer_inserts import Layout, divider_cells
 
 from ._common import clean_label, base_height

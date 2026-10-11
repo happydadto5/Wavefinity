@@ -29,7 +29,7 @@ from organizer_base_trim import (
 from organizer_engine import B4BSpec, BoxSpec
 from organizer_inserts import EDITOR_SNAP, Layout
 from organizer_inventory import normalise_space_definition
-from organizer_product_rules import SURFACE_TRIM_HEIGHTS
+from organizer_engine.product_rules import SURFACE_TRIM_HEIGHTS
 
 STORAGE_BOX = "storage_box"
 BASE_TRIM = "base_trim"

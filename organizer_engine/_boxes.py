@@ -105,9 +105,9 @@ def make_box(spec: BoxSpec) -> trimesh.Trimesh:
     additions = [*bumps, *grabbers]
     result = union([shell, *additions]) if additions else shell
     if vertical_stack_enabled(spec) or lid_enabled(spec):
-        # Imported here: organizer_stack builds on the engine, not the other way
+        # Imported here: organizer_features.stack builds on the engine, not the other way
         # round, so importing it at module scope would close a cycle.
-        from organizer_stack import stack_body_adders, stack_body_cutters
+        from organizer_features.stack import stack_body_adders, stack_body_cutters
 
         cutters = stack_body_cutters(spec)
         # Manifold handles the tapered, segmented cuts more reliably one at a

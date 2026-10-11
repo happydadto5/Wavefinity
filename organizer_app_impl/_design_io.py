@@ -31,10 +31,10 @@ from organizer_engine import (
     lid_stackable,
     max_wave_slope,
 )
-from organizer_side_openings import SIDE_OPENING_TOP_BRIDGE_MM, validate_side_openings
-from organizer_pegboard import normalise_mount_spec, receiver_layout
+from organizer_features.side_openings import SIDE_OPENING_TOP_BRIDGE_MM, validate_side_openings
+from organizer_features.pegboard import normalise_mount_spec, receiver_layout
 from organizer_b4b import b4b_effective_box, b4b_summary, validate_b4b_design
-from organizer_stack import (
+from organizer_features.stack import (
     normalize_stack_settings,
     stack_closed_height,
     stack_effective_box,

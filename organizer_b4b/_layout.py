@@ -15,7 +15,7 @@ from organizer_engine import (
     _wall_points,
     wave_value,
 )
-from organizer_product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD_XY
+from organizer_engine.product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD_XY
 
 from ._constants import (
     B4B_WALL_CORNER_FILLET,

@@ -7,7 +7,7 @@ import math
 import numpy as np
 from shapely.geometry import Polygon
 from organizer_engine import GRID_PITCH, WAVE_AMPLITUDE, BoxSpec
-from organizer_product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD_XY
+from organizer_engine.product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD_XY
 
 from ._constants import (
     B4B_SCREW_MAX_TAIL,

@@ -33,7 +33,7 @@ from organizer_app import (
     preview_geometry,
     validate_customization_clearance,
 )
-from organizer_pegboard import pegboard_layout_for_bin
+from organizer_features.pegboard import pegboard_layout_for_bin
 from .._runtime import GEOMETRY_LOCK, _interior_work_box
 
 from ._preview import _design, _is_base_trim_design, _reject_if_b4b

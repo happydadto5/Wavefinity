@@ -16,7 +16,7 @@ from organizer_engine import (
     BASE_UNIT,
     MIN_HEIGHT_ABOVE_BASE,
 )
-from organizer_product_rules import (
+from organizer_engine.product_rules import (
     B4B_LATCHED_MIN_HEIGHT,
     B4B_MIN_FIELD_XY,
     DRAWER_HARD_CLEARANCE_MM,
@@ -24,8 +24,8 @@ from organizer_product_rules import (
     SURFACE_TRIM_HEIGHTS,
     surface_maximums,
 )
-from organizer_pegboard import normalise_pegboard_space
-from organizer_storage_drawers import (
+from organizer_features.pegboard import normalise_pegboard_space
+from organizer_storage.drawers import (
     normalise_storage_drawers_definition,
     plan_add_drawer,
     plan_delete_drawer,

@@ -21,12 +21,12 @@ from shapely.geometry import Point
 
 import organizer_app
 import organizer_b4b
-import organizer_edge_mount
+import organizer_features.edge_mount as edge_mount
 import organizer_engine
 import organizer_geometry
 import organizer_inserts
-import organizer_side_openings
-from organizer_side_openings import (
+import organizer_features.side_openings as side_openings
+from organizer_features.side_openings import (
     SIDE_OPENING_CORNER_MARGIN_MM,
     SIDE_OPENING_MIN_SIDE_MM,
     SIDE_OPENING_TOP_BRIDGE_MM,
@@ -194,7 +194,7 @@ class WaveTests(unittest.TestCase):
 
 class BoxTests(unittest.TestCase):
         # _loft_cavity is no longer part of organizer_engine's re-export
-        # surface - organizer_stack.py / organizer_base_trim.py now import
+        # surface - organizer_features.stack / organizer_base_trim now import
         # it straight from organizer_geometry.
 
     def test_base_thickness_changes_only_the_floor_material(self) -> None:
@@ -1689,7 +1689,7 @@ class SideOpeningTests(unittest.TestCase):
             enabled=True, sides=("front",), shape="curved", size="medium",
             from_bottom_percent=0.0, from_top_percent=0.0,
         ))
-        floor_z, rim_z, bottom_z, top_z = organizer_side_openings._vertical_geometry(
+        floor_z, rim_z, bottom_z, top_z = side_openings._vertical_geometry(
             box, box.side_openings.from_bottom_percent,
             box.side_openings.from_top_percent,
         )
@@ -1850,8 +1850,8 @@ class EdgeMountTests(unittest.TestCase):
             side="front", holes_enabled=True, label_enabled=True,
             label_text="A", label_type="separate", standoff_ribs_enabled=False,
         ))
-        cutters = [cutter for hole in organizer_edge_mount.edge_mount_hole_plan(box)
-                   for cutter in organizer_edge_mount._hole_cutters(box, "front", hole, True)]
+        cutters = [cutter for hole in edge_mount.edge_mount_hole_plan(box)
+                   for cutter in edge_mount._hole_cutters(box, "front", hole, True)]
         for index, cutter in enumerate(cutters):
             with self.subTest(index=index):
                 self.assertTrue(cutter.is_volume, (cutter.bounds, cutter.is_watertight,
@@ -1879,7 +1879,7 @@ class EdgeMountTests(unittest.TestCase):
                     box, [one], organizer_app.base_height(box, "fused"))[0]
                 self.assertTrue(body.is_volume, (body.bounds, body.is_watertight,
                                                  body.is_winding_consistent))
-                cut = organizer_edge_mount.apply_edge_mount_hole_cuts(box, body)
+                cut = edge_mount.apply_edge_mount_hole_cuts(box, body)
                 self.assertTrue(cut.is_volume)
                 self.assertLess(cut.volume, body.volume)
                 for kwargs in ({"features": [one]}, {"draft": one}):
@@ -1916,7 +1916,7 @@ class EdgeMountTests(unittest.TestCase):
         box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
             holes_enabled=True, hole_count=1, top_offset_mm=12.7))
         shell = organizer_engine.make_box(box)
-        cut_shell = organizer_edge_mount.apply_edge_mount_structure(box, shell)
+        cut_shell = edge_mount.apply_edge_mount_structure(box, shell)
         self.assertTrue(cut_shell.is_volume)
         self.assertLess(cut_shell.volume, shell.volume)
         scene = organizer_app.preview_geometry(
@@ -1944,7 +1944,7 @@ class EdgeMountTests(unittest.TestCase):
         del saved["box"]["edge_mount"]["label_type"]
         loaded, *_ = organizer_app.design_from_dict(saved)
         self.assertEqual(loaded.edge_mount.label_type, "integrated")
-        label = organizer_edge_mount.make_edge_mount_label_part(box)
+        label = edge_mount.make_edge_mount_label_part(box)
         self.assertTrue(label.is_watertight)
         self.assertEqual(len(label.split()), 1)
 
@@ -1956,7 +1956,7 @@ class EdgeMountTests(unittest.TestCase):
         ))
         bare = organizer_engine.make_box(box)
         self.assertAlmostEqual(
-            organizer_edge_mount.apply_edge_mount_structure(box, bare).volume, bare.volume, places=4
+            edge_mount.apply_edge_mount_structure(box, bare).volume, bare.volume, places=4
         )
         with tempfile.TemporaryDirectory() as directory:
             result = organizer_app.generate_organizer_files(box, organizer_app.Layout(), Path(directory))
@@ -1979,10 +1979,10 @@ class EdgeMountTests(unittest.TestCase):
                             label_length_mode=mode,
                         ),
                     )
-                    clip = organizer_edge_mount.make_edge_mount_label_part(box)
+                    clip = edge_mount.make_edge_mount_label_part(box)
                     self.assertTrue(clip.is_watertight, label)
                     self.assertEqual(len(clip.split()), 1, label)
-                    depth = organizer_edge_mount.edge_mount_inner_leg_depth_mm(box)
+                    depth = edge_mount.edge_mount_inner_leg_depth_mm(box)
                     lock_bottom = organizer_engine.lock_z_levels(box.z)[0]
                     self.assertAlmostEqual(depth, 5.5, places=6, msg=label)
                     self.assertLess(clip.bounds[0][2], lock_bottom, label)
@@ -2019,13 +2019,13 @@ class EdgeMountTests(unittest.TestCase):
 
     def test_driver_access_preserves_legacy_auto_and_rejects_too_small(self) -> None:
         auto = EdgeMountSpec(holes_enabled=True, screw_diameter_mm=5.0)
-        self.assertEqual(organizer_edge_mount.resolved_access_diameter(auto), 10.0)
+        self.assertEqual(edge_mount.resolved_access_diameter(auto), 10.0)
         bad = BoxSpec(
             48.0, 48.0, 40.0,
             edge_mount=replace(auto, access_diameter_mm=4.0),
         )
         with self.assertRaisesRegex(ValueError, "at least the screw diameter"):
-            organizer_edge_mount.edge_mount_hole_plan(bad)
+            edge_mount.edge_mount_hole_plan(bad)
 
 
 if __name__ == "__main__":

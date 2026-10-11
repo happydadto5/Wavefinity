@@ -30,7 +30,7 @@ from organizer_inserts import (
     resolved_options,
 )
 from organizer_inserts._core import feature_touches_wall
-from organizer_product_rules import ORDINARY_BIN_MIN_HEIGHT_MM
+from organizer_engine.product_rules import ORDINARY_BIN_MIN_HEIGHT_MM
 from organizer_app import (
     base_height,
     convert_layout_mode,

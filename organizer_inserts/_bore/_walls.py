@@ -226,7 +226,7 @@ from .._walljoin import (
 def _access_top_limit(box: BoxSpec) -> float | None:
     """Highest absolute Z an auto-sized Bore top may reach under Edge Mount's
     screwdriver-access passage, or ``None`` when there is no such passage."""
-    from organizer_edge_mount import edge_mount_access_lowest_z
+    from organizer_features.edge_mount import edge_mount_access_lowest_z
     try:
         lowest = edge_mount_access_lowest_z(box)
     except ValueError:

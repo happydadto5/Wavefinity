@@ -21,7 +21,7 @@ known folder, last_seen) as an index only; the folder stays authoritative.
 from __future__ import annotations
 
 # Names this module used to re-export from sibling modules (kept for compatibility).
-from organizer_printer_profile import (
+from organizer_outputs.printer_profile import (
     PRINTER_PREF_KEYS,
     apply_printer_profile_to_preferences,
     default_printer_profile_state,
@@ -38,8 +38,8 @@ from organizer_inventory import (
     resolve_inventory_path,
     storage_drawers_mutate,
 )
-from organizer_product_rules import SURFACE_TRIM_HEIGHTS, surface_maximums
-from organizer_storage_drawers import (
+from organizer_engine.product_rules import SURFACE_TRIM_HEIGHTS, surface_maximums
+from organizer_storage.drawers import (
     normalise_storage_drawers_definition,
     prepare_new_storage_drawers_definition,
     reset_storage_drawers_definition,

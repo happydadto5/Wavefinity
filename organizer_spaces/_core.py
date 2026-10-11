@@ -17,9 +17,9 @@ from organizer_inventory import (
     normalise_space_definition,
     normalise_storage_box,
 )
-from organizer_product_rules import SURFACE_TRIM_HEIGHTS, surface_maximums
+from organizer_engine.product_rules import SURFACE_TRIM_HEIGHTS, surface_maximums
 import organizer_storage
-from organizer_storage_drawers import (
+from organizer_storage.drawers import (
     normalise_storage_drawers_definition,
     reset_storage_drawers_definition,
     storage_drawers_definition_problem,

@@ -215,7 +215,7 @@ function applyPendingLiveFormWithModifierConflictGuard() {
 }
 
 // Wall span a Side Opening's width is measured against - Front/Back run
-// along X, Left/Right run along Y. Mirrors organizer_side_openings.
+// along X, Left/Right run along Y. Mirrors organizer_features.side_openings.
 // side_opening_side_span() so the UI can filter eligibility client-side.
 function sideOpeningSideSpan(side, design = state.design) {
   const box = design?.box || {};
@@ -289,7 +289,7 @@ function reconcileSideOpeningsAfterResize(design) {
 }
 
 // Python remains authoritative for real validation/geometry; this mirrors
-// organizer_side_openings._vertical_fits() only for the immediate size-list
+// organizer_features.side_openings._vertical_fits() only for the immediate size-list
 // filtering while typing.
 function sideOpeningVerticalFits(design, spec, widthMm) {
   const box = design?.box || {};
@@ -310,7 +310,7 @@ function sideOpeningVerticalFits(design, spec, widthMm) {
 }
 
 // Sizes that fit every currently-selected side at the current shape/depth/
-// top-support combination. Mirrors organizer_side_openings.
+// top-support combination. Mirrors organizer_features.side_openings.
 // side_opening_allowed_sizes() so the browser never offers an impossible
 // preset, but Python still re-validates on every preview/generate.
 function sideOpeningAllowedSizes(design = state.design) {

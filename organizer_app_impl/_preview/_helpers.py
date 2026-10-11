@@ -18,7 +18,7 @@ from organizer_engine import (
     translated,
     difference,
 )
-from organizer_stack import stack_enabled
+from organizer_features.stack import stack_enabled
 from organizer_inserts._bore import bore_reference_meshes
 from organizer_inserts import (
     CRADLE_FLOOR_GAP,

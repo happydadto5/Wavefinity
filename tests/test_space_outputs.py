@@ -21,7 +21,7 @@ from organizer_inventory import (
     normalise_storage_box,
     storage_box_defaults,
 )
-from organizer_space_outputs import (
+from organizer_outputs.space import (
     STORAGE_BOX,
     BASE_TRIM,
     base_trim_design,
@@ -29,10 +29,10 @@ from organizer_space_outputs import (
     structural_kind,
 )
 from organizer_spaces import _write_metadata, describe
-import organizer_storage_drawer_outputs as cabinet_outputs
+import organizer_storage.drawer_outputs as cabinet_outputs
 from organizer_engine import BASE_UNIT
-from organizer_storage_drawer_geometry import _make_datum, resolve_storage_drawers_plan
-from organizer_storage_drawers import prepare_new_storage_drawers_definition
+from organizer_storage.drawer_geometry import _make_datum, resolve_storage_drawers_plan
+from organizer_storage.drawers import prepare_new_storage_drawers_definition
 
 CASE = {"name": "Screw case", "kind": "portable", "x": 96, "y": 96, "z": 40}
 SURFACE = {"name": "Bench", "kind": "surface", "x": 200, "y": 160, "z": 7.5, "trim_size": "medium"}

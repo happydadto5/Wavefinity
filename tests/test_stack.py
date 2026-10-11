@@ -14,7 +14,7 @@ from organizer_engine import (
 )
 from organizer_inserts import Layout
 from organizer_app import design_from_dict, design_to_dict, inventory_bin_record
-import organizer_stack as st
+import organizer_features.stack as st
 from wavefinity_web import catalog_payload, connector_payload
 
 

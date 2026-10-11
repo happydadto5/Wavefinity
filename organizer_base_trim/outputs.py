@@ -37,9 +37,9 @@ from organizer_base_trim import (
     generate_base_trim_files,
 )
 from organizer_inventory import normalise_space_definition
-from organizer_printer_profile import normalise_printer_profile
-from organizer_product_rules import SURFACE_TRIM_HEIGHTS
-from organizer_space_outputs import BASE_TRIM, base_trim_design, structural_kind
+from organizer_outputs.printer_profile import normalise_printer_profile
+from organizer_engine.product_rules import SURFACE_TRIM_HEIGHTS
+from organizer_outputs.space import BASE_TRIM, base_trim_design, structural_kind
 
 BASE_TRIM_OUTPUT_KEY = "base_trim"
 BASE_TRIM_MANIFEST_SCHEMA = 1

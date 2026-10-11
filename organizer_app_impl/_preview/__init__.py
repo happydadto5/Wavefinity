@@ -21,20 +21,20 @@ from organizer_engine import (
     translated,
     difference,
 )
-from organizer_edge_mount import (
+from organizer_features.edge_mount import (
     apply_edge_mount_hole_cuts,
     apply_edge_mount_structure,
     edge_mount_summary,
     edge_mount_text_object,
     make_edge_mount_label_part,
 )
-from organizer_side_openings import (
+from organizer_features.side_openings import (
     apply_side_openings,
     side_opening_summary,
     validate_side_openings,
 )
-from organizer_pegboard import apply_pegboard_mount_structure, receiver_layout
-from organizer_stack import stack_enabled
+from organizer_features.pegboard import apply_pegboard_mount_structure, receiver_layout
+from organizer_features.stack import stack_enabled
 from organizer_inserts._bore import bore_reference_meshes, bore_tool_clearance_zone
 from organizer_inserts._cradle import cradle_reference_meshes
 from organizer_inserts import (

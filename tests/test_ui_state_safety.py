@@ -11,7 +11,7 @@ from pathlib import Path
 
 from dataclasses import replace
 from organizer_engine import BoxSpec, SideOpeningSpec, StackSpec, SIDE_OPENING_WIDTHS
-from organizer_side_openings import (
+from organizer_features.side_openings import (
     SIDE_OPENING_CORNER_MARGIN_MM, side_opening_allowed_sizes, validate_side_openings,
 )
 from space_source import app_source, spaces_source

@@ -77,20 +77,20 @@ from organizer_engine import (
     export_object_groups_3mf,
     validate_object_groups_3mf,
 )
-from organizer_edge_mount import (
+from organizer_features.edge_mount import (
     apply_edge_mount_hole_cuts,
     apply_edge_mount_structure,
     edge_mount_summary,
     edge_mount_text_object,
     make_edge_mount_label_part,
 )
-from organizer_side_openings import (
+from organizer_features.side_openings import (
     SIDE_OPENING_TOP_BRIDGE_MM,
     apply_side_openings,
     side_opening_summary,
     validate_side_openings,
 )
-from organizer_pegboard import (
+from organizer_features.pegboard import (
     PegboardMountSpec,
     apply_pegboard_mount_structure,
     make_board_adapters,
@@ -104,7 +104,7 @@ from organizer_b4b import (
     b4b_summary,
     validate_b4b_design,
 )
-from organizer_stack import (
+from organizer_features.stack import (
     make_lid_parts,
     make_stack_lid,
     normalize_stack_settings,

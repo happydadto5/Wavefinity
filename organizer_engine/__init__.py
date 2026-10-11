@@ -37,7 +37,7 @@ from organizer_geometry import (
     translated,
     union,
 )
-from organizer_pegboard import PegboardMountSpec
+from organizer_features.pegboard import PegboardMountSpec
 
 from pathlib import Path
 import numpy as np

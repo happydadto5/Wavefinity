@@ -8,7 +8,7 @@ from pathlib import Path
 
 import organizer_app
 from organizer_app import BoxSpec, Layout, StackSpec
-from organizer_edge_mount import EdgeMountSpec
+from organizer_features.edge_mount import EdgeMountSpec
 from organizer_engine import LidSpec
 from tests.test_inventory_safety import BatchFixture, design, record
 from organizer_inventory import change_design_status, load_inventory, save_design_source

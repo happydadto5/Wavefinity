@@ -21,7 +21,7 @@ from organizer_engine import (
     wavy_rect_outer,
 )
 from organizer_geometry import _extrude_polygon
-from organizer_slicer import slicer_display_name
+from organizer_outputs.slicer import slicer_display_name
 
 from ._core import (
     UNIT,

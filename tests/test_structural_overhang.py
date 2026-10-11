@@ -13,11 +13,11 @@ from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
 from organizer_b4b import B4B_SUPPORT_FREE_BRIDGE_MAX
-from organizer_printer_profile import component_fit, normalise_printer_profile
-from organizer_storage_drawers import prepare_new_storage_drawers_definition
-import organizer_storage_drawer_geometry as geometry
-from organizer_storage_drawer_geometry import resolve_storage_drawers_plan
-from organizer_storage_drawer_outputs import _oriented_parts
+from organizer_outputs.printer_profile import component_fit, normalise_printer_profile
+from organizer_storage.drawers import prepare_new_storage_drawers_definition
+import organizer_storage.drawer_geometry as geometry
+from organizer_storage.drawer_geometry import resolve_storage_drawers_plan
+from organizer_storage.drawer_outputs import _oriented_parts
 
 BED_DEFAULT = {"x_mm": 256.0, "y_mm": 256.0, "z_mm": 256.0}
 

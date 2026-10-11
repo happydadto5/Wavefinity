@@ -13,8 +13,8 @@ from organizer_engine import (
     differing_connector_plan,
 )
 from organizer_inventory import design_specs
-from organizer_stack import STACK_MIN_WALL
-from organizer_pegboard import pegboard_layout_for_bin
+from organizer_features.stack import STACK_MIN_WALL
+from organizer_features.pegboard import pegboard_layout_for_bin
 
 from ._core import (
     UNIT,

@@ -18,8 +18,8 @@ from organizer_b4b import (B4B_STACK_RECESS_DEPTH, B4B_MIN_FLOOR_SKIN,
 from organizer_engine import WAVE_MATING_GAP, wavy_rect_cavity
 from organizer_geometry import _extrude_polygon, _extrude_yz_profile, _loft_cavity, difference, translated, union
 from organizer_inserts import Feature, Zone, text_fitted
-from organizer_printer_profile import component_fit, normalise_printer_profile
-from organizer_storage_drawers import normalise_storage_drawers_definition, storage_drawers_unit_counts
+from organizer_outputs.printer_profile import component_fit, normalise_printer_profile
+from organizer_storage.drawers import normalise_storage_drawers_definition, storage_drawers_unit_counts
 
 SD_JOINT_CLEARANCE_MM = 0.20
 SD_JOINT_LAND_MIN_MM = 4.0

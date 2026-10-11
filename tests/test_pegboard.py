@@ -14,7 +14,7 @@ from organizer_app import Layout, design_from_dict, design_to_dict, generate_org
 from organizer_drawer import drawer_report
 from organizer_engine import BoxSpec
 from organizer_inventory import configure_space, load_inventory
-from organizer_pegboard import (
+from organizer_features.pegboard import (
     PegboardMountSpec,
     PEGBOARD_PROJECTION,
     _adapter_body_profile,

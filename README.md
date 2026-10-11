@@ -562,7 +562,7 @@ the established B4B values when a legacy Space has no block. The Space header
 owns the Space-level buttons - *Open Space…*, *Edit Space*, *Show Folder*, *New
 Space* - plus the structural output: *Save Storage Box* / *Print Storage Box* for a
 Storage Box and *Save Base Trim* / *Print Base Trim* for a Surface. Those outputs
-are built by `organizer_space_outputs.py` as a transient empty-layout B4B (or Base
+are built by `organizer_outputs/space.py` as a transient empty-layout B4B (or Base
 Trim) design from the Space definition and go through `/api/space/structural-*`,
 which suppress Inventory logging entirely.
 
@@ -1696,19 +1696,17 @@ layered implementation:
 
 | File | Role | Entry point? |
 |---|---|---|
-| `organizer_geometry.py` | Feature-neutral booleans, extrusion, sweep, ring alignment and loft helpers. | No. |
-| `organizer_engine.py` | Wavy boxes, connectors, labels, mesh validation and 3MF/STL export. It re-exports established geometry helper names for compatibility. | No. |
-| `organizer_base_trim.py` | Isolated Base Trim validation, global-phase ring geometry, bed-aware splitting, section joints and export. | No. |
+| `organizer_geometry/` | Feature-neutral booleans, extrusion, sweep, ring alignment and loft helpers. | No. |
+| `organizer_engine/` | Wavy boxes, connectors, labels, mesh validation, product rules and 3MF/STL export. It re-exports established geometry helper names for compatibility. | No. |
+| `organizer_base_trim/` | Isolated Base Trim validation, global-phase ring geometry, bed-aware splitting, section joints and export. | No. |
 | `organizer_inserts/` | Item/layout model, authoritative feature registry, per-feature builders, Divider compartments, and fused/removable assembly. | No. |
 | `organizer_app.py` | CLI, exporters and design persistence. Legacy palette constants are generated from the feature registry. | Yes, for CLI subcommands. |
 | `wavefinity_web.py` | The local HTTP service — see [The browser service](#the-browser-service). | Yes, the default UI launch target. |
-| `organizer_inventory.py` | The drawer inventory file (`Wavefinity bins.md`): parsing, legacy upgrade, merge-saves, bin logging. | No. |
-| `organizer_drawer.py` | Drawer layout: grid fit, drawer report, spacer planning and export, and its `/api/drawer/*` routes. | No. |
-| `organizer_pegboard.py` | Pegboard standards, size derivation, receiver layout/geometry, standard-specific adapters, and mount footprints. | No. |
-| `organizer_storage_drawers.py` | Storage Drawers cabinet schema: drawer descriptors with stable IDs, the canonical normalizer, the damaged-settings reset, and placement-preserving add/delete/reconfigure plans. | No. |
-| `organizer_storage_drawer_geometry.py` | The physical cabinet from one datum: base, top, sides/frames, rear, drawers and stacking pegs, plus the fit summary. Fix 114: inset fronts with `SD_FRONT_REVEAL_MM`, half-dovetails, a ramped top detent, and support-conscious parts proven by `tests/test_structural_overhang.py` (design intent in the production orientation, not slicer certification). | No. |
-| `organizer_storage_drawer_outputs.py` | Cabinet output planning and the rollback-safe save transaction: oriented 3MF export, manifest and SHA-256 status, app-owned debris sweep. | No. |
-| `organizer_printer_profile.py` | The one printer build-volume owner: normalisation, print orientations (fit bounds and the matching real rotation), and reset. | No. |
+| `organizer_inventory/` | The drawer inventory file (`Wavefinity bins.md`): parsing, legacy upgrade, merge-saves and bin logging. | No. |
+| `organizer_drawer/` | Drawer layout: grid fit, drawer report, spacer planning/export and its `/api/drawer/*` routes. | No. |
+| `organizer_features/` | Edge Mount, Side Openings, Lid & Stacking, and Pegboard standards/geometry. | No. |
+| `organizer_storage/` | Storage location handling and Storage Drawers schema, geometry, output planning and recovery. | No. |
+| `organizer_outputs/` | Printer build-volume/profile ownership, slicer handoff and structural Space output helpers. | No. |
 | `web/storage-drawers.js`, `web/storage-drawers-form.js`, `web/storage-drawers-workspace.js` | Cabinet rules from the published catalog, the Create/Edit form and live summary (usable height = stored height + Drawer fit, computed locally), and the drawer navigator with Save/Print Cabinet and recovery; Add/Delete Drawer live only in Design. `web/storage-drawers-guide.html` is the one app-level assembly and print guide. | No. |
 | `web/storage-box-form.js`, `web/structural-design.js` | Structural Space objects in Design (Fix 103): the Storage Box case editor, and the controller that mounts the cabinet/case editor as the Design target, keeps one debounced draft preview in `state.structuralPreview`, draws the Interior Width/Depth/Height 3D handles, shows the Space canvas view-only as the 2D view, and owns Save Changes plus the one structural dirty/leave check. | No. |
 | `web/printer-profile.js` | The browser's printer build-volume owner and the Printer Settings control. | No. |

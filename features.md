@@ -1353,12 +1353,12 @@ Authoritative implementation details live in the owning code, including areas su
 
 - `wavefinity_web.py` catalog/rule payloads;
 - `organizer_inserts/_registry.py` and feature modules;
-- `organizer_product_rules.py`;
+- `organizer_engine/product_rules.py`;
 - `organizer_spaces.py`;
-- `organizer_pegboard.py`;
-- `organizer_edge_mount.py`;
-- `organizer_lid_handle.py`;
-- `organizer_stack.py`;
+- `organizer_features/pegboard.py`;
+- `organizer_features/edge_mount.py`;
+- `organizer_features/lid_handle.py`;
+- `organizer_features/stack.py`;
 - browser UI/state logic under `web/`.
 
 When this file disagrees with the current accepted code, fix the document.

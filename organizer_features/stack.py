@@ -52,7 +52,7 @@ from organizer_engine import (
     wavy_cavity_polygon,
     wavy_outer_polygon,
 )
-from organizer_lid_handle import handle_height, handle_keepout, resolve_lid_handle
+from organizer_features.lid_handle import handle_height, handle_keepout, resolve_lid_handle
 from organizer_geometry import (
     _align_ring,
     _extrude_polygon,

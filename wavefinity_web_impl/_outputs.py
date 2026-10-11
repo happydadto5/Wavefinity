@@ -10,18 +10,18 @@ import sys
 import time
 from typing import Any
 from organizer_inventory import normalise_storage_box
-from organizer_product_rules import surface_maximums
-from organizer_space_outputs import BASE_TRIM, STORAGE_DRAWERS, structural_kind
+from organizer_engine.product_rules import surface_maximums
+from organizer_outputs.space import BASE_TRIM, STORAGE_DRAWERS, structural_kind
 from organizer_inventory import storage_drawers_mutate_text
-from organizer_printer_profile import component_fit, normalise_printer_profile
-from organizer_storage_drawers import (
+from organizer_outputs.printer_profile import component_fit, normalise_printer_profile
+from organizer_storage.drawers import (
     normalise_storage_drawers_definition,
     reset_storage_drawers_definition,
     storage_drawers_definition_problem,
 )
-from organizer_storage_drawer_geometry import resolve_storage_drawers_plan
+from organizer_storage.drawer_geometry import resolve_storage_drawers_plan
 from organizer_app import _mesh_preview_geometry, design_source_payload
-from organizer_slicer import slicer_display_name
+from organizer_outputs.slicer import slicer_display_name
 
 from ._runtime import DEFAULT_OUTPUT, GEOMETRY_LOCK, EXPORTS
 

@@ -43,7 +43,7 @@ B4B_LID_SEAT_CLEARANCE = 0.15
 B4B_LID_SKIRT_LAP = 4.0        # how far the skirt laps down past the body rim
 B4B_LID_SKIRT_MIN_LAP = 0.30   # smallest lap that still counts as a locating skirt
 # A latched lid needs a printable body wall below its latch pad, independent
-# of the selected latch strength - see organizer_product_rules.B4B_LATCHED_MIN_HEIGHT.
+# of the selected latch strength - see organizer_engine.product_rules.B4B_LATCHED_MIN_HEIGHT.
 
 # --- support-free integrated hardware -------------------------------------- #
 # Every integrated hinge/latch/handle barrel has its axis on world X and prints
@@ -275,7 +275,7 @@ B4B_HW_M2_MAX_FIELD_Z = 64.0
 # --- minimum case ---------------------------------------------------------- #
 # A B4B is a carrying case, not a bin with hardware bolted on.  Below this the
 # hardware would be the product, so B4B is refused rather than grown.
-# See organizer_product_rules for B4B_MIN_FIELD_XY / B4B_LATCHED_MIN_HEIGHT.
+# See organizer_engine.product_rules for B4B_MIN_FIELD_XY / B4B_LATCHED_MIN_HEIGHT.
 # B4B wall floor and default. 0.8 mm is the deliberate Super thin / light duty
 # option; 1.6 mm is the default/recommended Storage Box wall. The child field
 # stays authoritative, so the extra material grows outward and costs no capacity.

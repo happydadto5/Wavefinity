@@ -52,7 +52,7 @@ from __future__ import annotations
 
 # Names this module used to re-export from sibling modules (kept for compatibility).
 from organizer_app import bore_reference_envelope_extensions, connector_filename, design_from_dict, design_source_payload, design_to_dict, generate_side_file, object_height_plan
-from organizer_stack import stack_summary
+from organizer_features.stack import stack_summary
 from organizer_engine import (
     BASE_UNIT,
     MAX_BOX_SIZE,
@@ -96,12 +96,12 @@ from organizer_inventory import (
 )
 from organizer_inserts import Layout
 from organizer_b4b import B4B_STACK_RECESS_DEPTH, b4b_summary
-from organizer_product_rules import DRAWER_HARD_CLEARANCE_MM, SURFACE_TRIM_HEIGHTS
-from organizer_stack import STACK_MIN_WALL, STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
-from organizer_pegboard import pegboard_layout_for_bin, pegboard_standard
-from organizer_edge_mount import edge_mount_projection_envelope
-from organizer_slicer import slicer_display_name
-from organizer_printer_profile import (
+from organizer_engine.product_rules import DRAWER_HARD_CLEARANCE_MM, SURFACE_TRIM_HEIGHTS
+from organizer_features.stack import STACK_MIN_WALL, STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
+from organizer_features.pegboard import pegboard_layout_for_bin, pegboard_standard
+from organizer_features.edge_mount import edge_mount_projection_envelope
+from organizer_outputs.slicer import slicer_display_name
+from organizer_outputs.printer_profile import (
     DEFAULT_PRINTER_BUILD_MM,
     normalise_printer_profile,
     print_file_fit_issues,

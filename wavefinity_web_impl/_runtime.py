@@ -30,7 +30,7 @@ from organizer_engine import (
 )
 from organizer_inserts import EDITOR_SNAP, Layout
 from organizer_app import APP_DIR, design_to_dict
-from organizer_stack import (
+from organizer_features.stack import (
     STACK_MIN_WALL,
     stack_base_minimum,
     stack_effective_box,

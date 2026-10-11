@@ -8,14 +8,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from organizer_product_rules import STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
+from organizer_engine.product_rules import STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
 from space_source import app_source
-from organizer_storage_drawers import (
+from organizer_storage.drawers import (
     STORAGE_DRAWER_FIT_CHOICES, STORAGE_DRAWER_FIT_DEFAULT,
     new_drawer_descriptor, prepare_new_storage_drawers_definition,
     reset_storage_drawers_definition, storage_drawers_defaults,
 )
-from organizer_storage_drawer_geometry import storage_drawers_summary
+from organizer_storage.drawer_geometry import storage_drawers_summary
 
 
 def source(name):
@@ -115,7 +115,7 @@ class StorageBoxFitTests(unittest.TestCase):
     def setUp(self):
         from organizer_app import design_from_dict
         from organizer_b4b import b4b_summary
-        from organizer_space_outputs import storage_box_design
+        from organizer_outputs.space import storage_box_design
         import wavefinity_web
         self.fit = wavefinity_web._storage_box_printer_fit
         self.design_from_dict, self.storage_box_design = design_from_dict, storage_box_design

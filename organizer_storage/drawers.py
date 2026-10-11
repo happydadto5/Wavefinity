@@ -6,7 +6,7 @@ import math
 import uuid
 
 from organizer_engine import BASE_UNIT, B4B_MATERIAL_PRESETS, B4B_DEFAULT_WALL, B4B_DEFAULT_BASE
-from organizer_product_rules import ORDINARY_BIN_MIN_HEIGHT_MM, STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
+from organizer_engine.product_rules import ORDINARY_BIN_MIN_HEIGHT_MM, STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
 
 STORAGE_DRAWERS_KIND = "storage_drawers"
 STORAGE_DRAWERS_MIN_UNITS = 6
@@ -265,7 +265,7 @@ def storage_drawers_active_limits(space: dict, drawer_id: str | None) -> dict:
     rows = canonical["storage_drawers"]["drawers"]
     index = next((i for i, one in enumerate(rows) if one["id"] == drawer_id), 0)
     # Local import avoids the storage_drawers <-> geometry module import cycle.
-    from organizer_storage_drawer_geometry import storage_drawers_usable_heights
+    from organizer_storage.drawer_geometry import storage_drawers_usable_heights
     usable = storage_drawers_usable_heights(canonical)
     row = rows[index]
     return {"x": canonical["x"], "y": canonical["y"], "z": usable[index], "drawer_id": row["id"]}
@@ -280,7 +280,7 @@ def storage_drawers_recent_summary(space: dict) -> str:
 
 def storage_drawers_projection(space: dict) -> list[dict]:
     canonical = normalise_storage_drawers_definition(space)
-    from organizer_storage_drawer_geometry import storage_drawers_usable_heights
+    from organizer_storage.drawer_geometry import storage_drawers_usable_heights
     usable = storage_drawers_usable_heights(canonical)
     return [{"id": row["id"], "name": f"Drawer {i}", "width": canonical["x"], "depth": canonical["y"], "height": usable[i-1], "clearance": 0.0, "boundary": "mating", "placements": []} for i, row in enumerate(canonical["storage_drawers"]["drawers"], 1)]
 

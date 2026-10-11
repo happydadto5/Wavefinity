@@ -41,7 +41,7 @@ from organizer_inserts import (
 from organizer_inserts._core import feature_touches_wall
 from organizer_drawer import stack_part_height
 from organizer_inventory import configure_space_text
-from organizer_product_rules import ORDINARY_BIN_MIN_HEIGHT_MM
+from organizer_engine.product_rules import ORDINARY_BIN_MIN_HEIGHT_MM
 from organizer_app import (
     _customization_zones,
     base_height,
@@ -72,7 +72,7 @@ from organizer_base_trim import (
     base_trim_summary,
     make_base_trim_pieces,
 )
-from organizer_pegboard import pegboard_layout_for_bin
+from organizer_features.pegboard import pegboard_layout_for_bin
 from .._runtime import (
     GEOMETRY_LOCK,
     _SupersededGeometry,

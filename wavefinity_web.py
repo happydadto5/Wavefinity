@@ -127,23 +127,23 @@ from organizer_inventory import (
     append_bin, configure_space_text, design_specs, load_inventory, mark_printed_rows,
     normalise_storage_box, resolve_inventory_path,
 )
-from organizer_product_rules import (
+from organizer_engine.product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
     ORDINARY_BIN_MIN_HEIGHT_MM,
     surface_maximums,
 )
-from organizer_space_outputs import (
+from organizer_outputs.space import (
     BASE_TRIM, STORAGE_BOX, STORAGE_DRAWERS, structural_design, structural_kind,
 )
 from organizer_inventory import storage_drawers_mutate_text
-from organizer_printer_profile import (
+from organizer_outputs.printer_profile import (
     DEFAULT_PRINTER_BUILD_MM,
     component_fit,
     normalise_printer_profile,
     print_file_fit_issues,
     printer_profile_from_preferences,
 )
-from organizer_storage_drawers import (
+from organizer_storage.drawers import (
     STORAGE_DRAWER_FIT_CHOICES,
     STORAGE_DRAWER_FIT_DEFAULT,
     STORAGE_DRAWER_FRAME_WIDTH_CHOICES,
@@ -157,8 +157,8 @@ from organizer_storage_drawers import (
     reset_storage_drawers_definition,
     storage_drawers_definition_problem,
 )
-from organizer_storage_drawer_geometry import resolve_storage_drawers_plan, storage_drawers_summary
-from organizer_base_trim_outputs import (
+from organizer_storage.drawer_geometry import resolve_storage_drawers_plan, storage_drawers_summary
+from organizer_base_trim.outputs import (
     BASE_TRIM_OUTPUT_KEY,
     base_trim_plan,
     base_trim_status,
@@ -166,7 +166,7 @@ from organizer_base_trim_outputs import (
     materialize_base_trim,
     public_plan as base_trim_public_plan,
 )
-from organizer_storage_drawer_outputs import (
+from organizer_storage.drawer_outputs import (
     STRUCTURAL_OUTPUT_KEY,
     materialize_storage_drawers,
     structural_manifest_plan,
@@ -174,7 +174,7 @@ from organizer_storage_drawer_outputs import (
     structural_status,
     sweep_cabinet_debris,
 )
-from organizer_product_rules import STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
+from organizer_engine.product_rules import STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
 from organizer_spaces import (
     commit_structural_output,
     default_space_parent,
@@ -252,7 +252,7 @@ from organizer_base_trim import (
     generate_base_trim_joint_test_file,
     make_base_trim_pieces,
 )
-from organizer_stack import (
+from organizer_features.stack import (
     STACK_MIN_WALL,
     make_lid_parts,
     stack_base_minimum,
@@ -261,8 +261,8 @@ from organizer_stack import (
     stack_summary,
     validate_stack_design,
 )
-from organizer_slicer import slicer_display_name
-from organizer_edge_mount import (
+from organizer_outputs.slicer import slicer_display_name
+from organizer_features.edge_mount import (
     EDGE_HOLE_DEFAULT_SCREW_DIAMETER,
     EDGE_HOLE_DEFAULT_TOP_OFFSET,
     EDGE_HOLE_MAX_ACCESS_DIAMETER,
@@ -281,14 +281,14 @@ from organizer_edge_mount import (
     EDGE_LABEL_MIN_THICKNESS,
     EDGE_LABEL_THICKNESS_PRESETS,
 )
-from organizer_side_openings import (
+from organizer_features.side_openings import (
     SIDE_OPENING_ARCH_CURVE,
     SIDE_OPENING_CORNER_MARGIN_MM,
     SIDE_OPENING_MIN_SIDE_MM,
     SIDE_OPENING_TOP_BRIDGE_MM,
 )
 from organizer_engine import export_object_groups_3mf
-from organizer_pegboard import (
+from organizer_features.pegboard import (
     make_pegboard_hooks,
     pegboard_catalog,
     pegboard_hook_count,

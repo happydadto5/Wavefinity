@@ -33,7 +33,7 @@ from organizer_engine import (
     wavy_outer_polygon,
 )
 import organizer_inserts as inserts
-from organizer_side_openings import apply_side_openings
+from organizer_features.side_openings import apply_side_openings
 from organizer_inserts._bore import (
     JOIN_SKIN, _bore_grid, _round_clear_sides, _wall_only_shell_reach,
     bore_envelope_zone, bore_minimum_pitches, wall_only_envelope,
@@ -1905,7 +1905,7 @@ class BoreFix068Tests(unittest.TestCase):
         return base_z + inserts.resolved_options(box, one, base_z)["height"]
 
     def test_auto_height_ends_two_mm_below_the_lowest_access_cutter(self) -> None:
-        from organizer_edge_mount import (
+        from organizer_features.edge_mount import (
             _print_safe_profile_radius, edge_mount_access_lowest_z, edge_mount_hole_plan)
         box = self._edge_box()
         holes = edge_mount_hole_plan(box)
@@ -1920,7 +1920,7 @@ class BoreFix068Tests(unittest.TestCase):
 
 
     def test_auto_height_uses_the_larger_access_diameter(self) -> None:
-        from organizer_edge_mount import _print_safe_profile_radius
+        from organizer_features.edge_mount import _print_safe_profile_radius
         box = self._edge_box(access_diameter_mm=12.0)
         lowest = (box.z - box.edge_mount.top_offset_mm) - _print_safe_profile_radius(6.0)
         self.assertAlmostEqual(self._auto_height_top(box), lowest - 2.0, places=6)
