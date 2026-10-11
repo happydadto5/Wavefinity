@@ -232,8 +232,9 @@ DP.wire = () => {
   const positive = (axis, label) => raw => {
     const n = dlNum(raw);
     const min = DP.drawerMinima()[axis];
-    if (n !== null && n >= min) return n;
-    toast(`${label} must be at least ${fmt(min)} mm.`, true);
+    const max = 2000; // matches the server's MAX_DRAWER_MM in organizer_drawer/_core.py
+    if (n !== null && n >= min && n <= max) return n;
+    toast(`${label} must be between ${fmt(min)} mm and ${fmt(max)} mm.`, true);
     return null;
   };
   drawerField("#dl-width", "width", positive("x", "Width"));

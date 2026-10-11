@@ -315,6 +315,13 @@ SP.readSetupValues = async () => {
     if (![x, y, z].every(Number.isFinite)) {
       return fail("Enter valid drawer dimensions in mm.", "#drawer-x");
     }
+    // Client-side early feedback only: the server's normalise_drawer() in
+    // organizer_drawer/_core.py (MAX_DRAWER_MM = 2000) is the authority and
+    // rejects anything larger with a clean 400.
+    const maxMM = 2000;
+    if (x > maxMM || y > maxMM || z > maxMM) {
+      return fail("Dimensions must be at most 2000 mm.", "#drawer-x");
+    }
     if (SP.drawerCapacity(x) < 1 || SP.drawerCapacity(y) < 1) {
       return fail(
         "The drawer must have room for at least one Wavefinity unit after wall clearance.",
@@ -359,6 +366,12 @@ SP.readSetupValues = async () => {
     const z = Number(document.getElementById("portable-z").value);
     if (![rawX, rawY, z].every(Number.isFinite)) {
       return fail("Enter valid Storage Box dimensions in mm.", "#portable-x");
+    }
+    // Client-side early feedback only: these become the drawer's width/depth/height,
+    // and the server's normalise_drawer() (MAX_DRAWER_MM = 2000) is the authority.
+    const maxMM = 2000;
+    if (rawX > maxMM || rawY > maxMM || z > maxMM) {
+      return fail("Dimensions must be at most 2000 mm.", "#portable-x");
     }
 
     const x = SP.snap(rawX);

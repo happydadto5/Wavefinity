@@ -146,6 +146,11 @@ SP.resolvePegboard = () => {
     if (![width, height].every(value => Number.isFinite(value) && value > 0)) {
       return { ok: false, error: "Enter the Pegboard width and height in mm." };
     }
+    // Client-side early feedback only: these become the drawer's width/depth,
+    // and the server's normalise_drawer() (MAX_DRAWER_MM = 2000) is the authority.
+    if (width > 2000 || height > 2000) {
+      return { ok: false, error: "Pegboard width and height must be at most 2000 mm." };
+    }
     holesX = Math.floor(width / standard.pitch_x_mm + 1e-9);
     holesY = Math.floor(height / standard.pitch_y_mm + 1e-9);
     if (holesX < 1 || holesY < 1) return { ok: false, error: "The board must contain at least one mount position." };

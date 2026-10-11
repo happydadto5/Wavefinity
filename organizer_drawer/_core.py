@@ -33,6 +33,13 @@ def _default_printer_profile() -> dict[str, float]:
 
 UNIT = BASE_UNIT
 SNAPS = (8.0, 4.0)
+# Server-authoritative size bounds: a drawer's width/depth/height arrive from the
+# client with no upper bound, and the grid is width/snap by depth/snap cells -
+# a 10 m "drawer" would ask numpy for a billion-cell array and exhaust server
+# memory. 2000 mm covers every real drawer (a full dresser width) several times
+# over; pegboard holes are capped at 500 (about 12 m of board at 25.4 mm pitch).
+MAX_DRAWER_MM = 2000.0
+MAX_PEGBOARD_HOLES = 500
 # How far a bin's wave crests stand past its grid footprint on each side.
 CREST = WAVE_AMPLITUDE - WAVE_MATING_GAP / 2.0
 # Total slack per axis a drawer needs just to take the crests at both walls.
@@ -81,7 +88,9 @@ SPACER_KINDS = ("spacer",)
 def _positive(value: Any, name: str) -> float:
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # float() raises OverflowError (not ValueError) for huge JSON integers.
+        # Convert to the promised clean 400 here, before Change 2's cap check.
         raise ValueError(f"drawer {name} must be a number of mm") from None
     if not math.isfinite(number) or number <= 0:
         raise ValueError(f"drawer {name} must be a positive number of mm")
@@ -94,6 +103,29 @@ def normalise_drawer(raw: dict[str, Any]) -> dict[str, Any]:
     drawer = {**DRAWER_DEFAULTS, **raw}
     for key in ("width", "depth", "height"):
         drawer[key] = _positive(drawer[key], key)
+        if drawer[key] > MAX_DRAWER_MM:
+            raise ValueError(f"drawer {key} must be at most {MAX_DRAWER_MM:g} mm")
+    for key in ("pegboard_holes_x", "pegboard_holes_y"):
+        holes = drawer.get(key)
+        if not holes:
+            continue  # unset, zero and blank fall back to width/depth in drawer_grid
+        try:
+            holes = float(holes)
+        except (TypeError, ValueError, OverflowError):
+            # float() itself raises OverflowError for huge JSON integers
+            # (e.g. 10**400: "int too large to convert to float") - which
+            # do_POST maps to HTTP 500, not 400. Convert to the promised
+            # clean 400 here, before any allocation.
+            raise ValueError(f"drawer {key} must be a whole number of holes") from None
+        # float("Infinity") and float("nan") parse fine, but int() of them raises
+        # OverflowError - which do_POST maps to HTTP 500, not 400. Reject them
+        # here so the response is the promised clean 400 before any allocation.
+        if not math.isfinite(holes):
+            raise ValueError(f"drawer {key} must be a whole number of holes")
+        holes = int(holes)
+        if holes > MAX_PEGBOARD_HOLES:
+            raise ValueError(f"drawer {key} must be at most {MAX_PEGBOARD_HOLES} holes")
+        drawer[key] = holes
     if drawer.get("boundary") not in BOUNDARIES:
         drawer["boundary"] = "wall"
     requested_clearance = float(drawer.get("clearance") or 0.0)

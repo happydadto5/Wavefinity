@@ -789,6 +789,66 @@ class BulkPrintTests(unittest.TestCase):
 
 
 
+class DrawerSizeBoundTests(unittest.TestCase):
+    """Fix 1040: width/depth/height and pegboard hole counts are bounded server-side."""
+
+    @staticmethod
+    def _drawer(**extra):
+        return {"width": 300.0, "depth": 300.0, "height": 60.0, **extra}
+
+    def test_a_drawer_at_the_cap_is_legal(self):
+        drawer = normalise_drawer({"width": 2000.0, "depth": 300.0, "height": 60.0})
+        self.assertEqual(drawer["width"], 2000.0)
+
+    def test_a_drawer_over_the_cap_is_rejected(self):
+        for width in (2000.1, 100000000, 1e15, 10**400):
+            with self.subTest(width=width):
+                with self.assertRaises(ValueError):
+                    normalise_drawer({"width": width, "depth": 300.0, "height": 60.0})
+
+    def test_every_axis_is_capped(self):
+        for key in ("width", "depth", "height"):
+            with self.subTest(key=key):
+                with self.assertRaises(ValueError):
+                    normalise_drawer(self._drawer(**{key: 100000000}))
+
+    def test_the_attack_value_fails_before_any_grid_allocation(self):
+        with mock.patch("numpy.full") as full, mock.patch("numpy.ones") as ones:
+            with self.assertRaises(ValueError):
+                drawer_report({"width": 100000000, "depth": 100000000, "height": 60.0}, [])
+        full.assert_not_called()
+        ones.assert_not_called()
+
+    def test_pegboard_holes_at_the_cap_are_legal(self):
+        drawer = normalise_drawer(self._drawer(boundary="pegboard", pegboard_holes_x=500))
+        self.assertEqual(drawer["pegboard_holes_x"], 500)
+
+    def test_pegboard_holes_over_the_cap_are_rejected(self):
+        for key in ("pegboard_holes_x", "pegboard_holes_y"):
+            for holes in (501, 10**18, 10**400):
+                with self.subTest(key=key, holes=holes):
+                    with self.assertRaises(ValueError):
+                        normalise_drawer(self._drawer(boundary="pegboard", **{key: holes}))
+
+    def test_non_finite_pegboard_holes_are_a_value_error_not_an_overflow(self):
+        for holes in ("Infinity", "nan", float("inf"), float("nan")):
+            with self.subTest(holes=holes):
+                with self.assertRaises(ValueError):
+                    normalise_drawer(self._drawer(boundary="pegboard", pegboard_holes_x=holes))
+
+    def test_unset_zero_and_blank_pegboard_holes_still_fall_back(self):
+        for holes in (None, 0, ""):
+            with self.subTest(holes=holes):
+                drawer = normalise_drawer(self._drawer(boundary="pegboard", pegboard_holes_x=holes))
+                self.assertTrue(drawer_grid(drawer)["cols"] > 0)
+
+    def test_the_largest_legal_drawer_has_a_bounded_grid(self):
+        drawer = normalise_drawer({"width": 2000.0, "depth": 2000.0, "height": 60.0, "snap": 4.0})
+        grid = drawer_grid(drawer)
+        # The 0.55 mm hard-wall clearance leaves 1999.45 mm: floor(1999.45 / 4) == 499.
+        self.assertEqual((grid["rows"], grid["cols"]), (499, 499))
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -1111,9 +1111,9 @@
         
         <div id="space-fields-drawer" class="space-type-fields" hidden>
           <div class="space-dimension-row">
-            <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="drawer-x" type="number" min="1" step="any"></label>
-            <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="drawer-y" type="number" min="1" step="any"></label>
-            <label class="space-field"><span>Usable height <span class="unit">mm</span></span><input id="drawer-z" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="drawer-x" type="number" min="1" max="2000" step="any"></label>
+            <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="drawer-y" type="number" min="1" max="2000" step="any"></label>
+            <label class="space-field"><span>Usable height <span class="unit">mm</span></span><input id="drawer-z" type="number" min="1" max="2000" step="any"></label>
           </div>
           <p class="space-help">Measure the clear inside width, depth, and height with the drawer closed. Width is left ↔ right; Depth is front ↔ back. Wavefinity handles its required wall clearance automatically.</p>
           <div id="drawer-readout" class="derived-readout" hidden>
@@ -1140,9 +1140,9 @@
 
         <div id="space-fields-portable" class="space-type-fields" hidden>
           <div class="space-dimension-row">
-            <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="portable-x" type="number" min="1" step="any"></label>
-            <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="portable-y" type="number" min="1" step="any"></label>
-            <label class="space-field"><span>Usable inside height <span class="unit">mm</span></span><input id="portable-z" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="portable-x" type="number" min="1" max="2000" step="any"></label>
+            <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="portable-y" type="number" min="1" max="2000" step="any"></label>
+            <label class="space-field"><span>Usable inside height <span class="unit">mm</span></span><input id="portable-z" type="number" min="1" max="2000" step="any"></label>
           </div>
           <p id="portable-printer-fit" class="portable-fit-warning" hidden></p>
           <div id="portable-readout" class="derived-readout" hidden>
@@ -1208,8 +1208,8 @@
             <label class="space-field"><span>Define board by</span><select id="pegboard-size-mode"><option value="physical">Physical size</option><option value="holes">Hole / slot count</option></select></label>
           </div>
           <div id="pegboard-physical-fields" class="space-dimension-row">
-            <label class="space-field"><span>Physical width <span class="unit">mm</span></span><input id="pegboard-x" type="number" min="1" step="any"></label>
-            <label class="space-field"><span>Physical height <span class="unit">mm</span></span><input id="pegboard-y" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Physical width <span class="unit">mm</span></span><input id="pegboard-x" type="number" min="1" max="2000" step="any"></label>
+            <label class="space-field"><span>Physical height <span class="unit">mm</span></span><input id="pegboard-y" type="number" min="1" max="2000" step="any"></label>
           </div>
           <div id="pegboard-hole-fields" class="space-dimension-row" hidden>
             <label class="space-field"><span>Holes / slots across</span><input id="pegboard-holes-x" type="number" min="1" max="500" step="1"></label>
