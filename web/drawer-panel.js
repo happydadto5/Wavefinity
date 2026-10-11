@@ -167,7 +167,7 @@ DP.build = () => {
       </div>
     </section>
 
-    <details id="dl-spacers" class="dl-section dl-spacers" aria-label="Spacers">
+    <details id="dl-spacers" class="dl-section dl-spacers" aria-label="Spacers" open>
       <summary>Spacers <span id="dl-sp-hint" class="dl-sp-hint" hidden></span></summary>
       <div class="section-body">
         <p class="dl-note">Spacers are filler parts that brace your bins against the drawer walls so nothing slides around. Flexible (unvalidated) spacers print 2mm oversized to wedge in snugly — print them in PLA or PETG. "Unvalidated" means the wedging force hasn't been tested on real printed parts yet.</p>
