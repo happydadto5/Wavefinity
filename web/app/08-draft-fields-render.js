@@ -305,8 +305,8 @@ function renderDraftFields() {
       const shownHeight = opt.height ?? state.draftResolvedOptions?.height ?? "";
       const wallStyle = opt.wall_style ?? state.draftResolvedOptions?.wall_style ?? "straight";
       html += `<div class="editor-group divider-layout"><div class="pair divider-xy-pair">
-        ${field("X count", "option:count_x", shownGx, { min: "0", step: "1", tip: "Walls dividing the bin left to right. 0 for none." })}
-        ${field("Y count", "option:count_y", shownGy, { min: "0", step: "1", tip: "Walls dividing the bin front to back. 0 for none." })}
+        ${field("X count", "option:count_x", shownGx, { min: "0", max: "200", step: "1", tip: "Walls dividing the bin left to right. 0 for none. At most 200." })}
+        ${field("Y count", "option:count_y", shownGy, { min: "0", max: "200", step: "1", tip: "Walls dividing the bin front to back. 0 for none. At most 200." })}
       </div><div class="pair triple">
         ${dividerThicknessField(shownThickness)}
         ${field("Wall height", "option:height", fmtBlank(shownHeight), { unit: "mm", step: "0.5", min: "0.1" })}
@@ -366,8 +366,13 @@ function renderDraftFields() {
           } else {
             const quantityLabel = info.kind === "steps" ? "Number of steps" : "Quantity";
             const autoState = info.kind !== "steps" && one.count == null;
+            // Divider legacy counts are server-capped at 200 (Feature.__post_init__); surface the
+            // bound in the editor for dividers only, matching the server's scope.
+            // (The "200" here is intentionally the same number as MAX_DIVIDER_COUNT;
+            // if the constant ever changes, update this hint to match.)
+            const qtyMax = info.kind === "divider" ? ' max="200"' : "";
             html += `<div class="pair"><label><span class="field-label">${quantityLabel}${autoState ? " (Auto)" : ""}</span><div class="input-with-button">
-              <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
+              <input type="number" min="1" step="1"${qtyMax} data-draft="count" value="${resolvedDraftCount(one)}">
               ${info.kind === "steps" ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
             </div></label>${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
           }

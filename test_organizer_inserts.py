@@ -2089,12 +2089,65 @@ class TextPartTests(unittest.TestCase):
         self.assertEqual(back.zone.centre, one.zone.centre)
 
 
+class DividerCountBoundTests(unittest.TestCase):
+    """Divider counts from the client are capped server-side (Fix 1041)."""
 
+    box = BoxSpec(80.0, 80.0, 40.0)
+    zone = Zone(-15.0, -20.0, 15.0, 20.0)
 
+    def test_grid_counts_accept_the_cap(self) -> None:
+        self.assertEqual(
+            divider_impl.divider_grid_counts({"count_x": 200, "count_y": 0}), (200, 0)
+        )
 
+    def test_grid_counts_refuse_over_the_cap(self) -> None:
+        for value in (201, 1_000_000_000, 10 ** 400):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "X count"):
+                    divider_impl.divider_grid_counts({"count_x": value})
+        with self.assertRaisesRegex(ValueError, "Y count must be at most 200"):
+            divider_impl.divider_grid_counts({"count_y": 201})
 
+    def test_grid_counts_refuse_non_finite_values(self) -> None:
+        for value in ("Infinity", "-Infinity", float("inf"), float("nan")):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "X count must be a valid number"):
+                    divider_impl.divider_grid_counts({"count_x": value})
 
+    def test_grid_counts_keep_their_lenient_parsing(self) -> None:
+        for value in ("", -5, "abc", None):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    divider_impl.divider_grid_counts({"count_x": value}), (0, 0)
+                )
 
+    def test_legacy_divider_count_is_capped(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Divider quantity must be at most 200"):
+            Feature("divider", Zone(0, 0, 100, 100), None, 201, "x", {})
+        Feature("divider", Zone(0, 0, 100, 100), None, 200, "x", {})
+
+    def test_the_cap_does_not_touch_other_kinds(self) -> None:
+        Feature("cradle", Zone(0, 0, 100, 100), None, 500, "x", {})
+
+    def test_non_finite_legacy_count_is_a_value_error(self) -> None:
+        data = {"version": 1, "features": [
+            {"kind": "divider", "zone": [0, 0, 100, 100], "count": float("inf")},
+        ]}
+        with self.assertRaisesRegex(ValueError, "feature count must be a valid number"):
+            layout_from_dict(data)
+
+    def test_client_payload_is_refused_before_any_geometry_is_built(self) -> None:
+        for value, message in (
+            (1_000_000, "X count must be at most 200"),
+            ("Infinity", "X count must be a valid number"),
+        ):
+            with self.subTest(value=value):
+                layout = layout_from_dict({"version": 1, "features": [{
+                    "kind": "divider", "zone": [-15, -20, 15, 20],
+                    "options": {"count_x": value},
+                }]})
+                with self.assertRaisesRegex(ValueError, message):
+                    build_features(self.box, layout.features, self.box.base_thickness)
 
 
 if __name__ == "__main__":

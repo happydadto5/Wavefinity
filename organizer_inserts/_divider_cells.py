@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import json
+import math
 
 from organizer_engine import BoxSpec
 
-from ._core import Feature, Zone
+from ._core import MAX_DIVIDER_COUNT, Feature, Zone
 from ._registry import resolved_options
 
 
@@ -34,14 +35,26 @@ class DividerCell:
 
 def divider_grid_counts(options: dict) -> tuple[int, int]:
     """Return grid wall counts; ``(0, 0)`` means legacy single-axis mode."""
-    def one(value: object) -> int:
+    def one(value: object, name: str) -> int:
         if value in (None, ""):
             return 0
         try:
-            return max(0, int(round(float(value))))
+            number = float(value)
         except (TypeError, ValueError):
             return 0
-    return one(options.get("count_x")), one(options.get("count_y"))
+        except OverflowError:
+            # float() itself overflows for huge JSON integers (e.g. 10**400:
+            # "int too large to convert to float") before math.isfinite is ever
+            # consulted. OverflowError is not a ValueError subclass, so without
+            # this it would escape as HTTP 500. Attack-shaped input -> reject.
+            raise ValueError(f"{name} must be a valid number")
+        if not math.isfinite(number):
+            raise ValueError(f"{name} must be a valid number")
+        parsed = max(0, int(round(number)))
+        if parsed > MAX_DIVIDER_COUNT:
+            raise ValueError(f"{name} must be at most {MAX_DIVIDER_COUNT}")
+        return parsed
+    return one(options.get("count_x"), "X count"), one(options.get("count_y"), "Y count")
 
 
 def even_centres(lo: float, hi: float, count: int) -> list[float]:

@@ -8,7 +8,7 @@ import trimesh
 from shapely.geometry import Polygon
 from organizer_engine import BoxSpec, WAVE_AMPLITUDE, build_scoop_region, wall_depth_for
 from organizer_geometry import _extrude_xz_profile, _extrude_yz_profile, intersection
-from .._core import Feature, Zone, connector_keep_out
+from .._core import MAX_DIVIDER_COUNT, Feature, Zone, connector_keep_out
 from .._divider_cells import (
     _divider_cross_centres,
     _even_centres,
@@ -142,8 +142,8 @@ def _divider_scoops(
         OptionDefinition("Spacing", "spacing", "", minimum=0.1, note="mm between dividers; blank = even split of the count"),
         OptionDefinition("Degree °", "bottom_angle", "0", minimum=-BOTTOM_SLOPE_MAX, maximum=BOTTOM_SLOPE_MAX, note="degrees of bottom slope either way; any non-zero value gives the divider a sloped bottom"),
         OptionDefinition("Number of crossbars", "bottom_supports", "3", "integer", minimum=1, note="whole number of bottom crossbars"),
-        OptionDefinition("X quantity", "count_x", 0, "integer", False, minimum=0, note="dividers running across X; 0 = none"),
-        OptionDefinition("Y quantity", "count_y", 0, "integer", False, minimum=0, note="dividers running across Y; 0 = none"),
+        OptionDefinition("X quantity", "count_x", 0, "integer", False, minimum=0, maximum=MAX_DIVIDER_COUNT, note="dividers running across X; 0 = none"),
+        OptionDefinition("Y quantity", "count_y", 0, "integer", False, minimum=0, maximum=MAX_DIVIDER_COUNT, note="dividers running across Y; 0 = none"),
         OptionDefinition("Wall angle", "angle", 0, "number", False, legacy=True, minimum=-MAX_DIVIDER_ANGLE, maximum=MAX_DIVIDER_ANGLE, note="the current Designer only builds upright grid dividers; leaning walls are not a current control"),
         OptionDefinition("Use sloped base", "slope_base", False, "boolean", False, note="older checkbox: true with bottom_angle 0 means the default 20 degree slope; prefer setting bottom_angle"),
         OptionDefinition("Reverse bottom", "reverse_bottom", False, "boolean", False, legacy=True, note="the current Designer reverses slope direction with a negative bottom_angle instead; not a current control"),

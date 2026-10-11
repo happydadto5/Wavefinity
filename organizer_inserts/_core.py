@@ -22,6 +22,12 @@ ITEM_PROFILES = (
 BASE_PLATE = 0.6           # floor of a standalone insert
 INSERT_CLEARANCE = 0.2     # slack around a standalone insert, per side
 MIN_FEATURE_GAP = 0.8      # material between two features
+# Server-authoritative divider cap: divider counts arrive from the client with
+# no upper bound, and geometry builds one wall solid per divider - a huge count
+# exhausts server memory/CPU. 200 walls across any real bin already need
+# sub-millimetre spacing (unprintable: the minimum gap alone is 0.8 mm), so 200
+# is far beyond anything legitimate. Applies to dividers only.
+MAX_DIVIDER_COUNT = 200
 CONNECTOR_EDGE_KEEP_OUT = 2.0  # interior strip kept low for connector arms
 EDITOR_SNAP = 1.0          # normal editor movement; effectively no floor loss
 CARTRIDGE_PITCH = 8.0      # optional interchangeable standalone-insert grid
@@ -214,6 +220,8 @@ class Feature:
             raise ValueError("feature orientation must be 'x' or 'y'")
         if self.count is not None and self.count < 1:
             raise ValueError("feature count must be positive or automatic")
+        if self.kind == "divider" and self.count is not None and self.count > MAX_DIVIDER_COUNT:
+            raise ValueError(f"Divider quantity must be at most {MAX_DIVIDER_COUNT}")
         if self.full_span and self.kind != "divider":
             raise ValueError("only a divider can span the full wall")
         if self.alternate_ends and self.kind not in {"cradle", "nest"}:
@@ -501,9 +509,21 @@ def layout_from_dict(data: dict) -> Layout:
             raise ValueError("a saved feature zone needs four coordinates")
         kind = str(raw["kind"])
         raw_count = raw.get("count")
-        count = 3 if kind == "steps" and raw_count is None else (
-            None if raw_count is None else int(raw_count)
-        )
+        if raw_count is None:
+            count = 3 if kind == "steps" else None
+        else:
+            try:
+                count = int(raw_count)
+            except OverflowError:
+                # int() of float("inf") (e.g. JSON 1e999) raises OverflowError,
+                # which do_POST maps to HTTP 500. (float("nan") already raises
+                # ValueError -> 400.) A non-finite count is never legitimate for
+                # any kind, so reject it with a clean 400 instead of the generic
+                # 500 path. This is a 500->400 hardening, not a compatibility
+                # cap: it changes nothing for any finite count of any kind, so
+                # it is intentionally NOT divider-scoped (unlike the divider
+                # 200-cap in Feature.__post_init__).
+                raise ValueError("feature count must be a valid number")
         part = Feature(
             kind, Zone(*coords), item, count,
             str(raw.get("along", "x")), dict(raw.get("options", {})),
