@@ -170,6 +170,16 @@ def build_features(
                 joined[WALL_HUG_FLAG] = True
             one = replace(one, options=joined)
 
+        if mode == "fused" and one.kind in (
+                "divider", "cradle", "pocket", "post", "scoop", "slot", "steps"):
+            # A fused interior part fuses into any side wall it reaches, like a
+            # bore. The flag is inert until Fused Walls 3's builders consume
+            # it - current consumers (_layout._feature_reach, bore builder)
+            # are bore-only. When consumed, the shared _join_tabs reach check
+            # (gap <= JOIN_TOUCH) skips walls the part doesn't reach.
+            # Removable inserts (separate/cartridge) never get the flag.
+            one = replace(one, options={**one.options, WALL_JOIN_FLAG: True})
+
         if (
             one.kind == "nest"
             and one.contour
