@@ -22,15 +22,15 @@ def post_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float]
 
 @feature(
     "post", title="Post", display="Center post — rolls and rings",
-    description="A tapered peg for tape rolls, spools, sockets and rings.",
+    description="A peg for tape rolls, spools, sockets and rings; add taper to hold contents snugly.",
     capabilities=("qty", "along"),
     options=(
         OptionDefinition("Height", "height", "16", minimum=0.1, note="mm; must fit inside the bin above the base"),
         OptionDefinition("Diameter", "diameter", "12", minimum=0.1, note="mm at the base; must fit the zone"),
         OptionDefinition("Taper", "taper", "0.4", minimum=0.0, note="mm the peg narrows over its height; must be smaller than the diameter"),
         OptionDefinition("Spacing", "spacing", "4", minimum=0.0, note="mm between neighbouring posts"),
-        OptionDefinition("X quantity", "count_x", "", "integer", False, minimum=1, legacy=True, note="engine-only grid override; the current Designer sets posts through top-level count/along instead"),
-        OptionDefinition("Y quantity", "count_y", "", "integer", False, minimum=1, legacy=True, note="engine-only grid override; the current Designer sets posts through top-level count/along instead"),
+        OptionDefinition("X quantity", "count_x", "", "integer", False, minimum=0, note="posts across X; 0 = none"),
+        OptionDefinition("Y quantity", "count_y", "", "integer", False, minimum=0, note="posts across Y; 0 = none"),
     ), order=40,
 )
 def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
@@ -56,9 +56,11 @@ def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
 
     raw_cx = options.get("count_x")
     raw_cy = options.get("count_y")
-    if raw_cx is not None or raw_cy is not None:
-        count_x = max(1, int(round(float(raw_cx)))) if raw_cx is not None else 1
-        count_y = max(1, int(round(float(raw_cy)))) if raw_cy is not None else 1
+    # Manual X/Y quantities: blank/unset falls through to the legacy count/auto
+    # path below; an explicit 0 means no posts on that axis.
+    if raw_cx not in (None, "") or raw_cy not in (None, ""):
+        count_x = max(0, int(round(float(raw_cx)))) if raw_cx not in (None, "") else 1
+        count_y = max(0, int(round(float(raw_cy)))) if raw_cy not in (None, "") else 1
     elif spec_feature.count is not None:
         legacy_count = max(1, int(round(spec_feature.count)))
         count_x = legacy_count if spec_feature.along == "x" else 1

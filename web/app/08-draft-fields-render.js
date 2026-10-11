@@ -312,9 +312,38 @@ function renderDraftFields() {
         ${wallStyleSelect(wallStyle)}
       </div></div>`;
     } else {
-      const autoPost = info.kind === "post" && one.count == null;
+      // Posts use manual X/Y quantities - the Auto concept is killed for Posts.
+      // Resolve what the two quantity fields show.
+      const postOpt = info.kind === "post" ? (one.options || {}) : null;
+      const postResolved = info.kind === "post" ? (state.draftResolvedOptions || {}) : null;
+      let postQx = null, postQy = null;
+      if (postOpt) {
+        const xRaw = postOpt.count_x, yRaw = postOpt.count_y;
+        const xSet = xRaw != null && xRaw !== "", ySet = yRaw != null && yRaw !== "";
+        if (!xSet && !ySet) {
+          if (one.count != null) {
+            // Legacy single-count post: map count/along onto the X/Y grid.
+            const legacyN = Math.max(1, Math.round(number(one.count, 1)));
+            postQx = one.along === "y" ? 1 : legacyN;
+            postQy = one.along === "y" ? legacyN : 1;
+          } else {
+            // Legacy auto post: show the fill the geometry builds (display only -
+            // typing a value takes manual control of the grid).
+            const pDiameter = number(postOpt.diameter ?? postResolved.diameter, 12);
+            const pSpacing = Math.max(0, number(postOpt.spacing ?? postResolved.spacing, 4));
+            const zw = one.zone[2] - one.zone[0], zd = one.zone[3] - one.zone[1];
+            postQx = Math.max(1, Math.floor((zw - pDiameter + 1e-6) / (pDiameter + pSpacing)) + 1);
+            postQy = Math.max(1, Math.floor((zd - pDiameter + 1e-6) / (pDiameter + pSpacing)) + 1);
+          }
+        } else {
+          postQx = xSet ? xRaw : 1;
+          postQy = ySet ? yRaw : 1;
+        }
+      }
+      // "Runs along direction" is meaningless with no posts (Andrew, raw capture).
+      const qtyZero = postOpt != null && (number(postQx, 1) === 0 || number(postQy, 1) === 0);
       const directionLabel = info.kind === "steps" ? "Shelf direction" : "Runs along";
-      const runsAlong = info.flags.along && !["divider", "bore"].includes(info.kind) && !autoPost
+      const runsAlong = info.flags.along && !["divider", "bore"].includes(info.kind) && !qtyZero
         ? `<fieldset><legend>${directionLabel}</legend><div class="segmented two">
           <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
           <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
@@ -322,18 +351,25 @@ function renderDraftFields() {
         : "";
       const hasOrientationControls = Boolean(info.flags.qty || repeatFieldsHtml || runsAlong || info.flags.alternate);
       if (hasOrientationControls) {
-        html += `<div class="editor-group">${info.kind === "slot" ? "" : `<span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`}`;
+        // Posts dropped the "Repeats" label when the Auto concept was killed.
+        const groupLabel = info.kind === "slot" || info.kind === "post" ? "" : `<span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`;
+        html += `<div class="editor-group">${groupLabel}`;
         // A part with no spacing field of its own (Slot Rack) would leave
         // Quantity alone on its row: Runs along takes the second column instead.
         const alongInPair = Boolean(info.flags.qty && !repeatFieldsHtml && runsAlong);
         if (info.flags.qty) {
-          const quantityLabel = info.kind === "steps" ? "Number of steps" : "Quantity";
-          const autoState = info.kind !== "steps" && one.count == null;
-          html += `<div class="pair"><label><span class="field-label">${quantityLabel}${autoState ? " (Auto)" : ""}</span><div class="input-with-button">
-            <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
-            ${info.kind === "steps" ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
-          </div></label>${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
-          if (autoPost) html += `<p class="inline-help">Auto fills the available area with posts.</p>`;
+          if (info.kind === "post") {
+            // Manual X/Y quantities - no Auto button, no "(Auto)" suffix, no help text.
+            // (postQx/postQy are resolved in the quantity block above.)
+            html += `<div class="pair">${field("X quantity", "option:count_x", postQx, { min: "0", step: "1", tip: "Posts across the bin left to right. 0 for none." })}${field("Y quantity", "option:count_y", postQy, { min: "0", step: "1", tip: "Posts across the bin front to back. 0 for none." })}${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
+          } else {
+            const quantityLabel = info.kind === "steps" ? "Number of steps" : "Quantity";
+            const autoState = info.kind !== "steps" && one.count == null;
+            html += `<div class="pair"><label><span class="field-label">${quantityLabel}${autoState ? " (Auto)" : ""}</span><div class="input-with-button">
+              <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
+              ${info.kind === "steps" ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
+            </div></label>${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
+          }
           if (info.kind === "cradle") {
             const item = one.item || starterItem();
             const first = item.segments[0] || { length: 40, diameter: 6 };
@@ -471,6 +507,7 @@ function renderDraftFields() {
     if (info.kind === "pocket" && option.key === "height") fieldOpts.min = 1.0;
     const labels = {
       pocket: { depth: "Pocket depth" },
+      post: { height: "post height", diameter: "post diameter", taper: "post taper" },
       slot: { depth: "Slot depth", thickness: "Slot width", angle: "Tilt angle" },
     };
     const mmKinds = new Set(["post", "pocket", "slot", "steps"]);
@@ -481,7 +518,7 @@ function renderDraftFields() {
   // Three-across for the kinds whose leftover body fields would otherwise leave
   // a half-empty row (matches the Width / Length / Height row at the top).
   if (info.kind === "post") {
-    html += `<div class="draft-triple">${bodyHtml}</div>` + repeatsHtml;
+    html += `<div class="draft-triple post-unit-fields">${bodyHtml}</div>` + repeatsHtml;
   } else if (info.kind === "steps") {
     html += editorGroup("Size", `<div class="pair">${stepsSizeHtml}${bodyHtml}</div>`) + repeatsHtml;
   } else if (bodyHtml) {

@@ -684,17 +684,13 @@ function updateAutoExpandButton() {
 
 // Bore and Slot Rack keep their Base snug around their selected quantities and
 // grow the bin when needed, so they do not need manual Fit or Fill shortcuts.
-// A Post Rack may still need a deliberately sized footprint, while Pocket and
-// Steps have no contents from which to derive one.
-const FIT_PART_KINDS = { post: "pegs" };
+// Pocket and Steps have no contents from which to derive one. The Post
+// "Fit to pegs" button was removed per Andrew (2026-10-09, Q5: remove it).
 const FILL_PART_KINDS = new Set(["pocket", "steps"]);
 
 function renderFitActions(one) {
   const kind = one.kind;
   const rows = [];
-  if (FIT_PART_KINDS[kind]) {
-    rows.push(`<button type="button" class="button" data-action="fit-part" hidden>Fit to ${FIT_PART_KINDS[kind]}</button>`);
-  }
   if (FILL_PART_KINDS.has(kind)) {
     rows.push(`<button type="button" class="button" data-action="fill-part" hidden>Fill the bin</button>`);
   }

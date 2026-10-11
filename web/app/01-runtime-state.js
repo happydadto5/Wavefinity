@@ -595,7 +595,11 @@ function seedFeatureFromPartDefaults(feature, entry) {
   if (seeded.kind === "bore") {
     if (seeded.options.height_size_mode === "bore_to_bin") delete seeded.options.height;
   }
-  if (Object.hasOwn(remembered, "count") && seeded.kind !== "nest") seeded.count = remembered.count;
+  if (Object.hasOwn(remembered, "count") && seeded.kind !== "nest") {
+    // The Auto concept is killed for Posts: a remembered null count (auto mode)
+    // must not re-arm auto-fill on a new Post; the fresh manual quantities stand.
+    if (!(seeded.kind === "post" && remembered.count == null)) seeded.count = remembered.count;
+  }
   if (remembered.along) seeded.along = remembered.along;
   if (typeof remembered.wedge === "boolean") seeded.wedge = remembered.wedge;
   if (typeof remembered.alternate_ends === "boolean") seeded.alternate_ends = remembered.alternate_ends;

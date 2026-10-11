@@ -387,6 +387,10 @@ function updateDraftFromFields(event) {
       if (info.kind === "divider" && (key === "count_x" || key === "count_y")) {
         value = Math.max(0, Math.round(value));
       }
+      // A post's X/Y quantities are whole numbers, zero or more.
+      if (info.kind === "post" && (key === "count_x" || key === "count_y")) {
+        value = Math.max(0, Math.round(value));
+      }
       if (info.kind === "cradle" && key === "spacing") value = Math.max(0, value);
       one.options[key] = value;
     }
@@ -412,6 +416,39 @@ function updateDraftFromFields(event) {
         delete one.options.compartment_spans;
         state.dividerSegmentHover = null;
         toast("Custom compartment merges reset because the divider grid changed.");
+      }
+    }
+    // Posts use manual X/Y quantities: on a deliberate (non-blank) edit of one
+    // quantity, pin the other from the value the quantity fields display (the
+    // quantity resolution in 08-draft-fields-render.js), rounded/clamped the
+    // same way - so touching one field never silently collapses the other axis.
+    // Blank (delete) commits do NOT pin: the generic option: branch above already
+    // deleted this key, so both fields can become absent and the documented
+    // legacy fallback really occurs. The old single count is deliberately KEPT
+    // (not nulled like dividers) so clearing both fields falls back to the
+    // last explicit count - never to the killed auto mode (remembered auto
+    // also no longer re-arms on new Posts; see 01-runtime-state.js).
+    if (info.kind === "post" && (key === "count_x" || key === "count_y") && Object.prototype.hasOwnProperty.call(one.options, key)) {
+      const otherKey = key === "count_x" ? "count_y" : "count_x";
+      if (!Object.prototype.hasOwnProperty.call(one.options, otherKey)) {
+        // Pin from the other field's displayed value: a legacy single-count
+        // post maps count/along onto the grid; a legacy auto post shows the
+        // computed fill (same resolution the fields render).
+        let otherShown;
+        if (one.count != null) {
+          const legacyN = Math.max(1, Math.round(number(one.count, 1)));
+          otherShown = one.along === "y"
+            ? (otherKey === "count_y" ? legacyN : 1)
+            : (otherKey === "count_x" ? legacyN : 1);
+        } else {
+          const pDiameter = number(one.options.diameter ?? state.draftResolvedOptions?.diameter, 12);
+          const pSpacing = Math.max(0, number(one.options.spacing ?? state.draftResolvedOptions?.spacing, 4));
+          const zw = one.zone[2] - one.zone[0], zd = one.zone[3] - one.zone[1];
+          const fillX = Math.max(1, Math.floor((zw - pDiameter + 1e-6) / (pDiameter + pSpacing)) + 1);
+          const fillY = Math.max(1, Math.floor((zd - pDiameter + 1e-6) / (pDiameter + pSpacing)) + 1);
+          otherShown = otherKey === "count_x" ? fillX : fillY;
+        }
+        one.options[otherKey] = Math.max(0, Math.round(otherShown));
       }
     }
     if (info.kind === "pocket" && key === "wall") {

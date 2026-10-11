@@ -394,7 +394,7 @@ def default_feature(
             # just along Z instead of X/Y.
             usable_height = box.z - base_height(box, mode)
             height = min(16.0, usable_height - MIN_FEATURE_GAP)
-        feature_options = {"diameter": diameter, "height": height, "taper": 0.4}
+        feature_options = {"diameter": diameter, "height": height, "taper": 0.0}
     elif kind == "bore":
         # Same starter X/Y footprint a Bore always got falling through the
         # generic branch below - only the fused-shallow-bin depth seeding is
