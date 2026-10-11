@@ -1130,5 +1130,32 @@ def test_fix1053_auto_height_gate_mirrors_backend_grid_gate():
     assert got["resolved_height"] == 25, got["resolved_height"]  # round(50/2)
 
 
+class StorageBoxHeightCapTests(unittest.TestCase):
+    def test_cap_equals_interior_z_not_z_plus_headroom(self):
+        from organizer_drawer import storage_box_height_cap
+        layout = {
+            "space": {
+                "kind": "box",
+                "z": 40,
+                "storage_box": {"lid_headroom_mm": 1.0},
+            }
+        }
+        # Must be exactly 40.0, not 41.0
+        self.assertEqual(storage_box_height_cap(layout), 40.0)
+
+    def test_cap_ignores_headroom_variants(self):
+        from organizer_drawer import storage_box_height_cap
+        for headroom in (0.5, 1.0, 1.5, 2.0):
+            with self.subTest(headroom=headroom):
+                layout = {
+                    "space": {
+                        "kind": "box",
+                        "z": 40,
+                        "storage_box": {"lid_headroom_mm": headroom},
+                    }
+                }
+                self.assertEqual(storage_box_height_cap(layout), 40.0)
+
+
 if __name__ == "__main__":
     unittest.main()

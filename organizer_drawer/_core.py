@@ -263,7 +263,7 @@ def is_storage_box_layout(layout: dict[str, Any] | None) -> bool:
 
 def storage_box_height_cap(layout: dict[str, Any]) -> float:
     space = layout["space"]
-    return float(space["z"]) + normalise_storage_box(space.get("storage_box"))["lid_headroom_mm"]
+    return float(space["z"])
 
 
 def stack_wall(one: dict[str, Any], specs: dict[str, Any]) -> float | None:

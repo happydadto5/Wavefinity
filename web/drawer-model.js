@@ -292,7 +292,7 @@ DL.isPegboard = (drawer = DL.drawer()) => drawer?.boundary === "pegboard";
 DL.isSurface = () => DL.layout?.space?.kind === "surface";
 DL.isStorageBox = () => ["portable", "box"].includes(DL.layout?.space?.kind);
 DL.heightCap = drawer => DL.isStorageBox()
-  ? Number(DL.layout.space.z) + Number(DL.layout.space.storage_box?.lid_headroom_mm ?? DL.storageBoxHeadroomDefault)
+  ? Number(DL.layout.space.z)
   : Number(drawer.height);
 DL.isStorageDrawers = () => state.activeSpace?.kind === "storage_drawers";
 // Storage Box and Surface share the server's canonical stack metrics.
