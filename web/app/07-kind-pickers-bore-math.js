@@ -481,6 +481,7 @@ async function selectKind(kind, reset = false) {
     return;
   }
   $("#draft-status").textContent = "Loading shape…";
+  $("#draft-status").classList.remove("error");
   loadingRequest = request;
   try {
     const result = await api("/api/feature/default", {
@@ -561,6 +562,7 @@ async function selectKind(kind, reset = false) {
     if (loadingRequest && loadingRequest === state.kindRequest &&
         $("#draft-status").textContent === "Loading shape…") {
       $("#draft-status").textContent = "";
+      $("#draft-status").classList.remove("error");
     }
     switchGuard?.finish();
   }
