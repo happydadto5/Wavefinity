@@ -248,9 +248,9 @@ function renderDraftFields() {
       const sizeFieldsHtml = field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" })
         + field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" })
         + (isSlot ? "" : fieldFor("depth", "Pocket depth", { unit: "mm", step: "0.5", min: "0.1" }))
-        + fieldFor("height", isSlot ? "Rack height" : "Height", isSlot ? { unit: "mm", min: "0.1" } : { unit: "mm", step: "0.5", min: "1.0" });
+        + fieldFor("height", "Height", isSlot ? { unit: "mm", min: "0.1" } : { unit: "mm", step: "0.5", min: "1.0" });
       html += isSlot
-        ? `<div class="editor-group slot-rack-fields"><div class="draft-triple">${sizeFieldsHtml}</div></div>`
+        ? `<div class="editor-group slot-rack-fields"><span class="editor-group-label">Size</span><div class="draft-triple">${sizeFieldsHtml}</div></div>`
         : `<div class="editor-group"><span class="editor-group-label">Size</span><div class="draft-triple">${sizeFieldsHtml}</div></div>`;
       if (isSlot) {
         const geometryFieldsHtml = fieldFor("thickness", "Slot width", { unit: "mm", min: "0.1" })
@@ -259,7 +259,7 @@ function renderDraftFields() {
         html += `<div class="editor-group slot-rack-fields"><div class="draft-triple">${geometryFieldsHtml}</div></div>`;
       }
       html += isSlot
-        ? `<div class="editor-group"><div class="pair">${wallField}</div></div>`
+        ? `<div class="editor-group"><span class="editor-group-label">Walls</span><div class="pair">${wallField}</div></div>`
         : `<div class="editor-group"><span class="editor-group-label">Walls</span><div class="pair">${wallField}${wallsField}</div></div>`;
     } else {
       const footprint = field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" })
