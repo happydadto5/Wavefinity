@@ -693,11 +693,11 @@ which suppress Inventory logging entirely.
   rewrites them as spacers the next time it saves. Spare copies of a matching
   spacer already in the inventory are used first. *Keep gaps open from*
   leaves any gap at least that wide both ways empty, for a bin you will print
-  later. **Save Selected Spacers**
+  later. **Place Selected Spacers**
   also saves one connector file for each pair of rim heights the layout needs,
   and says how many of each to print. Stacks join at their top bins; X spacers
   need none, since their waves hold them. **Print Spacers…** selects spacer
-  copies for Bambu Studio. **Create Spacers** plans candidates before **Save Selected Spacers**.
+  copies for Bambu Studio. **Find Spacer Candidates** plans candidates before **Place Selected Spacers**.
 - **Surface Fill** (Surface only) turns free Surface cells into ordinary editable
   bins. It first settles the Designer's autosave, then works from the authoritative
   Inventory and layout.

@@ -1468,7 +1468,7 @@ DL.removeSpacerCandidate = id => {
 // DL.spacerPlan / DL.spacerSelected are current; callers plan first.
 DL.savePlannedSpacers = async context => {
   if (!DL.spacerPlan) {
-    toast("No spacer plan to save. Click Create Spacers, choose spacers, then Save Selected Spacers.", true, 6000);
+    toast("No spacer plan to place. Click Find Spacer Candidates, choose spacers, then Place Selected Spacers.", true, 6000);
     return;
   }
   const before = DL.snapshot();

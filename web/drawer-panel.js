@@ -184,8 +184,8 @@ DP.build = () => {
         </fieldset>
         <p class="dl-note" style="font-size: 12px;">No front-wall spacers: bins are pulled toward you when opening the drawer, so front bracing would fight you every time.</p>
         <div class="dl-action-grid">
-          <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the chosen walls">Create Spacers</button>
-          <button type="button" id="dl-sp-generate" class="button secondary" title="Save the selected spacer plan">Save Selected Spacers</button>
+          <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the chosen walls">Find Spacer Candidates</button>
+          <button type="button" id="dl-sp-generate" class="button secondary" title="Generate and place the selected spacer candidates">Place Selected Spacers</button>
           <button type="button" id="dl-sp-refresh" class="button secondary" title="Delete placed spacers, re-plan, and place replacements">Refresh Spacers</button>
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
         </div>
@@ -1111,8 +1111,8 @@ DP.renderStats = () => {
   const spacerReasonCurrent = () => spacerReasonText;
   spacerReason("");
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
-  label("#dl-sp-plan", "Create Spacers", "Planning…", "spacers");
-  label("#dl-sp-generate", "Save Selected Spacers", "Saving…", "spacers");
+  label("#dl-sp-plan", "Find Spacer Candidates", "Planning…", "spacers");
+  label("#dl-sp-generate", "Place Selected Spacers", "Placing…", "spacers");
   label("#dl-sp-refresh", "Refresh Spacers", "Refreshing…", "spacers");
   // Nothing placed yet: these have nothing to work on, so say why instead of
   // letting the click end in an error.
