@@ -426,6 +426,9 @@ async function growBinForNewCradle(request) {
   updateSelectionButtons();
   if (trial.box.x !== previousBox.x) flashField($("#x-size"));
   if (trial.box.y !== previousBox.y) flashField($("#y-size"));
+  if (trial.box.x !== previousBox.x || trial.box.y !== previousBox.y) {
+    toast(`Bin grew to ${fmt(trial.box.x)} × ${fmt(trial.box.y)} mm to fit the Cradle.`);
+  }
   return "adopted";
 }
 
