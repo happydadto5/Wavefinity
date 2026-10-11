@@ -240,20 +240,26 @@ function renderDraftFields() {
       };
       const wallStyleShown = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style
         ?? info.fields.find(f => f.key === "wall_style")?.default;
-      const wallField = fieldFor("wall", "Wall", isSlot ? { unit: "mm", min: "0.1" } : { unit: "mm", min: "0.4" });
-      const wallsField = wallStyleSelect(wallStyleShown);
+      const wallField = isSlot
+        ? dividerThicknessField(number(one.options?.wall ?? state.draftResolvedOptions?.wall, 1.6), "option:wall")
+        : fieldFor("wall", "Wall", { unit: "mm", min: "0.4" });
+      const wallsField = isSlot ? "" : wallStyleSelect(wallStyleShown);
       const sizeFieldsHtml = field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" })
         + field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" })
         + (isSlot ? "" : fieldFor("depth", "Pocket depth", { unit: "mm", step: "0.5", min: "0.1" }))
-        + fieldFor("height", "Height", isSlot ? { unit: "mm", min: "0.1" } : { unit: "mm", step: "0.5", min: "1.0" });
-      html += `<div class="editor-group"><span class="editor-group-label">Size</span><div class="draft-triple">${sizeFieldsHtml}</div></div>`;
+        + fieldFor("height", isSlot ? "Rack height" : "Height", isSlot ? { unit: "mm", min: "0.1" } : { unit: "mm", step: "0.5", min: "1.0" });
+      html += isSlot
+        ? `<div class="editor-group slot-rack-fields"><div class="draft-triple">${sizeFieldsHtml}</div></div>`
+        : `<div class="editor-group"><span class="editor-group-label">Size</span><div class="draft-triple">${sizeFieldsHtml}</div></div>`;
       if (isSlot) {
         const geometryFieldsHtml = fieldFor("thickness", "Slot width", { unit: "mm", min: "0.1" })
           + fieldFor("depth", "Slot depth", { unit: "mm", min: "0.1" })
           + fieldFor("angle", "Tilt angle", { unit: "°", min: "0", max: "45" });
-        html += `<div class="editor-group"><span class="editor-group-label">Geometry</span><div class="draft-triple">${geometryFieldsHtml}</div></div>`;
+        html += `<div class="editor-group slot-rack-fields"><div class="draft-triple">${geometryFieldsHtml}</div></div>`;
       }
-      html += `<div class="editor-group"><span class="editor-group-label">Walls</span><div class="pair">${wallField}${wallsField}</div></div>`;
+      html += isSlot
+        ? `<div class="editor-group"><div class="pair">${wallField}</div></div>`
+        : `<div class="editor-group"><span class="editor-group-label">Walls</span><div class="pair">${wallField}${wallsField}</div></div>`;
     } else {
       const footprint = field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" })
         + field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
@@ -316,7 +322,7 @@ function renderDraftFields() {
         : "";
       const hasOrientationControls = Boolean(info.flags.qty || repeatFieldsHtml || runsAlong || info.flags.alternate);
       if (hasOrientationControls) {
-        html += `<div class="editor-group"><span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`;
+        html += `<div class="editor-group">${info.kind === "slot" ? "" : `<span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`}`;
         // A part with no spacing field of its own (Slot Rack) would leave
         // Quantity alone on its row: Runs along takes the second column instead.
         const alongInPair = Boolean(info.flags.qty && !repeatFieldsHtml && runsAlong);

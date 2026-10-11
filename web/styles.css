@@ -506,6 +506,7 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .unit { float: right; color: var(--muted); font-weight: 450; }
 .scoop-height-field .unit { float: none; margin-left: 4px; }
+.slot-rack-fields .unit { float: none; margin-left: 4px; }
 .field-grid { display: grid; gap: 10px; }
 .field-grid.three { grid-template-columns: repeat(3, 1fr); }
 @media (min-width: 621px) {
