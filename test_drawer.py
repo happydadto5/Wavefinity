@@ -469,14 +469,31 @@ class SpacerRedesignTests(unittest.TestCase):
         from organizer_drawer import _serpentine_flexure
         from organizer_geometry import _extrude_polygon
 
-        # Back spacers are checked at a 14 mm contact: wider back pads already
-        # leave a non-manifold pad-corner pinch on main (pre-existing, outside
-        # Fix 1042) - the right side is watertight at every contact.
+        # Fix 1043: back is checked at the default 28 mm contact again - the
+        # pad-corner spike that forced the old 14 mm workaround is healed.
         for gap in (9.0, 25.0, 60.0, 200.0):
-            for side, args in (("right", (gap, 28.0)), ("back", (14.0, gap))):
+            for side, args in (("right", (gap, 28.0)), ("back", (28.0, gap))):
                 poly, built = _serpentine_flexure(*args, side, True)
                 self.assertTrue(built)
                 self.assertTrue(_extrude_polygon(poly, 12).is_watertight, (side, gap))
+
+    def test_flexure_polygons_have_no_degenerate_spikes(self):
+        # Fix 1043: a spike (two ring vertices < 1e-9 mm apart) is OGC-valid
+        # but triangulates into a non-watertight mesh - is_valid alone cannot
+        # catch it, so check the ring directly.
+        from organizer_drawer import _serpentine_flexure
+
+        for contact in (6.0, 10.0, 14.0, 16.0, 20.0, 24.0, 28.0, 30.0):
+            for phase in (0.0, 1.3, 2.6):
+                for side, args, kwargs in (
+                        ("right", (12.0, contact), {"phase_y": phase}),
+                        ("back", (contact, 12.0), {"phase_x": phase})):
+                    poly, built = _serpentine_flexure(*args, side, True, **kwargs)
+                    self.assertTrue(built)
+                    coords = list(poly.exterior.coords)[:-1]
+                    for a, b in zip(coords, coords[1:] + coords[:1]):
+                        dist = ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+                        self.assertGreater(dist, 1e-9, (side, contact, phase, a, b))
 
     def test_flexible_filenames_carry_the_unvalidated_qualifier(self):
         from organizer_drawer._spacers import spacer_filename

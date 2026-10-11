@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 from typing import Any, Callable
 from shapely import affinity
-from shapely.geometry import box as shape_box
+from shapely.geometry import Polygon, box as shape_box
 from shapely.ops import unary_union
 import trimesh
 from organizer_app import connector_filename, generate_side_file
@@ -455,6 +455,31 @@ def spacer_fallback_reason(measured_gap: float, contact: float) -> str:
             f"too short for the flexible zigzag.")
 
 
+def _collapse_spikes(poly):
+    """Drop consecutive exterior-ring vertices closer than 1e-9 mm.
+
+    Fix 1043: clipping a wavy pad at exactly its wall's extreme x can leave
+    a degenerate spike - two ring vertices ~1e-14 apart where the clip edge
+    passes a hair outside a wall vertex (the back pad's bottom-right corner
+    at contacts >= 16 mm). The spike is OGC-valid (is_valid stays True) but
+    earcut triangulates it into a non-watertight mesh, and buffer(0) does
+    not remove it because the spike tip sits on the boundary. The first
+    vertex in ring order is the clip-edge crossing, exactly on the intended
+    boundary, so collapsing keeps the printed envelope bit-identical.
+    """
+    if not isinstance(poly, Polygon):
+        return poly
+    ring = list(poly.exterior.coords)[:-1]
+    kept = [ring[0]]
+    for coord in ring[1:]:
+        if math.hypot(coord[0] - kept[-1][0], coord[1] - kept[-1][1]) > 1e-9:
+            kept.append(coord)
+    if len(kept) > 1 and math.hypot(kept[-1][0] - kept[0][0],
+                                    kept[-1][1] - kept[0][1]) <= 1e-9:
+        kept.pop()
+    return Polygon(kept)
+
+
 def _serpentine_flexure(
     w, d, side, flexible=True, *, phase_x=0.0, phase_y=0.0,
 ):
@@ -533,8 +558,8 @@ def _serpentine_flexure(
         # otherwise poke up to ~0.12mm past the contact height at steep member
         # angles, which would falsify the plan-time printed envelope. The pads
         # already bound the part; this only trims bar-tip overshoot.
-        return unary_union([left_pad, right_pad] + parts).intersection(
-            shape_box(0, 0, w, d)), True
+        return _collapse_spikes(unary_union([left_pad, right_pad] + parts).intersection(
+            shape_box(0, 0, w, d))), True
 
     # Fix 1042: the cutoff runs on the UNPRELOADED measured gap via the
     # single authority - the preload is added only after it resolves.
@@ -582,8 +607,8 @@ def _serpentine_flexure(
     parts.append(shape_box(xb - web, yb - web, xb + web, yb + web))
     # Fix 1042 (review): clip to the contact band - see the right branch above.
     # Trims the rotated-bar tip overshoot so the printed envelope is exact.
-    return unary_union([bot_pad, top_pad] + parts).intersection(
-        shape_box(0, 0, w, d)), True
+    return _collapse_spikes(unary_union([bot_pad, top_pad] + parts).intersection(
+        shape_box(0, 0, w, d))), True
 
 
 def spacer_filename(side: str, w: float, d: float, height: float, flexible: bool) -> str:
