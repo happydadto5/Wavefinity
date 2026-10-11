@@ -820,11 +820,12 @@ function applySpaceSizingDefaults(design, remembered = null, keepStarterXY = fal
   }
 
   if (kind === "drawer") {
+    // Fix 1065: New Bin always takes the drawer's full intended interior
+    // height (3 mm below the top so the drawer closes). A remembered short
+    // height never overrides it.
     design.box.z = Math.min(
       space.z,
-      haveRememberedZ
-        ? normalizeBinDimension("z", rememberedZ, rememberedZ)
-        : normalizeBinDimension("z", space.z - 3, space.z - 3),
+      normalizeBinDimension("z", space.z - 3, space.z - 3),
     );
   } else if (kind === "surface") {
     const trimHeight = surfaceTrimHeight(space.trim_size);
@@ -846,9 +847,14 @@ function applySpaceSizingDefaults(design, remembered = null, keepStarterXY = fal
         : roundUpHalfMm(exactMinimum);
     }
   } else if (kind === "portable" || kind === "box" || kind === "storage_drawers") {
-    design.box.z = normalizeBinDimension(
-      "z", haveRememberedZ ? Math.min(space.z, rememberedZ) : space.z,
-    );
+    // Fix 1065: New Bin takes the container's full intended interior Z,
+    // floored to whole millimetres — round DOWN to fit, never up. (This is
+    // the actual 40.6 -> 41 owner: normalizeBinDimension's whole-mm
+    // Math.round would round a fractional interior up past the container.)
+    // A remembered short height never overrides the full height for
+    // Portable / Box / Storage Drawers — no remembered-Z exception.
+    const fullInteriorZ = Math.floor(space.z);
+    design.box.z = normalizeBinDimension("z", fullInteriorZ, fullInteriorZ);
   } else if (kind === "pegboard") {
     if (haveRememberedZ) design.box.z = normalizeBinDimension("z", rememberedZ, rememberedZ);
     const minimum = pegboardProductMinimums(space.pegboard_standard);
