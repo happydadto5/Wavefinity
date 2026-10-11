@@ -247,7 +247,7 @@ function renderDraftFields() {
       const wallsField = isSlot ? "" : wallStyleSelect(wallStyleShown);
       const sizeFieldsHtml = field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" })
         + field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" })
-        + (isSlot ? "" : fieldFor("depth", "Pocket depth", { unit: "mm", step: "0.5", min: "0.1" }))
+        + (isSlot ? "" : fieldFor("depth", "Pocket depth", { unit: "mm", step: "0.01", min: "0.1" }))
         + fieldFor("height", "Height", isSlot ? { unit: "mm", min: "0.1" } : { unit: "mm", step: "0.5", min: "1.0" });
       html += isSlot
         ? `<div class="editor-group slot-rack-fields"><span class="editor-group-label">Size</span><div class="draft-triple">${sizeFieldsHtml}</div></div>`

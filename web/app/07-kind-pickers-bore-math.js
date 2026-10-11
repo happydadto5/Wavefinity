@@ -1028,7 +1028,7 @@ function renderNestFields(one) {
         </select>
       </label>`;
       html += field("Push area", "option:push_area", fmt(val("push_area", 30)),
-        { unit: "%", step: "5", min: "15", max: "40" });
+        { unit: "%", step: "0.01", min: "15", max: "40" });
       html += field("Push depth", "option:push_depth", fmt(val("push_depth", 4)),
         { unit: "mm", step: "0.5", min: "2", max: "8" });
       html += `</div>`;
@@ -1249,4 +1249,4 @@ async function commitReferenceEdit() {
     $("#draft-status").textContent = friendlyError(error);
     $("#draft-status").classList.add("error");
   }
-}
+}
