@@ -1083,12 +1083,72 @@ DP.renderSpacerPlanTruth = () => {
   box.innerHTML = notesHtml + headHtml + candHtml;
 };
 
+// Fix 1053: client-side mirror of the backend auto-height expression in
+// organizer_drawer/_spacers.py plan_spacers (half the tallest non-spacer
+// bin placed in this drawer; Python round() is banker's rounding, clamped
+// to the 6 mm minimum and the drawer height; 15 mm when nothing is placed).
+// Same inputs the backend receives: the layout drawer dict it is sent in
+// the /api/drawer/spacers payload, DL.bins, and DL.isSpacer (kind ===
+// "spacer" matches the backend's SPACER_KINDS = ("spacer",)).
+// Grid gate: the backend only scans placements `if rows and cols:` (from
+// organizer_drawer/_core.py drawer_grid). For pegboard drawers this mirrors
+// that gate through the existing client grid owner DL.grid
+// (web/drawer-model.js), with the backend's max(1, ...) clamp applied
+// locally below (global DL.grid is unchanged). For standard drawers the
+// backend uses step = drawer["snap"] (4.0 preserved by normalise_drawer,
+// anything else normalised to 8.0) while DL.grid hardcodes step = 8, so
+// the gate is derived locally below with the backend's effective snap and
+// the same usable-dimension/slack formula DL.grid uses. When the gate is
+// closed (zero-grid/legacy drawer), tallest stays 0 and the fallback below
+// matches the backend exactly: 15 mm default, clamped to the 6 mm minimum
+// and the drawer height.
+const roundHalfEven = value => {
+  const rounded = Math.round(value);
+  if (Math.abs(value - rounded) === 0.5 && rounded % 2 !== 0) return rounded - 1;
+  return rounded;
+};
+DP.spacerAutoHeight = () => {
+  const drawer = DL.drawer();
+  let gateRows, gateCols;
+  if (DL.isPegboard(drawer)) {
+    // Backend-equivalent gate for pegboard drawers: drawer_grid clamps
+    // rows/cols to at least 1 (DL.isPegboard is the same predicate as the
+    // backend's boundary == "pegboard" check). Global DL.grid is unchanged.
+    const grid = DL.grid(drawer);
+    gateRows = Math.max(1, grid.rows);
+    gateCols = Math.max(1, grid.cols);
+  } else {
+    // Backend-equivalent gate for standard drawers: drawer_grid uses
+    // step = drawer["snap"] (normalise_drawer preserves exactly 4.0 and
+    // maps anything else to 8.0) while DL.grid hardcodes step = 8, so the
+    // gate is derived locally here with the backend's effective snap and
+    // the same usable-dimension/slack formula DL.grid uses. DL.grid itself
+    // is not changed.
+    const step = Number(drawer.snap) === 4 ? 4 : 8;
+    const slack = DL.slack(drawer);
+    gateCols = Math.max(0, Math.floor((drawer.width - slack) / step + 1e-6));
+    gateRows = Math.max(0, Math.floor((drawer.depth - slack) / step + 1e-6));
+  }
+  let tallest = 0;
+  if (gateRows && gateCols) {
+    for (const placement of drawer.placements || []) {
+      const one = DL.bin(placement.bin);
+      if (one && !DL.isSpacer(one)) tallest = Math.max(tallest, Number(one.z) || 0);
+    }
+  }
+  const auto = tallest > 0 ? roundHalfEven(tallest / 2) : 15;
+  return Math.min(Number(drawer.height), Math.max(6, auto));
+};
+
 DP.renderStats = () => {
   const box = $("#dl-stats");
   const spacers = DL.layout.settings.spacers;
   dlSet("#dl-sp-type", spacers.flexible ? "flexible" : "rigid");
-  $("#dl-sp-height").disabled = spacers.height_auto !== false;
-  dlSet("#dl-sp-height", fmt(spacers.height));
+  const heightAuto = spacers.height_auto !== false;
+  $("#dl-sp-height").disabled = heightAuto;
+  // Fix 1053: when Auto height is on, the disabled field shows the computed
+  // height (what will actually print) instead of the stored manual setting.
+  dlSet("#dl-sp-height", fmt(heightAuto ? DP.spacerAutoHeight() : spacers.height));
   // Fix 088: wall toggles + auto height reflect the Space's spacer settings.
   dlSet("#dl-sp-auto-height", spacers.height_auto !== false, "checked");
   for (const side of ["left", "back", "right"]) {

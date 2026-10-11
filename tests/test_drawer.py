@@ -1087,6 +1087,48 @@ class DrawerSizeBoundTests(unittest.TestCase):
         self.assertEqual((grid["rows"], grid["cols"]), (499, 499))
 
 
+def test_fix1053_auto_height_gate_mirrors_backend_grid_gate():
+    # Fix 1053 (G2M-0269 HOLD): client DP.spacerAutoHeight must mirror the
+    # backend `if rows and cols:` gate in plan_spacers exactly.
+    # Gate closed: a drawer too small for one grid cell (cols == 0) must fall
+    # back to the 15 mm default even with a tall bin placed in it.
+    tall = _bin("tall1053", 40, 40, 50)
+    tiny = {"width": 5, "depth": 300, "height": 60,
+            "placements": [{"bin": "tall1053", "gx": 0, "gy": 0}]}
+    grid = drawer_grid(normalise_drawer(tiny))
+    assert grid["cols"] == 0
+    got = plan_spacers(tiny, [tall], {"height_auto": True})
+    assert got["resolved_height"] == 15.0, got["resolved_height"]
+    # Gate open: a normal drawer counts the placed non-spacer bin.
+    room = {"width": 300, "depth": 300, "height": 60,
+            "placements": [{"bin": "tall1053", "gx": 0, "gy": 0}]}
+    assert drawer_grid(normalise_drawer(room))["cols"] > 0
+    got = plan_spacers(room, [tall], {"height_auto": True})
+    assert got["resolved_height"] == 25, got["resolved_height"]  # round(50/2)
+    # Pegboard-small, implicit holes (G2M-0271): no explicit hole counts and
+    # width 20 mm below one 25.4 mm Standard pitch. The backend clamps
+    # pegboard cols to max(1, ...), so the gate is OPEN and the tall placed
+    # bin is counted - the client helper must agree via its local pegboard
+    # clamp, not take the 15 mm fallback.
+    peg_tall = _bin("tallpeg1053", 40, 40, 50)
+    peg = {"boundary": "pegboard", "width": 20, "depth": 300, "height": 60,
+           "placements": [{"bin": "tallpeg1053", "gx": 0, "gy": 0}]}
+    assert drawer_grid(normalise_drawer(peg))["cols"] == 1
+    got = plan_spacers(peg, [peg_tall], {"height_auto": True})
+    assert got["resolved_height"] == 25, got["resolved_height"]  # round(50/2)
+    # Snap-4 gate parity (G2M-0275): a standard snap:4 drawer with usable
+    # width 4.0 mm (width 5 - clearance 1) in [4, 8) mm. The backend grid
+    # step is the drawer snap (4 mm), so cols == 1, the gate is OPEN, and
+    # the tall placed bin is counted - the client helper must agree via its
+    # local snap-aware gate, not take the 15 mm fallback (DL.grid's
+    # hardcoded step = 8 reads cols == 0 on this drawer).
+    snap_tall = _bin("tallsnap1053", 40, 40, 50)
+    snap4 = {"width": 5, "depth": 300, "height": 60, "snap": 4,
+             "placements": [{"bin": "tallsnap1053", "gx": 0, "gy": 0}]}
+    assert drawer_grid(normalise_drawer(snap4))["cols"] == 1
+    got = plan_spacers(snap4, [snap_tall], {"height_auto": True})
+    assert got["resolved_height"] == 25, got["resolved_height"]  # round(50/2)
+
+
 if __name__ == "__main__":
     unittest.main()
-
