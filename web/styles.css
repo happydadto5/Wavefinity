@@ -449,7 +449,7 @@ button { color: inherit; }
 }
 
 .app-shell { display: grid; grid-template-columns: minmax(420px, min(var(--sidebar-width), calc(100vw - 448px))) 8px minmax(420px, 1fr); height: calc(100vh - 79px); }
-.controls { background: #eef2f3; overflow: auto; min-width: 0; min-height: 0; padding-bottom: 250px; }
+.controls { background: #eef2f3; overflow: auto; min-width: 0; min-height: 0; padding-bottom: 24px; }
 .sidebar-resizer { position: relative; z-index: 4; cursor: col-resize; background: transparent; touch-action: none; }
 .sidebar-resizer::after { content: ""; position: absolute; inset: 0 3px; background: var(--line); transition: background .15s, inset .15s; }
 .sidebar-resizer:hover::after, .sidebar-resizer:focus::after, .sidebar-resizer.dragging::after { inset: 0 2px; background: var(--blue); }
@@ -820,9 +820,8 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
 .checkbox-row input[type="checkbox"] { margin: 0; cursor: pointer; accent-color: var(--teal); }
 /* A checkbox riding in a section heading row, not on its own line. */
 .section-heading .heading-check { margin: 0; font-weight: 600; }
-/* The sticky output panel floats over the end of the scroll area, so the last
-   control section needs room to scroll clear of it. */
-.control-section:last-of-type { margin-bottom: 260px; }
+/* Fix 1047: the output panel must stay in normal flow at the end of the scroll
+   area — never sticky/fixed — so it cannot float over the option cards. */
 .derived-readout { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--teal); border-radius: 6px; background: #fbfcfc; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; }
 .derived-readout dt { color: var(--muted); font-weight: 500; }
 .derived-readout dd { margin: 0; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -835,7 +834,7 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
 .field-help { margin: 8px 0 13px; font-size: 11px; color: var(--muted); line-height: 1.45; }
 .field-error { margin: 6px 0 0; font-size: 11px; color: var(--danger); line-height: 1.4; }
 .portable-fit-warning { margin: 6px 0 0; font-size: 12px; color: var(--danger, #b3261e); line-height: 1.4; }
-.output-panel { position: sticky; bottom: 0; z-index: 5; margin-top: 6px; padding: 10px 12px 12px; background: rgba(235,241,242,.97); border-top: 1px solid var(--line-dark); box-shadow: 0 -10px 24px rgba(30,51,61,.09); backdrop-filter: blur(8px); }
+.output-panel { position: static; margin-top: 6px; padding: 10px 12px 12px; background: rgba(235,241,242,.97); border-top: 1px solid var(--line-dark); box-shadow: 0 -10px 24px rgba(30,51,61,.09); backdrop-filter: blur(8px); }
 .save-location-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .save-location-group { display: grid; grid-template-columns: 66px minmax(0, 1fr); align-items: center; gap: 3px 6px; flex: 1; min-width: 0; }
 .save-location-group > label { white-space: nowrap; font-size: 11px; font-weight: 650; margin: 0; flex-shrink: 0; cursor: pointer; }
