@@ -1021,7 +1021,7 @@ field - and are not deleted.
 
 **Verification:** browser-driven tests are retired and are not part of the
 active verification contract. Python API contracts and JavaScript syntax are
-covered by `test_wavefinity_web.py` and `node --check`. A very dense design (many
+covered by `tests/test_wavefinity_web.py` and `node --check`. A very dense design (many
 cradle/bore parts at once) serializes a large triangle payload to
 the browser; camera motion stays client-side and fast regardless, but the
 initial load is heavier. **Save design** relies on the browser's own
@@ -1716,16 +1716,16 @@ layered implementation:
 | `web/spaces.js` | Typed Space setup and opening, folder and Space activation, resume and startup handoff, and Space setup lifecycle. | No. |
 | `web/browser-files.js` | Hosted-browser writable-folder permission and handle persistence, plus browser-owned file operations; Python receives no fake client path. | No. |
 | `web/preview3d-webgl.js` | Shared depth-buffered WebGL renderer for solid 3D preview geometry; `app.js` owns 2D overlay annotations. | No. |
-| `test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest`. |
-| `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
-| `test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest`. |
-| `test_drawer.py` | Inventory file, one-placement layout, report and spacer regressions. | Only via `python -m unittest`. |
-| `test_pegboard.py` | Pegboard sizing, persistence, mount geometry and placement regressions. | Only via `python -m unittest`. |
-| `test_inventory_safety.py` | Inventory refresh, deletion, and Space isolation. | Via `run_tests.py`. |
-| `test_edge_conflicts.py` | Edge Mount and Lid & Stacking conflicts. | Via `run_tests.py`. |
-| `test_ui_state_safety.py` | Preview selection and async UI state. | Via `run_tests.py`. |
-| `test_text_geometry.py` | Text placement and geometry. | Via `run_tests.py`. |
-| `test_lid_geometry.py` | Lid fit, labels, and export geometry. | Via `run_tests.py`. |
+| `tests/test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest tests.test_organizer_app`. |
+| `tests/test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest tests.test_organizer_inserts`. |
+| `tests/test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest tests.test_wavefinity_web`. |
+| `tests/test_drawer.py` | Inventory file, one-placement layout, report and spacer regressions. | Only via `python -m unittest tests.test_drawer`. |
+| `tests/test_pegboard.py` | Pegboard sizing, persistence, mount geometry and placement regressions. | Only via `python -m unittest tests.test_pegboard`. |
+| `tests/test_inventory_safety.py` | Inventory refresh, deletion, and Space isolation. | Via `run_tests.py`. |
+| `tests/test_edge_conflicts.py` | Edge Mount and Lid & Stacking conflicts. | Via `run_tests.py`. |
+| `tests/test_ui_state_safety.py` | Preview selection and async UI state. | Via `run_tests.py`. |
+| `tests/test_text_geometry.py` | Text placement and geometry. | Via `run_tests.py`. |
+| `tests/test_lid_geometry.py` | Lid fit, labels, and export geometry. | Via `run_tests.py`. |
 | `run_tests.py` | Compact test runner: full, 74-test core, or selected modules. See [Testing rules](#testing-rules). | Yes — `python3 run_tests.py [core | module ...]`. |
 
 `web/index.html`, `web/styles.css`, `web/feature-icons.js` and `web/app.js` are
@@ -2030,7 +2030,7 @@ Both were stated as done and later found false. Tests now exist for each.
 
 ## Traps
 
-- **Fingerprints.** `test_organizer_app.py` pins STL hashes for the default box
+- **Fingerprints.** `tests/test_organizer_app.py` pins STL hashes for the default box
   and connector. Any geometry change moves them; re-pin deliberately, never by
   reflex.
 - **3MF hashes are not reproducible.** `lib3mf` writes a fresh build UUID each

@@ -21,9 +21,9 @@ from organizer_inventory import (
     save_design_source,
     save_inventory,
 )
-from test_space_preferences import APP_JS, function_source, node_run
+from tests.test_space_preferences import APP_JS, function_source, node_run
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 DRAWER_MODEL_JS = (WEB / "drawer-model.js").read_text(encoding="utf-8")
 DRAWER_PANEL_JS = (WEB / "drawer-panel.js").read_text(encoding="utf-8")

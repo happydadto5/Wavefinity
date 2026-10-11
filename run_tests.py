@@ -11,7 +11,7 @@ Usage:
     python3 run_tests.py part3           # organizer app tests
     python3 run_tests.py part4           # web/space tests
     python3 run_tests.py part1 part3     # multiple chunks, run concurrently
-    python3 run_tests.py test_drawer     # single module (backward compat)
+    python3 run_tests.py test_drawer     # single module (short name kept for compatibility)
     python3 run_tests.py core            # original 8-module core gate
 
 Each module runs in its own subprocess — one module's crash or import
@@ -73,11 +73,18 @@ CORE = [
 ]
 
 STATUS_FILE = Path(__file__).resolve().parent / "test-status.md"
+TEST_PACKAGE = "tests"
+KNOWN_MODULES = frozenset(module for modules in PARTS.values() for module in modules)
+
+
+def test_module_path(module: str) -> str:
+    """Return the package path for an active test while retaining short CLI names."""
+    return f"{TEST_PACKAGE}.{module}" if module in KNOWN_MODULES else module
 
 
 def run_module(module: str) -> tuple[str, str]:
     """Run one test module in a subprocess. Returns (status, output)."""
-    cmd = [sys.executable, "-m", "unittest", module, "-v"]
+    cmd = [sys.executable, "-m", "unittest", test_module_path(module), "-v"]
     try:
         result = subprocess.run(
             cmd,
@@ -115,7 +122,7 @@ def update_status(results: dict[str, tuple[str, str]]):
                 lines.append(line)
             lines.append("```")
         lines.append("")
-    STATUS_FILE.write_text("\n".join(lines))
+    STATUS_FILE.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _part_worker(part: str, modules: list[str], done: "queue.Queue") -> None:

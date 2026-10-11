@@ -27,7 +27,7 @@ from wavefinity_web import (
     catalog_payload, inventory_preview_payload, preview_payload,
 )
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def lid_box(**lid_fields) -> BoxSpec:

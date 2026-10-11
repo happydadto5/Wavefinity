@@ -56,7 +56,7 @@ class FourSpaceTypeTests(unittest.TestCase):
                 self.assertEqual(edited["layout"]["space"]["name"], raw["name"] + " 2")
                 self.assertEqual(load_inventory(folder)["layout"]["space"]["kind"], raw["kind"])
         names = sorted({"Drawer", "Storage Box", "Surface", "Pegboard"})
-        spaces_js = spaces_source(Path(__file__).resolve().parent / "web")
+        spaces_js = spaces_source(Path(__file__).resolve().parent.parent / "web")
         kinds = spaces_js[spaces_js.index("const SP_KINDS = {"):spaces_js.index("const FOLDER_METADATA")]
         for name in names:
             self.assertIn(f'label: "{name}"', kinds)

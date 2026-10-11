@@ -287,7 +287,7 @@ class PegboardHookEndpointTests(unittest.TestCase):
 
 class PegboardHookFrontendTests(unittest.TestCase):
     def test_action_is_pegboard_only_and_uses_the_existing_save_path(self) -> None:
-        root = Path(__file__).resolve().parent / "web"
+        root = Path(__file__).resolve().parent.parent / "web"
         info = (root / "spaces" / "12-space-info.js").read_text(encoding="utf-8")
         html = (root / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="space-pegboard-hooks"', html)
@@ -347,7 +347,7 @@ const run = async (kind, folderFiles, replaceAnswer) => {
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required")
-        web = Path(__file__).resolve().parent / "web"
+        web = Path(__file__).resolve().parent.parent / "web"
         done = subprocess.run([node, "-e", self.SCRIPT, str(web)], capture_output=True, text=True,
                               timeout=60, encoding="utf-8")
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -378,7 +378,7 @@ const run = async (kind, folderFiles, replaceAnswer) => {
         self.assertIn("Give the bin a different name", out["bin"]["error"])
 
     def test_save_lifecycle_stays_single_and_hook_action_does_not_download_itself(self) -> None:
-        web = Path(__file__).resolve().parent / "web"
+        web = Path(__file__).resolve().parent.parent / "web"
         source = (web / "app" / "15-generate-dialogs.js").read_text(encoding="utf-8")
         self.assertIn('pegboard_hooks: "Pegboard hook"', source)
         self.assertEqual(source.count("async function saveGeneratedFiles("), 1)

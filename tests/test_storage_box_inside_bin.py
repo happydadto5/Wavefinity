@@ -6,9 +6,9 @@ import json
 import unittest
 from pathlib import Path
 
-from test_space_preferences import APP_JS, SPACES_JS, block, function_source, js, node_run
+from tests.test_space_preferences import APP_JS, SPACES_JS, block, function_source, js, node_run
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 INDEX_HTML = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
 FIT_PRELUDE = "\n".join([

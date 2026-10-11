@@ -15,9 +15,9 @@ import unittest
 from pathlib import Path
 from space_source import spaces_source
 
-from test_space_preferences import node_run
+from tests.test_space_preferences import node_run
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 
 

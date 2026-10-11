@@ -9,6 +9,9 @@ import math
 import os
 from dataclasses import replace
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
 from space_source import app_source, spaces_source
 import re
 import shutil
@@ -92,7 +95,7 @@ class FirstBinCapabilityTests(unittest.TestCase):
           process.stdout.write(JSON.stringify(rows));
         """
         result = subprocess.run(
-            [node, "-e", script], cwd=Path(__file__).resolve().parent,
+            [node, "-e", script], cwd=ROOT,
             capture_output=True, text=True, check=True,
         )
         self.assertEqual(json.loads(result.stdout), [True, True, False, False, False])
@@ -132,7 +135,7 @@ class PreferredSpaceLandingTests(unittest.TestCase):
           })().catch(error => { console.error(error); process.exitCode = 1; });
         """
         result = subprocess.run(
-            [node, "-e", script], cwd=Path(__file__).resolve().parent,
+            [node, "-e", script], cwd=ROOT,
             capture_output=True, text=True, check=True,
         )
         self.assertEqual(json.loads(result.stdout), [
@@ -1519,7 +1522,7 @@ class WebApplicationTests(unittest.TestCase):
 
 
     def test_hosted_inventory_writes_share_one_file_queue(self):
-        source = spaces_source(Path(__file__).resolve().parent / "web")
+        source = spaces_source(ROOT / "web")
         owner = source[source.index("SP._inventoryWriteChain = Promise.resolve();"):
                        source.index("// Fix 034 F1", source.index("SP._inventoryWriteChain = Promise.resolve();"))]
         script = "\n".join([
@@ -1540,7 +1543,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(self._run_node(script), {"text": "AB", "calls": 2})
 
     def test_resume_binds_existing_inventory_row_identity(self):
-        source = spaces_source(Path(__file__).resolve().parent / "web")
+        source = spaces_source(ROOT / "web")
         start = source.index("SP.initializeDesignForActiveSpace = async () => {")
         owner = source[start:source.index("\n};", start) + 3]
         script = "\n".join([
@@ -1563,7 +1566,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(self._run_node(script), "B2")
 
     def test_typed_space_replacement_and_output_boundaries_flush_autosave(self):
-        root = Path(__file__).resolve().parent / "web"
+        root = ROOT / "web"
         app = app_source(root)
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         spaces = spaces_source(root)
@@ -1579,7 +1582,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn('action: "printed"', app[app.index("async function printModel("):])
 
     def _app_js_functions(self, *names):
-        source = app_source(Path(__file__).resolve().parent / "web")
+        source = app_source(ROOT / "web")
         chunks = []
         for name in names:
             start = source.index(f"function {name}(")
@@ -1597,7 +1600,7 @@ class WebApplicationTests(unittest.TestCase):
 
 
     def test_first_bin_starter_waits_for_a_meaningful_edit(self):
-        root = Path(__file__).resolve().parent / "web"
+        root = ROOT / "web"
         app = app_source(root)
         fresh = app[app.index("async function loadFreshOrdinaryDesignForCurrentFolder"):]
         fresh = fresh[:fresh.index("\n}\n")]
@@ -1622,7 +1625,7 @@ class WebApplicationTests(unittest.TestCase):
     def test_current_design_position_does_not_leak_between_spaces(self):
         # The session-only Current-design position is gone with the shadow
         # owner; nothing about an unplaced bin is kept as coordinates.
-        model = (Path(__file__).resolve().parent / "web" / "drawer-model.js").read_text(encoding="utf-8")
+        model = (ROOT / "web" / "drawer-model.js").read_text(encoding="utf-8")
         for name in ("workingFit", "moveWorkingTo", "workingContext", "fitStamp"):
             self.assertNotIn(name, model)
 
@@ -1672,7 +1675,7 @@ class WebApplicationTests(unittest.TestCase):
         # Item 2's implementation detail: DL.save() must let callers know
         # whether persistence actually succeeded.
         node = self._node_or_skip()
-        model = Path(__file__).resolve().parent / "web" / "drawer-model.js"
+        model = ROOT / "web" / "drawer-model.js"
         script = """
 const vm = require("vm"), fs = require("fs");
 let shouldFail = false;
@@ -1721,7 +1724,7 @@ DL.dirty = true;
         # original (and every other) caller only resolves once that queued
         # request itself is finished.
         node = self._node_or_skip()
-        model = Path(__file__).resolve().parent / "web" / "drawer-model.js"
+        model = ROOT / "web" / "drawer-model.js"
         script = """
 const vm = require("vm"), fs = require("fs");
 function makeCtx() {
@@ -1825,7 +1828,7 @@ const tick = () => new Promise(r => setImmediate(r));
         # top-level shape (object-or-null design, boolean pending) is
         # validated the same way as keep_bin_defaults/bin_defaults already are.
         node = self._node_or_skip()
-        root = Path(__file__).resolve().parent / "web"
+        root = ROOT / "web"
         spaces_js = spaces_source(root)
 
         valid_space = self._spaces_slice(spaces_js, "SP.validSpace = raw => {")
@@ -1879,7 +1882,7 @@ const tick = () => new Promise(r => setImmediate(r));
         # writes, and a completion for a Space that is no longer active must
         # never overwrite a different Space's in-memory checkpoint.
         node = self._node_or_skip()
-        root = Path(__file__).resolve().parent / "web"
+        root = ROOT / "web"
         spaces_js = spaces_source(root)
 
         start = "SP._resume = {"
@@ -1982,7 +1985,7 @@ const tick = () => new Promise(r => setImmediate(r));
         # whatever is queued/in-flight for the OUTGOING Space before it
         # mutates state.output/state.activeSpaceId - not after.
         node = self._node_or_skip()
-        root = Path(__file__).resolve().parent / "web"
+        root = ROOT / "web"
         spaces_js = spaces_source(root)
         apply_folder = self._spaces_slice(spaces_js, "SP.applyFolder = async (info,")
 
@@ -2033,7 +2036,7 @@ const tick = () => new Promise(r => setImmediate(r));
         # Fix 032 Correction 1, item 4: an HTTP-200 preview that still
         # reports fit/feature/draft errors must not replace the last valid
         # resume checkpoint.
-        app_js = app_source(Path(__file__).resolve().parent / "web")
+        app_js = app_source(ROOT / "web")
         # refreshPreview() adopts its result through adoptPreviewResult() (shared
         # with AI Help's already-proven candidate), which owns the checkpoint rule.
         start = app_js.index("async function refreshPreview(")
@@ -2343,7 +2346,7 @@ class AiHelpBackendTests(unittest.TestCase):
         # Fixed hex-bit dimensions come from the Bore constants, and the browser's own
         # literals (which cannot read them yet) must agree - this is the drift guard.
         self.assertEqual(bore_item["hex_bit"], _bore.HEX_BIT_FIXED)
-        app_js = app_source(Path(__file__).resolve().parent / "web")
+        app_js = app_source(ROOT / "web")
         labels = dict(ITEM_PROFILES)
         for profile, fixed in _bore.HEX_BIT_FIXED.items():
             match = re.search(
@@ -2497,7 +2500,7 @@ class AiHelpBackendTests(unittest.TestCase):
         for needle in ("A tray for three screwdrivers", first["request_id"], first["context_fingerprint"],
                        "wavefinity-ai-design-v1", "recommend_only", "box.pegboard", "ASK the person"):
             self.assertIn(needle, prompt)
-        for private in ("B7", "someone", str(Path(__file__).resolve().parent)):
+        for private in ("B7", "someone", str(ROOT)):
             self.assertNotIn(private, prompt)
         # Old layout bounds are a reference for the current size only, and Pegboard minimums pass through.
         self.assertIn("current_baseline_layout_bounds_mm", prompt)

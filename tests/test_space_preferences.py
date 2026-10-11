@@ -11,9 +11,9 @@ from pathlib import Path
 from space_source import app_source, spaces_source
 
 from organizer_spaces import FolderMetadataError
-from test_space_identity import make_routes, make_v4_space, meta
+from tests.test_space_identity import make_routes, make_v4_space, meta
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 APP_JS = app_source(WEB)
 SPACES_JS = spaces_source(WEB)

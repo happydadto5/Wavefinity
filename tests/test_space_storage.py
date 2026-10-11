@@ -19,7 +19,7 @@ from unittest import mock
 
 import organizer_spaces
 import wavefinity_web
-from test_space_identity import make_routes
+from tests.test_space_identity import make_routes
 
 
 class SpaceStorageStartupTests(unittest.TestCase):

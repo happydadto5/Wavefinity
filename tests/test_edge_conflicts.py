@@ -10,9 +10,9 @@ import organizer_app
 from organizer_app import BoxSpec, Layout, StackSpec
 from organizer_edge_mount import EdgeMountSpec
 from organizer_engine import LidSpec
-from test_inventory_safety import BatchFixture, design, record
+from tests.test_inventory_safety import BatchFixture, design, record
 from organizer_inventory import change_design_status, load_inventory, save_design_source
-from test_space_preferences import function_source, node_run
+from tests.test_space_preferences import function_source, node_run
 
 
 def box(label_type="separate", side="front", label=True, lid=False, holes=False, direct=False):
