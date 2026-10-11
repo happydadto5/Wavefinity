@@ -353,6 +353,12 @@ DP.wire = () => {
     DL.refreshSpacers();
   });
   $("#dl-sp-print").addEventListener("click", () => DP.openSpacerPrintDialog());
+  // Fix 1060: the Spacers section defaults to open (Fix 1045), so the quiet
+  // "N gaps could use spacers" hint only matters when the user collapses the
+  // section. Re-run the hint evaluation on every expand/collapse; without
+  // this the hint logic in DP.updateSpacerHint is dead because nothing
+  // re-checks section.open after load.
+  $("#dl-spacers").addEventListener("toggle", () => DP.updateSpacerHint());
   $("#spacer-print-cancel").addEventListener("click", () => $("#spacer-print-dialog").close());
   $("#spacer-print-dialog").addEventListener("click", event => {
     if (event.target === $("#spacer-print-dialog")) $("#spacer-print-dialog").close();
