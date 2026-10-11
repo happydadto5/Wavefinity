@@ -805,6 +805,18 @@ DV.binLabelInfo = (one, stackCount = 1) => {
   };
 };
 
+// Fix 1042: hover details for a planned (pre-Save) spacer candidate - the
+// plan-time truth from the backend's single cutoff authority.
+DV.spacerCandidateLabelInfo = c => {
+  const p = (c.placements || [])[0] || {};
+  const side = String(p.side || String(c.id).split("-")[0] || "spacer");
+  const name = `${side.charAt(0).toUpperCase() + side.slice(1)} spacer (planned)`;
+  const typeLabel = c.resolved_type === "flexible" ? "Flexible (unvalidated)" : "Rigid";
+  const detailLine = `${typeLabel} · prints ${fmt(c.printed_w)} × ${fmt(c.printed_d)} mm`
+    + (c.will_fallback && c.fallback_reason ? ` · ${c.fallback_reason}` : "");
+  return { name, detailLine };
+};
+
 // Name, Width × Length, Height on the top of each column; compact when small.
 DV.drawLabel = (ctx, entry, topFace, ink) => {
   const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
@@ -1009,7 +1021,8 @@ DV.wire = () => {
         const one = found && DL.bin(found.placement.bin);
         const standing = found ? DL.layerOf(key, found.drawer) : null;
         const levels = standing ? Math.max(...standing.item.layers.map(layer => layer.depth)) + 1 : 1;
-        const info = one ? DV.binLabelInfo(one, levels) : null;
+        const planned = !one && key ? (DL.spacerPlan || []).find(c => c.id === key) : null;
+        const info = one ? DV.binLabelInfo(one, levels) : planned ? DV.spacerCandidateLabelInfo(planned) : null;
         canvas.title = info ? `${info.name} — ${info.detailLine}` : "";
         DV.paint();
       }

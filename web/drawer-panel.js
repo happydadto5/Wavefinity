@@ -170,8 +170,9 @@ DP.build = () => {
     <details id="dl-spacers" class="dl-section dl-spacers" aria-label="Spacers">
       <summary>Spacers <span id="dl-sp-hint" class="dl-sp-hint" hidden></span></summary>
       <div class="section-body">
+        <p class="dl-note">Spacers are filler parts that brace your bins against the drawer walls so nothing slides around. Flexible (unvalidated) spacers print 2mm oversized to wedge in snugly — print them in PLA or PETG. "Unvalidated" means the wedging force hasn't been tested on real printed parts yet.</p>
         <div class="field-grid two">
-          <label>Spacer type<select id="dl-sp-type"><option value="rigid">Rigid</option><option value="flexible">Flexible</option></select></label>
+          <label>Spacer type<select id="dl-sp-type"><option value="rigid">Rigid</option><option value="flexible">Flexible (unvalidated)</option></select></label>
           <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
         </div>
         <label class="checkbox-row"><span>Auto height (half the tallest bin)</span><input id="dl-sp-auto-height" type="checkbox" checked></label>
@@ -181,12 +182,14 @@ DP.build = () => {
           <label class="checkbox-row"><span>Back</span><input id="dl-sp-wall-back" type="checkbox" checked></label>
           <label class="checkbox-row"><span>Right</span><input id="dl-sp-wall-right" type="checkbox" checked></label>
         </fieldset>
+        <p class="dl-note" style="font-size: 12px;">No front-wall spacers: bins are pulled toward you when opening the drawer, so front bracing would fight you every time.</p>
         <div class="dl-action-grid">
           <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the chosen walls">Create Spacers</button>
           <button type="button" id="dl-sp-generate" class="button secondary" title="Save the selected spacer plan">Save Selected Spacers</button>
           <button type="button" id="dl-sp-refresh" class="button secondary" title="Delete placed spacers, re-plan, and place replacements">Refresh Spacers</button>
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
         </div>
+        <div id="dl-sp-plan-truth"></div>
         <p id="dl-sp-reason" class="dl-note" hidden></p>
       </div>
     </details>
@@ -326,6 +329,7 @@ DP.wire = () => {
 
   $("#dl-sp-auto-height").addEventListener("change", event => {
     DL.change(() => { DL.layout.settings.spacers.height_auto = event.target.checked; }, { history: false });
+    $("#dl-sp-height").disabled = event.target.checked;
   });
   for (const side of ["left", "back", "right"]) {
     $(`#dl-sp-wall-${side}`).addEventListener("change", event => {
@@ -334,7 +338,10 @@ DP.wire = () => {
   }
   $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
   $("#dl-sp-generate").addEventListener("click", () => DL.generateSelectedSpacers());
-  $("#dl-sp-refresh").addEventListener("click", () => DL.refreshSpacers());
+  $("#dl-sp-refresh").addEventListener("click", () => {
+    if (!confirm("Refresh Spacers will delete all placed spacers and create new ones. Continue?")) return;
+    DL.refreshSpacers();
+  });
   $("#dl-sp-print").addEventListener("click", () => DP.openSpacerPrintDialog());
   $("#spacer-print-cancel").addEventListener("click", () => $("#spacer-print-dialog").close());
   $("#spacer-print-dialog").addEventListener("click", event => {
@@ -833,18 +840,28 @@ DP.isCanonicalDrawer = () => state.folderMode === "space" && ["drawer", "pegboar
 // Opens the grouped selection dialog before anything is sent to the slicer -
 // clicking Print Spacers… must never silently print every unprinted row.
 DP.openSpacerPrintDialog = () => {
+  // Fix 1042: material guidance — users must know what to print Flexible in.
   const groups = DL.spacerPrintGroups();
   if (!groups.length) { toast("No spacers placed in this Space yet.", true); return; }
   DP.spacerPrintGroups = groups;
   const container = $("#spacer-print-table-container");
+  // Fix 1042: material guidance, inserted once before the table (the id guard
+  // stops it duplicating when the dialog is reopened).
+  if (!$("#spacer-print-guidance")) {
+    const guidance = document.createElement("p");
+    guidance.id = "spacer-print-guidance";
+    guidance.className = "dl-note";
+    guidance.textContent = "Print Flexible (unvalidated) spacers in PLA or PETG (2mm oversized to wedge in). Rigid spacers print in any material.";
+    container.before(guidance);
+  }
   container.innerHTML = `
     <table class="spacer-print-table">
-      <thead><tr><th></th><th>Size</th><th>Flexible/Rigid</th><th>Qty in Space</th><th>Printed</th><th>Qty to print</th></tr></thead>
+      <thead><tr><th></th><th>Size</th><th>Spacer type</th><th>Qty in Space</th><th>Printed</th><th>Qty to print</th></tr></thead>
       <tbody>${groups.map((g, index) => `
         <tr data-group="${index}">
           <td><input type="checkbox" data-sp-check ${g.toPrint > 0 ? "checked" : ""}></td>
           <td>${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm</td>
-          <td>${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible" : "Rigid"}</td>
+          <td>${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible (unvalidated)" : "Rigid"}</td>
           <td>${g.qty}</td>
           <td>${g.printed}</td>
           <td><input type="number" data-sp-qty min="1" max="${g.qty}" value="${Math.max(1, g.toPrint || g.qty)}" ${g.toPrint > 0 ? "" : "disabled"}></td>
@@ -1039,10 +1056,38 @@ DP.renderSurfaceFill = () => {
       : '<p class="dl-note">No empty Surface cells remain.</p>';
 };
 
+// Fix 1042: pre-generation truth - every planned candidate shows its
+// resolved type and true printed envelope BEFORE Save, straight from the
+// backend's single cutoff authority. No threshold numbers live in this file.
+// Fix 1042 (review): plan notes (including the >200mm "Gap too large" note)
+// render here too - an oversized gap produces no candidate, so without this
+// the note would never reach the user's eyes.
+DP.renderSpacerPlanTruth = () => {
+  const box = $("#dl-sp-plan-truth");
+  if (!box) return;
+  const plan = DL.spacerPlan || [];
+  const notes = DL.spacerPlanNotes || [];
+  if (!plan.length && !notes.length) { box.innerHTML = ""; return; }
+  const notesHtml = notes.map(n => `<p class="dl-note">${escapeHtml(n)}</p>`).join("");
+  const headHtml = plan.length ? `<p class="dl-note">Planned spacers — what will actually print:</p>` : "";
+  const candHtml = plan.map(c => {
+      const p = (c.placements || [])[0] || {};
+      const side = String(p.side || String(c.id).split("-")[0] || "spacer");
+      const sideLabel = side.charAt(0).toUpperCase() + side.slice(1);
+      const typeLabel = c.resolved_type === "flexible" ? "Flexible (unvalidated)" : "Rigid";
+      const reason = c.will_fallback && c.fallback_reason ? ` — ${escapeHtml(c.fallback_reason)}` : "";
+      const selected = DL.spacerSelected && DL.spacerSelected.has(c.id) ? " (selected)" : "";
+      return `<p class="dl-note">${escapeHtml(sideLabel)} spacer · gap ${fmt(c.measured_gap)} mm → `
+        + `${typeLabel} · prints ${fmt(c.printed_w)} × ${fmt(c.printed_d)} mm${reason}${selected}</p>`;
+    }).join("");
+  box.innerHTML = notesHtml + headHtml + candHtml;
+};
+
 DP.renderStats = () => {
   const box = $("#dl-stats");
   const spacers = DL.layout.settings.spacers;
   dlSet("#dl-sp-type", spacers.flexible ? "flexible" : "rigid");
+  $("#dl-sp-height").disabled = spacers.height_auto !== false;
   dlSet("#dl-sp-height", fmt(spacers.height));
   // Fix 088: wall toggles + auto height reflect the Space's spacer settings.
   dlSet("#dl-sp-auto-height", spacers.height_auto !== false, "checked");
@@ -1258,7 +1303,7 @@ DP.renderInventory = (force = false) => {
   if (!bins.length) { list.innerHTML = `<div class="dl-empty">No bins match.</div>`; return; }
   const range = DV.heightRange();
   const kinds = { b4b: "Storage Box", manual: "Added by hand" };
-  const kindLabel = one => one.kind === "spacer" ? (one.boundary === "edge" ? "Edge spacer" : "X spacer") : kinds[one.kind];
+  const kindLabel = one => one.kind === "spacer" ? (one.boundary === "edge" ? "Edge spacer" : "Spacer") : kinds[one.kind];
   const cabinet = DL.isStorageDrawers();
   list.innerHTML = bins.map(one => {
     const placed = DL.placedCount(one.id);

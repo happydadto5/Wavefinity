@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Callable
 from shapely import affinity
@@ -25,6 +26,10 @@ from organizer_slicer import slicer_display_name
 from ._core import (
     UNIT,
     MIN_EDGE_SPACER,
+    MAX_SPACER_GAP,
+    FLEX_PRELOAD_MM,
+    FLEX_MIN_GAP_MM,
+    FLEX_MIN_CONTACT_MM,
     RIGID_SPACER_CLEARANCE_MM,
     MIN_SPACER_HEIGHT,
     DEFAULT_SPACER_HEIGHT,
@@ -217,6 +222,14 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
         for comp_idx, comp in enumerate(components):
             comp_area = sum(i["w"] * i["d"] for i in comp)
 
+            def _note_max_gap():
+                # Fix 1042: deterministic, deduplicated plan note - one note
+                # no matter how many candidates are skipped for this reason.
+                # Uses the exact promised copy.
+                msg = f"Gap too large for a spacer (max {MAX_SPACER_GAP:.0f}mm)."
+                if msg not in notes:
+                    notes.append(msg)
+
             def _make_candidate(side, edge, start, end):
                 # Fix 088 S88-3: distribute along long runs - one candidate
                 # per ~100 mm of exposed run. Each is still a short,
@@ -239,21 +252,33 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
                     contact = min(sub_len, SPACER_CONTACT_TARGET)
                     contact_start = sub_lo + (sub_len - contact) / 2.0
                     if side == "right":
-                        gap = (drawer["width"] - grid["ox"] - (edge * step)) - wall
+                        gap = (drawer["width"] - grid["ox"] - (edge * step))
                         if gap < MIN_EDGE_SPACER or contact < MIN_EDGE_SPACER:
+                            continue
+                        if gap > MAX_SPACER_GAP:
+                            _note_max_gap()
                             continue
                         px, py, w, d = grid["ox"] + edge * step, contact_start, gap, contact
                         cid = f"right-{edge}-{start}-{end}-{k}"
                     elif side == "left":
                         # Fix 088 S88-1: mirror of "right" against the left wall.
-                        gap = (grid["ox"] + edge * step) - wall
+                        # Fix 1042: removed -wall (spacer must reach the wall);
+                        # px=0 places the spacer against the left wall (was
+                        # floating 0.5mm off).
+                        gap = (grid["ox"] + edge * step)
                         if gap < MIN_EDGE_SPACER or contact < MIN_EDGE_SPACER:
                             continue
-                        px, py, w, d = wall, contact_start, gap, contact
+                        if gap > MAX_SPACER_GAP:
+                            _note_max_gap()
+                            continue
+                        px, py, w, d = 0, contact_start, gap, contact
                         cid = f"left-{edge}-{start}-{end}-{k}"
                     else:
-                        gap = (drawer["depth"] - grid["oy"] - (edge * step)) - wall
+                        gap = (drawer["depth"] - grid["oy"] - (edge * step))
                         if gap < MIN_EDGE_SPACER or contact < MIN_EDGE_SPACER:
+                            continue
+                        if gap > MAX_SPACER_GAP:
+                            _note_max_gap()
                             continue
                         px, py, w, d = contact_start, grid["oy"] + edge * step, contact, gap
                         cid = f"back-{edge}-{start}-{end}-{k}"
@@ -264,9 +289,31 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
                     # distribution. A run's candidates are selected or
                     # skipped as a unit so the cap never chops a run in half.
                     run_id = f"{side}-{comp_idx}-{edge}-{start}-{end}"
+                    # Fix 1042: pre-generation truth - resolve the spacer type
+                    # here, on the UNPRELOADED measured gap, with the same
+                    # authority generation uses. The UI shows this before
+                    # Save; generation cannot disagree.
+                    resolved = resolve_spacer_type(gap, contact, flexible)
+                    will_fallback = bool(flexible) and resolved == "rigid"
+                    # Fix 1042 (review): the reason comes from the single
+                    # helper (Change 6b), not inline formatting - planning and
+                    # generation cannot word it differently.
+                    fallback_reason = spacer_fallback_reason(gap, contact) if will_fallback else ""
+                    if resolved == "flexible":
+                        printed_axis = gap + FLEX_PRELOAD_MM
+                    else:
+                        printed_axis = gap - RIGID_SPACER_CLEARANCE_MM
+                    if side in ("right", "left"):
+                        printed_w, printed_d = printed_axis, contact
+                    else:
+                        printed_w, printed_d = contact, printed_axis
                     made.append({"id": cid, "placements": [placement], "score": score,
                                  "axis": "x" if vertical else "y", "comp": comp_idx, "edge": edge,
-                                 "run_id": run_id})
+                                 "run_id": run_id,
+                                 "measured_gap": gap, "resolved_type": resolved,
+                                 "will_fallback": will_fallback,
+                                 "fallback_reason": fallback_reason,
+                                 "printed_w": printed_w, "printed_d": printed_d})
                 return made
 
             for side in ("left", "back", "right"):
@@ -372,29 +419,72 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
             "proposal_cap_applied": proposal_cap_applied,
             "placed_spacer_count": placed_spacer_count}
 
+def resolve_spacer_type(measured_gap: float, contact: float, flexible_requested: bool) -> str:
+    """Fix 1042: THE single authority for the flexible/rigid cutoff.
+
+    Evaluated on the UNPRELOADED measured gap. Planning (_make_candidate) and
+    generation (_serpentine_flexure) call this directly; the user-facing reason
+    comes from spacer_fallback_reason (below), which uses the same named
+    constants - no duplicated thresholds, no magic numbers anywhere.
+    A flexible spacer needs measured_gap >= FLEX_MIN_GAP_MM (9.0): the pads
+    take 3+2=5mm and the serpentine needs >=6mm of span for its minimum two
+    half-waves (3mm pitch at the boundary - the tightest that keeps 1mm webs
+    manufacturable; larger gaps use ~8mm pitch); the 2.0mm preload supplies
+    2mm of that span, so 5 + 6 - 2 = 9.0mm measured. It also needs contact >=
+    FLEX_MIN_CONTACT_MM (6.0) so the zigzag has room for its amplitude.
+    """
+    if (flexible_requested
+            and measured_gap >= FLEX_MIN_GAP_MM
+            and contact >= FLEX_MIN_CONTACT_MM):
+        return "flexible"
+    return "rigid"
+
+
+def spacer_fallback_reason(measured_gap: float, contact: float) -> str:
+    """Fix 1042: plain-language reason for a flexible->rigid fallback.
+
+    Single source for the message - planning (Change 10) and generation
+    (Change 10a) both call this, so the copy cannot desync from the cutoff.
+    Uses the same named constants as resolve_spacer_type. No backend
+    thresholds, no jargon ("contact" is not user vocabulary), consistent
+    "5.0 mm" spacing throughout.
+    """
+    if measured_gap < FLEX_MIN_GAP_MM:
+        return f"Gap {measured_gap:.1f} mm is too small for the flexible zigzag."
+    return (f"Only {contact:.1f} mm of bin edge to hold — "
+            f"too short for the flexible zigzag.")
+
+
 def _serpentine_flexure(
     w, d, side, flexible=True, *, phase_x=0.0, phase_y=0.0,
 ):
-    web = 1.5
+    # Fix 1042: thinner webs (1.0mm) bend instead of crushing; the 2.0mm
+    # preload ("a couple mm" - Andrew) is added only on the flexible branch,
+    # AFTER the cutoff authority above has run on the unpreloaded measurement.
+    web = 1.0
     pad_bin = 3.0
     pad_wall = 2.0
 
     if side == "left":
+        # Fix 1042: negate phase_y to compensate for the X-mirror, which
+        # otherwise leaves the wave anti-phase (up to 0.7mm interference).
         mirrored, built_flexible = _serpentine_flexure(
-            w, d, "right", flexible, phase_x=phase_x, phase_y=phase_y,
+            w, d, "right", flexible, phase_x=phase_x, phase_y=-phase_y,
         )
         minx, _miny, maxx, _maxy = mirrored.bounds
         return affinity.scale(mirrored, -1, 1, origin=((minx + maxx) / 2, 0)), built_flexible
 
     if side == "right":
-        if flexible:
-            w += 0.5  # accepted flexible preload
-        if not flexible or w < pad_bin + pad_wall + web * 3:
-            measured_w = w - (0.5 if flexible else 0.0)
-            relief = min(RIGID_SPACER_CLEARANCE_MM, max(0.0, measured_w - 0.2))
+        # Fix 1042: the cutoff runs on the UNPRELOADED measured gap via the
+        # single authority - the preload is added only after it resolves.
+        resolved_flexible = resolve_spacer_type(w, d, flexible) == "flexible"
+        if resolved_flexible:
+            w += FLEX_PRELOAD_MM  # Fix 1042: 2.0mm preload for hand-insertable flex
+        if not resolved_flexible:
+            relief = min(RIGID_SPACER_CLEARANCE_MM, max(0.0, w - 0.2))
             return shape_box(
                 relief / 2.0, 0,
-                measured_w - relief / 2.0, d,
+                w - relief / 2.0, d,
             ), False
 
         # Bin-facing wave: preserve the accepted shape construction but phase
@@ -409,22 +499,53 @@ def _serpentine_flexure(
         wall_profile = affinity.translate(wall_profile, w - wall_profile.bounds[2], d / 2.0)
         right_pad = wall_profile.intersection(shape_box(w - pad_wall, 0, w, d))
 
+        # Fix 1042: true serpentine - the compression direction (x) has no
+        # straight axial bridge. Diagonal members zigzag between the pads at
+        # a constant ~8mm pitch, so x-compression bends them instead of
+        # loading them axially. Constant pitch keeps the member angle ~56
+        # degrees at every gap size: stiffness is roughly gap-independent
+        # and no member gets long/shallow enough to buckle.
+        x0, x1 = pad_bin, w - pad_wall
         mid_y = d / 2.0
-        top_web = shape_box(pad_bin, d - web, w - pad_wall, d)
-        bot_web = shape_box(pad_bin, 0, w - pad_wall, web)
-        mid_web = shape_box(pad_bin, mid_y - web / 2, w - pad_wall, mid_y + web / 2)
-        vert1 = shape_box(pad_bin, web, pad_bin + web, mid_y)
-        vert2 = shape_box(w - pad_wall - web, mid_y, w - pad_wall, d - web)
-        return unary_union([left_pad, right_pad, top_web, bot_web, mid_web, vert1, vert2]), True
+        amp = min(6.0, d / 2.0 - web)
+        y_lo, y_hi = mid_y - amp, mid_y + amp
+        n_half = max(2, int(round((x1 - x0) / 8.0)))
+        parts = []
+        for i in range(n_half):
+            xa = x0 + (x1 - x0) * i / n_half
+            xb = x0 + (x1 - x0) * (i + 1) / n_half
+            ya = y_lo if i % 2 == 0 else y_hi
+            yb = y_hi if i % 2 == 0 else y_lo
+            dx, dy = xb - xa, yb - ya
+            length = math.hypot(dx, dy)
+            angle = math.degrees(math.atan2(dy, dx))
+            # Each bar runs web past its endpoints along its own axis so
+            # neighbours overlap solidly at the vertices and the end bars
+            # bite into the pads.
+            bar = shape_box(-length / 2.0 - web, -web / 2.0,
+                            length / 2.0 + web, web / 2.0)
+            bar = affinity.rotate(bar, angle, origin=(0, 0), use_radians=False)
+            parts.append(affinity.translate(bar, (xa + xb) / 2.0, (ya + yb) / 2.0))
+            # 2x2mm gusset at each vertex keeps the chain one connected solid.
+            parts.append(shape_box(xa - web, ya - web, xa + web, ya + web))
+        parts.append(shape_box(xb - web, yb - web, xb + web, yb + web))
+        # Fix 1042 (review): clip to the contact band. The rotated end bars
+        # otherwise poke up to ~0.12mm past the contact height at steep member
+        # angles, which would falsify the plan-time printed envelope. The pads
+        # already bound the part; this only trims bar-tip overshoot.
+        return unary_union([left_pad, right_pad] + parts).intersection(
+            shape_box(0, 0, w, d)), True
 
-    if flexible:
-        d += 0.5  # accepted flexible preload
-    if not flexible or d < pad_bin + pad_wall + web * 3:
-        measured_d = d - (0.5 if flexible else 0.0)
-        relief = min(RIGID_SPACER_CLEARANCE_MM, max(0.0, measured_d - 0.2))
+    # Fix 1042: the cutoff runs on the UNPRELOADED measured gap via the
+    # single authority - the preload is added only after it resolves.
+    resolved_flexible = resolve_spacer_type(d, w, flexible) == "flexible"
+    if resolved_flexible:
+        d += FLEX_PRELOAD_MM  # Fix 1042: 2.0mm preload for hand-insertable flex
+    if not resolved_flexible:
+        relief = min(RIGID_SPACER_CLEARANCE_MM, max(0.0, d - 0.2))
         return shape_box(
             0, relief / 2.0,
-            w, measured_d - relief / 2.0,
+            w, d - relief / 2.0,
         ), False
 
     bin_profile = wavy_rect_outer(w / 2.0, 10.0, phase_x=phase_x)
@@ -435,18 +556,47 @@ def _serpentine_flexure(
     wall_profile = affinity.translate(wall_profile, w / 2.0, d - wall_profile.bounds[3])
     top_pad = wall_profile.intersection(shape_box(0, d - pad_wall, w, d))
 
+    # Fix 1042: true serpentine - the compression direction (y) has no
+    # straight axial bridge. Diagonal members zigzag between the pads at a
+    # constant ~8mm pitch so y-compression bends them instead of loading
+    # them axially (mirror of the right-side construction).
+    y0, y1 = pad_bin, d - pad_wall
     mid_x = w / 2.0
-    left_web = shape_box(0, pad_bin, web, d - pad_wall)
-    right_web = shape_box(w - web, pad_bin, w, d - pad_wall)
-    mid_web = shape_box(mid_x - web / 2, pad_bin, mid_x + web / 2, d - pad_wall)
-    horiz1 = shape_box(web, pad_bin, mid_x, pad_bin + web)
-    horiz2 = shape_box(mid_x, d - pad_wall - web, w - web, d - pad_wall)
-    return unary_union([bot_pad, top_pad, left_web, right_web, mid_web, horiz1, horiz2]), True
+    amp = min(6.0, w / 2.0 - web)
+    x_lo, x_hi = mid_x - amp, mid_x + amp
+    n_half = max(2, int(round((y1 - y0) / 8.0)))
+    parts = []
+    for i in range(n_half):
+        ya = y0 + (y1 - y0) * i / n_half
+        yb = y0 + (y1 - y0) * (i + 1) / n_half
+        xa = x_lo if i % 2 == 0 else x_hi
+        xb = x_hi if i % 2 == 0 else x_lo
+        dx, dy = xb - xa, yb - ya
+        length = math.hypot(dx, dy)
+        angle = math.degrees(math.atan2(dy, dx))
+        bar = shape_box(-length / 2.0 - web, -web / 2.0,
+                        length / 2.0 + web, web / 2.0)
+        bar = affinity.rotate(bar, angle, origin=(0, 0), use_radians=False)
+        parts.append(affinity.translate(bar, (xa + xb) / 2.0, (ya + yb) / 2.0))
+        parts.append(shape_box(xa - web, ya - web, xa + web, ya + web))
+    parts.append(shape_box(xb - web, yb - web, xb + web, yb + web))
+    # Fix 1042 (review): clip to the contact band - see the right branch above.
+    # Trims the rotated-bar tip overshoot so the printed envelope is exact.
+    return unary_union([bot_pad, top_pad] + parts).intersection(
+        shape_box(0, 0, w, d)), True
+
+
 def spacer_filename(side: str, w: float, d: float, height: float, flexible: bool) -> str:
     """Deterministic from the real, unsnapped geometry - two decimals so
     distinct gaps (12.1 vs 12.9 mm) never collide, and Flexible/Rigid never
     share a name merely because their envelope came out the same size."""
-    variant = "Flex" if flexible else "Rigid"
+    # Fix 1042 (acceptance gate): while the mechanical acceptance record is
+    # PENDING, a flexible filename carries the non-performance-bearing
+    # qualifier "Unvalidated". The "Spacer Flex " prefix is kept on purpose:
+    # the Print Spacers UI detects flex from filenames with ^Spacer Flex ,
+    # and legacy bare "Spacer Flex ..." files must keep classifying as
+    # flexible (they are unvalidated too). Do not shorten or reorder.
+    variant = "Flex Unvalidated" if flexible else "Rigid"
     return f"Spacer {variant} {side.capitalize()} {w:.2f}x{d:.2f}x{height:.2f}.3mf"
 
 
@@ -483,7 +633,16 @@ def generate_spacers(request: dict[str, Any], output_dir: Path | str, generate_f
             part_w, part_d = maxx - minx, maxy - miny
             is_flexible = flexible and built_flexible
             if flexible and not built_flexible:
-                notes.append(f"Gap too short for flexure; generated rigid spacer for {side}.")
+                # Fix 1042: backstop note - plan-time truth already showed the
+                # resolved type before Save. The reason comes from the same
+                # helper as the plan-time message (Change 6b), so the two
+                # cannot desync; no duplicated thresholds.
+                axis_len = gap_w if side in ("left", "right") else gap_d
+                contact_len = gap_d if side in ("left", "right") else gap_w
+                reason = spacer_fallback_reason(axis_len, contact_len)
+                notes.append(
+                    f"{reason} Printed a rigid spacer for the {side} side instead."
+                )
 
             mesh = _extrude_polygon(poly, height)
             file_name = spacer_filename(side, part_w, part_d, height, is_flexible)

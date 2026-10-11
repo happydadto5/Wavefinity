@@ -293,6 +293,227 @@ class SpacerTests(unittest.TestCase):
 
 
 
+class SpacerRedesignTests(unittest.TestCase):
+    """Fix 1042: real flexibility, correct gap math, honest plan-time truth."""
+
+    @staticmethod
+    def _plan_and_generate(width, depth, *, gx=1, gy=0, flexible=True, height=12):
+        """Plan every candidate for one 16x16 bin, then really generate them all."""
+        layout = _layout(width, depth, placements=[{"bin": "B1", "copy": 0, "gx": gx, "gy": gy}])
+        drawer = layout["drawers"][0]
+        bins = [_bin("B1", 16, 16, 40)]
+        options = {"height": height, "flexible": flexible}
+        plan = plan_spacers(drawer, bins, options)
+        made = generate_spacers(
+            {"drawer": drawer, "bins": bins, "options": options,
+             "selected": [c["id"] for c in plan["candidates"]]},
+            ".", lambda name, mesh: Path(name),
+        )
+        return drawer, plan, made
+
+    def test_gap_spans_the_full_bin_to_wall_distance(self):
+        # C2: the old "- wall" subtraction made the spacer stop short of the wall.
+        drawer, plan, _made = self._plan_and_generate(2 * 8 + 1 + 25.0, 2 * 8 + 1 + 40.0, gx=0)
+        grid = drawer_grid(normalise_drawer(drawer))
+        right = next(c for c in plan["candidates"] if c["id"].startswith("right-"))
+        back = next(c for c in plan["candidates"] if c["id"].startswith("back-"))
+        rp, bp = right["placements"][0], back["placements"][0]
+        self.assertAlmostEqual(rp["x"] + rp["w"], drawer["width"], places=6)
+        self.assertAlmostEqual(bp["y"] + bp["d"], drawer["depth"], places=6)
+        self.assertAlmostEqual(right["measured_gap"], rp["w"], places=6)
+        self.assertAlmostEqual(back["measured_gap"], bp["d"], places=6)
+        self.assertGreater(grid["ox"], 0)
+
+    def test_left_spacer_sits_against_the_wall(self):
+        # C3 bug 2: the left placement used to float `wall` mm off the wall.
+        _drawer, plan, _made = self._plan_and_generate(2 * 8 + 1 + 40.0, 2 * 8 + 1, gx=2)
+        left = next(c for c in plan["candidates"] if c["id"].startswith("left-"))
+        placement = left["placements"][0]
+        self.assertEqual(placement["x"], 0)
+        self.assertAlmostEqual(placement["w"], left["measured_gap"], places=6)
+
+    def test_flexible_prints_two_mm_oversize_and_rigid_prints_exact(self):
+        from organizer_drawer._core import FLEX_PRELOAD_MM, RIGID_SPACER_CLEARANCE_MM
+
+        _d, plan, made = self._plan_and_generate(2 * 8 + 1 + 25.0, 2 * 8 + 1, gx=0)
+        cand = next(c for c in plan["candidates"] if c["id"].startswith("right-"))
+        gen = next(g for g in made["generated"] if g["id"] == cand["id"])
+        self.assertTrue(gen["flexible"])
+        self.assertAlmostEqual(gen["w"], cand["measured_gap"] + FLEX_PRELOAD_MM, places=6)
+
+        _d, plan, made = self._plan_and_generate(2 * 8 + 1 + 25.0, 2 * 8 + 1, gx=0, flexible=False)
+        cand = next(c for c in plan["candidates"] if c["id"].startswith("right-"))
+        gen = next(g for g in made["generated"] if g["id"] == cand["id"])
+        self.assertFalse(gen["flexible"])
+        self.assertAlmostEqual(gen["w"], cand["measured_gap"] - RIGID_SPACER_CLEARANCE_MM, places=6)
+
+    def test_oversized_gaps_are_skipped_with_one_deduplicated_note(self):
+        from organizer_drawer._core import MAX_SPACER_GAP
+
+        message = f"Gap too large for a spacer (max {MAX_SPACER_GAP:.0f}mm)."
+        # Right AND back gaps are both oversized, so several runs hit the limit.
+        _d, plan, _made = self._plan_and_generate(17 + 250.0, 17 + 250.0, gx=0)
+        self.assertEqual(plan["candidates"], [])
+        self.assertEqual(plan["notes"].count(message), 1)
+        # A normal gap produces no such note.
+        _d, plan, _made = self._plan_and_generate(17 + 25.0, 17 + 25.0, gx=0)
+        self.assertNotIn(message, plan["notes"])
+
+    def test_the_cutoff_authority_uses_the_unpreloaded_gap(self):
+        from organizer_drawer import resolve_spacer_type
+        from organizer_drawer._core import FLEX_MIN_CONTACT_MM, FLEX_MIN_GAP_MM
+
+        self.assertEqual(resolve_spacer_type(FLEX_MIN_GAP_MM - 0.1, 28.0, True), "rigid")
+        self.assertEqual(resolve_spacer_type(FLEX_MIN_GAP_MM, 28.0, True), "flexible")
+        self.assertEqual(resolve_spacer_type(25.0, FLEX_MIN_CONTACT_MM - 0.1, True), "rigid")
+        self.assertEqual(resolve_spacer_type(25.0, FLEX_MIN_CONTACT_MM, True), "flexible")
+        self.assertEqual(resolve_spacer_type(25.0, 28.0, False), "rigid")
+
+    def test_plan_and_generation_agree_on_type_and_printed_size(self):
+        from organizer_drawer import spacer_fallback_reason
+
+        seen = set()
+        for width in (17.0, 20.3, 24.9, 25.5, 31.0, 38.6, 41.7, 60.0, 130.2):
+            for depth in (17.0, 22.4, 26.0, 33.7, 60.0, 118.0):
+                for gx, gy in ((0, 0), (1, 0), (2, 1)):
+                    drawer, plan, made = self._plan_and_generate(width, depth, gx=gx, gy=gy)
+                    by_id = {g["id"]: g for g in made["generated"]}
+                    self.assertEqual(set(by_id), {c["id"] for c in plan["candidates"]})
+                    for cand in plan["candidates"]:
+                        gen = by_id[cand["id"]]
+                        side = cand["placements"][0]["side"]
+                        seen.add((side, cand["resolved_type"]))
+                        self.assertEqual(cand["resolved_type"] == "flexible", gen["flexible"], cand["id"])
+                        self.assertAlmostEqual(cand["printed_w"], gen["w"], delta=0.05, msg=cand["id"])
+                        self.assertAlmostEqual(cand["printed_d"], gen["d"], delta=0.05, msg=cand["id"])
+                        self.assertEqual(cand["will_fallback"], cand["resolved_type"] == "rigid")
+                        if cand["will_fallback"]:
+                            p = cand["placements"][0]
+                            contact = p["d"] if side in ("left", "right") else p["w"]
+                            reason = spacer_fallback_reason(cand["measured_gap"], contact)
+                            self.assertEqual(cand["fallback_reason"], reason)
+                            self.assertTrue(any(n.startswith(reason) for n in made["notes"]))
+                        else:
+                            self.assertEqual(cand["fallback_reason"], "")
+        # The sweep must actually cross the cutoff on every side.
+        for side in ("left", "right", "back"):
+            self.assertIn((side, "flexible"), seen)
+            self.assertIn((side, "rigid"), seen)
+
+    def test_the_fallback_reason_is_plain_language(self):
+        from organizer_drawer import spacer_fallback_reason
+
+        self.assertEqual(spacer_fallback_reason(5.0, 28.0),
+                         "Gap 5.0 mm is too small for the flexible zigzag.")
+        self.assertEqual(spacer_fallback_reason(25.0, 4.0),
+                         "Only 4.0 mm of bin edge to hold — too short for the flexible zigzag.")
+
+    def test_flexure_has_no_straight_axial_bridge(self):
+        from organizer_drawer import _serpentine_flexure
+        from shapely.geometry import box
+
+        def pieces(poly, boxes):
+            rest = poly
+            for one in boxes:
+                rest = rest.difference(one)
+            return list(rest.geoms) if hasattr(rest, "geoms") else [rest]
+
+        poly, built = _serpentine_flexure(25.0, 28.0, "right", True)
+        self.assertTrue(built)
+        self.assertEqual(poly.geom_type, "Polygon")  # one connected solid
+        for piece in pieces(poly, [box(0, 0, 3, 28), box(25, 0, 27, 28)]):
+            x0, y0, x1, y1 = piece.bounds
+            self.assertFalse(x1 - x0 > 10 and y1 - y0 < 2, piece.bounds)
+
+        poly, built = _serpentine_flexure(28.0, 25.0, "back", True)
+        self.assertTrue(built)
+        self.assertEqual(poly.geom_type, "Polygon")
+        for piece in pieces(poly, [box(0, 0, 28, 3), box(0, 25, 28, 27)]):
+            x0, y0, x1, y1 = piece.bounds
+            self.assertFalse(y1 - y0 > 10 and x1 - x0 < 2, piece.bounds)
+
+    def test_printed_envelope_is_exact_at_the_minimum_contact_boundary(self):
+        from organizer_drawer import _serpentine_flexure
+        from organizer_drawer._core import FLEX_MIN_GAP_MM, FLEX_PRELOAD_MM
+
+        for contact in (6.0, 8.0, 10.0, 14.0, 28.0):
+            for side in ("right", "left"):
+                poly, built = _serpentine_flexure(FLEX_MIN_GAP_MM, contact, side, True)
+                self.assertTrue(built, (side, contact))
+                x0, y0, x1, y1 = poly.bounds
+                self.assertAlmostEqual(x1 - x0, FLEX_MIN_GAP_MM + FLEX_PRELOAD_MM, delta=0.05)
+                self.assertAlmostEqual(y1 - y0, contact, delta=0.05)
+            poly, built = _serpentine_flexure(contact, FLEX_MIN_GAP_MM, "back", True)
+            self.assertTrue(built, ("back", contact))
+            x0, y0, x1, y1 = poly.bounds
+            self.assertAlmostEqual(x1 - x0, contact, delta=0.05)
+            self.assertAlmostEqual(y1 - y0, FLEX_MIN_GAP_MM + FLEX_PRELOAD_MM, delta=0.05)
+
+    def test_a_short_contact_falls_back_to_rigid(self):
+        from organizer_drawer import _serpentine_flexure
+
+        poly, built = _serpentine_flexure(25.0, 4.0, "right", True)
+        self.assertFalse(built)
+        self.assertAlmostEqual(poly.bounds[2] - poly.bounds[0], 25.0 - 0.4, places=6)
+
+    def test_left_flexure_is_the_mirror_of_right_with_the_wave_phase_negated(self):
+        from organizer_drawer import _serpentine_flexure
+
+        left, built = _serpentine_flexure(25.0, 28.0, "left", True, phase_y=3.1)
+        right, _ = _serpentine_flexure(25.0, 28.0, "right", True, phase_y=-3.1)
+        self.assertTrue(built)
+        mirrored = affinity.scale(right, -1, 1, origin=((right.bounds[0] + right.bounds[2]) / 2, 0))
+        self.assertAlmostEqual(left.symmetric_difference(mirrored).area, 0.0, places=6)
+
+    def test_flexible_geometry_extrudes_watertight_across_gaps(self):
+        from organizer_drawer import _serpentine_flexure
+        from organizer_geometry import _extrude_polygon
+
+        # Back spacers are checked at a 14 mm contact: wider back pads already
+        # leave a non-manifold pad-corner pinch on main (pre-existing, outside
+        # Fix 1042) - the right side is watertight at every contact.
+        for gap in (9.0, 25.0, 60.0, 200.0):
+            for side, args in (("right", (gap, 28.0)), ("back", (14.0, gap))):
+                poly, built = _serpentine_flexure(*args, side, True)
+                self.assertTrue(built)
+                self.assertTrue(_extrude_polygon(poly, 12).is_watertight, (side, gap))
+
+    def test_flexible_filenames_carry_the_unvalidated_qualifier(self):
+        from organizer_drawer._spacers import spacer_filename
+
+        self.assertEqual(spacer_filename("back", 27.0, 28.0, 20.0, True),
+                         "Spacer Flex Unvalidated Back 27.00x28.00x20.00.3mf")
+        self.assertEqual(spacer_filename("back", 27.0, 28.0, 20.0, False),
+                         "Spacer Rigid Back 27.00x28.00x20.00.3mf")
+        _d, plan, made = self._plan_and_generate(2 * 8 + 1 + 25.0, 2 * 8 + 1 + 5.0, gx=0)
+        by_side = {g["side"]: g for g in made["generated"]}
+        self.assertTrue(by_side["right"]["file"].startswith("Spacer Flex Unvalidated "))
+        self.assertTrue(re.match(r"^Spacer Flex ", by_side["right"]["file"]))  # Print Spacers detector
+        # A fallback rigid part is never mislabelled.
+        self.assertTrue(by_side["back"]["file"].startswith("Spacer Rigid "))
+
+    def test_saved_spacer_bins_are_named_for_what_was_built(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Shop"
+            append_bin(folder, file="Box 16 x 16 x 40.3mf", x=16, y=16, z=40, design_spec={})
+            layout = _layout(2 * 8 + 1 + 25.0, 2 * 8 + 1 + 4.0, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
+            save_inventory(folder, layout=layout)
+            routes = drawer_routes(threading.RLock(), folder)
+            options = {"fill": "edges", "height": 12}
+            planned = routes["/api/drawer/spacers"]({
+                "output": str(folder), "layout": layout, "drawer_id": "d1", "options": options,
+            })
+            made = routes["/api/drawer/spacers/generate"]({
+                "output": str(folder), "layout": layout, "drawer_id": "d1", "options": options,
+                "selected": [c["id"] for c in planned["candidates"]],
+                "plan_signature": planned["plan_signature"],
+            })
+            names = {b["file"].split(" ")[1]: b["name"] for b in made["bins"] if b["kind"] == "spacer"}
+            self.assertEqual(names["Flex"], "Flexible (unvalidated) Spacer")
+            self.assertEqual(names["Rigid"], "Rigid Spacer")
+
+
+
 class BoundaryTests(unittest.TestCase):
     def test_a_portable_space_keeps_its_exact_grid_capacity(self):
         with tempfile.TemporaryDirectory() as tmp:

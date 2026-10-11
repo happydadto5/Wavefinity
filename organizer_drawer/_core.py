@@ -45,6 +45,10 @@ CREST = WAVE_AMPLITUDE - WAVE_MATING_GAP / 2.0
 # Total slack per axis a drawer needs just to take the crests at both walls.
 MIN_CLEARANCE = DRAWER_HARD_CLEARANCE_MM
 MIN_EDGE_SPACER = 1.2           # thinnest edge spacer worth printing, at a wave trough
+MAX_SPACER_GAP = 200.0          # Fix 1042: gaps larger than this are rejected with a plan note
+FLEX_PRELOAD_MM = 2.0           # Fix 1042: flexible spacers print this much oversize ("a couple mm" - Andrew)
+FLEX_MIN_GAP_MM = 9.0           # Fix 1042: minimum UNPRELOADED measured gap for the flexible serpentine
+FLEX_MIN_CONTACT_MM = 6.0       # Fix 1042: minimum contact length for the flexible serpentine
 RIGID_SPACER_CLEARANCE_MM = 0.40
 MIN_SPACER_HEIGHT = 6.0         # a spacer frame still needs room for its lock bumps
 DEFAULT_SPACER_HEIGHT = 15.0

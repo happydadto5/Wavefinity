@@ -266,7 +266,18 @@ DL.prune = () => {
 DL.drawer = () => DL.layout.drawers.find(one => one.id === DL.layout.active) || DL.layout.drawers[0];
 DL.bin = id => DL.bins.find(one => one.id === id);
 DL.key = p => `${p.bin}:${p.copy ?? 0}`;
-DL.label = one => one.name || `${fmt(one.x)} × ${fmt(one.y)} mm`;
+DL.label = one => {
+  const base = one.name || `${fmt(one.x)} × ${fmt(one.y)} mm`;
+  // Fix 1042 (acceptance gate): spacer bins saved before the gate carry the
+  // bare product name "Flexible Spacer". Qualify it at display time - the
+  // same honesty rule as the Print Spacers table (Change 19). Uses the same
+  // flexible detection (flag, else the ^Spacer Flex filename detector).
+  if (one.kind === "spacer" && base === "Flexible Spacer"
+      && (one.flexible ?? /^Spacer Flex /.test(String(one.file || "")))) {
+    return "Flexible (unvalidated) Spacer";
+  }
+  return base;
+};
 DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
 // The user-facing Wavefinity unit is always 8 mm - see the "8 mm size grid"
 // section of README.md. The one place this conversion belongs.
@@ -872,8 +883,10 @@ DL.spacerSignature = () => JSON.stringify([
 // Toggling a candidate's own checkbox must not call this.
 DL.clearSpacerPlan = ({ preserveFill = false } = {}) => {
   DL.spacerPlan = null;
+  DL.spacerPlanNotes = [];
   DL.spacerSelected = new Set();
   DL.spacerPlanSignature = null;
+  DP.renderSpacerPlanTruth();
   if (!preserveFill) {
     DL.fillPlan = null;
     DL.fillSelected = new Set();
@@ -1413,7 +1426,9 @@ DL.planSpacers = () => DL.busyWith("spacers", async context => {
   }, { write: false, context });
   DL.requireSpaceContext(context);
   DL.spacerPlan = result.candidates || [];
+  DL.spacerPlanNotes = result.notes || [];
   DL.spacerSelected = new Set((result.selected || []).map(c => c.id));
+  DP.renderSpacerPlanTruth();
   DL.spacerPlanSignature = result.plan_signature || null;
   if (!DL.spacerPlan.length) {
     const allOff = (result.notes || []).some(note =>
@@ -1434,6 +1449,7 @@ DL.toggleSpacerCandidate = id => {
   if (DL.spacerSelected.has(id)) DL.spacerSelected.delete(id);
   else DL.spacerSelected.add(id);
   DL.emit();
+  DP.renderSpacerPlanTruth();
 };
 
 // Fix 088 S88-3: the x badge on a planned candidate removes just that
@@ -1444,6 +1460,7 @@ DL.removeSpacerCandidate = id => {
   DL.spacerPlan = DL.spacerPlan.filter(c => c.id !== id);
   DL.spacerSelected.delete(id);
   DL.emit();
+  DP.renderSpacerPlanTruth();
 };
 
 // The save-and-place half of spacer generation: persists every currently
@@ -1468,8 +1485,10 @@ DL.savePlannedSpacers = async context => {
   } catch (error) {
     if (String(error.message || "").startsWith("Spacers changed while you were planning")) {
       DL.spacerPlan = null;
+      DL.spacerPlanNotes = [];
       DL.spacerSelected = new Set();
       DL.spacerPlanSignature = null;
+      DP.renderSpacerPlanTruth();
       toast(error.message, true, 9000);
       return;
     }
@@ -1483,8 +1502,10 @@ DL.savePlannedSpacers = async context => {
   DL.normaliseLayout(result.layout);
   if (DL.snapshot() !== before) { DL.history.push(before); DL.future = []; }
   DL.spacerPlan = null;
+  DL.spacerPlanNotes = [];
   DL.spacerSelected = new Set();
   DL.spacerPlanSignature = null;
+  DP.renderSpacerPlanTruth();
   DL.dirty = false;
   DL.saveState = "saved";
   DL.savedAt = new Date();
@@ -1522,8 +1543,10 @@ DL.refreshSpacers = () => DL.busyWith("spacers", async context => {
   DL.adopt(result);
   DL.normaliseLayout(result.layout);
   DL.spacerPlan = null;
+  DL.spacerPlanNotes = [];
   DL.spacerSelected = new Set();
   DL.spacerPlanSignature = null;
+  DP.renderSpacerPlanTruth();
   DL.dirty = false;
   DL.saveState = "saved";
   DL.savedAt = new Date();
