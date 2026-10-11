@@ -1141,13 +1141,7 @@ function referencePhysicalHeight(draft, resolvedOptions) {
   if (rawHeight === null || rawHeight === undefined || rawHeight === "" ||
       !Number.isFinite(height) || height <= 0) return null;
   if (draft.kind !== "steps") return height;
-  const explicitLip = draft.options?.lip;
-  const rawLip = explicitLip !== null && explicitLip !== undefined && explicitLip !== ""
-    ? explicitLip : resolvedOptions?.lip;
-  const lip = Number(rawLip);
-  if (rawLip === null || rawLip === undefined || rawLip === "" || !Number.isFinite(lip)) return null;
-  const physicalHeight = height + Math.max(0, lip);
-  return Number.isFinite(physicalHeight) ? physicalHeight : null;
+  return height;
 }
 
 function referenceSeedForDraft(draft, resolvedOptions, design) {

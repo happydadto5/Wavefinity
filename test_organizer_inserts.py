@@ -2000,14 +2000,14 @@ class SlotRackTests(unittest.TestCase):
 class TieredStepsTests(unittest.TestCase):
     def test_steps_builds_watertight_mesh(self) -> None:
         zone = Zone(-20.0, -20.0, 20.0, 20.0)
-        one = Feature("steps", zone, count=3, along="x", options={"height": 15.0, "lip": 1.0})
+        one = Feature("steps", zone, count=3, along="x", options={"height": 15.0})
         base = BIN.base_thickness
         solids = build_features(BIN, [one], base)
         self.assertEqual(len(solids), 1)
         mesh = solids[0]
         self.assertTrue(mesh.is_watertight)
         self.assertAlmostEqual(mesh.bounds[0][2], base, places=3)
-        self.assertAlmostEqual(mesh.bounds[1][2], base + 15.0 + 1.0, places=3)
+        self.assertAlmostEqual(mesh.bounds[1][2], base + 15.0, places=3)
 
 
     def test_steps_rejects_invalid_count(self) -> None:

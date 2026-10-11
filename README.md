@@ -1160,7 +1160,7 @@ effect when only one tool fits.
 | `divider` | One or more straight or leaning subdividing walls along X or Y, with optional sloped tool-slot bottoms and per-compartment **Labels** (No label / On base / Rim level) | `height`, `thickness`, `angle`, `spacing`, `bottom_angle`, `reverse_bottom`, `alternate_bottom`, `minimal_bottom`, `bottom_supports` |
 | `pocket` | Raised rectangular tray with a recessed centre and 0.5 mm chamfered edges | `height`, `wall` |
 | `slot` | Slot Rack: angled slots for driver bits, cards, and small tools | `height`, `depth`, `thickness`, `angle`, `wall`, `wall_style` |
-| `steps` | Tiered riser shelves that climb from front to back | `height`, `lip`, `count` |
+| `steps` | Tiered riser shelves that climb from front to back | `height`, `count` |
 | `text` | Centered lettering, Inlaid or Raised, on the base or at a rim wall; one 3MF object each. One On-base Text per bin, one At-rim Text per rim side | `text`, `cap_height`, `quarter_turns`, `depth`, `raised`, `level`, `rim_side` |
 
 **Divider labels.** The **Labels** group has one **Label Type**: *No label*

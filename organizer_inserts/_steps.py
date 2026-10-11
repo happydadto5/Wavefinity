@@ -15,8 +15,7 @@ from ._registry import OptionDefinition, defaults, feature, resolved_options
 @defaults("steps")
 def steps_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float]:
     return {
-        "height": min(16.0, max(4.0, box.z - base_z - 2.0)),
-        "lip": 1.0,
+        "height": max(4.0, (box.z - base_z) / 2.0),
     }
 
 
@@ -25,8 +24,7 @@ def steps_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float
     description="Stepped shelves rising from front to back.",
     capabilities=("qty", "size", "along"),
     options=(
-        OptionDefinition("Height", "height", "", minimum=0.1, note="mm of the tallest step; blank = worked out from the bin"),
-        OptionDefinition("Lip", "lip", "1", minimum=0.0, note="mm retaining lip on each step"),
+        OptionDefinition("Step height", "height", "", minimum=0.1, note="mm of the tallest step; blank = half the bin height"),
         OptionDefinition("Count", "count", "3", "integer", False, minimum=1, note="number of steps"),
     ), order=80,
 )
@@ -35,7 +33,6 @@ def build_steps(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trim
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
     height = options["height"]
-    lip = max(0.0, float(options.get("lip", 1.0)))
     count = spec_feature.count or int(options.get("count", 3))
 
     if count < 1:
@@ -62,14 +59,8 @@ def build_steps(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trim
         u_end = u0 + (i + 1) * step_run
         z_tread = base_z + (i + 1) * step_rise
 
-        if lip > 0.0:
-            pts.append((u_start, z_tread + lip))
-            lip_run = min(lip, step_run * 0.25)
-            pts.append((u_start + lip_run, z_tread))
-            pts.append((u_end, z_tread))
-        else:
-            pts.append((u_start, z_tread))
-            pts.append((u_end, z_tread))
+        pts.append((u_start, z_tread))
+        pts.append((u_end, z_tread))
 
     pts.append((u1, base_z))
 

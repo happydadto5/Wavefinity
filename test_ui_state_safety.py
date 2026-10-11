@@ -182,7 +182,7 @@ async function lifecycle(kind, options, resolvedOptions){
 (async()=>{
  const cycles=[];
  cycles.push(await lifecycle('slot',{}, {height:16}));
- cycles.push(await lifecycle('steps',{}, {height:16,lip:1}));
+ cycles.push(await lifecycle('steps',{}, {height:16}));
  cycles.push(await lifecycle('post',{height:12},{}));
  state.draft={kind:'slot',zone:[-10,-8,10,8],options:{}};
  state.draftRequest=40;state.referenceResolutionRequest=40;state.draftResolvedOptions={height:16};
@@ -203,7 +203,7 @@ async function lifecycle(kind, options, resolvedOptions){
         result = node_json(script)
         self.assertEqual(result["cycles"], [
             {"kind": "slot", "addVisible": True, "seeded": 16, "count": 1, "calls": 3},
-            {"kind": "steps", "addVisible": True, "seeded": 17, "count": 1, "calls": 3},
+            {"kind": "steps", "addVisible": True, "seeded": 16, "count": 1, "calls": 3},
             {"kind": "post", "addVisible": True, "seeded": 12, "count": 1, "calls": 3},
         ])
         self.assertFalse(result["afterHolderEdit"])
@@ -252,7 +252,7 @@ for(const kind of ['pocket','post','slot']){
  state.draftTouched=false;state.referenceResolutionRequest=null;state.draftResolvedOptions={};
  explicit.push({kind,ready:referenceAddReady(),height:referenceSeedForDraft(state.draft,null,state.design).height});
 }
-state.draft={kind:'steps',zone:[-10,-8,10,8],options:{height:16,lip:-2}};
+state.draft={kind:'steps',zone:[-10,-8,10,8],options:{height:16}};
 const clamped=referenceSeedForDraft(state.draft,null,state.design).height;
 process.stdout.write(JSON.stringify({results,explicit,clamped}));
 """.replace("__SOURCE__", source)
@@ -263,7 +263,7 @@ process.stdout.write(JSON.stringify({results,explicit,clamped}));
                  "shown": True, "height": 16, "zone": [-10, -8, 10, 8], "commits": 1},
                 {"kind": "steps", "before": {"hidden": True, "reference": None, "commits": 1,
                                                "unresolvedRejected": True},
-                 "shown": True, "height": 17, "zone": [-10, -8, 10, 8], "commits": 2},
+                 "shown": True, "height": 16, "zone": [-10, -8, 10, 8], "commits": 2},
             ],
             "explicit": [{"kind": kind, "ready": True, "height": 12}
                          for kind in ("pocket", "post", "slot")],

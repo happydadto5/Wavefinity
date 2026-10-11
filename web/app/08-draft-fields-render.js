@@ -95,10 +95,11 @@ function renderDraftFields() {
     // A bore's footprint reads Width x Length, matching Pocket and the item terms.
     // Slot and base Text each also carry their own "Depth" field (slot cut / letter
     // sink), so the footprint dimension is named apart to avoid two "Depth" boxes.
-    const widthLabel = isPocket ? "Inside width" : one.kind === "slot" ? "Rack width" : "Width";
+    const widthLabel = isPocket ? "Inside width" : one.kind === "slot" ? "Rack width" : one.kind === "steps" ? "Step width" : "Width";
     const depthLabel = isPocket || isBore ? (isPocket ? "Inside length" : "Length")
       : one.kind === "slot" ? "Rack length"
       : one.kind === "text" ? "Label box depth"
+      : one.kind === "steps" ? "Step depth"
       : "Depth";
     if (isBore) {
       const draftProfile = one.item?.profile || "round";
@@ -485,6 +486,9 @@ function renderDraftFields() {
     if (info.kind === "post") {
       stepFor.height = "1.0";
     }
+    if (info.kind === "steps") {
+      stepFor.height = "1.0";
+    }
     if (info.kind === "pocket") {
       stepFor.height = "0.5";
       stepFor.depth = "0.5";
@@ -499,8 +503,7 @@ function renderDraftFields() {
     if (info.kind === "post" && option.key === "diameter") fieldOpts.min = 0.1;
     if (info.kind === "post" && option.key === "taper") fieldOpts.min = 0;
     if (info.kind === "post" && option.key === "spacing") fieldOpts.min = 0;
-    if (info.kind === "steps" && option.key === "height") fieldOpts.min = 0.1;
-    if (info.kind === "steps" && option.key === "lip") fieldOpts.min = 0;
+    if (info.kind === "steps" && option.key === "height") fieldOpts.min = 1;
     if (info.kind === "pocket" && option.key === "rounding") fieldOpts.min = 0;
     if (info.kind === "pocket" && option.key === "wall") fieldOpts.min = 0.4;
     if (info.kind === "pocket" && option.key === "depth") fieldOpts.min = 0.1;
@@ -520,7 +523,7 @@ function renderDraftFields() {
   if (info.kind === "post") {
     html += `<div class="draft-triple post-unit-fields">${bodyHtml}</div>` + repeatsHtml;
   } else if (info.kind === "steps") {
-    html += editorGroup("Size", `<div class="pair">${stepsSizeHtml}${bodyHtml}</div>`) + repeatsHtml;
+    html += `<div class="pair">${stepsSizeHtml}${bodyHtml}</div>` + repeatsHtml;
   } else if (bodyHtml) {
     html += ["pocket", "slot"].includes(info.kind)
       ? `<div class="draft-triple">${bodyHtml}</div>`

@@ -250,7 +250,6 @@ Tiered shelves/riser.
 Typical controls:
 
 - height;
-- lip;
 - number of steps;
 - quantity/layout.
 

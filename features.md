@@ -647,7 +647,6 @@ Options include:
 Options include:
 
 - total height;
-- lip;
 - step count;
 - quantity/layout;
 - sizing;

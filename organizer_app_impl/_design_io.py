@@ -58,6 +58,7 @@ from organizer_inserts import (
     Zone,
     normalize_bore_modes,
     build_features,
+    connector_keep_out,
     is_text,
     layout_from_dict,
     layout_to_dict,
@@ -448,17 +449,38 @@ def default_feature(
             if available - 4.0 + 1e-9 < 14.0:
                 feature_options["depth"] = 14.0
     elif kind == "steps":
-        run = _starter_span(bounds.width if along == "x" else bounds.depth, 32.0, mode)
-        across = _starter_span(bounds.depth if along == "x" else bounds.width, 32.0, mode)
-        width, depth = ((run, across) if along == "x" else (across, run))
+        # Andrew (H5): new Steps default to the FULL BIN footprint, not the
+        # 32 mm connector-safe starter. Same full-bounds pattern the Divider
+        # and Text branches use: bounds = layout_zone(box, mode), which is
+        # Zone.whole(box) in fused mode and the whole-cell rectangle in
+        # cartridge mode.
         if mode == "fused":
             base_z = box.base_thickness
             available = box.z - base_z
-            # The historical resolver clamps Height to (available - 2 mm);
-            # only step in when a shallow fused bin would shorten the
-            # natural 16 mm height.
-            if available - 2.0 + 1e-9 < 16.0:
-                feature_options["height"] = 16.0
+            # The half-height default, computed once so the seeding and the
+            # fallback decision use the same value.
+            starter_height = max(4.0, available / 2.0)
+            feature_options["height"] = starter_height
+            # A full-footprint starter touches the wall, so assembly's
+            # connector-keep-out check applies. Assembly rejects a
+            # wall-touching feature iff its built top exceeds
+            # connector_keep_out(box) + 1e-6 ("a steps touching the wall must
+            # stay below ... so a connector can seat"), and a Steps' built
+            # top is base_z + height. Use the identical comparison: fall back
+            # to the 32 mm connector-safe starter exactly where a
+            # full-bounds starter would break - Add must never error on a bin
+            # the app calls valid (Fix 109 A2; see _starter_span's docstring).
+            if base_z + starter_height > connector_keep_out(box) + 1e-6:
+                run = _starter_span(bounds.width if along == "x" else bounds.depth, 32.0, mode)
+                across = _starter_span(bounds.depth if along == "x" else bounds.width, 32.0, mode)
+            else:
+                run = bounds.width if along == "x" else bounds.depth
+                across = bounds.depth if along == "x" else bounds.width
+        else:
+            # Cartridge: no wall-touch keep-out; full bounds, unchanged.
+            run = bounds.width if along == "x" else bounds.depth
+            across = bounds.depth if along == "x" else bounds.width
+        width, depth = ((run, across) if along == "x" else (across, run))
     elif kind == "scoop":
         along = "x"
         scoop_height = (box.z - box.base_thickness) * 0.6
