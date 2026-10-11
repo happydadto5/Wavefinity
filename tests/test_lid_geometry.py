@@ -151,6 +151,50 @@ class HandleTests(unittest.TestCase):
                         slab = _extrude_polygon(plate, st.stack_lid_rise(box))
                         slab.apply_translation((0.0, 0.0, eff.z))
                         self.assertGreater(float(intersection([slab, mesh]).volume), 0.5)
+    OUTER_BOUNDS = (-24.0, -24.0, 24.0, 24.0)
+    # Knob mesh recorded from the unmodified builder before the teardrop change.
+    KNOB_BASELINE = {
+        "small": (2400, 1202, ((-4.2, -4.2, -0.8), (4.2, 4.2, 4.0))),
+        "medium": (2400, 1202, ((-4.62, -4.62, -0.8), (4.62, 4.62, 4.0))),
+        "large": (2400, 1202, ((-6.06, -6.06, -0.8), (6.06, 6.06, 5.016))),
+    }
+
+    def test_pull_has_no_exposed_overhang_beyond_45_degrees(self):
+        for size in self.SIZES:
+            for position in ("middle", "front", "left"):
+                with self.subTest(size=size, position=position):
+                    mesh = handles.resolve_lid_handle(self.OUTER_BOUNDS, "pull", size, position)
+                    self.assertTrue(mesh.is_watertight)
+                    self.assertGreater(mesh.volume, 0.0)
+                    # Exposed faces only: the buried root caps sit at the root plane
+                    # (the tolerance absorbs float noise in their centroid height).
+                    exposed = mesh.triangles_center[:, 2] > -handles.LID_HANDLE_ROOT_EMBED + 1e-6
+                    normals = mesh.face_normals
+                    down = exposed & (normals[:, 2] < 0.0)
+                    self.assertTrue(down.any())
+                    angle = np.degrees(np.arccos(np.clip(normals[down, 2], -1.0, 1.0)))
+                    overhang = np.abs(90.0 - angle)
+                    self.assertEqual(int((overhang > 45.0 + 1e-6).sum()), 0)
+
+    def test_pull_bounds_match_the_round_tube_envelope(self):
+        # Bounds recorded from the round-tube builder before the teardrop change.
+        recorded = {
+            "small": ((-6.0, -2.4, -0.8), (6.0, 2.4, 9.0)),
+            "medium": ((-8.55, -3.0, -0.8), (8.55, 3.0, 11.0)),
+            "large": ((-11.4, -3.6, -0.8), (11.4, 3.6, 13.0)),
+        }
+        for size, bounds in recorded.items():
+            with self.subTest(size=size):
+                mesh = handles.resolve_lid_handle(self.OUTER_BOUNDS, "pull", size, "middle")
+                np.testing.assert_allclose(mesh.bounds, np.asarray(bounds), atol=1e-6)
+
+    def test_knob_mesh_is_unchanged_by_the_pull_redesign(self):
+        for size, (faces, vertices, bounds) in self.KNOB_BASELINE.items():
+            with self.subTest(size=size):
+                mesh = handles.resolve_lid_handle(self.OUTER_BOUNDS, "knob", size, "middle")
+                self.assertEqual(len(mesh.faces), faces)
+                self.assertEqual(len(mesh.vertices), vertices)
+                np.testing.assert_allclose(mesh.bounds, np.asarray(bounds), atol=1e-6)
 
 
 

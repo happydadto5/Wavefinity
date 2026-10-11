@@ -9,7 +9,7 @@ The handle is built with its lid-top plane at ``z = 0`` and its lowest point
 ``LID_HANDLE_ROOT_EMBED`` below that plane, so every root overlaps real lid
 material by a positive margin before the union.  Both forms are support
 conscious when the lid prints plug-down: nothing undercuts, the Knob is a dome
-that blends into the lid through a concave fillet, and the Pull is a round
+that blends into the lid through a concave fillet, and the Pull is a teardrop
 section swept over a half-ellipse with vertical legs that flare into the lid.
 """
 
@@ -111,7 +111,7 @@ def _revolved_knob(diameter: float, height: float) -> trimesh.Trimesh:
 
 
 def _swept_arch(half_width: float, top_height: float, radius: float) -> trimesh.Trimesh:
-    """A round section swept over a half-ellipse; legs flare into the lid."""
+    """A teardrop section swept over a half-ellipse; legs flare into the lid."""
     foot = radius * (1.0 + LID_PULL_FOOT_FLARE)
     leg = half_width - foot                              # centre-line half span
     crown = top_height - radius                          # centre-line height of the crown
@@ -137,9 +137,27 @@ def _swept_arch(half_width: float, top_height: float, radius: float) -> trimesh.
         ring = []
         for k in range(_SECTIONS):
             a = 2.0 * math.pi * k / _SECTIONS
-            cu = r * math.cos(a) * nrm[0]
-            cz = r * math.cos(a) * nrm[1]
-            cv = r * math.sin(a)
+            ca = math.cos(a)
+            sa = math.sin(a)
+            # Support-facing half of the ring in world coordinates: the
+            # outward radial offset is ca * nrm in (u, z), so it points
+            # physically downward exactly when ca * nrm[1] < 0. At the
+            # arch crown nrm == [0, -1], hence ca > 0 is the underside
+            # there (the previous `ca < 0` test selected the topside).
+            # Along the vertical legs nrm[1] == 0, so no half is selected
+            # and the legs stay round (vertical walls need no support).
+            if ca * nrm[1] < 0.0:
+                # Teardrop underside: 45-degree V instead of round
+                # (support-free). apex puts the V point at the ring's
+                # lowest world-z point for either path direction.
+                apex = -math.copysign(1.0, nrm[1])
+                w = apex * (1.0 - abs(sa))
+                cu = w * r * nrm[0]
+                cz = w * r * nrm[1]
+            else:
+                cu = r * ca * nrm[0]
+                cz = r * ca * nrm[1]
+            cv = r * sa
             ring.append(len(vertices))
             vertices.append((u + cu, cv, z + cz))
         rings.append(ring)
