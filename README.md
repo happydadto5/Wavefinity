@@ -35,7 +35,6 @@ ordinary bin with a different known wall.
 Everything below is millimetres. This is the whole documentation for the
 project: design, rationale, measured evidence, and the traps.
 
-See [changelog.md](changelog.md) for dated implementation changes.
 (The historical test log has been moved to an untracked `archive/` folder; keeping a testing log is no longer needed or maintained.)
 
 ---
@@ -1874,7 +1873,6 @@ git commit -m "short description of what changed"
 git push
 ```
 
-Add a dated entry to [changelog.md](changelog.md) for user-facing changes.
 Do NOT log to `TESTING.md` — that file is retired and archived.
 
 For explicitly non-Help-Code work, **do not be obsessed with testing** (see the
