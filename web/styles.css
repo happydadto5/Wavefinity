@@ -747,6 +747,26 @@ input[type="number"]::-webkit-inner-spin-button {
 .input-with-button { display: flex; gap: 6px; margin-top: 5px; }
 .input-with-button input { margin-top: 0; flex: 1; }
 .input-with-button .button { flex: none; padding: 8px 12px; }
+/* Fix 1126: in the Cradle Quantity/Spacing/From-ends row the unit label sits
+   with its label text directly above its field. Floating it right would strand
+   it at the cell's far edge, detached from the 9rem-capped input. */
+.draft-fields .editor-group .pair.triple.cradle-qty-row .unit { float: none; margin-left: 4px; }
+/* Fix 1126 (panel/Breaker): grid-minimum guard. The Quantity cell holds an
+   input plus an Auto button (flex:none), whose intrinsic width exceeds 1fr and
+   would force its track wider than a third. minmax(0,1fr) lets the three tracks
+   shrink to a true third; min-width:0 on the items lets them shrink inside
+   their tracks instead of overflowing. The min-width media guard keeps the
+   existing <=620px single-column collapse working. */
+@media (min-width: 621px) {
+  .draft-fields .editor-group .pair.triple.cradle-qty-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.draft-fields .editor-group .pair.triple.cradle-qty-row > * { min-width: 0; }
+/* Fix 1126 (panel/UI-UX): "Offset from center" can wrap to two lines in the
+   narrower third column while "Quantity"/"Spacing" stay on one, which would
+   push its input down out of alignment. Reserve two lines (line-height 1.4)
+   for all three labels so the inputs stay aligned whether or not wrapping
+   occurs. Scoped to this row only. */
+.draft-fields .editor-group .pair.triple.cradle-qty-row .field-label { min-height: 2.8em; }
 .fit-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }
 .fit-actions:not(:has(> *:not([hidden]))) { margin: 0; }
 .fit-actions .button {

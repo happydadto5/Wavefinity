@@ -376,47 +376,20 @@ function renderDraftFields() {
         html += `<div class="editor-group">${groupLabel}`;
         // A part with no spacing field of its own (Slot Rack) would leave
         // Quantity alone on its row: Runs along takes the second column instead.
-        const alongInPair = Boolean(info.flags.qty && !repeatFieldsHtml && runsAlong);
-        if (info.flags.qty) {
-          if (info.kind === "post") {
-            // Manual X/Y quantities - no Auto button, no "(Auto)" suffix, no help text.
-            // (postQx/postQy are resolved in the quantity block above.)
-            html += `<div class="pair">${field("X quantity", "option:count_x", postQx, { min: "0", max: "200", step: "1", tip: "Posts across the bin left to right. 0 for none. X × Y total must be at most 10,000 per part, and at most 10,000 across all Post parts." })}${field("Y quantity", "option:count_y", postQy, { min: "0", max: "200", step: "1", tip: "Posts across the bin front to back. 0 for none. X × Y total must be at most 10,000 per part, and at most 10,000 across all Post parts." })}${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
-          } else {
-            const quantityLabel = info.kind === "steps" ? "Number of steps" : "Quantity";
-            const autoState = info.kind !== "steps" && one.count == null;
-            // Divider legacy counts are server-capped at 200 (Feature.__post_init__); surface the
-            // bound in the editor for dividers only, matching the server's scope.
-            // (The "200" here is intentionally the same number as MAX_DIVIDER_COUNT;
-            // if the constant ever changes, update this hint to match.)
-            const qtyMax = info.kind === "divider" ? ' max="200"' : "";
-            html += `<div class="pair"><label><span class="field-label">${quantityLabel}${autoState ? " (Auto)" : ""}</span><div class="input-with-button">
-              <input type="number" min="1" step="1"${qtyMax} data-draft="count" value="${resolvedDraftCount(one)}">
-              ${info.kind === "steps" ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
-            </div></label>${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
-          }
-          if (info.kind === "cradle") {
-            const item = one.item || starterItem();
-            const first = item.segments[0] || { length: 40, diameter: 6 };
-            const tip = "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.";
-            // Fix 1127: no "Tool" section label above Length - the group
-            // renders bare, like the unlabeled text group above.
-            cradleToolHtml = `<div class="editor-group"><div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div></div>`;
-          }
-        } else if (repeatFieldsHtml) {
-          html += `<div class="pair">${repeatFieldsHtml}</div>`;
-        }
-        // Fix 1127: End layout (alternate ends) has no geometry meaning for a
-        // single trough - build_cradle gates on count > 1 - so the select is
-        // hidden at Quantity 1. The stored choice is kept for higher quantities.
+        // Fix 1127 (definition moved above the Quantity block by Fix 1126):
+        // a single-trough Cradle - build_cradle gates End layout on count > 1.
+        // Moved verbatim from below the Quantity block; same value, computed
+        // from the same inputs, and nothing between here and its old position
+        // mutates one.count, so the End layout select below sees the identical
+        // value. Defining it here is what lets the hoisted From-ends
+        // computation use !cradleSingle without a temporal-dead-zone error.
         const cradleSingle = info.kind === "cradle" && resolvedDraftCount(one) === 1;
-        if (info.flags.alternate && !cradleSingle) {
-          html += `<label>End layout<select data-draft="alternate_ends">
-            <option value="aligned" ${one.alternate_ends === true ? "" : "selected"}>Aligned</option>
-            <option value="alternate" ${one.alternate_ends === true ? "selected" : ""}>Alternate ends</option>
-          </select></label>`;
-        }
-        if (runsAlong && !alongInPair) html += runsAlong;
+        const alongInPair = Boolean(info.flags.qty && !repeatFieldsHtml && runsAlong);
+        // Fix 1126: compute the From-ends / Offset-from-center field here so the
+        // Cradle quantity row can place it right of Spacing. Kinds other than
+        // Cradle keep it appended below the row, exactly as before.
+        let fromEndsHtml = "";
+        let fromEndsInQtyRow = false;
         if (info.flags.alternate) {
           // One field, two readings. Alternate ends on: the clearance kept at each
           // run end (writes end_margin). Off: a signed slide of the whole row along
@@ -438,9 +411,57 @@ function renderDraftFields() {
             : "Slides the trough along the bin from centre, as a share of the room to the wall. Positive one way, negative the other; 0 stays centred.";
           // Fix 096 F12: browser bounds follow the backend option authority -
           // end_margin 0..45%, run_offset -100..100%.
-          html += field(label, `option:${key}`, fmt(shown), { unit: "%", step: "1", tip,
+          fromEndsHtml = field(label, `option:${key}`, fmt(shown), { unit: "%", step: "1", tip,
             ...(alternating ? { min: "0", max: "45" } : { min: "-100", max: "100" }) });
+          fromEndsInQtyRow = info.kind === "cradle";
         }
+        if (info.flags.qty) {
+          if (info.kind === "post") {
+            // Manual X/Y quantities - no Auto button, no "(Auto)" suffix, no help text.
+            // (postQx/postQy are resolved in the quantity block above.)
+            html += `<div class="pair">${field("X quantity", "option:count_x", postQx, { min: "0", max: "200", step: "1", tip: "Posts across the bin left to right. 0 for none. X × Y total must be at most 10,000 per part, and at most 10,000 across all Post parts." })}${field("Y quantity", "option:count_y", postQy, { min: "0", max: "200", step: "1", tip: "Posts across the bin front to back. 0 for none. X × Y total must be at most 10,000 per part, and at most 10,000 across all Post parts." })}${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
+          } else {
+            const quantityLabel = info.kind === "steps" ? "Number of steps" : "Quantity";
+            const autoState = info.kind !== "steps" && one.count == null;
+            // Divider legacy counts are server-capped at 200 (Feature.__post_init__); surface the
+            // bound in the editor for dividers only, matching the server's scope.
+            // (The "200" here is intentionally the same number as MAX_DIVIDER_COUNT;
+            // if the constant ever changes, update this hint to match.)
+            const qtyMax = info.kind === "divider" ? ' max="200"' : "";
+            // Fix 1126: Cradle fits Quantity (+Auto) / Spacing / From ends on one
+            // row; the triple grid narrows the Quantity column from half to a third.
+            const qtyRowClass = fromEndsInQtyRow ? "pair triple cradle-qty-row" : "pair";
+            html += `<div class="${qtyRowClass}"><label><span class="field-label">${quantityLabel}${autoState ? " (Auto)" : ""}</span><div class="input-with-button">
+              <input type="number" min="1" step="1"${qtyMax} data-draft="count" value="${resolvedDraftCount(one)}">
+              ${info.kind === "steps" ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
+            </div></label>${repeatFieldsHtml}${fromEndsInQtyRow ? fromEndsHtml : ""}${alongInPair ? runsAlong : ""}</div>`;
+          }
+          if (info.kind === "cradle") {
+            const item = one.item || starterItem();
+            const first = item.segments[0] || { length: 40, diameter: 6 };
+            const tip = "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.";
+            // Fix 1127: no "Tool" section label above Length - the group
+            // renders bare, like the unlabeled text group above.
+            cradleToolHtml = `<div class="editor-group"><div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div></div>`;
+          }
+        } else if (repeatFieldsHtml) {
+          html += `<div class="pair">${repeatFieldsHtml}</div>`;
+        }
+        // Fix 1127: End layout (alternate ends) has no geometry meaning for a
+        // single trough - build_cradle gates on count > 1 - so the select is
+        // hidden at Quantity 1. The stored choice is kept for higher quantities.
+        // (cradleSingle is now defined above the Quantity block, where Fix 1126
+        // hoisted the From-ends computation - same value, see there.)
+        if (info.flags.alternate && !cradleSingle) {
+          html += `<label>End layout<select data-draft="alternate_ends">
+            <option value="aligned" ${one.alternate_ends === true ? "" : "selected"}>Aligned</option>
+            <option value="alternate" ${one.alternate_ends === true ? "selected" : ""}>Alternate ends</option>
+          </select></label>`;
+        }
+        if (runsAlong && !alongInPair) html += runsAlong;
+        // Fix 1126: the From-ends field was hoisted above; Cradle already placed
+        // it in the Quantity row, so only other kinds append it here (unchanged).
+        if (fromEndsHtml && !fromEndsInQtyRow) html += fromEndsHtml;
         html += `</div>`;
       }
     }
