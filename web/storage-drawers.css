@@ -79,6 +79,13 @@
 #structural-editor-host .sd-form-group,
 #structural-editor-host .sd-summary-group { grid-column: 1; }
 .sd-size-grid.sd-size-grid-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* Fix 1111: narrow-layout rule for the two qualified selectors, placed after
+   the desktop definitions so it wins on source order at equal specificity.
+   The top-of-file mobile rule is defeated by their higher specificity. */
+@media (max-width: 700px) {
+  .sd-drawer-row.sd-drawer-row-with-label, .sd-size-grid.sd-size-grid-three { grid-template-columns: 1fr; }
+}
 .sd-drawer-row.sd-drawer-row-active { outline: 2px solid var(--teal, #168a89); outline-offset: 2px; border-radius: 6px; background: color-mix(in srgb, var(--teal, #168a89) 8%, transparent); }
 .storage-box-units { color: var(--muted); font-size: 11px; }
 .sd-drawer-head { display: grid; gap: 2px; justify-items: start; }
