@@ -44,7 +44,7 @@ MAX_POST_FEATURE_COUNT = 150
 
 @defaults("post")
 def post_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float]:
-    return {"diameter": 12.0, "height": 16.0, "spacing": 4.0, "taper": 0.4}
+    return {"diameter": 12.0, "height": 16.0, "spacing": 4.0, "taper": 0.0}
 
 
 def post_grid_counts(options: dict) -> tuple[int | None, int | None]:
@@ -150,7 +150,7 @@ def check_post_geometry_budget(box: BoxSpec, features: list[Feature], base_z: fl
     options=(
         OptionDefinition("Height", "height", "16", minimum=0.1, note="mm; must fit inside the bin above the base"),
         OptionDefinition("Diameter", "diameter", "12", minimum=0.1, note="mm at the base; must fit the zone"),
-        OptionDefinition("Taper", "taper", "0.4", minimum=0.0, note="mm the peg narrows over its height; must be smaller than the diameter"),
+        OptionDefinition("Taper", "taper", "0", minimum=0.0, note="mm the peg narrows over its height; must be smaller than the diameter"),
         OptionDefinition("Spacing", "spacing", "4", minimum=0.0, note="mm between neighbouring posts"),
         OptionDefinition("X quantity", "count_x", "", "integer", False, minimum=0, maximum=MAX_DIVIDER_COUNT, note="posts across X; 0 = none"),
         OptionDefinition("Y quantity", "count_y", "", "integer", False, minimum=0, maximum=MAX_DIVIDER_COUNT, note="posts across Y; 0 = none"),

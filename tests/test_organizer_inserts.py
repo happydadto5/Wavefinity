@@ -2526,5 +2526,60 @@ class PostCumulativeBudgetTests(unittest.TestCase):
         check_layout(self.box, feats, None, self.box.base_thickness)
 
 
+
+class PostTaperDefaultTests(unittest.TestCase):
+    """Fix 1130: a fresh post is straight (taper 0); legacy drafts keep 0.4."""
+
+    def test_post_defaults_and_option_default_are_straight(self) -> None:
+        self.assertEqual(post_impl.post_defaults(BIN, Feature("post", Zone(-6, -6, 6, 6)), 0.0)["taper"], 0.0)
+        option = next(o for o in inserts.feature_definition("post").options if o.key == "taper")
+        self.assertEqual(float(option.default), 0.0)
+
+    def test_fresh_post_resolves_to_zero_taper_and_builds_straight(self) -> None:
+        one = Feature("post", Zone(-6, -6, 6, 6), count=1)
+        self.assertEqual(inserts.resolved_options(BIN, one, BIN.base_thickness)["taper"], 0.0)
+        meshes = post_impl.build_post(BIN, one, BIN.base_thickness)
+        self.assertTrue(meshes)
+        verts = np.vstack([m.vertices for m in meshes])
+        z_lo, z_hi = verts[:, 2].min(), verts[:, 2].max()
+        span = (z_hi - z_lo) * 0.1
+        radius = np.hypot(verts[:, 0], verts[:, 1])
+        bottom = radius[verts[:, 2] <= z_lo + span].max()
+        top = radius[verts[:, 2] >= z_hi - span].max()
+        self.assertAlmostEqual(top, bottom, places=3)
+
+    def test_explicit_taper_still_builds_tapered(self) -> None:
+        one = Feature("post", Zone(-6, -6, 6, 6), count=1, options={"taper": 1.5})
+        self.assertEqual(inserts.resolved_options(BIN, one, BIN.base_thickness)["taper"], 1.5)
+        meshes = post_impl.build_post(BIN, one, BIN.base_thickness)
+        verts = np.vstack([m.vertices for m in meshes])
+        z_lo, z_hi = verts[:, 2].min(), verts[:, 2].max()
+        span = (z_hi - z_lo) * 0.1
+        radius = np.hypot(verts[:, 0], verts[:, 1])
+        bottom = radius[verts[:, 2] <= z_lo + span].max()
+        top = radius[verts[:, 2] >= z_hi - span].max()
+        self.assertLess(top, bottom - 0.5)
+
+    def test_legacy_post_without_taper_loads_with_0_4(self) -> None:
+        saved = layout_to_dict(Layout((Feature("post", Zone(-6, -6, 6, 6), count=1, options={"diameter": 12.0}),), "fused"))
+        for feat in saved["features"]:
+            feat.pop("options", None)
+        loaded = layout_from_dict(saved)
+        self.assertEqual(loaded.features[0].options["taper"], 0.4)
+
+    def test_legacy_pin_keeps_explicit_taper(self) -> None:
+        for value in (1.5, 0.0):
+            layout = Layout((Feature("post", Zone(-6, -6, 6, 6), count=1, options={"taper": value}),), "fused")
+            self.assertEqual(layout_from_dict(layout_to_dict(layout)).features[0].options["taper"], value)
+
+    def test_legacy_round_trip_preserves_pinned_taper(self) -> None:
+        saved = layout_to_dict(Layout((Feature("post", Zone(-6, -6, 6, 6), count=1, options={"diameter": 12.0}),), "fused"))
+        for feat in saved["features"]:
+            feat.pop("options", None)
+        once = layout_from_dict(saved)
+        twice = layout_from_dict(layout_to_dict(once))
+        self.assertEqual(twice.features[0].options["taper"], 0.4)
+
+
 if __name__ == "__main__":
     unittest.main()

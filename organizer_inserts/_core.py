@@ -513,6 +513,13 @@ def layout_from_dict(data: dict) -> Layout:
             options = dict(part.options)
             del options["small_size_ack"]
             part = replace(part, options=options)
+        # Fix 1130: taper default changed 0.4 -> 0.0. Drafts saved before the
+        # change that never set taper explicitly keep the legacy 0.4 geometry;
+        # without this pin they would silently rebuild straight on next open.
+        # New posts are unaffected: default_feature() stamps explicit
+        # taper 0.0 at creation, so the pin never fires for them.
+        if kind == "post" and "taper" not in part.options:
+            part = replace(part, options={**part.options, "taper": 0.4})
         # Auto placement, a destination change, and a new automatic rim fit
         # need the bin before their Text height can be made canonical.
         deferred_text = kind == "text" and (
