@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fix 1105 Two-Instance Test</title>
+<style>
+  body { font-family: monospace; padding: 20px; }
+  .pass { color: green; } .fail { color: red; font-weight: bold; }
+  body.has-failures { background: #fff0f0; }
+  #hosts { display: flex; gap: 20px; }
+  #hosts > div { border: 1px solid #ccc; padding: 10px; min-width: 300px; min-height: 200px; }
+</style>
+</head>
+<body>
+<noscript><p>JavaScript is required to run these tests.</p></noscript>
+<h1>Fix 1105: Two-Instance Concurrency Tests</h1>
+<div id="boot">Loading tests…</div>
+<div id="results"></div>
+<div id="hosts"><div id="hostA"></div><div id="hostB"></div></div>
+<script src="storage-drawers.js"></script>
+<script>
+/* Test doubles for app globals used by storage-drawers-form.js */
+function fmt(value){ const n = Number(value); const r = Math.round((Number.isFinite(n)?n:0)*100)/100; return String(r); }
+function friendlyError(e){ return (e && e.message) || String(e) || "Cabinet is invalid"; }
+</script>
+<script src="storage-drawers-form.js"></script>
+<script>
+(() => {
+  "use strict";
+  const results = document.getElementById("results");
+  let passed = 0, failed = 0;
+  const log = (name, ok, detail = "") => {
+    const div = document.createElement("div");
+    div.className = ok ? "pass" : "fail";
+    div.textContent = (ok ? "PASS: " : "FAIL: ") + name + (detail ? " — " + detail : "");
+    results.appendChild(div);
+    if (ok) { passed++; }
+    else { failed++; document.body.classList.add("has-failures"); }
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const deferred = () => {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  };
+  // Satisfies catalogRules: base_unit plus the rule blocks the form reads at mount.
+  const minimalCatalog = {
+    base_unit: 12,
+    b4b_rules: {},
+    drawer_rules: { ordinary_bin_min_height_mm: 6, min_usable_drawer_height_mm: 8 },
+    storage_drawers_rules: {
+      min_units: 2, max_units: 40, min_drawers: 1, max_drawers: 12,
+      drawer_fit_choices_mm: [0.1, 0.2, 0.3], default_drawer_fit_mm: 0.2,
+      frame_width_choices_mm: [8, 12, 16], default_frame_width_mm: 12,
+      label_limit: 24, default_usable_height_mm: 48, max_usable_height_mm: 120
+    }
+  };
+  const minimalProfile = { name: "test" };
+  const lastDeferred = (list) => list[list.length - 1];
+  // The name field starts empty; without a valid name, schedule() takes the
+  // field-validation error path and requestSummary is never called. Fill it
+  // after every mount and dispatch input so validation re-runs.
+  // Verified: the name input is the first <input> in the form (id "sd-name-<epoch>").
+  const fillName = (host) => {
+    const nameInput = host.querySelector("input"); // name field
+    if (nameInput) { nameInput.value = "Test Cabinet"; nameInput.dispatchEvent(new Event("input", { bubbles: true })); }
+  };
+  // Mounts with a requestSummary that records one deferred per invocation.
+  const mountInstance = (host, opts = {}) => {
+    const deferreds = [];
+    const inst = window.StorageDrawersForm.mount({
+      host,
+      catalog: minimalCatalog,
+      printerProfile: minimalProfile,
+      mode: "create",
+      callbacks: {
+        requestSummary: () => { const d = deferred(); deferreds.push(d); return d.promise; },
+        identity: () => "test-space",
+      },
+      onReadyChange: opts.onReadyChange || null,
+    });
+    fillName(host);
+    return { inst, deferreds };
+  };
+  // Timing: schedule() debounces 250ms before invoking requestSummary, so
+  // wait 400ms for the request to actually be in flight, then settle the
+  // latest deferred, then allow 100ms for the async continuation to run.
+  const settleLatest = async (deferreds, value, isError = false) => {
+    await sleep(400);
+    const d = lastDeferred(deferreds);
+    if (isError) { d.promise.catch(() => {}); d.reject(value); }
+    else { d.resolve(value); }
+    await sleep(100);
+  };
+
+  async function runTests() {
+    document.body.dataset.testState = "running";
+    const boot = document.getElementById("boot");
+    if (boot) boot.remove();
+    const status = document.createElement("div");
+    status.id = "status";
+    status.textContent = "Running tests…";
+    results.before(status);
+
+    // Test 1: Mount B while A's check is debouncing — A's callbacks still settle
+    {
+      const readyA = [];
+      const hostA = document.getElementById("hostA");
+      const hostB = document.getElementById("hostB");
+      hostA.replaceChildren(); hostB.replaceChildren();
+      const a = mountInstance(hostA, { onReadyChange: (v) => readyA.push(v) });
+      a.inst.refreshSummary();
+      const b = mountInstance(hostB); // mounted while A's check is still in flight
+      await settleLatest(a.deferreds, { ok: true, summary: "cabinet ok" });
+      const okState = a.inst.currentSummary() !== null;
+      log("T1: A's check settles ok after B mounted",
+        okState && readyA.includes(true),
+        `summary set: ${okState}, ready events: [${readyA.join(",")}]`);
+      a.inst.destroy(); b.inst.destroy();
+    }
+
+    // Test 2: A's error path works with B mounted
+    {
+      const unhandled = [];
+      const onUnhandled = (e) => unhandled.push(e);
+      window.addEventListener("unhandledrejection", onUnhandled);
+      try {
+        const readyA = [];
+        const hostA = document.getElementById("hostA");
+        const hostB = document.getElementById("hostB");
+        hostA.replaceChildren(); hostB.replaceChildren();
+        const a = mountInstance(hostA, { onReadyChange: (v) => readyA.push(v) });
+        a.inst.refreshSummary();
+        const b = mountInstance(hostB);
+        // Reject only after the request is in flight (see settleLatest); the
+        // form handles it on its own error path, so no unhandled rejection.
+        await settleLatest(a.deferreds, new Error("cabinet invalid test"), true);
+        const summaryNull = a.inst.currentSummary() === null;
+        const errorShown = hostA.textContent.includes("cabinet invalid test");
+        const noUnhandled = unhandled.length === 0;
+        log("T2: A's rejection handled with B mounted",
+          summaryNull && errorShown && noUnhandled,
+          `currentSummary null: ${summaryNull}, error shown: ${errorShown}, unhandled rejections: ${unhandled.length}`);
+        a.inst.destroy(); b.inst.destroy();
+      } finally {
+        window.removeEventListener("unhandledrejection", onUnhandled);
+      }
+    }
+
+    // Test 3: Destroy B — the ORIGINAL A instance's checks still settle (no remount)
+    {
+      const readyA = [];
+      const hostA = document.getElementById("hostA");
+      const hostB = document.getElementById("hostB");
+      hostA.replaceChildren(); hostB.replaceChildren();
+      const a = mountInstance(hostA, { onReadyChange: (v) => readyA.push(v) });
+      a.inst.refreshSummary();
+      await settleLatest(a.deferreds, { ok: true, summary: "baseline ok" });
+      const b = mountInstance(hostB);
+      b.inst.destroy();
+      // Original A instance — never destroyed or remounted. A fresh mount
+      // could not catch the destroy-bump regression this test targets.
+      a.inst.refreshSummary();
+      await settleLatest(a.deferreds, { ok: true, summary: "still works after B destroyed" });
+      const okState = a.inst.currentSummary() !== null;
+      log("T3: Original A's checks settle after B destroyed",
+        okState && readyA.includes(true),
+        `original A instance (no remount), summary set: ${okState}, ready events: [${readyA.join(",")}]`);
+      a.inst.destroy();
+    }
+
+    // Test 4: Destroy A mid-flight — waiters released, A stays invalidated, B unaffected
+    {
+      const readyA = [];
+      const readyB = [];
+      const hostA = document.getElementById("hostA");
+      const hostB = document.getElementById("hostB");
+      hostA.replaceChildren(); hostB.replaceChildren();
+      const a = mountInstance(hostA, { onReadyChange: (v) => readyA.push(v) });
+      a.inst.refreshSummary();
+      const b = mountInstance(hostB, { onReadyChange: (v) => readyB.push(v) });
+      b.inst.refreshSummary();
+      await sleep(400); // both checks in flight
+      // whenValidationSettled(2000) also resolves on its OWN 2000ms timeout
+      // even if destroy() never releases the waiter — so release must be
+      // proven by timing: resolution via destroy() is immediate, the
+      // fallback timeout is not. (Deleting markSettled() from destroy()
+      // leaves only the timeout and fails this test.)
+      const waiterStart = Date.now();
+      const p = a.inst.whenValidationSettled(2000);
+      a.inst.destroy(); // destroy A while its check is in flight
+      await p;
+      const waiterMs = Date.now() - waiterStart;
+      const waitersReleased = waiterMs < 1500; // destroy-released, not timeout
+      lastDeferred(a.deferreds).resolve({ ok: true }); // must be ignored, no throw
+      await sleep(100); // let any (mis)fired success continuation run
+      // A destroyed instance must STAY invalidated: its late response may
+      // not set a summary or report ready. (Deleting the per-instance
+      // `!live` guard lets the continuation fire and fails this test.)
+      const aStaysInvalid = a.inst.currentSummary() === null && !readyA.includes(true);
+      const hostAEmpty = hostA.children.length === 0;
+      lastDeferred(b.deferreds).resolve({ ok: true, summary: "B ok" });
+      await sleep(100);
+      const bOk = b.inst.currentSummary() !== null;
+      log("T4: Destroy A mid-flight releases waiters, A stays invalid, B unaffected",
+        waitersReleased && aStaysInvalid && hostAEmpty && bOk,
+        `waiter resolved in ${waiterMs}ms by destroy, not the 2000ms timeout (<1500): ${waitersReleased}, destroyed A stayed invalid (summary null, no ready event): ${aStaysInvalid}, hostA cleared: ${hostAEmpty}, B summary set: ${bOk}, B ready events: [${readyB.join(",")}]`);
+      b.inst.destroy();
+    }
+
+    // Test 5: Single-instance rapid edits collapse (debounce regression)
+    {
+      const hostA = document.getElementById("hostA");
+      hostA.replaceChildren();
+      document.getElementById("hostB").replaceChildren();
+      const a = mountInstance(hostA);
+      // Rapid successive refreshes should collapse to one in-flight request
+      a.inst.refreshSummary();
+      a.inst.refreshSummary();
+      a.inst.refreshSummary();
+      await sleep(400); // debounce fires
+      const collapsed = a.deferreds.length === 1;
+      log("T5: Rapid edits collapse to single request", collapsed,
+        `requests created: ${a.deferreds.length}`);
+      // Profile change must invalidate the stale epoch: a NEW request is
+      // created while the stale deferred's late resolution is dropped.
+      a.inst.setPrinterProfile({ name: "test2" });
+      await sleep(400); // debounce fires for the profile-change schedule
+      const newRequestCreated = a.deferreds.length === 2;
+      a.deferreds[0].resolve({ ok: true, summary: "stale" }); // late, must be dropped
+      await sleep(100);
+      const staleDropped = a.inst.currentSummary() === null;
+      log("T5: Profile change invalidates stale request",
+        newRequestCreated && staleDropped,
+        `total requests: ${a.deferreds.length}, summary still null after stale resolve: ${staleDropped}`);
+      // Resolve everything so no promise dangles
+      for (const d of a.deferreds) d.resolve({ ok: true });
+      a.inst.destroy();
+    }
+
+    const summary = document.createElement("h2");
+    summary.textContent = `Done: ${passed} passed, ${failed} failed`;
+    summary.className = failed === 0 ? "pass" : "fail";
+    results.appendChild(summary);
+    const statusEl = document.getElementById("status");
+    if (statusEl) statusEl.remove();
+    // Machine-readable completion signal (for Luna's browser testing)
+    document.body.dataset.testState = "done";
+    window.__fix1105 = { passed, failed, done: true };
+    document.title = failed === 0 ? "Fix 1105: PASS" : `Fix 1105: FAIL (${failed})`;
+  }
+
+  // Wait for dependencies, then run
+  if (window.StorageDrawersForm && window.StorageDrawers) {
+    runTests().catch(e => {
+      log("Harness error", false, String(e));
+      // A harness-level throw must still produce the completion signals —
+      // otherwise automated waiters see testState stuck at "running" forever.
+      document.body.dataset.testState = "done";
+      window.__fix1105 = { passed, failed, done: true, error: String(e) };
+      document.title = `Fix 1105: FAIL (${failed})`;
+    });
+  } else {
+    document.body.dataset.testState = "done";
+    window.__fix1105 = { passed: 0, failed: 1, done: true };
+    document.title = "Fix 1105: FAIL (deps)";
+    log("Dependencies loaded", false, "StorageDrawersForm or StorageDrawers missing");
+  }
+})();
+</script>
+</body>
+</html>
