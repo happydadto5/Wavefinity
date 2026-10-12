@@ -686,9 +686,20 @@ def _datum_components(space, datum):
                                     if left else (body_edge+0.2, body_edge+1.4-datum.fit))
                 stop_y0 = datum.front+SD_RAIL_LEADIN_MM+12.0
                 stop_y1 = stop_y0+SD_CATCH_LENGTH_MM
+                # Fix 1099 (Opus H2), Option A (Andrew-approved 2026-10-12):
+                # the stop root used to run 0.25 mm proud of the ledge top
+                # across the full drawer-runner X range, putting a square step
+                # in the runner's path. Lower the connector flush with the
+                # ledge top (floor-fit) but keep the old X range so the bump
+                # stays attached to the rail; the bump footprint keeps its
+                # full-height column to floor+0.25-fit. (Clipping the root to
+                # the bump footprint alone leaves a floating island — 2 mesh
+                # components, unbuildable; see dispatch #243.)
                 root_x0, root_x1 = ((inner-0.2, stop_x1) if left else (stop_x0, inner+0.2))
                 bars.append(_box(root_x0, stop_y0, floor-SD_RAIL_LEDGE_MM-datum.fit,
-                                 root_x1, stop_y1, floor+0.25-datum.fit))
+                                 root_x1, stop_y1, floor-datum.fit))
+                bars.append(_box(stop_x0, stop_y0, floor-SD_RAIL_LEDGE_MM-datum.fit,
+                                 stop_x1, stop_y1, floor+0.25-datum.fit))
                 # Wing and runner both start on the drawer's print-bed plane.
                 # The catch rises only 0.25 mm above it, less than every fit.
                 bump_base = floor-datum.fit

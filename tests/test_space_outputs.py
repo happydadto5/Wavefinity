@@ -244,6 +244,34 @@ class StorageDrawersHardeningTests(unittest.TestCase):
             for want, got in zip(nominal.bounds_xyz, real.bounds_xyz):
                 self.assertGreaterEqual(want + 1e-3, got, real.key)
 
+    def test_stop_root_is_flush_and_bump_stays_attached(self):
+        drawers = [{"id": f"00000000-0000-4000-8000-{i:012d}", "height_mm": 20}
+                   for i in range(1, 4)]
+        for style in ("full", "open"):
+            for fit in (0.30, 0.40, 0.60):
+                space = _cabinet(style, drawers=drawers, drawer_fit_mm=fit)
+                datum = _make_datum(space)
+                self.assertAlmostEqual(datum.fit, fit)
+                plan = resolve_storage_drawers_plan(space, build_meshes=True)
+                for left in (True, False):
+                    key = ("side_" if style == "full" else "frame_") + ("left" if left else "right")
+                    mesh = next(c.mesh for c in plan.components if c.key == key)
+                    field_left = (datum.outer_x-datum.field_x)/2
+                    body_edge = (field_left-datum.drawer_wall if left else
+                                 field_left+datum.field_x+datum.drawer_wall)
+                    stop_a, stop_b = ((body_edge-1.4+fit, body_edge-0.2) if left else
+                                      (body_edge+0.2, body_edge+1.4-fit))
+                    inner = datum.track_reach if left else datum.outer_x-datum.track_reach
+                    gap_x = (inner + (stop_a if left else stop_b))/2
+                    bump_x = (stop_a+stop_b)/2
+                    with self.subTest(style=style, fit=fit, side=key):
+                        self.assertEqual(len(mesh.split(only_watertight=False)), 1)
+                        for interior_floor in datum.floors:
+                            z = interior_floor-datum.drawer_base-fit+0.1
+                            y = datum.front+3+12+4
+                            self.assertEqual(mesh.contains([[gap_x, y, z], [bump_x, y, z]]).tolist(),
+                                             [False, True])
+
     def test_export_applies_the_orientation_the_fit_check_chose(self):
         self._install_plan()
         with tempfile.TemporaryDirectory() as tmp:
