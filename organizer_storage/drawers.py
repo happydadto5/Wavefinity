@@ -27,6 +27,11 @@ STORAGE_DRAWER_LABEL_LIMIT = 80
 STORAGE_DRAWER_MAX_USABLE_HEIGHT_MM = DRAWER_LAYER_MAX_USABLE_HEIGHT_MM
 STORAGE_DRAWER_MATERIAL_MIN_MM = 0.4
 STORAGE_DRAWER_MATERIAL_MAX_MM = 4.0
+# Fix 1101 (Opus H4): drawer walls carry the wavy-rect cavity whose crest
+# stands 0.524 mm proud of the nominal wall plane — a 0.8 mm wall is 0.28 mm
+# at the crests and the 0.4 mm floor breaks through. Drawer walls need
+# >= 1.4 mm (0.524 + ~2 extrusion widths). Cabinet/base/top keep 0.4 mm.
+STORAGE_DRAWER_DRAWER_WALL_MIN_MM = 1.4
 STORAGE_DRAWER_MATERIAL_DEFAULT_MM = 1.6
 _MATERIAL_KEYS = ("cabinet_wall_mm", "cabinet_base_mm", "cabinet_top_mm", "drawer_wall_mm", "drawer_base_mm")
 _MATERIAL_TITLES = {
@@ -153,7 +158,8 @@ def normalise_storage_drawers_block(raw: object) -> dict:
         raise ValueError("Enter unit label text")
     result["drawer_label_style"] = _choice(raw.get("drawer_label_style", "inlaid"), ("inlaid", "raised"), "drawer label style")
     for key in _MATERIAL_KEYS:
-        result[key] = _number(raw.get(key, defaults[key]), _MATERIAL_TITLES[key], STORAGE_DRAWER_MATERIAL_MIN_MM, STORAGE_DRAWER_MATERIAL_MAX_MM)
+        floor = STORAGE_DRAWER_DRAWER_WALL_MIN_MM if key == "drawer_wall_mm" else STORAGE_DRAWER_MATERIAL_MIN_MM
+        result[key] = _number(raw.get(key, defaults[key]), _MATERIAL_TITLES[key], floor, STORAGE_DRAWER_MATERIAL_MAX_MM)
     return result
 
 
@@ -244,8 +250,9 @@ def reset_storage_drawers_definition(raw: object) -> dict:
     if block["unit_label_enabled"] and not block["unit_label_text"]:
         block["unit_label_enabled"] = False
     for key in _MATERIAL_KEYS:
+        floor = STORAGE_DRAWER_DRAWER_WALL_MIN_MM if key == "drawer_wall_mm" else STORAGE_DRAWER_MATERIAL_MIN_MM
         value = _attempt(_number, block_in.get(key, defaults[key]), key,
-                         STORAGE_DRAWER_MATERIAL_MIN_MM, STORAGE_DRAWER_MATERIAL_MAX_MM)
+                         floor, STORAGE_DRAWER_MATERIAL_MAX_MM)
         block[key] = defaults[key] if value is None else value
     rows = block_in.get("drawers")
     kept, seen = [], set()

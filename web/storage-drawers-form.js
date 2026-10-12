@@ -22,8 +22,15 @@
     node.value = String(value); return node;
   };
   const group = (host, title) => { const section = el("div", "sd-form-group storage-box-group"); section.append(el("h5", "storage-box-subtitle", title)); host.append(section); return section; };
-  const materialChoices = (catalog, kind, current) => {
-    const rows = catalog?.b4b_rules?.[kind] || [];
+  // Fix 1101 (Opus H4): drawer-wall choices must not offer values the backend
+  // now rejects. Keep in sync with STORAGE_DRAWER_DRAWER_WALL_MIN_MM in
+  // organizer_storage/drawers.py.
+  const STORAGE_DRAWER_WALL_MIN_MM = 1.4;
+  const materialChoices = (catalog, kind, current, minMm = 0) => {
+    const rows = (catalog?.b4b_rules?.[kind] || []).filter(row => {
+      const raw = Array.isArray(row) ? row[0] : (row.value ?? row.mm);
+      return Number(raw) >= minMm;
+    });
     const options = rows.map(row => {
       const [value, label] = Array.isArray(row)
         ? [String(row[0]), String(row[1])]
@@ -186,12 +193,25 @@
     labels.append(labelsRowA, labelsRowB);
     const material = el("div", "sd-subgroup"); material.append(el("strong", "sd-subhead", "Material")); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
     material.append(matA, matB);
+    // Fix 1101 (Opus H4): per-key UI floor. Only drawer_wall_mm is floored;
+    // cabinet/base/top keep the full shared catalogs.
+    const MATERIAL_MIN_MM = { drawer_wall_mm: STORAGE_DRAWER_WALL_MIN_MM };
     const materialFields = {};
     for (const [key, title, row, kind] of [
       ["cabinet_wall_mm", "Cabinet wall thickness", matA, "wall_choices"], ["cabinet_base_mm", "Cabinet base thickness", matA, "base_choices"],
       ["cabinet_top_mm", "Cabinet top thickness", matA, "base_choices"], ["drawer_wall_mm", "Drawer wall thickness", matB, "wall_choices"],
       ["drawer_base_mm", "Drawer base thickness", matB, "base_choices"]]) {
-      const control = select(block[key], materialChoices(catalog, kind, block[key])); materialFields[key] = control; row.append(labeled(title, control));
+      const floor = MATERIAL_MIN_MM[key] ?? 0;
+      if (floor && Number(block[key]) < floor) {
+        // Legacy saved drawer wall below the floor: repair to the smallest
+        // published catalog choice at/above the floor. The sub-floor value is
+        // never re-added as a selectable "Current setting".
+        const published = (catalog?.b4b_rules?.[kind] || [])
+          .map(r => Number(Array.isArray(r) ? r[0] : (r.value ?? r.mm)))
+          .filter(mm => Number.isFinite(mm) && mm >= floor);
+        block[key] = published.length ? Math.min(...published) : floor;
+      }
+      const control = select(block[key], materialChoices(catalog, kind, block[key], floor)); materialFields[key] = control; row.append(labeled(title, control));
     }
     finish.append(labels, material);
     const summaryGroup = el("div", "sd-summary-compact sd-summary-group"); form.append(summaryGroup); const summary = el("div", "sd-summary", "Checking cabinet…"); summaryGroup.append(summary);

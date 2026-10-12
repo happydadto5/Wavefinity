@@ -214,6 +214,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 
 ## 2.3a Storage Drawers Space
 
+- Drawer walls use a safe minimum thickness; Design excludes thinner choices and repairs older thin-wall settings to a supported choice. Other cabinet and base material choices remain available.
 - One shared Inventory and parking lot for the whole cabinet; every drawer is a physical drawer with its own stable identity and usable height.
 - New Space and the Space-header **Edit** are a short basic form: Basics (Name, Width, Depth in millimeters on the 8 mm grid) and Drawers (count and each drawer's Usable height), with a quiet live Summary showing the inside size in mm, finished outside size, and printer fit. A new Space starts at 208 × 120 mm. **Design** is the one full editor, grouped as Basics, Drawers, Cabinet and Finish (labels and material). Hidden advanced settings are kept, never reset, when only the basic fields are edited.
 - A right-side navigator lists the drawers proportionally with their usable height, marks the active one, and offers Save Cabinet and Print Cabinet. Add Drawer and per-drawer Delete (only an empty drawer, and never the last) live only in Design. Switching drawers is not an undo step.
