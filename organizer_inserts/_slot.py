@@ -105,20 +105,24 @@ def build_slot(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     from ._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
     if spec_feature.options.get(WALL_JOIN_FLAG):
         # Fuse the slot rack into any side wall it reaches.
-        # Keep-clear: the plan-view slot openings. Each cutter (tilted slot
-        # void) is projected exactly - the union of its projected face
-        # triangles, which is the true shadow of the tilted void, lean angle
-        # included - so tabs are differenced against the real openings and
-        # cannot bridge the outer slot mouths. The slot mouths sit `wall`
-        # (min 0.1 mm) from the block edge, so an empty keep-clear would let
-        # the 1.2 mm tab clip them when wall < 1.2.
+        # Keep-clear: the slot voids themselves, subtracted in 3D from the
+        # tab meshes. A plan-view (2D) keep-clear over-removes here: each
+        # cutter is tilted, so its plan shadow blankets the whole mouth-side
+        # tab and the tab never forms, leaving a 0-0.8 mm gap along the full
+        # wall inside a wavy bin. Differencing the real cutter solids keeps
+        # the tab everywhere the channel does not actually pass, so the rack
+        # fuses to the wavy wall around the slots instead of floating off it.
         _wj_material = _footprint_from_solids(_wj_solids)
-        _wj_keep_clear = _footprint_from_solids(cutters)
         _wj_tabs = _join_tabs(
-            box, _wj_material, _wj_keep_clear, JOIN_BAND,
+            box, _wj_material, Polygon(), JOIN_BAND,
             sides=_joined_sides(box, _wj_material, "slot", along),
         )
-        _wj_solids.extend(_tab_meshes(_wj_tabs, height, base_z))
+        _wj_void = union(cutters) if len(cutters) > 1 else cutters[0]
+        for _wj_tab in _tab_meshes(_wj_tabs, height, base_z):
+            _wj_cut = difference([_wj_tab, _wj_void])
+            for _wj_part in _wj_cut.split(only_watertight=False):
+                if _wj_part.is_watertight and _wj_part.volume > 1e-6:
+                    _wj_solids.append(_wj_part)
     return _wj_solids
 
 

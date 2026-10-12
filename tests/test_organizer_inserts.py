@@ -26,6 +26,7 @@ from organizer_engine import (
     LOCK_PROTRUSION,
     WAVE_AMPLITUDE,
     intersection_volume,
+    wave_value,
     make_box,
     top_label_surface_z,
     translated,
@@ -40,6 +41,7 @@ from organizer_inserts._bore import (
     bore_envelope_zone, bore_minimum_pitches, wall_only_envelope,
 )
 from organizer_inserts._bore import bore_reference_meshes, bore_reference_top
+from organizer_inserts._bore._consts import WALL_JOIN_FLAG
 from organizer_inserts._cradle import cradle_reference_meshes
 from organizer_inserts import (
     EDITOR_SNAP,
@@ -1994,6 +1996,118 @@ class SlotRackTests(unittest.TestCase):
             build_features(BIN, [Feature("slot", zone, options={"angle": 50.0})], BIN.base_thickness)
         with self.assertRaisesRegex(ValueError, "depth must be less than height"):
             build_features(BIN, [Feature("slot", zone, options={"depth": 16.0, "height": 16.0})], BIN.base_thickness)
+
+    def _fused_rack(self, zone, along="x", style="straight", count=None, **options):
+        base = {"height": 20.0, "depth": 14.0, "thickness": 4.0, "angle": 35.0,
+                "wall": 0.5, "wall_style": style, WALL_JOIN_FLAG: True}
+        return Feature("slot", zone, along=along, count=count, options={**base, **options})
+
+    def test_fused_slot_rack_joins_wavy_wall_on_mouth_sides(self) -> None:
+        box = replace(BIN, x=64.0, y=48.0)
+        whole = Zone.whole(box)
+        cavity = wavy_cavity_polygon(box)
+        mid_zs = box.base_thickness + np.linspace(1.0, 19.0, 6)
+        for style in ("straight", "wavy"):
+            with self.subTest(style=style):
+                solids = build_features(box, [self._fused_rack(whole, style=style, angle=20.0, wall=1.6)], box.base_thickness)
+                for side in ("front", "back"):
+                    # Plan points in the true wavy strip on the mouth side, away from the cavity edge.
+                    nominal = shapely_box(whole.x0, whole.y0, whole.x1, whole.y1)
+                    strip = cavity.difference(nominal)
+                    xs, ys = [], []
+                    for x in np.arange(whole.x0 + 1.0, whole.x1 - 1.0, 0.3):
+                        for y in np.arange(cavity.bounds[1] + 0.1, cavity.bounds[3], 0.3):
+                            if side == "front" and not y < whole.y0 - 0.05:
+                                continue
+                            if side == "back" and not y > whole.y1 + 0.05:
+                                continue
+                            point = Point(float(x), float(y))
+                            if strip.contains(point) and cavity.boundary.distance(point) > 0.05:
+                                xs.append(x)
+                                ys.append(y)
+                    self.assertGreater(len(xs), 10, side)
+                    covered = np.zeros(len(xs), dtype=bool)
+                    for z in mid_zs:
+                        pts = np.column_stack([xs, ys, np.full(len(xs), z)])
+                        for solid in solids:
+                            covered |= solid.contains(pts)
+                    void_area = (~covered).sum() * 0.3 * 0.3
+                    self.assertLessEqual(void_area, 1.0, (style, side))
+
+    def test_fused_slot_rack_tabs_do_not_bridge_slot_mouths(self) -> None:
+        box = replace(BIN, x=64.0, y=48.0)
+        whole = Zone.whole(box)
+        cavity = wavy_cavity_polygon(box)
+        nominal = shapely_box(whole.x0, whole.y0, whole.x1, whole.y1)
+        strip = cavity.difference(nominal)
+        x0, y0, x1, y1 = cavity.bounds
+        grid = [(float(x), float(y)) for x in np.arange(x0 + 0.1, x1, 0.4) for y in np.arange(y0 + 0.1, y1, 0.4)
+                if strip.contains(Point(float(x), float(y))) and cavity.boundary.distance(Point(float(x), float(y))) > 0.05]
+        for along in ("x", "y"):
+            for style in ("straight", "wavy"):
+                with self.subTest(along=along, style=style):
+                    rack = self._fused_rack(whole, along=along, style=style, count=None)
+                    solids = build_features(box, [rack], box.base_thickness)
+                    for solid in solids:
+                        self.assertTrue(solid.is_watertight)
+                    probes = []
+                    for fraction in (0.15, 0.3, 0.5, 0.7, 0.85):
+                        z = box.base_thickness + 20.0 * fraction
+                        for x, y in grid:
+                            mouth = (y < whole.y0 or y > whole.y1) if along == "x" else (x < whole.x0 or x > whole.x1)
+                            if mouth:
+                                probes.append((x, y, z))
+                    probes = np.asarray(probes)
+                    in_channel = self._slot_channel_mask(whole, along, style, box.base_thickness, probes)
+                    channel_probes = probes[in_channel]
+                    self.assertGreaterEqual(len(channel_probes), 100)
+                    for solid in solids:
+                        self.assertFalse(solid.contains(channel_probes).any())
+
+    def _slot_channel_mask(self, zone, along, style, base, pts, shrink=0.4):
+        """Which points lie inside a slot channel, using build_slot's cutter layout."""
+        depth, thickness, wall, height, angle = 14.0, 4.0, 0.5, 20.0, 35.0
+        rad = math.radians(angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+        wave_margin = WAVE_AMPLITUDE if style == "wavy" else 0.0
+        run = zone.width if along == "x" else zone.depth
+        across = zone.depth if along == "x" else zone.width
+        slot_len = run - 2.0 * wall
+        pitch = (thickness + wall) / cos_a
+        count = max(1, int((across - 2.0 * (wall + wave_margin) - thickness / cos_a) // pitch) + 1)
+        cutter_len = (depth + 4.0) / cos_a
+        d_mid = cutter_len / 2.0 - 2.0
+        cut_mid_z = base + height - d_mid * cos_a
+        cut_shift = -d_mid * sin_a
+        centre_x, centre_y = zone.centre
+        centre_cross = centre_y if along == "x" else centre_x
+        centre_run = centre_x if along == "x" else centre_y
+        first = centre_cross - ((count - 1) * pitch) / 2.0
+        x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
+        if along == "x":
+            dr, dz = x - centre_x, z - cut_mid_z
+        else:
+            dr, dz = y - centre_y, z - cut_mid_z
+        mask = np.zeros(len(pts), dtype=bool)
+        for i in range(count):
+            c_cross = first + i * pitch + cut_shift
+            if along == "x":
+                dc = y - c_cross
+                local_c = cos_a * dc + sin_a * dz
+                local_a = -sin_a * dc + cos_a * dz
+            else:
+                dc = x - c_cross
+                local_c = cos_a * dc - sin_a * dz
+                local_a = sin_a * dc + cos_a * dz
+            if style == "wavy":
+                wave = np.array([wave_value(v + centre_run) for v in dr])
+                inside_c = np.abs(local_c - wave) < thickness / 2.0 - shrink
+            else:
+                inside_c = np.abs(local_c) < thickness / 2.0 - shrink
+            inside = (inside_c & (np.abs(dr) < slot_len / 2.0 - shrink)
+                      & (np.abs(local_a) < cutter_len / 2.0 - shrink))
+            mask |= inside
+        return mask
 
 
 class TieredStepsTests(unittest.TestCase):
