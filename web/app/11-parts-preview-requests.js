@@ -4,9 +4,7 @@
 // to auto-add/auto-save; this action never appends a second copy.
 async function saveCurrentPart() {
   if (state.modifierEditing) return saveModifierPart();
-  commitReferenceEditSoon.cancel();
-  const badReference = $('#draft-fields [data-reference-axis]:invalid');
-  if (badReference) { badReference.reportValidity(); return; }
+
   if (!state.draft || !beginDesignMutation()) return;
   // An incomplete Photo Nest (no traced cavity outline yet) has nothing legal
   // to commit. Save must not silently discard it - stay in the editor with

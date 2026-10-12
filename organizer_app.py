@@ -215,7 +215,6 @@ from organizer_app_impl._preview import (
     PREVIEW_DECIMALS,
     PREVIEW_MIN_FACE_AREA,
     _mesh_preview_geometry,
-    _reference_preview_meshes,
     bore_reference_envelope_extensions,
     _customization_zones,
     validate_inside_handles_mode,

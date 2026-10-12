@@ -244,18 +244,10 @@ def _mesh_preview_geometry(
     ]
 
 
-def _reference_preview_meshes(box: BoxSpec, one: Feature, base_z: float) -> list[trimesh.Trimesh]:
+def _bore_item_preview_meshes(box: BoxSpec, one: Feature, base_z: float) -> list[trimesh.Trimesh]:
     if one.kind == "bore" and one.item is not None:
         return bore_reference_meshes(box, one, base_z)
-    if one.kind == "nest" and not one.contour:
-        return []
-    ref = one.reference_object
-    if ref is None:
-        return []
-    x, y = one.zone.centre
-    mesh = trimesh.creation.box(extents=(ref.width, ref.depth, ref.height))
-    mesh.apply_translation((x, y, base_z + ref.height / 2.0))
-    return [mesh]
+    return []
 
 
 def bore_reference_envelope_extensions(

@@ -424,7 +424,6 @@ Current palette-visible families are listed below.
 
 # 6. Interior parts
 
-Pocket, Post, Slot, Steps and Photo Nest can carry an optional **Reference object** with measured Width (X), Depth (Y) and Height (Z). It appears as a translucent, non-selectable object in 3D Preview and follows the holder when moved. It does not resize the holder or change printed geometry. Photo Nest offers it after a contour and tool thickness are accepted. Bore instead shows its existing measured item in 3D Preview, including its physical profile and placement.
 
 In a Drawer or Storage Box, a Bore-held object's full physical envelope crossing the Space ceiling produces an amber warning in manual Design. The warning does not block generation. Surface, Pegboard and Design without a typed Space have no ceiling warning.
 
@@ -503,6 +502,8 @@ Photo Nest is a **media-derived feature**. AI Design may recommend it, but text 
 ## 6.3 Bore
 
 **Purpose:** Hold upright tools/items in one or more fitted holes.
+
+Bore shows its existing measured item in 3D Preview, including its physical profile and placement.
 
 ### Four Bore styles
 

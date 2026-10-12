@@ -592,7 +592,6 @@ async function refreshDraft() {
   applyBoreSizing(state.draft);
   bumpBoreEpoch();
   const request = ++state.draftRequest;
-  updateReferenceAddAvailability();
   if (state.draft.kind === "nest") {
     $("#draft-status").textContent = "Resizing bin around cavity…";
     if (state.draftAutoCommit && !(await autoCommitDraft(request))) {
@@ -624,7 +623,6 @@ async function refreshDraft() {
     }
     if (request !== state.draftRequest) return;
     state.draftResolvedOptions = result.resolved_options || {};
-    state.referenceResolutionRequest = request;
     if (state.draft.kind === "text" && result.feature) {
       if (Array.isArray(result.feature.zone)) state.draft.zone = result.feature.zone.slice();
       state.draft.options.text_v2 = true;
@@ -686,9 +684,8 @@ async function refreshDraft() {
     }
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
-    const committed = !state.draftAutoCommit || await autoCommitDraft(request);
+    if (state.draftAutoCommit) await autoCommitDraft(request);
     if (request !== state.draftRequest) return;
-    if (committed) updateReferenceAddAvailability();
     // "Auto size bin to bore" (Width / Length or Height) keeps the bin fitted to
     // this Bore after every edit.
     if (request === state.draftRequest && await reconcileBoreBin(result)) return;
@@ -855,7 +852,7 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
   const snapshot = JSON.stringify(draft);
   const previousDesign = clone(state.design);
   state.draftRequest += 1;
-  const committed = await api(state.referenceEditPending ? "/api/feature/reference" : "/api/feature/apply", {
+  const committed = await api("/api/feature/apply", {
     design: state.design, feature: draft, index,
   });
   if (state.draft !== draft || JSON.stringify(draft) !== snapshot) {
@@ -869,7 +866,6 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
   noteCommittedDesignChange(previousDesign);
   state.draftIsNew = false;
   state.draftTouched = false;
-  state.referenceEditPending = false;
   state.selected = committed.selected;
   if (Number.isInteger(committed.selected)) {
     state.draftSourceIndex = committed.selected;

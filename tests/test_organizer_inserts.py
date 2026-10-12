@@ -41,7 +41,6 @@ from organizer_inserts._bore import (
 )
 from organizer_inserts._bore import bore_reference_meshes, bore_reference_top
 from organizer_inserts._cradle import cradle_reference_meshes
-from organizer_inserts._core import ReferenceObject
 from organizer_inserts import (
     EDITOR_SNAP,
     Feature,
@@ -71,26 +70,7 @@ PHOTO_CONTOUR = ((-30.0, -10.0), (30.0, -10.0), (30.0, 0.0),
                  (5.0, 0.0), (5.0, 10.0), (-30.0, 10.0))
 
 
-class ReferenceObjectTests(unittest.TestCase):
-    def test_optional_reference_round_trips_and_never_changes_holder_mesh(self):
-        plain = Feature("post", Zone(-12, -12, 12, 12))
-        referenced = replace(plain, reference_object=ReferenceObject(18, 12, 70))
-        saved = layout_to_dict(Layout((referenced,), "fused"))
-        self.assertEqual(layout_from_dict(saved).features[0].reference_object, referenced.reference_object)
-        self.assertNotIn("reference_object", layout_to_dict(Layout((plain,), "fused"))["features"][0])
-        saved["features"][0]["reference_object"] = None
-        self.assertIsNone(layout_from_dict(saved).features[0].reference_object)
-        saved["features"][0]["reference_object"] = {"width": True, "depth": 12, "height": 70}
-        with self.assertRaises(ValueError):
-            layout_from_dict(saved)
-        self.assertEqual(build_features(BIN, [plain], BIN.base_thickness)[0].volume,
-                         build_features(BIN, [referenced], BIN.base_thickness)[0].volume)
-        for bad in (0, -1, float("inf"), float("nan")):
-            with self.assertRaises(ValueError):
-                ReferenceObject(bad, 12, 70)
-        with self.assertRaises(ValueError):
-            replace(Feature("bore", plain.zone), reference_object=ReferenceObject(1, 1, 1))
-
+class BoreReferenceTopTests(unittest.TestCase):
     def test_bore_reference_top_includes_tilted_radius_and_segments(self):
         item = Item("Tool", (Segment(20, 4), Segment(30, 16)))
         one = Feature("bore", Zone(-20, -20, 20, 20), item, count=1,

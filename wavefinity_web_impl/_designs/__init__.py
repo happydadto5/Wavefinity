@@ -114,7 +114,6 @@ from ._features import (
     _draft_payload,
     feature_fit_payload,
     apply_feature_payload,
-    apply_reference_payload,
     duplicate_feature_payload,
     delete_feature_payload,
     mode_payload,

@@ -1,7 +1,7 @@
 "use strict";
 
 function kindColor(kind) {
-  if (kind === "reference_object") return "#9db8c2";
+  if (kind === "measured_item") return "#9db8c2";
   if (COLORS[kind]) return COLORS[kind];
   if (kind === "draft_invalid") return COLORS.invalid;
   if (kind.endsWith("_divider_slope")) return COLORS.divider_slope;
@@ -229,7 +229,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   const visibleGroups = b4bEnabled()
     ? new Set(state.b4bView === "base" ? ["base"] : state.b4bView === "lid" ? ["lid"] : ["base", "lid"])
     : baseTrimEnabled() ? new Set(["bin"])
-      : new Set([...(state.binVisible ? ["bin"] : []), ...(state.interiorVisible ? ["interior", "reference"] : [])]);
+      : new Set([...(state.binVisible ? ["bin"] : []), ...(state.interiorVisible ? ["interior", "measured"] : [])]);
   if (!geometry?.length) {
     context.fillStyle = "#8b989e";
     context.textAlign = "center";
@@ -346,8 +346,8 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
     for (let at = 0; at < corners; at += 1) {
       polygon[at] = [originX + flat[at * 2] * scale, originY + flat[at * 2 + 1] * scale];
     }
-    if (!b4bEnabled() && kind !== "reference_object") addPreviewPickFace(face, polygon, camera);
-    context.globalAlpha = kind === "reference_object" ? 0.3 : 1;
+    if (!b4bEnabled() && kind !== "measured_item") addPreviewPickFace(face, polygon, camera);
+    context.globalAlpha = kind === "measured_item" ? 0.3 : 1;
     const fill = shadedColor(kind, face.normal);
     if (fill !== penFill) { context.fillStyle = fill; penFill = fill; }
     context.fill();
@@ -826,15 +826,15 @@ function classifyB4BFace(face) {
 }
 
 function classifyOrdinaryFace(face) {
-  if (face.kind === "reference_object") return "reference";
+  if (face.kind === "measured_item") return "measured";
   return isBinFace(face.kind) ? "bin" : "interior";
 }
 
 function currentPreviewGroups() {
-  return b4bEnabled() ? ["base", "lid"] : ["bin", "interior", "reference"];
+  return b4bEnabled() ? ["base", "lid"] : ["bin", "interior", "measured"];
 }
 
-function previewAabbWithoutReference(buffers) {
+function previewAabbWithoutMeasured(buffers) {
   const selected = [buffers.groups.bin?.aabb, buffers.groups.interior?.aabb].filter(Boolean);
   if (!selected.length) return null;
   return {
@@ -880,9 +880,9 @@ function currentPreviewPasses(buffers) {
   if (state.binVisible) { passes.push({ group: "bin", alpha: 1 }); visible.add("bin"); }
   if (state.interiorVisible) {
     passes.push({ group: "interior", alpha: 1 }); visible.add("interior");
-    passes.push({ group: "reference", alpha: 0.3 }); visible.add("reference");
+    passes.push({ group: "measured", alpha: 0.3 }); visible.add("measured");
   }
-  return { passes, aabb: state.interiorVisible ? buffers.allAabb : previewAabbWithoutReference(buffers), visible };
+  return { passes, aabb: state.interiorVisible ? buffers.allAabb : previewAabbWithoutMeasured(buffers), visible };
 }
 
 function renderPreview3D() {
@@ -1033,7 +1033,7 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
     const kind = face.kind;
     if (!visibleGroups.has(classify(face))) continue;
     if (state.xrayOn && isFacingBinWall(face, camera)) continue;
-    if (dot(face.normal, vector) <= 0 || face.kind === "reference_object") continue;
+    if (dot(face.normal, vector) <= 0 || face.kind === "measured_item") continue;
     addPreviewPickFace(face, face.points.map(point => project(iso(point, camera))), camera);
   }
   addPreviewPickProxies(camera, point => project(iso(point, camera)), visibleGroups,

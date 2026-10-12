@@ -132,143 +132,7 @@ __SOURCE__
                            "changes": 1},
         })
 
-    def test_reference_add_remove_readd_preserves_only_current_height_authority(self):
-        source = "\n".join(function_source(name, APP) for name in (
-            "referencePhysicalHeight", "referenceSeedForDraft", "referenceAddReady",
-            "updateReferenceAddAvailability", "addReferenceToCurrentDraft",
-            "removeReferenceFromCurrentDraft", "markDraftChanged", "commitReferenceEdit"))
-        script = r"""
-const clone=value=>JSON.parse(JSON.stringify(value));
-const number=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
-const _nestMeasuredThickness=()=>null;
-const button={hidden:true};
-const fields={};
-const $=selector=>selector==='#draft-fields'?fields:
- selector==='[data-action="add-reference"]'?(state.draft?.reference_object?null:button):
- {textContent:'',classList:{add(){}}};
-const draftCommitIndex=()=>state.selected;
-const updateGenerateAvailability=()=>{};
-const renderDraftFields=()=>{};
-const renderPlaced=()=>{};
-const updateSelectionButtons=()=>{};
-const refreshPreview=async()=>{};
-const calls=[];
-const noteCommittedDesignChange=()=>calls.push('change');
-const api=async(path,payload)=>{
- calls.push(path);const design=clone(payload.design);
- design.layout.features[payload.index]=clone(payload.feature);
- return {design,selected:payload.index};
-};
-const toast=()=>{};
-const commitReferenceEditSoon=()=>{};commitReferenceEditSoon.cancel=()=>{};
-const state={draft:null,design:null,draftRequest:10,referenceResolutionRequest:10,
- draftResolvedOptions:{height:16,lip:1},draftIsNew:false,draftTouched:false,
- draftAutoCommit:true,referenceEditPending:false,selected:0,draftSourceIndex:0};
-__SOURCE__
-async function lifecycle(kind, options, resolvedOptions){
- state.draft={kind,zone:[-10,-8,10,8],options};state.design={layout:{features:[clone(state.draft)]}};
- state.draftRequest++;state.referenceResolutionRequest=state.draftRequest;
- state.draftResolvedOptions=resolvedOptions;state.draftTouched=false;state.referenceEditPending=false;
- const before=calls.length;
- addReferenceToCurrentDraft();await commitReferenceEdit();
- removeReferenceFromCurrentDraft();await commitReferenceEdit();
- const addVisible=referenceAddReady()&&!button.hidden;
- addReferenceToCurrentDraft();
- const seeded=state.draft.reference_object?.height;
- await commitReferenceEdit();
- return {kind,addVisible,seeded,count:state.design.layout.features.length,
-   calls:calls.slice(before).filter(call=>call==='/api/feature/reference').length};
-}
-(async()=>{
- const cycles=[];
- cycles.push(await lifecycle('slot',{}, {height:16}));
- cycles.push(await lifecycle('steps',{}, {height:16}));
- cycles.push(await lifecycle('post',{height:12},{}));
- state.draft={kind:'slot',zone:[-10,-8,10,8],options:{}};
- state.draftRequest=40;state.referenceResolutionRequest=40;state.draftResolvedOptions={height:16};
- state.draftIsNew=false;state.draftTouched=false;state.selected=0;state.draftSourceIndex=0;
- markDraftChanged(false);
- state.draftTouched=false; // holder edit saved; no fresh resolution has arrived
- const afterHolderEdit=referenceAddReady();
- markDraftChanged(true);
- state.draftTouched=false; // reference-only save cannot restore the stale owner
- const afterReferenceEdit=referenceAddReady();
- state.draftRequest++;state.referenceResolutionRequest=state.draftRequest;
- state.draftResolvedOptions={height:18};
- const afterFreshResolution=referenceAddReady();
- process.stdout.write(JSON.stringify({cycles,afterHolderEdit,afterReferenceEdit,afterFreshResolution,
-   allCalls:calls.filter(call=>call==='/api/feature/reference').length}));
-})();
-""".replace("__SOURCE__", source)
-        result = node_json(script)
-        self.assertEqual(result["cycles"], [
-            {"kind": "slot", "addVisible": True, "seeded": 16, "count": 1, "calls": 3},
-            {"kind": "steps", "addVisible": True, "seeded": 16, "count": 1, "calls": 3},
-            {"kind": "post", "addVisible": True, "seeded": 12, "count": 1, "calls": 3},
-        ])
-        self.assertFalse(result["afterHolderEdit"])
-        self.assertFalse(result["afterReferenceEdit"])
-        self.assertTrue(result["afterFreshResolution"])
-        self.assertEqual(result["allCalls"], 9)
 
-    def test_reference_seed_waits_for_resolved_slot_and_steps_height(self):
-        source = "\n".join(function_source(name, APP) for name in (
-            "referencePhysicalHeight", "referenceSeedForDraft", "referenceAddReady",
-            "updateReferenceAddAvailability", "addReferenceToCurrentDraft"))
-        script = r"""
-const number=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
-const _nestMeasuredThickness=()=>null;
-const button={hidden:true};
-const $=selector=>selector==='[data-action="add-reference"]'?button:{};
-const draftCommitIndex=()=>0;
-let referenceCommits=0;
-const renderDraftFields=()=>{};
-const commitReferenceEditSoon=()=>referenceCommits++;
-const state={draft:null,draftRequest:5,referenceResolutionRequest:null,draftResolvedOptions:{},
- draftIsNew:false,draftTouched:false,design:{box:{z:40,base_thickness:4},layout:{features:[]}}};
-const markDraftChanged=()=>{state.draftTouched=true;state.draftRequest++;updateReferenceAddAvailability()};
-__SOURCE__
-const results=[];
-for(const kind of ['slot','steps']){
- state.draft={kind,zone:[-10,-8,10,8],options:{}};
- state.draftTouched=false;state.draftRequest=5;state.referenceResolutionRequest=null;
- state.draftResolvedOptions={};state.design.layout.features=[state.draft];
- updateReferenceAddAvailability();
- addReferenceToCurrentDraft();
- let unresolvedRejected=false;
- try{referenceSeedForDraft(state.draft,null,state.design)}catch{unresolvedRejected=true}
- const before={hidden:button.hidden,reference:state.draft.reference_object??null,
-  commits:referenceCommits,unresolvedRejected};
- state.draftResolvedOptions={height:16,lip:1};state.referenceResolutionRequest=5;
- updateReferenceAddAvailability();
- const shown=!button.hidden;
- addReferenceToCurrentDraft();
- results.push({kind,before,shown,height:state.draft.reference_object?.height,
-   zone:state.draft.zone,commits:referenceCommits});
-}
-const explicit=[];
-for(const kind of ['pocket','post','slot']){
- state.draft={kind,zone:[-10,-8,10,8],options:{height:12}};
- state.draftTouched=false;state.referenceResolutionRequest=null;state.draftResolvedOptions={};
- explicit.push({kind,ready:referenceAddReady(),height:referenceSeedForDraft(state.draft,null,state.design).height});
-}
-state.draft={kind:'steps',zone:[-10,-8,10,8],options:{height:16}};
-const clamped=referenceSeedForDraft(state.draft,null,state.design).height;
-process.stdout.write(JSON.stringify({results,explicit,clamped}));
-""".replace("__SOURCE__", source)
-        self.assertEqual(node_json(script), {
-            "results": [
-                {"kind": "slot", "before": {"hidden": True, "reference": None, "commits": 0,
-                                              "unresolvedRejected": True},
-                 "shown": True, "height": 16, "zone": [-10, -8, 10, 8], "commits": 1},
-                {"kind": "steps", "before": {"hidden": True, "reference": None, "commits": 1,
-                                               "unresolvedRejected": True},
-                 "shown": True, "height": 16, "zone": [-10, -8, 10, 8], "commits": 2},
-            ],
-            "explicit": [{"kind": kind, "ready": True, "height": 12}
-                         for kind in ("pocket", "post", "slot")],
-            "clamped": 16,
-        })
 
     def test_bore_ceiling_warning_stays_at_design_level_and_clears(self):
         source = function_source("updateBoreCeilingWarning", APP)
@@ -291,96 +155,28 @@ process.stdout.write(JSON.stringify({whileEditingAnotherBore,afterCorrection:{hi
         self.assertLess(html.index('id="bore-ceiling-warning"'), html.index('class="canvas-wrap'))
         self.assertNotIn("data-bore-ceiling-warning", APP)
 
-    def test_new_part_reference_action_waits_for_initial_add(self):
-        source = "\n".join(function_source(name, APP) for name in
-                           ("referencePhysicalHeight", "referenceAddReady", "addReferenceToCurrentDraft"))
-        script = r"""
-const state={draftIsNew:true,selected:null,draftSourceIndex:null,draft:{kind:'post',zone:[-10,-8,10,8]},
- design:{layout:{features:[]}},draftRequest:0,referenceResolutionRequest:0,
- draftResolvedOptions:{height:30},referenceEditPending:false,draftTouched:false};
-const draftCommitIndex=()=>state.selected!==null ? state.selected : state.draftIsNew ? null : state.draftSourceIndex;
-const markDraftChanged=()=>{},renderDraftFields=()=>{};
-const referenceSeedForDraft=()=>({width:20,depth:16,height:30});
-let referenceCommits=0;
-const commitReferenceEditSoon=()=>{referenceCommits++;state.design.layout.features[0].reference_object=state.draft.reference_object};
-__SOURCE__
-const initial=referenceAddReady();
-const initialApply=new Promise(resolve=>globalThis.acceptInitial=resolve);
-addReferenceToCurrentDraft();
-const clickedWhilePending=referenceCommits;
-acceptInitial({kind:'post',zone:[-10,-8,10,8]});
-initialApply.then(feature=>{
- state.design.layout.features.push(feature);state.selected=0;state.draftSourceIndex=0;state.draftIsNew=false;state.draft=feature;
- const after=referenceAddReady();
- addReferenceToCurrentDraft();
- process.stdout.write(JSON.stringify({initial,clickedWhilePending,after,referenceCommits,features:state.design.layout.features}));
-});
-""".replace("__SOURCE__", source)
-        self.assertEqual(node_json(script), {"initial": False, "clickedWhilePending": 0,
-            "after": True, "referenceCommits": 1, "features": [{"kind": "post", "zone": [-10, -8, 10, 8],
-                                         "reference_object": {"width": 20, "depth": 16, "height": 30}}]})
 
-    def test_reference_commit_uses_reference_route_without_resizing(self):
-        source = function_source("commitReferenceEdit", APP)
-        script = r"""
-const clone=v=>JSON.parse(JSON.stringify(v));
-const original={kind:'post',zone:[-10,-8,10,8]};
-const state={design:{layout:{features:[original]}},draft:{...clone(original),
- reference_object:{width:22,depth:16,height:16}},draftRequest:3,referenceEditPending:true,
- selected:0,draftIsNew:false};
-const draftCommitIndex=()=>0;
-const calls=[];
-const api=async(path,payload)=>{calls.push(path);return {design:{layout:{features:[clone(payload.feature)]}},selected:0}};
-const noteCommittedDesignChange=()=>calls.push('change'),renderPlaced=()=>{},updateSelectionButtons=()=>{};
-const updateReferenceAddAvailability=()=>{};
-const refreshPreview=async()=>calls.push('preview');
-const $=()=>({textContent:'',classList:{add(){}}});
-__SOURCE__
-commitReferenceEdit().then(()=>process.stdout.write(JSON.stringify({calls,
- zone:state.design.layout.features[0].zone,pending:state.referenceEditPending})));
-""".replace("__SOURCE__", source)
-        self.assertEqual(node_json(script), {"calls": ["/api/feature/reference", "change", "preview"],
-                                            "zone": [-10, -8, 10, 8], "pending": False})
-
-    def test_reference_editor_seed_and_positive_edit_leave_holder_size_alone(self):
+    def test_measured_item_preview_group_follows_interior_visibility_and_framing(self):
         source = "\n".join(function_source(name, APP) for name in
-                           ("referencePhysicalHeight", "referenceSeedForDraft", "updateReferenceAxis"))
-        script = r"""
-const number=(v,f)=>Number.isFinite(Number(v))?Number(v):f;
-const _nestMeasuredThickness=o=>o?.tool_thickness || null;
-__SOURCE__
-const draft={kind:'post',zone:[-10,-8,10,8],options:{}};
-const before=JSON.stringify(draft.zone);
-draft.reference_object=referenceSeedForDraft(draft,{height:16},{box:{z:40,base_thickness:.6}});
-const rejected=updateReferenceAxis(draft,'width','0');
-const accepted=updateReferenceAxis(draft,'width','22');
-process.stdout.write(JSON.stringify({ref:draft.reference_object,before,after:JSON.stringify(draft.zone),rejected,accepted}));
-""".replace("__SOURCE__", source)
-        self.assertEqual(node_json(script), {"ref": {"width": 22, "depth": 16, "height": 16},
-                                            "before": "[-10,-8,10,8]", "after": "[-10,-8,10,8]",
-                                            "rejected": False, "accepted": True})
-
-    def test_reference_preview_group_follows_interior_visibility_and_framing(self):
-        source = "\n".join(function_source(name, APP) for name in
-                           ("classifyOrdinaryFace", "previewAabbWithoutReference", "currentPreviewPasses"))
+                           ("classifyOrdinaryFace", "previewAabbWithoutMeasured", "currentPreviewPasses"))
         script = r"""
 const state={binVisible:true,interiorVisible:true,xrayOn:false};
 const b4bEnabled=()=>false,baseTrimEnabled=()=>false;
 const buffers={allAabb:{min:[-5,-5,0],max:[5,5,100]},groups:{
  bin:{aabb:{min:[-5,-5,0],max:[5,5,30]}},
  interior:{aabb:{min:[-3,-3,1],max:[3,3,25]}},
- reference:{aabb:{min:[-2,-2,1],max:[2,2,100]}}}};
+ measured:{aabb:{min:[-2,-2,1],max:[2,2,100]}}}};
 __SOURCE__
 const shown=currentPreviewPasses(buffers);
 state.interiorVisible=false;
 const hidden=currentPreviewPasses(buffers);
-process.stdout.write(JSON.stringify({group:classifyOrdinaryFace({kind:'reference_object'}),
+process.stdout.write(JSON.stringify({group:classifyOrdinaryFace({kind:'measured_item'}),
  shown:shown.passes,shownZ:shown.aabb.max[2],hidden:hidden.passes,hiddenZ:hidden.aabb.max[2]}));
 """.replace("__SOURCE__", source)
         self.assertEqual(node_json(script), {
-            "group": "reference",
+            "group": "measured",
             "shown": [{"group": "bin", "alpha": 1}, {"group": "interior", "alpha": 1},
-                      {"group": "reference", "alpha": .3}], "shownZ": 100,
+                      {"group": "measured", "alpha": .3}], "shownZ": 100,
             "hidden": [{"group": "bin", "alpha": 1}], "hiddenZ": 30,
         })
 

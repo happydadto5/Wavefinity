@@ -688,22 +688,7 @@ function renderDraftFields() {
   // Informational only - a legal fused part above the rim still generates
   // fine. No checkbox, no warning styling; just a plain note of the fact.
   html += `<p class="inline-help" data-draft-overhang hidden></p>`;
-  if (["pocket", "post", "slot", "steps"].includes(one.kind)) {
-    const ready = one.kind !== "nest" || (one.contour && _nestMeasuredThickness(one.options) != null);
-    let referenceFields = `<p class="inline-help">Reference only — does not resize this holder. Shown in 3D Preview.</p>`;
-    if (one.reference_object) {
-      let axisFields = "";
-      for (const [axis, title] of [["width", "Width (X)"], ["depth", "Depth (Y)"], ["height", "Height (Z)"]]) {
-        axisFields += field(title, axis, String(one.reference_object[axis]),
-          { unit: "mm", min: "0", step: "any", dataAttribute: "data-reference-axis" });
-      }
-      referenceFields += `<div class="pair triple">${axisFields}</div>`;
-      referenceFields += `<button type="button" class="button secondary" data-action="remove-reference">Remove reference</button>`;
-    } else if (ready) {
-      referenceFields += `<button type="button" class="button secondary" data-action="add-reference" ${referenceAddReady() ? "" : "hidden"}>Add object reference</button>`;
-    }
-    html += editorGroup("Reference object", referenceFields);
-  }
+
   const activeDraft = document.activeElement?.dataset?.draft;
   $("#draft-fields").innerHTML = html;
   applyDivisionGridLayout($("#draft-fields"));
@@ -836,18 +821,7 @@ function renderDraftFields() {
   if (growBtn) growBtn.addEventListener("click", event => autoExpandBin({ button: event.currentTarget }));
   updateFitActions();
   if (state.draft?.kind === "nest") wireNestFieldActions();
-  $('[data-action="add-reference"]', $("#draft-fields"))?.addEventListener("click", addReferenceToCurrentDraft);
-  $('[data-action="remove-reference"]', $("#draft-fields"))?.addEventListener("click", removeReferenceFromCurrentDraft);
-  $$('[data-reference-axis]', $("#draft-fields")).forEach(input => input.addEventListener("input", () => {
-    const valid = input.value.trim() !== "" && Number.isFinite(Number(input.value)) && Number(input.value) > 0;
-    input.setCustomValidity(valid ? "" : "Enter a positive number of mm.");
-    if (!valid) return;
-    markDraftChanged(true);
-    updateReferenceAxis(state.draft, input.dataset.referenceAxis, input.value);
-    state.draftAutoCommit = true;
-    state.referenceEditPending = true;
-    commitReferenceEditSoon();
-  }));
+
   if (state.draft?.kind === "bore") {
     const fields = $("#draft-fields");
     const angleField = $('[data-draft="option:angle"]', fields);

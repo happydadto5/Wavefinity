@@ -96,7 +96,7 @@ from ._helpers import (
     PREVIEW_DECIMALS,
     PREVIEW_MIN_FACE_AREA,
     _mesh_preview_geometry,
-    _reference_preview_meshes,
+    _bore_item_preview_meshes,
     bore_reference_envelope_extensions,
     _customization_zones,
     validate_inside_handles_mode,
@@ -785,8 +785,8 @@ def preview_geometry(
     # live draft. These faces never enter any printable builder or pick map.
     for one in effective_features:
         try:
-            for mesh in _reference_preview_meshes(box, one, base_z):
-                geometry.extend(_mesh_preview_geometry(mesh, "reference_object"))
+            for mesh in _bore_item_preview_meshes(box, one, base_z):
+                geometry.extend(_mesh_preview_geometry(mesh, "measured_item"))
         except Exception:
             pass
 

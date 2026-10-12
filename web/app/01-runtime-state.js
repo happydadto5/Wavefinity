@@ -58,7 +58,6 @@ const state = {
   draftKind: "divider",
   draft: null,
   draftResolvedOptions: {},
-  referenceResolutionRequest: null,
   // The last Design 2D/3D view actually used, runtime-only (Fix 078): a mode
   // switch through Space never overwrites it, only 2D/3D activation does.
   lastDesignView: "3d",
@@ -467,7 +466,6 @@ function spaceBinPreferences() {
 // absolute position), count, orientation and options - never literal text,
 // photos or traced contours.
 function partDefaultsFromFeature(feature) {
-  // reference_object is object-specific; reusable Space settings exclude it.
   if (!feature?.kind || !Array.isArray(feature.zone) || feature.zone.length !== 4) return null;
   const copy = {
     kind: feature.kind,
@@ -554,7 +552,6 @@ function cleanPartDefaultEntry(entry) {
   // Item measurements/profile/clearance are reusable; a user's item name is
   // identity and never carries into another bin.
   if (plainObject(entry.item)) clean.item = { ...clone(entry.item), name: "Custom item" };
-  delete clean.reference_object;
   return clean;
 }
 
@@ -610,7 +607,6 @@ function seedFeatureFromPartDefaults(feature, entry) {
   if (remembered.item && !partInfo(feature.kind)?.flags?.photo) seeded.item = clone(remembered.item);
   delete seeded.contour;
   delete seeded.source_contour;
-  delete seeded.reference_object;
   return seeded;
 }
 

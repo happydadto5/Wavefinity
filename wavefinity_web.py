@@ -405,7 +405,6 @@ from wavefinity_web_impl._designs import (
     _draft_payload,
     feature_fit_payload,
     apply_feature_payload,
-    apply_reference_payload,
     duplicate_feature_payload,
     delete_feature_payload,
     mode_payload,
@@ -2682,13 +2681,7 @@ def ai_capability_manifest() -> dict[str, Any]:
                 if not option.get("internal") and not option.get("legacy")
             ]
             entry["generic_fields"] = _ai_generic_fields(part, starter["feature"], catalog["item_rules"])
-            if part["kind"] in {"pocket", "post", "slot", "steps"}:
-                entry["generic_fields"]["reference_object"] = {
-                    "type": "optional object or null",
-                    "shape": {"width": "positive finite mm", "depth": "positive finite mm",
-                              "height": "positive finite mm"},
-                    "rules": "Preview/planning only; never changes holder geometry. Include only measured dimensions supplied or confirmed by the person; never invent them.",
-                }
+
             # What Wavefinity fills in for a blank option in the example bin.
             entry["resolved_defaults"] = starter["resolved_options"]
             entry["example"] = starter["feature"]
@@ -2903,7 +2896,6 @@ POST_ROUTES = {
     "/api/feature/fit": feature_fit_payload,
     "/api/feature/apply": apply_feature_payload,
     "/api/feature/duplicate": duplicate_feature_payload,
-    "/api/feature/reference": apply_reference_payload,
     "/api/feature/delete": delete_feature_payload,
     "/api/nest/trace": nest_trace_payload,
     "/api/nest/photo": photo_nest_payload,

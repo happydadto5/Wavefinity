@@ -347,7 +347,6 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "- All values in the design are millimetres. Convert nothing silently; ask if unsure.",
         "- You may use any legal part, option or modifier in the CAPABILITY MANIFEST that best solves the request.",
         "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",
-        "- Optional reference_object {width, depth, height} is only for Pocket, Post, Slot and Steps. It is a preview/planning envelope, never holder geometry. Include it only when the person supplied or confirmed all three measurements; never invent them. Bore and Cradle use their existing item instead.",
         "- Interior part zones are [x0,y0,x1,y1] in mm from the bin centre. current_baseline_layout_bounds_mm is only the interior of the CURRENT bin size. If you change box.x/box.y/box.z, the legal interior changes with it (each axis keeps about interior_margin_mm of shell in total): every zone you return must fit inside the interior of the design you RETURN, not the old one. Adjust the example zones, counts and sizes to the real item.",
         "- Keep every field listed in space_controlled_fields exactly as it is in the current design.",
         cap_line,
@@ -465,8 +464,7 @@ def _ai_semantic_violation(raw: Any) -> str | None:
         if not isinstance(feature, dict):
             continue
         kind = feature.get("kind")
-        if feature.get("reference_object") is not None and kind not in {"pocket", "post", "slot", "steps"}:
-            return f"reference_object is not an AI-configurable field for {kind}"
+
         options = feature.get("options") if isinstance(feature.get("options"), dict) else {}
         if kind == "text" and options.get("level") == "rim":
             rim_text_count += 1

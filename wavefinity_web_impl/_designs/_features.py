@@ -424,32 +424,6 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def apply_reference_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Commit preview/planning data without running holder sizing owners."""
-    _reject_if_b4b(payload, "editing a reference object")
-    request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
-    one = _feature_from_json(payload["feature"], layout.mode)
-    features = list(layout.features)
-    index = payload.get("index")
-    if index is None:
-        if one.reference_object is None:
-            raise ValueError("a new reference edit needs a reference object")
-        features.append(one)
-        selected = len(features) - 1
-    else:
-        selected = int(index)
-        if not 0 <= selected < len(features):
-            raise ValueError("the selected interior part no longer exists")
-        if replace(one, reference_object=features[selected].reference_object) != features[selected]:
-            raise ValueError("Reference edit also changed printable holder settings")
-        features[selected] = one
-    updated = replace(layout, features=tuple(features))
-    box = _interior_work_box(request_box)
-    updated.validate(box)
-    validate_customization_clearance(box, updated.features, label, label_location, scoop, updated.mode)
-    return {"design": design_to_dict(request_box, updated, label, part_name, label_location, scoop),
-            "selected": selected}
-
 
 def duplicate_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Duplicate a completed Photo Nest to another spot (Fix 082 J: Text's own

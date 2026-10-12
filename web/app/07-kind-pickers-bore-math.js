@@ -50,8 +50,7 @@ function clearDraftSelection(resetLocks = true) {
   // context. Invalidate every in-flight draft operation so an old palette
   // response, fit, photo upload, or auto-save cannot alter the new design.
   cancelPendingDraftWork();
-  commitReferenceEditSoon.cancel();
-  state.referenceEditPending = false;
+
   resetNestPhotoSession();
   state.draft = null;
   state.draftKind = null;
@@ -502,7 +501,6 @@ async function selectKind(kind, reset = false) {
     state.draftTouched = false;
     state.pinnedZone = {};
     state.draftResolvedOptions = result.resolved_options || {};
-    state.referenceResolutionRequest = state.draftRequest;
     // What the engine started this text at, so the Part Name is only ever
     // seeded from lettering the user actually typed - never the placeholder.
     state.draftStartingText = result.feature?.options?.text ?? null;
@@ -615,7 +613,6 @@ async function selectedFeature(index, force = false, acceptPreviewPick = null) {
     state.pinnedZone.depth = true;
   }
   state.draftResolvedOptions = {};
-  state.referenceResolutionRequest = null;
   if (state.draft.kind === "bore") sizeBoreToGrid(state.draft);
   state.draftKind = state.draft.kind;
   updateInteriorModeVisibility(true);
@@ -861,11 +858,7 @@ function nestFingerAccessVisible(holderStyle, assist) {
 // Fit, Bin and Outline (spec section 45). Broken out of renderDraftFields
 // only because it is long, not because it is reused elsewhere.
 function renderNestFields(one) {
-  // Fix 1020: the nest editor no longer offers a Reference object group, so a
-  // legacy design's stored reference_object would be an unviewable, unremovable
-  // ghost in 3D preview. Drop it from the draft the first time the nest editor
-  // opens (the draft is a copy — cancel keeps the stored design untouched).
-  if (one.reference_object) delete one.reference_object;
+
   const opt = one.options || {};
   const resolved = state.draftResolvedOptions || {};
   const val = (key, fallback) => (opt[key] !== undefined && opt[key] !== null ? opt[key] : (resolved[key] ?? fallback));
@@ -1154,101 +1147,5 @@ function pocketWallReach(wall, style) {
   return 2 * amplitude + wall * depthFactor + waveNoiseFloor;
 }
 
-function referencePhysicalHeight(draft, resolvedOptions) {
-  const explicitHeight = draft.options?.height;
-  const rawHeight = explicitHeight !== null && explicitHeight !== undefined && explicitHeight !== ""
-    ? explicitHeight : resolvedOptions?.height;
-  const height = Number(rawHeight);
-  if (rawHeight === null || rawHeight === undefined || rawHeight === "" ||
-      !Number.isFinite(height) || height <= 0) return null;
-  if (draft.kind !== "steps") return height;
-  return height;
-}
 
-function referenceSeedForDraft(draft, resolvedOptions, design) {
-  const zone = draft.zone;
-  const usable = Math.max(0.1, number(design?.box?.z, 8) - number(design?.box?.base_thickness, 0.6));
-  const resolved = draft.kind === "nest" ? _nestMeasuredThickness(draft.options)
-    : referencePhysicalHeight(draft, resolvedOptions);
-  if (["pocket", "post", "slot", "steps"].includes(draft.kind) &&
-      (!Number.isFinite(resolved) || resolved <= 0)) {
-    throw new Error("Wait for this part's height to finish updating before adding a reference.");
-  }
-  return { width: zone[2] - zone[0], depth: zone[3] - zone[1],
-    height: Number.isFinite(resolved) && resolved > 0 ? resolved : usable };
-}
 
-function updateReferenceAxis(draft, axis, raw) {
-  const value = Number(raw);
-  if (!raw.trim() || !Number.isFinite(value) || value <= 0) return false;
-  draft.reference_object[axis] = value;
-  return true;
-}
-
-function referenceAddReady() {
-  if (!state.draft || state.draftIsNew || state.draftTouched ||
-      !Number.isInteger(draftCommitIndex())) return false;
-  if (!["pocket", "post", "slot", "steps"].includes(state.draft.kind)) return false;
-  const resolved = state.referenceResolutionRequest === state.draftRequest
-    ? state.draftResolvedOptions : null;
-  return referencePhysicalHeight(state.draft, resolved) !== null;
-}
-
-function updateReferenceAddAvailability() {
-  const button = $('[data-action="add-reference"]', $("#draft-fields"));
-  if (button) button.hidden = !referenceAddReady();
-}
-
-function addReferenceToCurrentDraft() {
-  const draft = state.draft;
-  if (!draft || !referenceAddReady()) return;
-  const resolved = state.referenceResolutionRequest === state.draftRequest
-    ? state.draftResolvedOptions : null;
-  markDraftChanged(true);
-  draft.reference_object = referenceSeedForDraft(draft, resolved, state.design);
-  state.draftAutoCommit = true;
-  state.referenceEditPending = true;
-  renderDraftFields();
-  commitReferenceEditSoon();
-}
-
-function removeReferenceFromCurrentDraft() {
-  if (!state.draft?.reference_object) return;
-  markDraftChanged(true);
-  delete state.draft.reference_object;
-  state.draftAutoCommit = true;
-  state.referenceEditPending = true;
-  renderDraftFields();
-  commitReferenceEditSoon();
-}
-
-const commitReferenceEditSoon = debounce(commitReferenceEdit, 180);
-
-async function commitReferenceEdit() {
-  if (!state.draft || !state.referenceEditPending) return;
-  const index = draftCommitIndex();
-  if (index === false) return;
-  const draft = state.draft;
-  const snapshot = JSON.stringify(draft);
-  const request = state.draftRequest;
-  const before = clone(state.design);
-  try {
-    const result = await api("/api/feature/reference", { design: before, feature: draft, index });
-    if (request !== state.draftRequest || state.draft !== draft || JSON.stringify(draft) !== snapshot) return;
-    state.design = result.design;
-    noteCommittedDesignChange(before);
-    state.draftIsNew = false;
-    state.draftTouched = false;
-    state.referenceEditPending = false;
-    state.selected = result.selected;
-    state.draftSourceIndex = result.selected;
-    state.draft = clone(state.design.layout.features[result.selected]);
-    updateReferenceAddAvailability();
-    renderPlaced(); updateSelectionButtons();
-    await refreshPreview();
-  } catch (error) {
-    if (request !== state.draftRequest) return;
-    $("#draft-status").textContent = friendlyError(error);
-    $("#draft-status").classList.add("error");
-  }
-}

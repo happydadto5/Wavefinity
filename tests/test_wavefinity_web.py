@@ -162,56 +162,7 @@ def _text_feature(said, auto=False, zone=(-20.0, -6.0, 20.0, 6.0), **options):
     }
 
 
-class ObjectReferenceWebTests(unittest.TestCase):
-    def test_reference_edit_endpoint_changes_only_reference(self):
-        design = default_design()
-        design["box"].update({"x": 64, "y": 64, "z": 40})
-        feature = default_feature_payload({"design": design, "kind": "post"})["feature"]
-        design["layout"]["features"] = [feature]
-        edited = json.loads(json.dumps(feature))
-        edited["reference_object"] = {"width": 6, "depth": 8, "height": 60}
-        result = wavefinity_web.apply_reference_payload({"design": design, "feature": edited, "index": 0})
-        self.assertEqual(result["design"]["layout"]["features"][0]["reference_object"], edited["reference_object"])
-        removed = json.loads(json.dumps(edited))
-        removed.pop("reference_object")
-        after = wavefinity_web.apply_reference_payload({"design": result["design"],
-                                                        "feature": removed, "index": 0})
-        self.assertNotIn("reference_object", after["design"]["layout"]["features"][0])
-        bad = json.loads(json.dumps(edited))
-        bad["zone"] = [-12, -12, 12, 12]
-        with self.assertRaisesRegex(ValueError, "printable holder"):
-            wavefinity_web.apply_reference_payload({"design": design, "feature": bad, "index": 0})
-
-    def test_ai_reference_rules_are_explicit_and_reject_wrong_kind(self):
-        manifest = wavefinity_web.ai_capability_manifest()
-        allowed = {part["kind"] for part in manifest["features"]
-                   if "reference_object" in part.get("generic_fields", {})}
-        self.assertEqual(allowed, {"pocket", "post", "slot", "steps"})
-        design = default_design()
-        design["part_name"] = "Tools"
-        bore = default_feature_payload({"design": design, "kind": "bore"})["feature"]
-        bore["reference_object"] = {"width": 1, "depth": 1, "height": 1}
-        design["layout"]["features"] = [bore]
-        self.assertIn("reference_object", wavefinity_web._ai_semantic_violation(design))
-
-    def test_generic_preview_is_draft_owned_and_reference_does_not_print(self):
-        design = default_design()
-        design["box"].update({"x": 64, "y": 64, "z": 40})
-        feature = default_feature_payload({"design": design, "kind": "post"})["feature"]
-        feature["reference_object"] = {"width": 6, "depth": 8, "height": 60}
-        design["layout"]["features"] = [feature]
-        saved = preview_payload({"design": design, "client_id": "reference-test", "generation": 1})
-        saved_faces = [face for face in saved["geometry"] if face["kind"] == "reference_object"]
-        self.assertTrue(saved_faces)
-        self.assertTrue(all(face["pick"] is None for face in saved_faces))
-        draft = json.loads(json.dumps(feature))
-        draft["reference_object"]["height"] = 80
-        live = preview_payload({"design": design, "draft": draft, "selected": 0,
-                                "client_id": "reference-test", "generation": 2})
-        reference_z = max(point[2] for face in live["geometry"]
-                          if face["kind"] == "reference_object" for point in face["points"])
-        self.assertAlmostEqual(reference_z, design["box"]["base_thickness"] + 80)
-        self.assertEqual(live["design"]["layout"]["features"][0]["reference_object"]["height"], 60)
+class FeaturePayloadWebTests(unittest.TestCase):
 
     def test_tilted_bore_radius_crosses_cap_for_manual_and_ai_only(self):
         from organizer_inserts._bore import bore_reference_top

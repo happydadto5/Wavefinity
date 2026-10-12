@@ -1226,20 +1226,12 @@ async function uploadNestPhoto(event) {
   await runNestTrace();
 }
 
-function markDraftChanged(referenceOnly = false) {
-  const keepReferenceResolution = referenceOnly &&
-    state.referenceResolutionRequest === state.draftRequest;
-  if (!referenceOnly) {
-    commitReferenceEditSoon.cancel();
-    state.referenceEditPending = false;
-  }
+function markDraftChanged() {
   // Invalidate an auto-save immediately, at the moment the user changes the
   // visible draft. Waiting for the debounced rebuild leaves a short window in
   // which the older response can replace the newer edit.
   state.draftTouched = true;
   state.draftRequest += 1;
-  if (keepReferenceResolution) state.referenceResolutionRequest = state.draftRequest;
-  updateReferenceAddAvailability();
   state.canGenerate = false;
   updateGenerateAvailability();
 }
