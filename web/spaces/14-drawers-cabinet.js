@@ -385,7 +385,7 @@ SP.refreshCabinetStructural = async () => {
     });
     if (SP.cabinetInfo.key !== key) return;
     SP.cabinetInfo.summary = result.summary;
-    SP.cabinetInfo.status = hosted ? await SP.hostedCabinetStatus(result.signature, result.orientations) : result.status;
+    SP.cabinetInfo.status = hosted ? await SP.hostedCabinetStatus(result.signature, result.orientations, result.expected_components) : result.status;
   } catch (error) {
     if (SP.cabinetInfo.key !== key) return;
     if (error.code === "CABINET_RECOVERY") {
@@ -400,7 +400,7 @@ SP.refreshCabinetStructural = async () => {
   if (SP.cabinetInfo.key === key) SP.updateCabinetWorkspace();
 };
 
-SP.hostedCabinetStatus = async (signature, orientations = null) => {
+SP.hostedCabinetStatus = async (signature, orientations = null, expected = null) => {
   const handle = state.browserFolder?.handle;
   if (!handle) return { status: "need_save" };
   if (SP._hostedCabinetSaving) return SP.cabinetInfo.status || { status: "need_save" };
@@ -410,10 +410,28 @@ SP.hostedCabinetStatus = async (signature, orientations = null) => {
   const { current } = await SP.readMetadata(handle);
   const manifest = SP.classifyMetadata(current).structural_outputs?.storage_drawers;
   const rows = manifest?.components;
-  if (!Array.isArray(rows) || !rows.length || rows.some(one => typeof one?.filename !== "string" || typeof one?.sha256 !== "string")) {
+  // Fix 1106 (Astra AD-005): a row without a string key is malformed, matching
+  // the backend's _valid_manifest_components shape requirement.
+  if (!Array.isArray(rows) || !rows.length || rows.some(one => typeof one?.filename !== "string" || typeof one?.sha256 !== "string" || typeof one?.key !== "string")) {
     return { status: "need_save" };
   }
   if (manifest.signature !== signature) return { status: "need_update" };
+  // Fix 1106 (Astra AD-005): the manifest must be the complete current plan —
+  // the remaining rows can be self-consistent while a component is missing,
+  // duplicated, or filed under a foreign key/filename. Compared as sorted
+  // "key\0filename" fingerprints so multiplicities must match exactly.
+  // Completeness fails closed (G2M-0400): when the expected plan set is
+  // absent, non-array, or malformed, there is no plan-set proof at all, so a
+  // self-consistent incomplete manifest must never return "saved".
+  // Compatibility avoids a crash — it does not waive completeness.
+  if (!Array.isArray(expected) || !expected.length || expected.some(one => typeof one?.key !== "string" || typeof one?.filename !== "string")) {
+    return { status: "need_save" };
+  }
+  {
+    const fingerprint = list => list.map(one => `${one.key}\0${one.filename}`).sort();
+    const want = fingerprint(expected), have = fingerprint(rows);
+    if (want.length !== have.length || want.some((entry, index) => entry !== have[index])) return { status: "need_save" };
+  }
   for (const component of rows) {
     if ((await WFFileSystem.sha256(handle, component.filename)) !== component.sha256) return { status: "need_save" };
   }

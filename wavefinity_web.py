@@ -2107,6 +2107,10 @@ def _storage_drawers_structural_design(payload: dict[str, Any]) -> dict[str, Any
     if output or not include_preview:
         plan = structural_manifest_plan(space, Path(output or DEFAULT_OUTPUT), profile)
         reply["orientations"] = {one["key"]: one["orientation"] for one in plan["components"]}
+        # Fix 1106 (Astra AD-005): the hosted status check compares the stored
+        # manifest against the exact expected component set — key and filename
+        # multiplicities — so a partial/duplicate manifest is never "saved".
+        reply["expected_components"] = [{"key": one["key"], "filename": one["filename"]} for one in plan["components"]]
     if not HOSTED and payload.get("output"):
         folder, _saved, _space_id = _local_cabinet_folder(payload)
         reply["status"] = structural_status(

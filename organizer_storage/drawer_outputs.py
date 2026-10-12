@@ -128,7 +128,8 @@ def _valid_manifest_components(manifest) -> list | None:
 
 def structural_status(space: dict, stored_manifest: dict | None, output_dir: Path,
                       printer_profile: dict | None = None) -> dict:
-    """Saved only when signature, shape, filenames and every file's SHA-256 agree."""
+    """Saved only when signature, shape, filenames, every file's SHA-256, and the
+    exact component key/filename set of the current plan all agree."""
     rows = _valid_manifest_components(stored_manifest)
     if rows is None:
         return {"status": "need_save"}
@@ -144,9 +145,35 @@ def structural_status(space: dict, stored_manifest: dict | None, output_dir: Pat
                 return {"status": "need_save"}
         except OSError:
             return {"status": "need_save"}
+    # Fix 1106 (Astra AD-005): a manifest is only "saved" when it IS the complete
+    # current plan. The rows that remain can be fully self-consistent (right
+    # signature, every file present with a matching hash) while a component is
+    # missing, duplicated, or filed under a foreign key/filename — compare exact
+    # key/filename multiplicities against the plan before anything is "saved".
+    # The (key, filename) multiset is printer-profile independent (filenames are
+    # minted from the space name + component display name via _filename), so
+    # when no profile is given it is derived from the resolved plan without
+    # requiring one — the optional-profile contract is preserved. Only
+    # orientation/fit freshness needs a profile (checked below).
+    if printer_profile is not None:
+        plan_components = structural_manifest_plan(space, Path(output_dir), printer_profile)["components"]
+    else:
+        try:
+            resolved = resolve_storage_drawers_plan(space, build_meshes=False)
+            plan_components = [{"key": component.key,
+                                "filename": _filename(resolved.space["name"], component.display_name)}
+                               for component in resolved.components]
+        except (ValueError, KeyError, TypeError, AttributeError):
+            # The expected set is underivable, so completeness is unprovable:
+            # not "saved". Re-saving regenerates the full set.
+            return {"status": "need_save"}
+    expected = sorted((one["key"], one["filename"]) for one in plan_components)
+    actual = sorted((item["key"], item["filename"]) for item in rows)
+    if actual != expected:
+        return {"status": "need_save"}
     if printer_profile is not None:
         # Files exported for another printer orientation are stale, not saved.
-        wanted = {one["key"]: one for one in structural_manifest_plan(space, Path(output_dir), printer_profile)["components"]}
+        wanted = {one["key"]: one for one in plan_components}
         for item in rows:
             now = wanted.get(item["key"])
             if now is None or not now["fits"] or item.get("orientation") != now["orientation"]:

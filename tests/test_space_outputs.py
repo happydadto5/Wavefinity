@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import threading
 import unittest
@@ -330,6 +331,67 @@ class StorageDrawersHardeningTests(unittest.TestCase):
             with self.assertRaises(ValueError) as caught:
                 cabinet_outputs.materialize_storage_drawers(self.space, folder, self.PROFILE, {"components": None})
             self.assertIn("Previous cabinet manifest is invalid", str(caught.exception))
+
+    def test_saved_status_requires_exact_plan_set_with_or_without_profile(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            manifest = cabinet_outputs.materialize_storage_drawers(
+                self.space, source, self.PROFILE, None)["manifest"]
+            expected = cabinet_outputs.structural_manifest_plan(
+                self.space, source, self.PROFILE)["components"]
+
+            def copied_folder(name):
+                folder = root / name
+                shutil.copytree(source, folder)
+                return folder
+
+            complete = copied_folder("complete")
+            self.assertEqual(cabinet_outputs.structural_status(
+                self.space, manifest, complete)["status"], "saved")
+
+            for index, row in enumerate(manifest["components"]):
+                with self.subTest(missing=row["key"]):
+                    damaged = [dict(item) for item in manifest["components"] if item["key"] != row["key"]]
+                    folder = copied_folder(f"missing-{index}")
+                    (folder / row["filename"]).unlink()
+                    stored = {**manifest, "components": damaged}
+                    self.assertEqual(cabinet_outputs.structural_status(
+                        self.space, stored, folder)["status"], "need_save")
+
+            duplicate = [dict(item) for item in manifest["components"]]
+            duplicate[-1] = dict(duplicate[0])
+            folder = copied_folder("duplicate")
+            self.assertEqual(cabinet_outputs.structural_status(
+                self.space, {**manifest, "components": duplicate}, folder)["status"], "need_save")
+
+            mismatch = [dict(item) for item in manifest["components"]]
+            target = next((i for i, row in enumerate(mismatch) if row["key"] == "drawer-2"), None)
+            if target is None:
+                target = 0
+            foreign = dict(mismatch[target])
+            foreign["key"] = "foreign-component"
+            mismatch[target] = foreign
+            folder = copied_folder("foreign-key")
+            self.assertEqual(cabinet_outputs.structural_status(
+                self.space, {**manifest, "components": mismatch}, folder)["status"], "need_save")
+
+            mismatch = [dict(item) for item in manifest["components"]]
+            source_row = mismatch[0]
+            other_row = next(item for item in mismatch if item["key"] != source_row["key"])
+            altered = dict(source_row)
+            altered["filename"] = other_row["filename"]
+            altered["sha256"] = cabinet_outputs._hash(source / other_row["filename"])
+            mismatch[0] = altered
+            folder = copied_folder("key-filename-mismatch")
+            self.assertEqual(cabinet_outputs.structural_status(
+                self.space, {**manifest, "components": mismatch}, folder)["status"], "need_save")
+
+            # Profile-free checks still compare expected key/filename pairs and
+            # must preserve the ordinary complete-manifest saved result.
+            self.assertEqual(len(expected), len(manifest["components"]))
 
     def test_full_ignores_the_hidden_open_frame_width_and_open_uses_it(self):
         narrow, wide = _cabinet("full", 10.0), _cabinet("full", 18.0)
