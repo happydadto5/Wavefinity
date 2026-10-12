@@ -1637,6 +1637,28 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn('action: "saved"', app[app.index("async function generateParts("):])
         self.assertIn('action: "printed"', app[app.index("async function printModel("):])
 
+    def test_new_bin_banks_current_bin_and_delete_fallback_skips_bank(self):
+        # Fix 1140: every New Bin click banks the current bin; the last-bin
+        # delete fallback opts out so the deleted draft is not resurrected.
+        root = ROOT / "web"
+        app = app_source(root)
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        start = app.index("async function designerNewBin(")
+        body = app[start:app.find("\nasync function ", start + 1)]
+        self.assertIn("async function designerNewBin(acceptTransition = null, { skipBank = false } = {})", app)
+        self.assertIn("!skipBank &&", body)
+        self.assertIn("flushSpaceDesignAutosave({ deferDraftPreview: true, materialize: true })", body)
+        self.assertIn('"Discard Invalid Changes?"', body)
+        self.assertIn("else await designerNewBin(null, { skipBank: true });", panel)
+        # The options object must never be passed as the first (acceptTransition) argument.
+        self.assertNotIn("designerNewBin({ skipBank: true })", app + panel)
+        # Every designerNewBin call in the drawer panel is either the Space
+        # empty-state transition or the skipBank delete fallback; no bare call remains.
+        calls = re.findall(r"designerNewBin\([^)]*\)", panel)
+        self.assertTrue(calls)
+        for call in calls:
+            self.assertIn(call, ("designerNewBin(acceptTransition)", "designerNewBin(null, { skipBank: true })"))
+
     def _app_js_functions(self, *names):
         source = app_source(ROOT / "web")
         chunks = []

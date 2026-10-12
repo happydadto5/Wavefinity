@@ -793,7 +793,12 @@ DP.deleteRow = async (one, opts = {}) => {
       const remaining = preDeleteOrder.filter(id => id !== one.id && DL.bin(id) && DP.editableSourceFor(DL.bin(id)));
       const nextId = remaining[Math.min(preDeleteOrder.indexOf(one.id), remaining.length - 1)];
       if (nextId) await DP.openInventoryRow(nextId);
-      else await designerNewBin();
+      // Fix 1140 round 2: after deleting the last bin in Design, the
+      // fresh-bin reset must NOT re-bank the deleted draft. designerNewBin
+      // now materializes the flush on every call, so the opt-out (second-arg
+      // options object) keeps the just-deleted bin deleted — no resurrected
+      // inventory row, and the banking autosave is never invoked on this path.
+      else await designerNewBin(null, { skipBank: true });
     } else {
       DP.setMode("space");
       activatePreviewView("drawer");

@@ -3,7 +3,7 @@
 // New Bin (B1): a fresh product-appropriate starter. Meaningful current work
 // in a typed Space is preserved through the autosave flush first, never silently
 // discarded; on flush failure New Bin is cancelled rather than losing work.
-async function designerNewBin(acceptTransition = null) {
+async function designerNewBin(acceptTransition = null, { skipBank = false } = {}) {
   if (acceptTransition && !acceptTransition()) return false;
   // Fix 103 (R6): structural -> New Bin settles an unsaved structural draft first.
   if (typeof designTargetIsStructural === "function" && designTargetIsStructural() && !(await SP.confirmLeaveStructuralEditor())) return false;
@@ -11,8 +11,17 @@ async function designerNewBin(acceptTransition = null) {
   return withDeferredDraftSwitch(async () => {
   if (acceptTransition && !acceptTransition()) return false;
   if (state.folderMode === "space") {
-    if (typedSpaceOrdinaryBin() &&
-        !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) {
+    // Fix 1140: bank the current bin before starting a fresh one. materialize
+    // forces the persist even when the draft is unchanged vs clean, so each
+    // New Bin click yields a durable Space row (N clicks => N bins) — before,
+    // only clicks made after an edit created anything.
+    // skipBank (Breaker HOLD): the delete path passes { skipBank: true } so a
+    // just-deleted bin is not re-banked by this flush (which would resurrect
+    // it as a new inventory row). Skipping the flush entirely is deliberate:
+    // the pre-fix "bank only if changed" behavior would still resurrect a
+    // deleted bin that had unsaved edits.
+    if (typedSpaceOrdinaryBin() && !skipBank &&
+        !(await flushSpaceDesignAutosave({ deferDraftPreview: true, materialize: true }))) {
       const discard = await appConfirmAction({
         title: "Discard Invalid Changes?",
         message: "This bin has invalid changes that cannot be saved. Discard those changes and start a new bin?",
