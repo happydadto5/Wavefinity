@@ -102,7 +102,7 @@
     zField.dataset.usableHeight = "1";
     const zHelp = help("");
     const zLabel = labeled("Usable height", zField, null, "mm"); zLabel.append(zHelp);
-    for (const [field, title] of [[x, structural ? "Interior Width" : "Width"], [y, structural ? "Interior Depth" : "Depth"]]) {
+    for (const [field, title] of [[x, "Interior Width"], [y, "Interior Depth"]]) {
       const label = labeled(title, field, null, "mm"); label.append(sizeHelp.get(field)); sizeGrid.append(label);
     }
     if (structural) { sizeGrid.classList.add("sd-size-grid-three"); sizeGrid.append(zLabel); }
@@ -262,7 +262,7 @@
       });
       renderRowHeights();
     };
-    if (!compact) drawersGroup.append(help("Each height is the drawer's usable interior height."));
+    drawersGroup.append(help("Each height is the drawer's usable interior height."));
     if (structural) {
       const addRow = el("div", "sd-drawer-actions");
       const add = el("button", "button secondary", "Add Drawer"); add.type = "button";
@@ -365,7 +365,7 @@
     const readFields = () => {
       const fail = (message, focusId) => ({ ok: false, message, focusId });
       if (!name.value.trim()) return fail("Enter a Space name", name.id);
-      for (const [field, axis] of [[x, "Width"], [y, "Depth"]]) {
+      for (const [field, axis] of [[x, "Interior Width"], [y, "Interior Depth"]]) {
         if (!resolveMm(field).ok) return fail(`${axis} must be ${minUnits * baseUnit}–${maxUnits * baseUnit} mm (${baseUnit} mm grid).`, field.id);
       }
       if (countProblem()) return fail(`Number of drawers: ${countProblem().toLowerCase()}`, count.id);
