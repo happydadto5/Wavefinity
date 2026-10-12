@@ -6,7 +6,7 @@ import math
 import uuid
 
 from organizer_engine import BASE_UNIT, B4B_MATERIAL_PRESETS, B4B_DEFAULT_WALL, B4B_DEFAULT_BASE
-from organizer_engine.product_rules import DRAWER_LAYER_MAX_USABLE_HEIGHT_MM, ORDINARY_BIN_MIN_HEIGHT_MM, STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
+from organizer_engine.product_rules import DRAWER_LAYER_MAX_USABLE_HEIGHT_MM, ORDINARY_BIN_MIN_HEIGHT_MM, STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM, STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM
 
 STORAGE_DRAWERS_KIND = "storage_drawers"
 STORAGE_DRAWERS_MIN_UNITS = 6
@@ -130,6 +130,10 @@ def normalise_storage_drawers_block(raw: object) -> dict:
             raise ValueError("Duplicate drawer ID")
         seen.add(drawer_id)
         height = _number(row.get("height_mm"), "Drawer height", ORDINARY_BIN_MIN_HEIGHT_MM)
+        # Fix 1098 (G2M-0360): usable height must fit one minimum-legal bin
+        # under the hard 2 mm running-clearance cap.
+        if height + fit < STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM:
+            raise ValueError(f"Drawer usable height must be at least {STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM:g} mm")
         drawers.append({"id": drawer_id, "height_mm": _usable_drawer_height(height, fit), "label_text": _label(row.get("label_text", ""), "Drawer label")})
     result = {"drawers": drawers}
     result["cabinet_style"] = _choice(raw.get("cabinet_style", defaults["cabinet_style"]), ("full", "open"), "cabinet style")
@@ -258,6 +262,8 @@ def reset_storage_drawers_definition(raw: object) -> dict:
         )
         if height is None or _attempt(_usable_drawer_height, height, block["drawer_fit_mm"]) is None:
             height = STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - block["drawer_fit_mm"]
+        elif height + block["drawer_fit_mm"] < STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM:
+            height = STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM - block["drawer_fit_mm"]
 
         label = _attempt(_label, source.get("label_text", ""), "Drawer label")
         if label is None:

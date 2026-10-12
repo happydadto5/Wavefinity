@@ -20,7 +20,8 @@
     const published = catalog?.storage_drawers_rules;
     const baseUnit = catalog?.base_unit;
     const minDrawerHeight = catalog?.drawer_rules?.ordinary_bin_min_height_mm;
-    if (!published || !positive(baseUnit) || !positive(minDrawerHeight) ||
+    const minUsableDrawerHeight = catalog?.drawer_rules?.min_usable_drawer_height_mm;
+    if (!published || !positive(baseUnit) || !positive(minDrawerHeight) || !positive(minUsableDrawerHeight) ||
         !whole(published.min_units) || !whole(published.max_units) || published.max_units < published.min_units ||
         !whole(published.min_drawers) || !whole(published.max_drawers) || published.max_drawers < published.min_drawers ||
         !choiceList(published.drawer_fit_choices_mm) || !published.drawer_fit_choices_mm.includes(published.default_drawer_fit_mm) ||
@@ -29,7 +30,7 @@
       throw new Error("Storage Drawers catalog rules are unavailable");
     }
     return Object.freeze({
-      baseUnit, minDrawerHeight,
+      baseUnit, minDrawerHeight, minUsableDrawerHeight,
       minUnits: published.min_units, maxUnits: published.max_units,
       minDrawers: published.min_drawers, maxDrawers: published.max_drawers,
       fitChoices: Object.freeze([...published.drawer_fit_choices_mm]), defaultFit: published.default_drawer_fit_mm,
@@ -39,7 +40,7 @@
     });
   };
   const validate = space => {
-    const { baseUnit, minDrawerHeight, maxUsableHeight, fitChoices, defaultFit, minUnits, maxUnits, minDrawers, maxDrawers } = requireRules();
+    const { baseUnit, minDrawerHeight, minUsableDrawerHeight, maxUsableHeight, fitChoices, defaultFit, minUnits, maxUnits, minDrawers, maxDrawers } = requireRules();
     if (!isSpace(space)) throw new Error("Expected Storage Drawers Space");
     const rows = descriptors(space);
     if (!Array.isArray(rows) || rows.length < minDrawers || rows.length > maxDrawers) throw new Error(`Number of drawers must be ${minDrawers}–${maxDrawers}`);
@@ -49,6 +50,10 @@
       if (!UUID.test(row?.id || "") || seen.has(row.id)) throw new Error("Drawer ID is missing, malformed, or duplicated");
       seen.add(row.id);
       if (typeof row.height_mm !== "number" || !Number.isFinite(row.height_mm) || row.height_mm < minDrawerHeight) throw new Error("Invalid drawer height");
+      // Fix 1098 (G2M-0360): usable height (stored height + fit) must fit
+      // one minimum-legal ordinary bin under the hard 2 mm
+      // running-clearance cap — i.e. usable >= minUsableDrawerHeight (8 mm).
+      if (row.height_mm + fit < minUsableDrawerHeight) throw new Error("Invalid drawer height");
       if (row.height_mm + fit > maxUsableHeight) throw new Error(`Drawer usable height must be at most ${maxUsableHeight} mm`);
     }
     for (const axis of ["x", "y"]) {

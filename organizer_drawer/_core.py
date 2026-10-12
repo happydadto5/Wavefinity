@@ -264,6 +264,11 @@ def is_storage_box_layout(layout: dict[str, Any] | None) -> bool:
     return isinstance(space, dict) and space.get("kind") in ("portable", "box")
 
 
+def is_storage_drawers_layout(layout: dict[str, Any] | None) -> bool:
+    space = layout.get("space") if isinstance(layout, dict) else None
+    return isinstance(space, dict) and space.get("kind") == "storage_drawers"
+
+
 def storage_box_height_cap(layout: dict[str, Any]) -> float:
     space = layout["space"]
     return float(space["z"])

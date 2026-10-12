@@ -664,11 +664,22 @@ function syncContainerInsideHint() {
     const kind = state.activeSpace.kind;
     if (kind === "box") {
       text = `Storage Box is ${fmt(state.activeSpace.z)}mm inside`;
-    } else if (kind === "drawer" || kind === "storage_drawers") {
-      const z = kind === "storage_drawers" && typeof cabinetActiveLimits === "function"
+    } else if (kind === "drawer") {
+      const z = state.activeSpace.z;
+      if (Number.isFinite(Number(z))) text = `Storage Drawer is ${fmt(Number(z))}mm inside`;
+    } else if (kind === "storage_drawers") {
+      // Fix 1098 (Opus H1, option A, exact-cap authority per G2M-0360): the
+      // hint teaches the EXACT safe cap — usable drawer height minus 2 mm
+      // running clearance — the same authority the Layout report enforces.
+      // It must NOT show the floored New Bin default: a 40.6 mm drawer
+      // shows "safe bin height 38.6mm" while New Bin creates a 38 mm bin.
+      const z = typeof cabinetActiveLimits === "function"
         ? (cabinetActiveLimits().z ?? state.activeSpace.z)
         : state.activeSpace.z;
-      if (Number.isFinite(Number(z))) text = `Storage Drawer is ${fmt(Number(z))}mm inside`;
+      if (Number.isFinite(Number(z))) {
+        const safe = fmt(Number(z) - 2);
+        text = `Storage Drawer is ${fmt(Number(z))}mm inside · safe bin height ${safe}mm (2 mm running clearance)`;
+      }
     }
   }
   if (text) {

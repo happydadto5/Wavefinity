@@ -846,15 +846,26 @@ function applySpaceSizingDefaults(design, remembered = null, keepStarterXY = fal
         ? Math.round(rememberedZ * 10) / 10
         : roundUpHalfMm(exactMinimum);
     }
-  } else if (kind === "portable" || kind === "box" || kind === "storage_drawers") {
+  } else if (kind === "portable" || kind === "box") {
     // Fix 1065: New Bin takes the container's full intended interior Z,
     // floored to whole millimetres — round DOWN to fit, never up. (This is
     // the actual 40.6 -> 41 owner: normalizeBinDimension's whole-mm
     // Math.round would round a fractional interior up past the container.)
     // A remembered short height never overrides the full height for
-    // Portable / Box / Storage Drawers — no remembered-Z exception.
+    // Portable / Box — no remembered-Z exception.
     const fullInteriorZ = Math.floor(space.z);
     design.box.z = normalizeBinDimension("z", fullInteriorZ, fullInteriorZ);
+  } else if (kind === "storage_drawers") {
+    // Fix 1098 (Opus H1, option A, exact-cap authority per G2M-0360):
+    // safeMax = usable drawer height - 2.0 mm running clearance. New Bin
+    // takes a whole-mm default AT OR BELOW the exact cap — Math.floor of
+    // the exact cap, never the cap itself and never above it. (40.6 ->
+    // exact cap 38.6 -> default 38; 40.0 -> exact cap 38.0 -> default 38.)
+    // A remembered short height never overrides the full height —
+    // no remembered-Z exception.
+    const safeMax = Number(space.z) - 2;
+    const clearZ = Math.floor(safeMax);
+    design.box.z = normalizeBinDimension("z", clearZ, clearZ);
   } else if (kind === "pegboard") {
     if (haveRememberedZ) design.box.z = normalizeBinDimension("z", rememberedZ, rememberedZ);
     const minimum = pegboardProductMinimums(space.pegboard_standard);

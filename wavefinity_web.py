@@ -130,6 +130,7 @@ from organizer_inventory import (
 from organizer_engine.product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
     ORDINARY_BIN_MIN_HEIGHT_MM,
+    STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM,
     surface_maximums,
 )
 from organizer_outputs.space import (
@@ -725,6 +726,7 @@ def catalog_payload() -> dict[str, Any]:
         "drawer_rules": {
             "hard_wall_clearance_mm": DRAWER_HARD_CLEARANCE_MM,
             "ordinary_bin_min_height_mm": ORDINARY_BIN_MIN_HEIGHT_MM,
+            "min_usable_drawer_height_mm": STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM,
         },
         "pegboard_rules": pegboard_catalog(),
         "item_rules": {

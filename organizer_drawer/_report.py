@@ -26,6 +26,7 @@ from ._core import (
     _per_unit,
     is_surface_layout,
     is_storage_box_layout,
+    is_storage_drawers_layout,
     storage_box_height_cap,
     space_stack_metrics,
     surface_planning_heights,
@@ -362,6 +363,14 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         for note in item["notes"]:
             problems.append({"type": "clearance", "keys": item["keys"], "message": note})
         height_cap = storage_box_height_cap(layout) if storage_box else drawer["height"]
+        if is_storage_drawers_layout(layout):
+            # Fix 1098 (Opus H1, exact-cap authority per G2M-0360): the cap
+            # is usable height minus 2.0 mm, EXACT — never floored. A bin at
+            # the full usable height leaves 0.0 mm running clearance to the
+            # drawer above, so user-grown bins get the same margin New Bin
+            # applies (New Bin floors the default to whole mm; the report
+            # enforces the exact cap).
+            height_cap -= 2
         if not is_surface_layout(layout) and item["h"] > height_cap + 1e-6:
             problems.append({"type": "too_tall", "keys": item["keys"], "message": f"{label} is {item['h']:g} mm tall; this Space takes {height_cap:g} mm"})
         base = item["chain"][0]

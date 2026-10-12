@@ -38,7 +38,7 @@
   const mount = ({ host, initialSpace, catalog, printerProfile, mode, callbacks = {}, onReadyChange = null, scope = "full" }) => {
     const epoch = ++mountSerial;
     const rules = window.StorageDrawers.catalogRules(catalog);
-    const { baseUnit, minDrawerHeight, maxUsableHeight, minUnits, maxUnits, minDrawers, maxDrawers, labelLimit } = rules;
+    const { baseUnit, minDrawerHeight, minUsableDrawerHeight, maxUsableHeight, minUnits, maxUnits, minDrawers, maxDrawers, labelLimit } = rules;
     const defaults = () => ({
       drawers: Array.from({ length: 3 }, () => ({ temp_key: `temporary:${crypto.randomUUID()}`, height_mm: rules.defaultHeight - rules.defaultFit, label_text: "" })),
       cabinet_style: "full", rear_support: "cross", open_frame_width_mm: rules.defaultFrame, drawer_fit_mm: rules.defaultFit,
@@ -282,7 +282,11 @@
     const roundMm = value => Math.round(value * 1000) / 1000;
     const getDrawerFitMm = () => Number(fit.value);
     const usableOf = row => roundMm(row.height_mm + getDrawerFitMm());
-    const usableMinOf = () => roundMm(minDrawerHeight + getDrawerFitMm());
+    // Fix 1098 (G2M-0360): the visible usable-height floor is the max of
+    // the structural floor and the authority minimum — a drawer must fit
+    // one minimum-legal ordinary bin under the hard 2 mm running-clearance
+    // cap (currently 6 + 2 = 8 mm).
+    const usableMinOf = () => Math.max(roundMm(minDrawerHeight + getDrawerFitMm()), minUsableDrawerHeight);
     const setUsable = (row, requested) => {
       const wanted = Number(requested);
       if (!Number.isFinite(wanted)) return NaN;
@@ -377,7 +381,8 @@
       if (countProblem()) return fail(`Number of drawers: ${countProblem().toLowerCase()}`, count.id);
       for (let i = 0; i < block.drawers.length; i++) {
         const height = block.drawers[i].height_mm;
-        if (!Number.isFinite(height) || height < minDrawerHeight) {
+        const usable = Number.isFinite(height) ? roundMm(height + getDrawerFitMm()) : NaN;
+        if (!Number.isFinite(height) || height < minDrawerHeight || usable < minUsableDrawerHeight) {
           const floor = usableMinOf();
           return fail(Number.isFinite(floor) ? `Drawer ${i + 1} needs at least ${fmt(floor)} mm usable height` : `Drawer ${i + 1} is too short`, `sd-height-${epoch}-${i}`);
         }
