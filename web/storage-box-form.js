@@ -349,7 +349,18 @@
       form.remove();
     }
 
-    return { read, draft: read, fill, destroy, isDirty, markPristine, setError, setInterior, getInterior, setOutside };
+    // Fix 1104 (Astra AD-003): freeze every field while a structural save is in
+    // flight, mirroring StorageDrawersForm's setDisabled. Disabled fields can
+    // neither be typed in nor arrow/wheel-stepped, so the save's draft snapshot
+    // cannot be silently superseded by newer input.
+    function setDisabled(value) {
+      const frozen = !!value;
+      for (const input of [xInput, yInput, zInput, lidType, snugness, latchCount, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel]) {
+        input.disabled = frozen;
+      }
+    }
+
+    return { read, draft: read, fill, destroy, isDirty, markPristine, setError, setInterior, getInterior, setOutside, setDisabled };
   }
 
   window.StorageBoxForm = { mount };

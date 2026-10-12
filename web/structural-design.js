@@ -537,8 +537,29 @@ function drawStructuralOverlay(context, camera, project, buffers) {
 // ---- structural dimension drag (same label grab as an ordinary bin, but the
 // value goes through the form's one normalization path, never state.design) ----
 
+// Fix 1104 (Astra AD-003): a dimension drag still in flight when Save begins is
+// reverted to its start value and released through the shared end-drag
+// mechanics (browser pointer-capture release included). The save commits the
+// pre-drag draft snapshot; the drag must neither keep mutating the form under
+// the freeze nor have its newer value silently discarded — it is explicitly
+// reverted before the snapshot is taken.
+function cancelStructuralDimensionDrag() {
+  const drag = state.structuralDimensionDrag;
+  if (!drag) return;
+  // Fix 1104: reuse the shared end-drag mechanics with commit:false so the
+  // pre-snapshot start value is restored and the captured pointer is released,
+  // exactly as a normal drag end would.
+  endStructuralDimensionDrag(drag.canvas, { commit: false });
+}
+
 function beginStructuralDimensionDrag(handle, canvas, event) {
+  // Fix 1104 (Astra AD-003): never start a drag while a save is in flight —
+  // the save commits the pre-drag draft snapshot.
+  if (structuralEditorRecord?.saving) return;
   state.structuralDimensionDrag = {
+    // Fix 1104: retain the canvas so cancelStructuralDimensionDrag can release
+    // the browser pointer capture through the shared end-drag path.
+    canvas,
     view: "3d",
     axis: handle.axis,
     pointerId: event.pointerId,
@@ -559,6 +580,9 @@ function updateStructuralDimensionDrag(clientX, clientY) {
   const drag = state.structuralDimensionDrag;
   const form = structuralEditorRecord?.form;
   if (!drag || !form) return;
+  // Fix 1104 (Astra AD-003): a drag must never mutate the form while a save is
+  // in flight — the save commits the pre-drag draft snapshot.
+  if (structuralEditorRecord?.saving) return;
   const projected = (clientX - drag.startClientX) * drag.screenAxis[0] + (clientY - drag.startClientY) * drag.screenAxis[1];
   const pixelsPerMm = drag.pixelSpan / Math.max(1e-6, drag.displayStartValue);
   const applied = form.setInterior(drag.axis, drag.startValue + projected / pixelsPerMm);
@@ -612,6 +636,12 @@ async function structuralSaveChanges() {
   if (!record?.form || record.saving) return false;
   const kind = record.kind;
   record.saving = true;
+  // Fix 1104 (Astra AD-003): freeze every form/drag mutation owner BEFORE the
+  // draft snapshot is taken. Controls stay visibly disabled until the save
+  // settles; a save failure re-enables the untouched draft (see finally).
+  // The Storage Box form gains the same setDisabled API in Change 5.
+  cancelStructuralDimensionDrag();
+  record.form.setDisabled?.(true);
   updateStructuralActions();
   setStructuralStatus("Saving…");
   try {
@@ -654,7 +684,14 @@ async function structuralSaveChanges() {
     return false;
   } finally {
     record.saving = false;
-    if (structuralEditorRecord === record) updateStructuralActions();
+    // Fix 1104: unfreeze only while this record is still the live editor. After
+    // a successful save the editor was rebuilt from the accepted Space (this
+    // record's form is destroyed and the fresh form mounts enabled); after a
+    // failure the draft is untouched and editing simply resumes.
+    if (structuralEditorRecord === record) {
+      record.form.setDisabled?.(false);
+      updateStructuralActions();
+    }
   }
 }
 
