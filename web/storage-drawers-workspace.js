@@ -56,6 +56,11 @@
       const space = current.space, layout = current.layout;
       const rows = window.StorageDrawers.drawerDescriptors(space);
       const maxHeight = Math.max(...rows.map(row => row.height_mm));
+      // Fix 1109: capture which drawer selector holds keyboard focus before
+      // the list is rebuilt, so focus can be restored to the same drawer.
+      const focusedDrawerId = list.contains(document.activeElement)
+        ? document.activeElement?.dataset?.drawerId || null
+        : null;
       list.replaceChildren();
       rows.forEach((row, index) => {
         const item = el("div", "sd-drawer-item", "");
@@ -63,8 +68,11 @@
         const selector = el("button", "sd-drawer-select", drawerText(row, index, placed, space.storage_drawers.drawer_fit_mm));
         selector.type = "button"; selector.disabled = editing;
         if (editing) selector.title = "Finish editing the current drawer first.";
+        selector.dataset.drawerId = row.id;
         selector.setAttribute("aria-pressed", String(layout.active === row.id));
-        selector.setAttribute("aria-label", `Select Drawer ${index + 1}`);
+        // Fix 1109: the accessible name carries the same identifying details
+        // as the visible text (custom label, usable height, bin count).
+        selector.setAttribute("aria-label", drawerText(row, index, placed, space.storage_drawers.drawer_fit_mm));
         selector.dataset.size = String(Math.max(0, Math.min(4, Math.round(row.height_mm / maxHeight * 4))));
         selector.addEventListener("click", async () => {
           if (editing || layout.active === row.id) return;
@@ -82,6 +90,14 @@
         });
         item.append(selector); list.append(item);
       });
+      // Fix 1109: restore keyboard focus to the same drawer after the rebuild.
+      // Selection and layout/report updates all funnel through render(), so
+      // this covers every path that destroys the focused button. Pointer
+      // users are untouched: restore only fires when focus was inside the list.
+      if (focusedDrawerId) {
+        const focusedSelector = selectors().find(button => button.dataset.drawerId === focusedDrawerId);
+        if (focusedSelector && !focusedSelector.disabled) focusedSelector.focus({ preventScroll: true });
+      }
       // Add/Delete Drawer live in Design only; the navigator just switches drawers.
       editNote.hidden = !editing;
       editNote.textContent = editing ? "Finish editing the current drawer to switch drawers." : "";
