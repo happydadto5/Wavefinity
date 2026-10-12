@@ -270,6 +270,36 @@
             selectDrawer(row.id);
             callbacks.onHighlightDrawer?.(owner, { ensure: inField });
           }, { signal: events.signal });
+          // Fix 1110: keyboard focus into a drawer field establishes the same
+          // drawer subject as clicking into the field does (select + ensure
+          // highlight). The click handler's row-level highlight toggle above
+          // is untouched, and the row container itself stays non-focusable.
+          line.addEventListener("focusin", event => {
+            if (event.target.closest?.("input, select, textarea")) {
+              selectDrawer(row.id);
+              callbacks.onHighlightDrawer?.(owner, { ensure: true });
+            }
+          }, { signal: events.signal });
+          // Fix 1110: dedicated semantic keyboard control for row selection.
+          // A native button supplies Enter/Space semantics without a custom
+          // keydown handler. It is a leaf control appended to the drawer
+          // head, so the row's inputs and Delete button remain siblings —
+          // no interactive descendants are nested inside a button-like
+          // container. Activation mirrors a row-body click EXACTLY: select
+          // the drawer and TOGGLE the 3D highlight (ensure:false), the same
+          // as clicking the row itself. stopPropagation keeps the row's own
+          // click handler (which treats any button target as "in field" and
+          // would force ensure:true) from double-handling the activation.
+          const highlightBtn = el("button", "link-button sd-drawer-highlight", "Highlight");
+          highlightBtn.type = "button";
+          highlightBtn.setAttribute("aria-label", `Drawer ${index + 1}. Activate to select and toggle the 3D highlight, same as clicking the row.`);
+          highlightBtn.title = "Select this drawer and toggle its 3D highlight (same as clicking the row).";
+          highlightBtn.addEventListener("click", event => {
+            event.stopPropagation();
+            selectDrawer(row.id);
+            callbacks.onHighlightDrawer?.(owner, { ensure: false });
+          }, { signal: events.signal });
+          head.append(highlightBtn);
         }
         // Usable height never waits for summary or preview work.
         const height = input("", "number"); height.step = "any"; height.required = true;
