@@ -979,7 +979,13 @@ DV.stackTarget = (moving, sx, sy, skip) => {
 DV.wire = () => {
   const canvas = $("#drawer-canvas");
   // Fix 103 (R5): structural Design shows this canvas view-only.
-  const readOnly = () => Boolean(DP.structuralReadOnly2D?.());
+  // Fix 1107 (Astra AD-006): while a cabinet print is in flight the server is
+  // generating from the submitted Space and its response replaces the whole
+  // layout on adoption (DL.adoptBatchResult) — any placement edit made now
+  // would be silently discarded. The canvas is explicitly non-editable until
+  // the print finishes (pan/zoom still work); every edit entry point already
+  // funnels through readOnly().
+  const readOnly = () => Boolean(DP.structuralReadOnly2D?.()) || Boolean(SP.structuralBusy);
   canvas.addEventListener("contextmenu", event => event.preventDefault());
   canvas.addEventListener("pointerdown", event => {
     if (!DL.layout || !DV.cam) return;

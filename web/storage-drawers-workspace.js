@@ -28,11 +28,19 @@
     const save = el("button", "button sd-save", "Save Cabinet"), print = el("button", "button sd-print", "Print Cabinet");
     const printBoth = el("button", "button sd-print-both", "Print Cabinet + Bins");
     save.type = print.type = printBoth.type = "button";
+    // Fix 1107 (Astra AD-006): visible busy state — while a cabinet operation
+    // is in flight, placement and drawer switching are explicitly locked.
+    // The note text is set from Fix 1108's operation-specific
+    // structuralBusyLabel when shown (Change 5); it starts hidden.
+    // (round 2, GPT G2M-0429: hard-coded "Printing — …" copy was false when
+    // Save Cabinet or cabinet-only Print holds the busy flag.)
+    const busyNote = el("p", "sd-help", "");
+    busyNote.hidden = true;
     save.addEventListener("click", () => callbacks.saveCabinet?.());
     print.addEventListener("click", event => callbacks.printCabinet?.(event));
     printBoth.addEventListener("click", event => callbacks.printCabinetAndBins?.(event));
     const guide = el("a", "sd-guide-link", "Assembly & print guide"); guide.href = GUIDE_URL; guide.target = "_blank"; guide.rel = "noopener";
-    structural.append(status, fit, printerRow, save, print, printBoth, guide);
+    structural.append(status, fit, printerRow, save, print, printBoth, busyNote, guide);
     // Damaged known cabinet settings: Inventory and designs stay usable, cabinet
     // output stays off, and one button repairs only the cabinet definition.
     const recovery = el("section", "sd-recovery", ""); recovery.hidden = true;
@@ -66,8 +74,14 @@
         const item = el("div", "sd-drawer-item", "");
         const placed = layout.drawers?.find(one => one.id === row.id)?.placements?.length || 0;
         const selector = el("button", "sd-drawer-select", drawerText(row, index, placed, space.storage_drawers.drawer_fit_mm));
-        selector.type = "button"; selector.disabled = editing;
-        if (editing) selector.title = "Finish editing the current drawer first.";
+        // Fix 1107 (Astra AD-006): visible drawer-switch lock. The flag is
+        // Fix 1108's `current.structuralBusy`, read inline — no parallel state.
+        // (Fix 1108's own `const structuralBusy` is declared later in render(),
+        // so it cannot be reused here. The title phrases from 1108's
+        // operation-specific `current.structuralBusyLabel` — round 2, G2M-0429.)
+        selector.type = "button"; selector.disabled = editing || Boolean(current.structuralBusy);
+        if (current.structuralBusy) selector.title = `${current.structuralBusyLabel || "Working"} — drawer switching is locked until it finishes.`;
+        else if (editing) selector.title = "Finish editing the current drawer first.";
         selector.dataset.drawerId = row.id;
         selector.setAttribute("aria-pressed", String(layout.active === row.id));
         // Fix 1109: the accessible name carries the same identifying details
@@ -121,6 +135,19 @@
       }
       fit.textContent = current.summary?.fits_printer ? "Fits printer" : current.summary?.first_fit_error || "";
       fit.classList.toggle("bad", Boolean(current.summary) && !current.summary.fits_printer);
+      // Fix 1107 (Astra AD-006): explicit placement-lock note. The busy flag,
+      // the Save/Print disabling, and the operation-specific pending label are
+      // owned by Fix 1108 — this contract only toggles the note and phrases
+      // its copy from 1108's structuralBusyLabel, so Save Cabinet never claims
+      // to be "Printing".
+      // (round 2, GPT G2M-0429: hard-coded "Printing — …" copy was false when
+      // Save Cabinet or cabinet-only Print holds the busy flag.)
+      if (current.structuralBusy) {
+        busyNote.textContent = `${current.structuralBusyLabel || "Working"} — placement is locked until it finishes.`;
+        busyNote.hidden = false;
+      } else {
+        busyNote.hidden = true;
+      }
     };
     render();
     return {

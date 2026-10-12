@@ -310,6 +310,13 @@ SP.cabinetCallbacks = () => ({
   printCabinet: event => SP.runStructural("print", event),
   printCabinetAndBins: event => SP.printCabinetAndBins(event),
   setActiveDrawer: async id => {
+    // Fix 1107 (Astra AD-006): the drawer-switch mutation authority. While a
+    // cabinet print is in flight the server is generating from the submitted
+    // Space and its response replaces the whole layout on adoption — a switch
+    // now would be silently rewound. Guarding here (not just the navigator
+    // button's disabled state) also closes SP.cabinetJumpToRow /
+    // StorageDrawersWorkspace.jumpToInventoryRow, which call this directly.
+    if (SP.structuralBusy) return;
     DL.change(() => { DL.layout.active = id; }, { history: false });
     DL.selected = null;
     DL.emit();
