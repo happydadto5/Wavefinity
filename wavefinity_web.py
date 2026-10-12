@@ -149,6 +149,7 @@ from organizer_storage.drawers import (
     STORAGE_DRAWER_FRAME_WIDTH_CHOICES,
     STORAGE_DRAWER_FRAME_WIDTH_DEFAULT,
     STORAGE_DRAWER_LABEL_LIMIT,
+    STORAGE_DRAWER_MAX_USABLE_HEIGHT_MM,
     STORAGE_DRAWERS_MAX_DRAWERS,
     STORAGE_DRAWERS_MAX_UNITS,
     STORAGE_DRAWERS_MIN_DRAWERS,
@@ -805,6 +806,7 @@ def catalog_payload() -> dict[str, Any]:
             "frame_width_choices_mm": list(STORAGE_DRAWER_FRAME_WIDTH_CHOICES),
             "default_frame_width_mm": STORAGE_DRAWER_FRAME_WIDTH_DEFAULT,
             "label_limit": STORAGE_DRAWER_LABEL_LIMIT,
+            "max_usable_height_mm": STORAGE_DRAWER_MAX_USABLE_HEIGHT_MM,
             "default_printer_build_mm": list(DEFAULT_PRINTER_BUILD_MM),
         },
         "b4b_rules": {

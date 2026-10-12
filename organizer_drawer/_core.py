@@ -16,7 +16,7 @@ from organizer_features.stack import stack_summary
 from organizer_engine import BASE_UNIT, MAX_BOX_SIZE, WAVE_AMPLITUDE, WAVE_MATING_GAP
 from organizer_inventory import design_specs, normalise_storage_box
 from organizer_b4b import B4B_STACK_RECESS_DEPTH, b4b_summary
-from organizer_engine.product_rules import DRAWER_HARD_CLEARANCE_MM
+from organizer_engine.product_rules import DRAWER_HARD_CLEARANCE_MM, DRAWER_LAYER_MAX_USABLE_HEIGHT_MM
 from organizer_features.stack import STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
 from organizer_features.pegboard import pegboard_standard
 from organizer_features.edge_mount import edge_mount_projection_envelope
@@ -38,7 +38,10 @@ SNAPS = (8.0, 4.0)
 # a 10 m "drawer" would ask numpy for a billion-cell array and exhaust server
 # memory. 2000 mm covers every real drawer (a full dresser width) several times
 # over; pegboard holes are capped at 500 (about 12 m of board at 25.4 mm pitch).
-MAX_DRAWER_MM = 2000.0
+# Fix 1080: single source of truth is DRAWER_LAYER_MAX_USABLE_HEIGHT_MM in
+# organizer_engine.product_rules; MAX_DRAWER_MM stays the working name so the
+# downstream ValueError copy ("drawer {key} must be at most 2000 mm") is untouched.
+MAX_DRAWER_MM = DRAWER_LAYER_MAX_USABLE_HEIGHT_MM
 MAX_PEGBOARD_HOLES = 500
 # How far a bin's wave crests stand past its grid footprint on each side.
 CREST = WAVE_AMPLITUDE - WAVE_MATING_GAP / 2.0

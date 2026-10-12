@@ -29,6 +29,15 @@ B4B_MIN_FIELD_XY = 48.0
 B4B_LATCHED_MIN_HEIGHT = 16.0
 STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM = 40.0
 
+# The drawer layer's server-authoritative 2000 mm ceiling on a drawer's usable
+# height. Neutral owner for this bound (Fix 1080): both organizer_drawer/_core.py
+# and organizer_storage/drawers.py consume this authority. It MUST live here and
+# not in organizer_drawer/_core, because organizer_storage.drawers ->
+# organizer_drawer (__init__) -> organizer_inventory -> organizer_storage.drawers
+# is a real import cycle — a top-level `from organizer_drawer._core import ...`
+# in storage drawers raises ImportError on the partially initialized module.
+DRAWER_LAYER_MAX_USABLE_HEIGHT_MM = 2000.0
+
 SURFACE_TRIM_PRESETS = (
     ("small", 6.5, "Small"),
     ("medium", 7.5, "Medium"),

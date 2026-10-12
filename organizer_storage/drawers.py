@@ -6,7 +6,7 @@ import math
 import uuid
 
 from organizer_engine import BASE_UNIT, B4B_MATERIAL_PRESETS, B4B_DEFAULT_WALL, B4B_DEFAULT_BASE
-from organizer_engine.product_rules import ORDINARY_BIN_MIN_HEIGHT_MM, STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
+from organizer_engine.product_rules import DRAWER_LAYER_MAX_USABLE_HEIGHT_MM, ORDINARY_BIN_MIN_HEIGHT_MM, STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
 
 STORAGE_DRAWERS_KIND = "storage_drawers"
 STORAGE_DRAWERS_MIN_UNITS = 6
@@ -18,6 +18,13 @@ STORAGE_DRAWER_FIT_DEFAULT = 0.40
 STORAGE_DRAWER_FRAME_WIDTH_CHOICES = (10.0, 14.0, 18.0)
 STORAGE_DRAWER_FRAME_WIDTH_DEFAULT = 14.0
 STORAGE_DRAWER_LABEL_LIMIT = 80
+# The visible usable height (stored clear height + the cabinet's current fit)
+# of a Storage Drawers drawer must fit the drawer layer's 2000 mm usable-height
+# ceiling. Single authority: DRAWER_LAYER_MAX_USABLE_HEIGHT_MM in
+# organizer_engine.product_rules. Backend validation compares height_mm + the
+# cabinet's *current* fit against this cap; the frontend quotes the same visible
+# maximum.
+STORAGE_DRAWER_MAX_USABLE_HEIGHT_MM = DRAWER_LAYER_MAX_USABLE_HEIGHT_MM
 STORAGE_DRAWER_MATERIAL_MIN_MM = 0.4
 STORAGE_DRAWER_MATERIAL_MAX_MM = 4.0
 STORAGE_DRAWER_MATERIAL_DEFAULT_MM = 1.6
@@ -57,6 +64,17 @@ def _label(value, title):
     return value
 
 
+def _usable_drawer_height(height, fit):
+    """Usable height (stored clear height + the cabinet's current fit) must fit
+    the drawer layer's DRAWER_LAYER_MAX_USABLE_HEIGHT_MM ceiling. The error quotes the visible
+    usable height, never a derived clear-height cap. Uses the same raw
+    comparison as normalise_drawer's downstream check, so the boundary agrees
+    exactly (1999.4 + 0.6 == 2000.0 is accepted; 1999.5 + 0.6 raises)."""
+    if height + fit > DRAWER_LAYER_MAX_USABLE_HEIGHT_MM:
+        raise ValueError(f"Drawer usable height must be at most {DRAWER_LAYER_MAX_USABLE_HEIGHT_MM:g} mm")
+    return height
+
+
 def _uuid(value):
     if not isinstance(value, str):
         raise ValueError("Drawer ID is missing or invalid")
@@ -69,8 +87,12 @@ def _uuid(value):
     return value
 
 
-def new_drawer_descriptor(height_mm: float | None = None) -> dict:
-    height = STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - STORAGE_DRAWER_FIT_DEFAULT if height_mm is None else _number(height_mm, "Drawer height", ORDINARY_BIN_MIN_HEIGHT_MM)
+def new_drawer_descriptor(height_mm: float | None = None, fit_mm: float | None = None) -> dict:
+    if height_mm is None:
+        height = STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - STORAGE_DRAWER_FIT_DEFAULT
+    else:
+        fit = _choice(fit_mm, STORAGE_DRAWER_FIT_CHOICES, "drawer fit") if fit_mm is not None else STORAGE_DRAWER_FIT_DEFAULT
+        height = _usable_drawer_height(_number(height_mm, "Drawer height", ORDINARY_BIN_MIN_HEIGHT_MM), fit)
     return {"id": str(uuid.uuid4()), "height_mm": height, "label_text": ""}
 
 
@@ -99,6 +121,7 @@ def normalise_storage_drawers_block(raw: object) -> dict:
         raise ValueError("Number of drawers must be 1–32")
     seen = set()
     drawers = []
+    fit = _choice(raw.get("drawer_fit_mm", defaults["drawer_fit_mm"]), STORAGE_DRAWER_FIT_CHOICES, "drawer fit")
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("Drawer must be an object")
@@ -106,14 +129,15 @@ def normalise_storage_drawers_block(raw: object) -> dict:
         if drawer_id in seen:
             raise ValueError("Duplicate drawer ID")
         seen.add(drawer_id)
-        drawers.append({"id": drawer_id, "height_mm": _number(row.get("height_mm"), "Drawer height", ORDINARY_BIN_MIN_HEIGHT_MM), "label_text": _label(row.get("label_text", ""), "Drawer label")})
+        height = _number(row.get("height_mm"), "Drawer height", ORDINARY_BIN_MIN_HEIGHT_MM)
+        drawers.append({"id": drawer_id, "height_mm": _usable_drawer_height(height, fit), "label_text": _label(row.get("label_text", ""), "Drawer label")})
     result = {"drawers": drawers}
     result["cabinet_style"] = _choice(raw.get("cabinet_style", defaults["cabinet_style"]), ("full", "open"), "cabinet style")
     result["rear_support"] = _choice(raw.get("rear_support", defaults["rear_support"]), ("cross", "solid"), "rear support")
     result["wall_mounting"] = _choice(raw.get("wall_mounting", defaults["wall_mounting"]), ("off", "keyholes"), "wall mounting")
     result["wall_mount_keyholes_per_drawer"] = _choice(raw.get("wall_mount_keyholes_per_drawer", defaults["wall_mount_keyholes_per_drawer"]), (2, 4), "keyholes per drawer level")
     result["open_frame_width_mm"] = _choice(raw.get("open_frame_width_mm", defaults["open_frame_width_mm"]), STORAGE_DRAWER_FRAME_WIDTH_CHOICES, "frame width")
-    result["drawer_fit_mm"] = _choice(raw.get("drawer_fit_mm", defaults["drawer_fit_mm"]), STORAGE_DRAWER_FIT_CHOICES, "drawer fit")
+    result["drawer_fit_mm"] = fit
     for key in ("drawer_handles", "stacking", "unit_label_enabled", "drawer_labels_enabled"):
         value = raw.get(key, defaults[key])
         if not isinstance(value, bool):
@@ -232,7 +256,7 @@ def reset_storage_drawers_definition(raw: object) -> dict:
             _number, source.get("height_mm"), "Drawer height",
             ORDINARY_BIN_MIN_HEIGHT_MM,
         )
-        if height is None:
+        if height is None or _attempt(_usable_drawer_height, height, block["drawer_fit_mm"]) is None:
             height = STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - block["drawer_fit_mm"]
 
         label = _attempt(_label, source.get("label_text", ""), "Drawer label")
@@ -245,7 +269,7 @@ def reset_storage_drawers_definition(raw: object) -> dict:
             "label_text": label,
         })
     if not kept:
-        kept = [new_drawer_descriptor(STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - block["drawer_fit_mm"]) for _ in range(3)]
+        kept = [new_drawer_descriptor(STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - block["drawer_fit_mm"], block["drawer_fit_mm"]) for _ in range(3)]
     block["drawers"] = kept
     base["storage_drawers"] = block
     return normalise_storage_drawers_definition(base)
@@ -334,7 +358,7 @@ def plan_add_drawer(space: dict, layout: dict) -> tuple[dict, dict, str]:
     rows = canonical["storage_drawers"]["drawers"]
     if len(rows) >= STORAGE_DRAWERS_MAX_DRAWERS:
         raise ValueError(f"Maximum {STORAGE_DRAWERS_MAX_DRAWERS} drawers")
-    added = new_drawer_descriptor(rows[-1]["height_mm"] if rows else None)
+    added = new_drawer_descriptor(rows[-1]["height_mm"] if rows else None, canonical["storage_drawers"]["drawer_fit_mm"])
     rows.append(added)
     canonical["z"] = storage_drawers_compatibility_z(canonical["storage_drawers"])
     updated = reconcile_storage_drawers_layout(current, canonical)

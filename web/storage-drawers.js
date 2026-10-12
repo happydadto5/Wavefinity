@@ -25,7 +25,7 @@
         !whole(published.min_drawers) || !whole(published.max_drawers) || published.max_drawers < published.min_drawers ||
         !choiceList(published.drawer_fit_choices_mm) || !published.drawer_fit_choices_mm.includes(published.default_drawer_fit_mm) ||
         !choiceList(published.frame_width_choices_mm) || !published.frame_width_choices_mm.includes(published.default_frame_width_mm) ||
-        !whole(published.label_limit) || !positive(published.default_usable_height_mm)) {
+        !whole(published.label_limit) || !positive(published.default_usable_height_mm) || !positive(published.max_usable_height_mm)) {
       throw new Error("Storage Drawers catalog rules are unavailable");
     }
     return Object.freeze({
@@ -35,18 +35,21 @@
       fitChoices: Object.freeze([...published.drawer_fit_choices_mm]), defaultFit: published.default_drawer_fit_mm,
       frameChoices: Object.freeze([...published.frame_width_choices_mm]), defaultFrame: published.default_frame_width_mm,
       labelLimit: published.label_limit, defaultHeight: published.default_usable_height_mm,
+      maxUsableHeight: published.max_usable_height_mm,
     });
   };
   const validate = space => {
-    const { baseUnit, minDrawerHeight, minUnits, maxUnits, minDrawers, maxDrawers } = requireRules();
+    const { baseUnit, minDrawerHeight, maxUsableHeight, fitChoices, defaultFit, minUnits, maxUnits, minDrawers, maxDrawers } = requireRules();
     if (!isSpace(space)) throw new Error("Expected Storage Drawers Space");
     const rows = descriptors(space);
     if (!Array.isArray(rows) || rows.length < minDrawers || rows.length > maxDrawers) throw new Error(`Number of drawers must be ${minDrawers}–${maxDrawers}`);
     const seen = new Set();
+    const fit = fitChoices.includes(space?.storage_drawers?.drawer_fit_mm) ? space.storage_drawers.drawer_fit_mm : defaultFit;
     for (const row of rows) {
       if (!UUID.test(row?.id || "") || seen.has(row.id)) throw new Error("Drawer ID is missing, malformed, or duplicated");
       seen.add(row.id);
       if (typeof row.height_mm !== "number" || !Number.isFinite(row.height_mm) || row.height_mm < minDrawerHeight) throw new Error("Invalid drawer height");
+      if (row.height_mm + fit > maxUsableHeight) throw new Error(`Drawer usable height must be at most ${maxUsableHeight} mm`);
     }
     for (const axis of ["x", "y"]) {
       const units = space[axis] / baseUnit;

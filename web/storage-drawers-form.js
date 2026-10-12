@@ -38,7 +38,7 @@
   const mount = ({ host, initialSpace, catalog, printerProfile, mode, callbacks = {}, onReadyChange = null, scope = "full" }) => {
     const epoch = ++mountSerial;
     const rules = window.StorageDrawers.catalogRules(catalog);
-    const { baseUnit, minDrawerHeight, minUnits, maxUnits, minDrawers, maxDrawers, labelLimit } = rules;
+    const { baseUnit, minDrawerHeight, maxUsableHeight, minUnits, maxUnits, minDrawers, maxDrawers, labelLimit } = rules;
     const defaults = () => ({
       drawers: Array.from({ length: 3 }, () => ({ temp_key: `temporary:${crypto.randomUUID()}`, height_mm: rules.defaultHeight - rules.defaultFit, label_text: "" })),
       cabinet_style: "full", rear_support: "cross", open_frame_width_mm: rules.defaultFrame, drawer_fit_mm: rules.defaultFit,
@@ -295,7 +295,8 @@
         const usable = usableOf(row);
         field.disabled = disabled;
         field.min = String(usableMinOf());
-        field.toggleAttribute("aria-invalid", !Number.isFinite(usable) || usable < usableMinOf());
+        field.max = String(maxUsableHeight);
+        field.toggleAttribute("aria-invalid", !Number.isFinite(usable) || usable < usableMinOf() || usable > maxUsableHeight);
         if (document.activeElement !== field) field.value = Number.isFinite(usable) ? String(usable) : "";
       });
       syncAddButton();
@@ -306,9 +307,10 @@
       const usable = row ? usableOf(row) : NaN, ready = Number.isFinite(usable);
       zField.disabled = disabled || !row;
       zField.min = String(usableMinOf());
+      zField.max = String(maxUsableHeight);
       zField.toggleAttribute("aria-invalid", Boolean(row) && (!ready || usable < usableMinOf()));
       if (document.activeElement !== zField) zField.value = ready ? String(usable) : "";
-      zHelp.textContent = !row ? "Select a drawer" : `Drawer ${index + 1} usable height · minimum ${usableMinOf()} mm`;
+      zHelp.textContent = !row ? "Select a drawer" : `Drawer ${index + 1} usable height · ${usableMinOf()}–${fmt(maxUsableHeight)} mm`;
     };
     const selectDrawer = id => {
       if (!structural || id === activeDrawerId || !block.drawers.some(row => row.id === id)) return;
@@ -374,6 +376,9 @@
         if (!Number.isFinite(height) || height < minDrawerHeight) {
           const floor = usableMinOf();
           return fail(Number.isFinite(floor) ? `Drawer ${i + 1} needs at least ${fmt(floor)} mm usable height` : `Drawer ${i + 1} is too short`, `sd-height-${epoch}-${i}`);
+        }
+        if (Number.isFinite(maxUsableHeight) && height + getDrawerFitMm() > maxUsableHeight) {
+          return fail(`Drawer ${i + 1} is taller than the ${fmt(maxUsableHeight)} mm usable-height maximum`, `sd-height-${epoch}-${i}`);
         }
       }
       if (unitEnabled.value === "true" && !unitText.value.trim()) return fail("Enter unit label text", unitText.id);
