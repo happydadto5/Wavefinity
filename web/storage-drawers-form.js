@@ -149,7 +149,7 @@
     let previousFit = Number(fit.value);
     const handles = select(String(block.drawer_handles), [["true", "Pull handles"], ["false", "No handles"]]);
     const handleSize = select(block.drawer_handle_size, [["auto", "Auto"], ["small", "Small"], ["medium", "Medium"], ["large", "Large"]]);
-    const handleField = labeled("Pull size", handleSize);
+    const handleField = labeled("Handle size", handleSize);
     const drawersRowA = el("div", "sd-size-grid");
     const fitField = labeled("Drawer fit", fit);
     fitField.title = "Standard is recommended for the first print. Tight leaves very little working clearance.";
