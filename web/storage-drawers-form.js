@@ -1,6 +1,11 @@
 /* Create/Edit cabinet draft. No route or persistence calls live here. */
 (() => {
   "use strict";
+  // Fix 1105 (Astra AD-004): this counter only mints unique DOM ids per mount
+  // (sd-name-<n> etc). It is NOT a liveness guard: every mounted form is an
+  // independent instance whose validation callbacks are gated by its own
+  // `live` flag, request number and profile epoch, so mounting a second form
+  // can never invalidate the first.
   let mountSerial = 0;
   const GUIDE_URL = "/storage-drawers-guide.html";
   const copy = value => structuredClone(value);
@@ -493,10 +498,14 @@
               new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("Cabinet check timed out. Edit a setting or retry.")), 30000); }),
             ]);
           } finally { clearTimeout(timeout); }
-          if (!live || epoch !== mountSerial || n !== requestNumber || pEpoch !== profileEpoch || identity !== (callbacks.identity?.() ?? space.id ?? space.name) || key !== window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) return;
+          // Fix 1105 (Astra AD-004): per-instance staleness only. The removed
+          // `epoch !== mountSerial` global let any second mount permanently
+          // invalidate this live instance's checks; a destroyed instance is
+          // already ignored via `live`, a superseded request via `n`.
+          if (!live || n !== requestNumber || pEpoch !== profileEpoch || identity !== (callbacks.identity?.() ?? space.id ?? space.name) || key !== window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) return;
           showSummary(response); summaryKey = key; summaryIdentity = identity; summaryState = "ok"; notifyReady(); markSettled();
         } catch (error) {
-          if (live && epoch === mountSerial && n === requestNumber && pEpoch === profileEpoch && identity === (callbacks.identity?.() ?? space.id ?? space.name) && key === window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) {
+          if (live && n === requestNumber && pEpoch === profileEpoch && identity === (callbacks.identity?.() ?? space.id ?? space.name) && key === window.StorageDrawers.structuralDraftKey(draft(), printerProfile)) {
             summaryError = friendlyError(error) || "Cabinet is invalid"; showSummaryText(summaryError, true); summaryState = "error"; notifyReady(); markSettled();
           }
         }
@@ -604,7 +613,10 @@
         renderRows();
         syncHeightField();
       },
-      destroy() { live = false; mountSerial += 1; clearTimeout(timer); events.abort(); markSettled(); host.replaceChildren(); }
+      // Fix 1105 (Astra AD-004): `live = false` alone invalidates this
+      // instance's in-flight callbacks via the guards above; the global bump
+      // was the cross-instance invalidation mechanism being removed.
+      destroy() { live = false; clearTimeout(timer); events.abort(); markSettled(); host.replaceChildren(); }
     };
   };
   window.StorageDrawersForm = { mount };
