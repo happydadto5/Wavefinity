@@ -872,15 +872,15 @@ DP.openSpacerPrintDialog = () => {
   }
   container.innerHTML = `
     <table class="spacer-print-table">
-      <thead><tr><th></th><th>Size</th><th>Spacer type</th><th>Qty in Space</th><th>Printed</th><th>Qty to print</th></tr></thead>
+      <thead><tr><th>Include</th><th>Size</th><th>Spacer type</th><th>Qty in Space</th><th>Printed</th><th>Qty to print</th></tr></thead>
       <tbody>${groups.map((g, index) => `
         <tr data-group="${index}">
-          <td><input type="checkbox" data-sp-check ${g.toPrint > 0 ? "checked" : ""}></td>
+          <td><input type="checkbox" data-sp-check aria-label="Include ${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm ${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible" : "Rigid"} spacer" ${g.toPrint > 0 ? "checked" : ""}></td>
           <td>${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm</td>
           <td>${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible (unvalidated)" : "Rigid"}</td>
           <td>${g.qty}</td>
           <td>${g.printed}</td>
-          <td><input type="number" data-sp-qty min="1" max="${g.qty}" value="${Math.max(1, g.toPrint || g.qty)}" ${g.toPrint > 0 ? "" : "disabled"}></td>
+          <td><input type="number" data-sp-qty min="1" max="${g.qty}" value="${Math.max(1, g.toPrint || g.qty)}" aria-label="Quantity to print for ${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm ${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible" : "Rigid"} spacer" ${g.toPrint > 0 ? "" : "disabled"}></td>
         </tr>`).join("")}</tbody>
     </table>`;
   $$("[data-sp-check]", container).forEach(box => box.addEventListener("change", event => {
