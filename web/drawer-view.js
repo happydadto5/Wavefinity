@@ -674,6 +674,51 @@ DV.paintScene = (ctx, drawer, cam) => {
       }
     });
     labels.forEach(({ path, face: topFace, ink }) => DV.drawLabel(ctx, { layers: path }, topFace, ink));
+    // Fix 1068: yellow/red rim for under-/over-height bins (Storage Box / Drawer).
+    // Thresholds are literal vs the interior Z (Fix 1069): red when the stack
+    // top exceeds the interior, yellow for any stack top strictly below it.
+    if (!entry.ghost && (DL.isStorageBox() || DL.isStorageDrawers()) &&
+        entry.layers.some(layer => !DL.isSpacer(layer.bin))) {
+      const interior = DL.isStorageBox() ? Number(DL.layout.space.z) : Number(drawer.height);
+      const stackTop = Math.max(0, ...entry.layers.map(layer => Number(layer.z1) || 0));
+      let rim = null;
+      if (interior > 0) {
+        if (stackTop > interior + 1e-6) rim = "#d43d2f";
+        else if (stackTop < interior - 1e-6) rim = "#e0a100";
+      }
+      if (rim) {
+        // Stack-level footprint: the ACTUAL union perimeter of all layer
+        // footprints at the stack-top height (per GPT G2M-0322 — a min/max
+        // bounding rectangle is NOT a union and can rim empty area on
+        // offset/stepped stacks, so it must not be used here). Coordinate
+        // compression over every layer's x/y edges gives an exact
+        // rectangular partition of the union; a covered cell edge with no
+        // covered neighbor on that side is union perimeter and is stroked
+        // as a 3D segment at stackTop. Each layer's rect is inset first,
+        // exactly matching how the bins themselves are drawn (layer.x0 +
+        // inset, ...), so the rim sits on the drawn top faces.
+        const inX0 = layer => layer.x0 + inset, inX1 = layer => layer.x1 - inset;
+        const inY0 = layer => layer.y0 + inset, inY1 = layer => layer.y1 - inset;
+        const xs = [...new Set(entry.layers.flatMap(layer => [inX0(layer), inX1(layer)]))].sort((a, b) => a - b);
+        const ys = [...new Set(entry.layers.flatMap(layer => [inY0(layer), inY1(layer)]))].sort((a, b) => a - b);
+        const cellHit = (cx, cy) => entry.layers.some(layer =>
+          inX0(layer) <= xs[cx] + 1e-9 && xs[cx + 1] <= inX1(layer) + 1e-9 &&
+          inY0(layer) <= ys[cy] + 1e-9 && ys[cy + 1] <= inY1(layer) + 1e-9);
+        ctx.save();
+        ctx.lineCap = "round";
+        const seg = (x0, y0, x1, y1) => face([[x0, y0, stackTop], [x1, y1, stackTop]], null, rim, 3);
+        for (let cx = 0; cx < xs.length - 1; cx++) {
+          for (let cy = 0; cy < ys.length - 1; cy++) {
+            if (!cellHit(cx, cy)) continue;
+            if (!cellHit(cx, cy - 1)) seg(xs[cx], ys[cy], xs[cx + 1], ys[cy]);         // front edge (y0 side)
+            if (!cellHit(cx, cy + 1)) seg(xs[cx], ys[cy + 1], xs[cx + 1], ys[cy + 1]); // back edge (y1 side)
+            if (!cellHit(cx - 1, cy)) seg(xs[cx], ys[cy], xs[cx], ys[cy + 1]);         // left edge (x0 side)
+            if (!cellHit(cx + 1, cy)) seg(xs[cx + 1], ys[cy], xs[cx + 1], ys[cy + 1]); // right edge (x1 side)
+          }
+        }
+        ctx.restore();
+      }
+    }
     if (entry.ex && Object.values(entry.ex).some(Boolean)) {
       // The projecting reach: only where a layer's own envelope goes past the
       // footprint the layers cover.
