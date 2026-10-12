@@ -546,7 +546,11 @@ function cleanPartDefaultEntry(entry) {
   if (Object.hasOwn(entry, "count")) clean.count = entry.count;
   if (typeof entry.along === "string") clean.along = entry.along;
   if (typeof entry.wedge === "boolean") clean.wedge = entry.wedge;
-  if (typeof entry.alternate_ends === "boolean") clean.alternate_ends = entry.alternate_ends;
+  // Fix 1127: a brand-new Cradle always starts Aligned. A remembered
+  // alternate-ends choice used to seed every new Cradle in the Space, so once
+  // "Alternate ends" was tried it became the sticky default. Precedent:
+  // Fix 082 H in this file (a new Text always starts On base - Inlaid).
+  if (entry.kind !== "cradle" && typeof entry.alternate_ends === "boolean") clean.alternate_ends = entry.alternate_ends;
   // Item measurements/profile/clearance are reusable; a user's item name is
   // identity and never carries into another bin.
   if (plainObject(entry.item)) clean.item = { ...clone(entry.item), name: "Custom item" };

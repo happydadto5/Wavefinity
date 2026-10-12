@@ -295,7 +295,8 @@ function renderDraftFields() {
       const shown = explicit ? one.options[option.key]
         : state.draftResolvedOptions?.[option.key] ?? option.default;
       const fo = {};
-      if (info.kind === "cradle" && option.key === "spacing") fo.min = 0;
+      // Fix 1127: the Cradle Spacing stepper moves in whole mm, not 0.1.
+      if (info.kind === "cradle" && option.key === "spacing") { fo.min = 0; fo.step = "1"; }
       if (["cradle", "post"].includes(info.kind) && option.key === "spacing") fo.unit = "mm";
       repeatFieldsHtml += field(option.label, `option:${option.key}`, shown, fo);
     }
@@ -369,7 +370,9 @@ function renderDraftFields() {
       const hasOrientationControls = Boolean(info.flags.qty || repeatFieldsHtml || runsAlong || info.flags.alternate);
       if (hasOrientationControls) {
         // Posts dropped the "Repeats" label when the Auto concept was killed.
-        const groupLabel = info.kind === "slot" || info.kind === "post" ? "" : `<span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`;
+        // Fix 1127: the Cradle repeats group carries no "Repeats" section
+        // label - the redundant heading above Quantity is removed.
+        const groupLabel = ["slot", "post", "cradle"].includes(info.kind) ? "" : `<span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`;
         html += `<div class="editor-group">${groupLabel}`;
         // A part with no spacing field of its own (Slot Rack) would leave
         // Quantity alone on its row: Runs along takes the second column instead.
@@ -396,12 +399,18 @@ function renderDraftFields() {
             const item = one.item || starterItem();
             const first = item.segments[0] || { length: 40, diameter: 6 };
             const tip = "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.";
-            cradleToolHtml = editorGroup("Tool", `<div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div>`);
+            // Fix 1127: no "Tool" section label above Length - the group
+            // renders bare, like the unlabeled text group above.
+            cradleToolHtml = `<div class="editor-group"><div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div></div>`;
           }
         } else if (repeatFieldsHtml) {
           html += `<div class="pair">${repeatFieldsHtml}</div>`;
         }
-        if (info.flags.alternate) {
+        // Fix 1127: End layout (alternate ends) has no geometry meaning for a
+        // single trough - build_cradle gates on count > 1 - so the select is
+        // hidden at Quantity 1. The stored choice is kept for higher quantities.
+        const cradleSingle = info.kind === "cradle" && resolvedDraftCount(one) === 1;
+        if (info.flags.alternate && !cradleSingle) {
           html += `<label>End layout<select data-draft="alternate_ends">
             <option value="aligned" ${one.alternate_ends === true ? "" : "selected"}>Aligned</option>
             <option value="alternate" ${one.alternate_ends === true ? "selected" : ""}>Alternate ends</option>
@@ -412,7 +421,10 @@ function renderDraftFields() {
           // One field, two readings. Alternate ends on: the clearance kept at each
           // run end (writes end_margin). Off: a signed slide of the whole row along
           // the bin (writes run_offset). Each key keeps its own last value.
-          const alternating = one.alternate_ends === true;
+          // Fix 1127: at Quantity 1 the layout reads as aligned (the select is
+          // hidden there), so the single trough offers Offset from center - the
+          // control that actually moves it - not the inert From ends.
+          const alternating = one.alternate_ends === true && !cradleSingle;
           const key = alternating ? "end_margin" : "run_offset";
           const label = alternating ? "From ends" : "Offset from center";
           const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);

@@ -55,7 +55,10 @@ function updateDraftFromFields(event) {
     }
   }
   if (info.flags.alternate) {
-    one.alternate_ends = get("alternate_ends") === "alternate";
+    // Fix 1127: the End layout select is hidden for a single-trough Cradle,
+    // and absent during the 1→2 crossing before re-render restores it; its
+    // absence must not reset a stored choice made at a higher quantity.
+    if ($(`[data-draft="alternate_ends"]`, $("#draft-fields"))) one.alternate_ends = get("alternate_ends") === "alternate";
   }
   if (info.flags.item) {
     const item = one.item || starterItem();
@@ -544,6 +547,8 @@ function updateDraftFromFields(event) {
     changed === "option:count_x" || changed === "option:count_y"
   )) renderDraftFields();
   if (one.kind === "post" && changed === "count") renderDraftFields();
+  // Fix 1127: the End layout select appears/disappears as Quantity crosses 1.
+  if (one.kind === "cradle" && changed === "count") renderDraftFields();
   updateSelectionButtons();
   renderLayout2D();
   syncDraftFieldProblems();
