@@ -364,7 +364,9 @@ function syncDraftEditorIdentity(kind, info) {
   // Fix 081 C: Bore now identifies itself above its settings like every
   // other kind, so its editor no longer needs a standalone "Type" card to
   // stand in for a name.
-  title.hidden = isNest;
+  // Fix 1135: the blue feature bar already identifies the Scoop, so the
+  // "Curved Scoop" heading above its fields is redundant.
+  title.hidden = isNest || kind === "scoop";
   // Fix 058 Correction 1, C1.4A: the palette keeps its short description for
   // discoverability, but the Edge Mount editor's own Label/Screw Mounting
   // hierarchy makes the redundant "Add a label and/or screw mounting..."
