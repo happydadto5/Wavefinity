@@ -164,6 +164,7 @@
     const drawerRows = el("div", "sd-drawer-rows"); drawersGroup.append(drawerRows);
     const cabinet = group(form, "Cabinet"); cabinet.classList.add("sd-cabinet-group");
     const style = select(block.cabinet_style, [["full", "Full"], ["open", "Open"]]);
+    style.title = "Full hides the drawer rails behind solid side panels. Open uses slim frames so the rails stay visible.";
     const rear = select(block.rear_support, [["cross", "Rear cross"], ["solid", "Rear solid"]]);
     rear.title = "Rear cross is an X brace that uses less filament. Rear solid is a full back panel.";
     const wallMounting = select(block.wall_mounting, [["off", "Off"], ["keyholes", "Keyholes"]]);
