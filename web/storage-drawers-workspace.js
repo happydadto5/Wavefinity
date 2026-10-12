@@ -89,6 +89,20 @@
       status.textContent = code === "recovery_error" && current.structuralStatus.message
         ? current.structuralStatus.message
         : ({ saved: "Cabinet files saved", need_update: "Cabinet files need update", need_save: "Cabinet files need save" })[code] || "Cabinet files need save";
+      // Fix 1108: immediate pending state while a cabinet structural operation
+      // runs. The flag arrives on the workspace state from SP.structuralBusy -
+      // the existing side-effect owner - so the second click cannot silently
+      // do nothing: the buttons are disabled for the whole operation.
+      const structuralBusy = Boolean(current.structuralBusy);
+      save.disabled = structuralBusy;
+      print.disabled = structuralBusy;
+      printBoth.disabled = structuralBusy;
+      if (structuralBusy) {
+        status.textContent = current.structuralBusyLabel || "Working…";
+        save.title = print.title = printBoth.title = "A cabinet operation is already running.";
+      } else {
+        save.title = print.title = printBoth.title = "";
+      }
       fit.textContent = current.summary?.fits_printer ? "Fits printer" : current.summary?.first_fit_error || "";
       fit.classList.toggle("bad", Boolean(current.summary) && !current.summary.fits_printer);
     };

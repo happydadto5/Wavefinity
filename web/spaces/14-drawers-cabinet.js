@@ -338,6 +338,11 @@ SP.updateCabinetWorkspace = () => {
       space: state.activeSpace, layout: DL.layout, editing: Boolean(SP.editing),
       structuralStatus: SP.cabinetInfo.status, summary: SP.cabinetInfo.summary,
       printer: PrinterProfile.current(), recovery: state.cabinetRecovery || null,
+      // Fix 1108: feed the existing structural-operation busy state into the
+      // workspace renderer so Save/Print show an immediate pending state and
+      // disable while running. Reuses SP.structuralBusy - no second tracker.
+      structuralBusy: Boolean(SP.structuralBusy),
+      structuralBusyLabel: SP.structuralBusyLabel || "",
     };
     if (!SP.cabinetWorkspace) {
       SP.cabinetWorkspace = StorageDrawersWorkspace.mount({ host, state: data, callbacks: SP.cabinetCallbacks() });
@@ -462,6 +467,7 @@ SP.printCabinetAndBins = async event => {
   let wroteFiles = false;
   const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\\\/]/).pop()))].join("\\n");
   SP.structuralBusy = true;
+  SP.structuralBusyLabel = "Preparing cabinet and bins…";
   SP.renderSpaceInfo();
   try {
     DL.requireSpaceContext(context);
@@ -496,6 +502,7 @@ SP.printCabinetAndBins = async event => {
     }
   } finally {
     SP.structuralBusy = false;
+    SP.structuralBusyLabel = "";
     SP.cabinetInfo.commitSerial += 1;
     SP.renderSpaceInfo();
   }
@@ -524,6 +531,7 @@ SP.runCabinetStructural = async mode => {
   let wroteFiles = false;
   const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\/]/).pop()))].join("\n");
   SP.structuralBusy = true;
+  SP.structuralBusyLabel = mode === "save" ? "Saving cabinet…" : "Printing cabinet…";
   SP.renderSpaceInfo();
   try {
     let saved;
@@ -558,6 +566,7 @@ SP.runCabinetStructural = async mode => {
     }
   } finally {
     SP.structuralBusy = false;
+    SP.structuralBusyLabel = "";
     SP.cabinetInfo.commitSerial += 1;
     SP.renderSpaceInfo();
   }
