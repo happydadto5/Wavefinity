@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
+
 import trimesh
 from shapely.affinity import translate
-from shapely.geometry import box as shapely_box
+from shapely.geometry import Polygon, box as shapely_box
 from shapely.ops import unary_union
 from organizer_engine import BoxSpec
 from organizer_geometry import _extrude_polygon, difference, union
@@ -13,6 +15,48 @@ from ._consts import WALL_ONLY_FOOT, FLOOR_OVERTRAVEL, JOIN_BAND
 from ._walls import _wall_only_ring, _union
 from .._walljoin import _join_tabs, _polygons, _tab_meshes
 from ._grid import _bore_hole_centres
+
+
+# Overlay-noise cleanup for the wavy-base cavity (Fix 1073). A neighbour's
+# ring biting into a hole's wavy cavity is a near-tangent intersection of two
+# identical sine-displaced outlines, so the shapely overlay can emit a
+# zero-area sliver, or a duplicate vertex (a 1e-16 edge) that earcut
+# triangulates into a non-watertight solid — which manifold then rejects with
+# "Not all meshes are volumes!". Both artifacts are far below any printable
+# feature, so they are removed, not worked around per profile.
+_CAVITY_SLIVER_AREA = 1e-4  # mm^2; cavity pieces smaller than this are dropped
+_CAVITY_DEDUP_TOL = 1e-9    # mm; merges only float-noise duplicate vertices
+
+
+def _deduped_ring(coords):
+    """Drop consecutive vertices closer than _CAVITY_DEDUP_TOL."""
+    pts = [(float(x), float(y)) for x, y in coords]
+    kept = []
+    for pt in pts:
+        if not kept or math.hypot(pt[0] - kept[-1][0], pt[1] - kept[-1][1]) > _CAVITY_DEDUP_TOL:
+            kept.append(pt)
+    if len(kept) > 1 and math.hypot(kept[0][0] - kept[-1][0],
+                                   kept[0][1] - kept[-1][1]) <= _CAVITY_DEDUP_TOL:
+        kept.pop()
+    return kept
+
+
+def _deduped_polygon(piece):
+    """Rebuild a cavity piece without float-noise duplicate vertices."""
+    exterior = _deduped_ring(piece.exterior.coords)
+    holes = [_deduped_ring(ring.coords) for ring in piece.interiors]
+    return Polygon(exterior, [hole for hole in holes if len(hole) >= 3])
+
+
+def _clean_cavity(cavity):
+    """Drop overlay slivers and collapse duplicate vertices.
+
+    Returns a Polygon/MultiPolygon safe to extrude and to pass as
+    keep-clear geometry to _join_tabs.
+    """
+    pieces = [_deduped_polygon(piece) for piece in _polygons(cavity)
+              if piece.area >= _CAVITY_SLIVER_AREA]
+    return unary_union(pieces) if pieces else cavity
 
 
 def _build_wall_only_bore(
@@ -110,6 +154,9 @@ def _build_wavy_base_bore(
     walls = unary_union([translate(ring, x, y) for x, y in centres])
     cavity = unary_union([translate(inner, x, y) for x, y in centres]).difference(walls)
     cavity = cavity.union(unary_union([translate(clear, x, y) for x, y in centres]))
+    # Fix 1073: clean overlay noise before extrusion (and before the cavity
+    # is reused as keep-clear geometry for wall joining below).
+    cavity = _clean_cavity(cavity)
     body = trimesh.creation.box(extents=(2.0 * half_x, 2.0 * half_y, height))
     body.apply_translation((cx, cy, base_z + height / 2.0))
     # A cavity as deep as the Bore is tall reaches the normal bin floor; a hair

@@ -1809,6 +1809,24 @@ class BoreWavyBaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "touching the wall"):
             build_features(box, [one], box.base_thickness)
 
+    def test_wavy_base_multi_hole_with_default_wall_builds_watertight(self) -> None:
+        # Fix 1073: a base_wavy round Bore with 2+ holes at the production
+        # default wall (box.wall = 0.8 here — the other tests pin wall 1.6)
+        # crashed with "ValueError: Not all meshes are volumes!". The
+        # neighbour ring's bite into the wavy cavity leaves shapely overlay
+        # noise (a 1e-16 duplicate vertex, a zero-area sliver) that earcut
+        # turns into a non-watertight cut.
+        zone = Zone(-40.0, -40.0, 40.0, 40.0)
+        for columns, rows in ((1, 2), (2, 2)):
+            one = Feature(
+                "bore", zone, Item.simple("tube", 20.0, 10.0),
+                options={"bore_style": "base_wavy", "height": 24.0,
+                         "depth": 14.0, "columns": columns, "rows": rows},
+            )
+            mesh = build_features(BIN, [one], BIN.base_thickness)[0]
+            self.assertTrue(mesh.is_watertight, (columns, rows))
+            self.assertGreater(mesh.volume, 0.0)
+
 
 class BoreAutoModeTests(unittest.TestCase):
     def _bore(self, **options):
