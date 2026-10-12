@@ -121,7 +121,7 @@ from organizer_inserts._core import ITEM_CLEARANCE, ITEM_PROFILES, feature_touch
 from organizer_drawer import (
     blocking_problem_messages, blocking_problem_copy, drawer_report, drawer_routes, generate_connectors, inventory_row_files,
     prepare_inventory_bins, selected_blocking_problems, stack_part_height,
-    _space_connectors,
+    _space_connectors, _prepare_failure_text,
 )
 from organizer_inventory import (
     append_bin, configure_space_text, design_specs, load_inventory, mark_printed_rows,
@@ -2297,7 +2297,7 @@ def structural_print_combined_payload(payload: dict[str, Any]) -> dict[str, Any]
             return {
                 **cabinet, **prepared["inventory"], "partial": True, "partial_stage": "generate",
                 "error": "Cabinet files were saved, but the bins could not be prepared: "
-                         + _prepare_failure_text(prepared, slicer=True),
+                         + _prepare_failure_text(prepared, slicer_name=slicer_display_name(slicer_path) or "the slicer"),
             }
         rows_files = prepared["files"]
         specs = prepared["specs"]

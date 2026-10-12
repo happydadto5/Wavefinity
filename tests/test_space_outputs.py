@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from space_source import spaces_source
@@ -11,8 +12,11 @@ from unittest.mock import patch
 
 import trimesh
 
+import organizer_drawer
 import wavefinity_web
 from organizer_inventory import (
+    append_bin,
+    save_inventory,
     configure_space,
     configure_space_text,
     load_inventory,
@@ -335,6 +339,110 @@ class StorageDrawersHardeningTests(unittest.TestCase):
         open_narrow, open_wide = _cabinet("open", 10.0), _cabinet("open", 18.0)
         self.assertLess(_make_datum(open_narrow).frame, _make_datum(open_wide).frame)
         self.assertNotEqual(cabinet_outputs.structural_signature(open_narrow), cabinet_outputs.structural_signature(open_wide))
+
+
+def _two_saved_rows(folder):
+    """Create two real bin rows and place both in drawer 1. Returns (bin_a_id, bin_b_id)."""
+    spec = {"layout": {}}
+    append_bin(folder, file="bin-a.3mf", x=48, y=48, z=40, name="Bin A",
+               design_spec=spec, object_height_mm=40.0)
+    append_bin(folder, file="bin-b.3mf", x=48, y=48, z=40, name="Bin B",
+               design_spec=spec, object_height_mm=40.0)
+    inv = load_inventory(folder)
+    rows = inv["bins"]
+    assert len(rows) == 2, "fixture needs exactly two real rows"
+    layout = inv["layout"]
+    layout["drawers"][0]["placements"] = [{"bin": r["id"]} for r in rows]
+    save_inventory(folder, layout=layout)
+    rows = load_inventory(folder)["bins"]
+    assert all(r["status"] == "saved" and r["qty"] == 0 for r in rows)
+    return rows[0]["id"], rows[1]["id"]
+
+
+def _failed_stub(folder, inv, bin_a, bin_b):
+    return {
+        "root": folder, "inventory": inv, "files": {}, "specs": {},
+        "generated": [bin_a], "reused": [],
+        "failed": {"id": bin_b, "name": "Bin B", "error": "export failed"},
+        "unfinished": [bin_b],
+    }
+
+
+class _Fix1102Mixin:
+    def _assert_rows_saved(self, folder, bin_a, bin_b):
+        after = load_inventory(folder)["bins"]
+        self.assertEqual(len(after), 2, "printed-state assertions need the two real rows")
+        by_id = {r["id"]: r for r in after}
+        for one in (bin_a, bin_b):
+            self.assertEqual(by_id[one]["status"], "saved")
+            self.assertEqual(by_id[one]["qty"], 0)
+        self.assertFalse(any(r["status"] == "printed" for r in after))
+
+
+class Fix1102CombinedPrintFailureTests(_Fix1102Mixin, unittest.TestCase):
+    def test_partial_result_names_slicer_without_launch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Space"
+            space = _cabinet()
+            made = configure_space(folder, raw_def=space)
+            _write_metadata(folder, "space", made["layout"]["space"])
+            bin_a, bin_b = _two_saved_rows(folder)
+            payload = {"space": space, "output": str(folder)}
+            payload["space_id"] = describe(folder, {})["space_id"]
+            fake_exe = Path(tmp) / "bambu-studio.exe"
+            fake_exe.write_text("x")
+            stub = _failed_stub(folder, load_inventory(folder), bin_a, bin_b)
+            with patch.object(wavefinity_web, "load_preferences", return_value={}),                  patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),                  patch.object(wavefinity_web, "selected_blocking_problems", return_value=[]),                  patch.object(wavefinity_web, "_materialize_local_cabinet", return_value={"files": []}),                  patch.object(wavefinity_web, "prepare_inventory_bins", return_value=stub),                  patch.object(wavefinity_web, "launch_slicer", return_value=None) as launch:
+                result = wavefinity_web.structural_print_combined_payload(payload)
+            self.assertIs(result["partial"], True)
+            self.assertEqual(result["partial_stage"], "generate")
+            self.assertEqual(
+                result["error"],
+                "Cabinet files were saved, but the bins could not be prepared: Could not prepare Bin B: "
+                "export failed. 1 bin saved before it stopped. Bambu Studio was not opened. Retry to finish the rest.")
+            self.assertIn("bins", result)
+            self.assertIn("layout", result)
+            launch.assert_not_called()
+            self._assert_rows_saved(folder, bin_a, bin_b)
+
+    def test_old_keyword_is_invalid(self):
+        with self.assertRaises(TypeError):
+            wavefinity_web._prepare_failure_text({}, slicer=True)
+
+    def test_import_binding(self):
+        from organizer_drawer._inventory import _prepare_failure_text
+        self.assertIs(wavefinity_web._prepare_failure_text, _prepare_failure_text)
+
+
+class Fix1102PrintCompleteFailureTests(_Fix1102Mixin, unittest.TestCase):
+    def test_value_error_names_detected_slicer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Space"
+            space = _cabinet()
+            configure_space(folder, raw_def=space)
+            bin_a, bin_b = _two_saved_rows(folder)
+            inv = load_inventory(folder)
+            fake_exe = Path(tmp) / "bambu-studio.exe"
+            fake_exe.write_text("x")
+            stub = _failed_stub(folder, inv, bin_a, bin_b)
+            launched = []
+            routes = organizer_drawer.drawer_routes(
+                threading.Lock(), Path(tmp),
+                detect_slicer=lambda p: fake_exe,
+                launch_slicer=lambda *a: launched.append(a),
+                hosted=False)
+            print_complete = routes["/api/drawer/print-complete"]
+            with patch.object(organizer_drawer, "selected_blocking_problems", return_value=[]),                  patch.object(organizer_drawer, "prepare_inventory_bins", return_value=stub):
+                with self.assertRaises(ValueError) as ctx:
+                    print_complete({"output": str(folder), "drawer_id": inv["layout"]["drawers"][0]["id"]})
+            message = str(ctx.exception)
+            self.assertEqual(
+                message,
+                "The bins could not be prepared: Could not prepare Bin B: export failed. "
+                "1 bin saved before it stopped. Bambu Studio was not opened. Retry to finish the rest.")
+            self.assertEqual(message.count("was not opened."), 1)
+            self.assertEqual(launched, [])
+            self._assert_rows_saved(folder, bin_a, bin_b)
 
 
 if __name__ == "__main__":

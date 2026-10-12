@@ -937,8 +937,7 @@ def drawer_routes(
             if prepared["failed"]:
                 raise ValueError(
                     "The bins could not be prepared: "
-                    + _prepare_failure_text(prepared, slicer=True)
-                    + " Bambu Studio was not opened.")
+                    + _prepare_failure_text(prepared, slicer_name=slicer_display_name(slicer) or "The slicer"))
             rows_files = prepared["files"]
             specs = prepared["specs"]
             inventory = prepared["inventory"]
