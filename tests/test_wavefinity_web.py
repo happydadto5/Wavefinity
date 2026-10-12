@@ -2719,5 +2719,29 @@ class Fix1069StorageBoxGenerateBlockTests(unittest.TestCase):
         self.assertIn("Cannot verify", str(ctx.exception))
 
 
+class StorageBoxPreviewWarningCapTests(unittest.TestCase):
+    def test_warning_caps_at_interior_z_not_z_plus_headroom(self):
+        # Fix 1070: the live-preview storage_box_height_warning must cap at
+        # the interior space.z (40), not space.z + lid_headroom_mm (41) —
+        # matching the backend too_tall check and client DL.heightCap().
+        design = default_design()
+        design["box"].update({"x": 48, "y": 48, "z": 40.5})
+        space = {"kind": "portable", "z": 40, "storage_box": {"lid_headroom_mm": 1.0}}
+        result = preview_payload({"design": design, "space": space,
+                                  "client_id": "sb-cap", "generation": 1})
+        warning = result["storage_box_height_warning"]
+        self.assertIsNotNone(warning)
+        self.assertEqual(warning["cap_mm"], 40)
+        self.assertEqual(warning["kind"], "one_bin")
+
+    def test_no_warning_at_or_below_interior_z(self):
+        design = default_design()
+        design["box"].update({"x": 48, "y": 48, "z": 40})
+        space = {"kind": "portable", "z": 40, "storage_box": {"lid_headroom_mm": 1.0}}
+        result = preview_payload({"design": design, "space": space,
+                                  "client_id": "sb-cap-ok", "generation": 1})
+        self.assertIsNone(result["storage_box_height_warning"])
+
+
 if __name__ == "__main__":
     unittest.main()

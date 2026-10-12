@@ -125,7 +125,7 @@ from organizer_drawer import (
 )
 from organizer_inventory import (
     append_bin, configure_space_text, design_specs, load_inventory, mark_printed_rows,
-    normalise_storage_box, resolve_inventory_path,
+    resolve_inventory_path,
 )
 from organizer_engine.product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
