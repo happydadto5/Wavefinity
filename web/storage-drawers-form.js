@@ -487,10 +487,12 @@
       const [fx, fy] = (response.field_mm || []).map(v => fmt(v));
       const heights = (response.drawers || []).map(row => fmt(row.usable_height_mm)).join(", ");
       const material = response.effective_material || {};
+      const parts = response.components || [];
       const lines = [
         line("Finished outside", `${outside.join(" × ")} mm`, "sd-summary-outside"),
         line("Inside each drawer", `${fx} × ${fy} mm`),
         line("Drawers", `${response.drawer_count} · usable height${response.drawer_count === 1 ? "" : "s"} ${heights} mm`),
+        line("Parts", parts.length ? `${parts.length} files: ${parts.map(part => part.name).join(", ")}` : "—"),
         line("Cabinet base / top", `${fmt(material.base_mm)} / ${fmt(material.top_mm)} mm`),
       ];
       if (response.cabinet_style === "open" && material.frame_width_mm) lines.push(line("Open frame width", `${fmt(material.frame_width_mm)} mm`));
