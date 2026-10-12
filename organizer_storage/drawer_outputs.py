@@ -18,8 +18,9 @@ from organizer_storage.drawers import normalise_storage_drawers_definition
 from organizer_storage.drawer_geometry import resolve_storage_drawers_plan
 
 STRUCTURAL_OUTPUT_KEY = "storage_drawers"
-# Version 3: Fix 096 wall-mount settings participate in structural currentness.
-STRUCTURAL_GENERATOR_VERSION = 3
+# Version 4: Fix 1113 — Fix 114 changed runner, dovetail, pull, top-retention and
+# support geometry, so pre-114 saved manifests must report needs-update.
+STRUCTURAL_GENERATOR_VERSION = 4
 # The exact app-owned namespace for temp files and rollback backups in a Space folder.
 CABINET_DEBRIS_PREFIX = ".wavefinity-cabinet-"
 # (Fix 096 A7) The local transaction namespace: only files under this prefix
