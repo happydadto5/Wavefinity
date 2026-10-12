@@ -606,6 +606,23 @@ def _datum_components(space, datum):
                                            max(bed_x, inner_head)+SD_JOINT_CLEARANCE_MM,
                                            end-SD_TOP_DETENT_LENGTH_MM-SD_JOINT_CLEARANCE_MM,
                                            end+SD_JOINT_CLEARANCE_MM, z0, pocket_top))
+                # Fix 1115 (Opus M2): the Top slides from back toward front,
+                # so in the Top's frame the fixed bump first enters the groove
+                # at the front/low-Y end (datum.front-0.2) and travels rearward
+                # to the seat. Open a flat relief channel along that travel
+                # path, from the entry up to the pocket's ramp start, at the
+                # pocket roof height; the pocket's own gentle slopes stay as
+                # the short ramp before the seat. Y bounds ascend
+                # (datum.front-0.2 < pocket_y0) so _box builds a
+                # positive-volume cutter.
+                pocket_y0 = end-SD_TOP_DETENT_LENGTH_MM-SD_JOINT_CLEARANCE_MM
+                # pocket_top is a height RELATIVE to z0 (as in _catch_bump,
+                # which reaches z0+pocket_top); the flat cutter's z1 must be
+                # the absolute coordinate z0+pocket_top, not pocket_top alone.
+                cutters.append(_box(min(bed_x, inner_head)-SD_JOINT_CLEARANCE_MM,
+                                    datum.front-0.2, z0,
+                                    max(bed_x, inner_head)+SD_JOINT_CLEARANCE_MM,
+                                    pocket_y0, z0+pocket_top))
         if not top:
             rear_t = block["cabinet_wall_mm"]
             cutters.append(_box(datum.track_reach-SD_JOINT_CLEARANCE_MM,

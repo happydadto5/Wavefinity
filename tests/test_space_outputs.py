@@ -36,7 +36,15 @@ from organizer_outputs.space import (
 from organizer_spaces import _write_metadata, describe
 import organizer_storage.drawer_outputs as cabinet_outputs
 from organizer_engine import BASE_UNIT
-from organizer_storage.drawer_geometry import _make_datum, resolve_storage_drawers_plan
+from organizer_storage.drawer_geometry import (
+    SD_FRONT_SHOULDER_MM,
+    SD_JOINT_CLEARANCE_MM,
+    SD_TOP_DETENT_BUMP_MM,
+    SD_TOP_DETENT_INTERFERENCE_MM,
+    SD_TOP_DETENT_LENGTH_MM,
+    _make_datum,
+    resolve_storage_drawers_plan,
+)
 from organizer_storage.drawers import prepare_new_storage_drawers_definition
 
 CASE = {"name": "Screw case", "kind": "portable", "x": 96, "y": 96, "z": 40}
@@ -505,6 +513,60 @@ class Fix1102PrintCompleteFailureTests(_Fix1102Mixin, unittest.TestCase):
             self.assertEqual(message.count("was not opened."), 1)
             self.assertEqual(launched, [])
             self._assert_rows_saved(folder, bin_a, bin_b)
+
+
+class Fix1115ReliefChannelTests(unittest.TestCase):
+    """Fix 1115: the Top's detent bump gets a relief channel from the groove entry to the seat."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.space = _cabinet()
+        cls.datum = _make_datum(cls.space)
+        plan = resolve_storage_drawers_plan(cls.space, build_meshes=True)
+        cls.top = next(c for c in plan.components if c.key == "cabinet_top").mesh
+        cls.z0 = cls.datum.outer_z - cls.datum.top
+        cls.pocket_top = SD_TOP_DETENT_BUMP_MM + SD_JOINT_CLEARANCE_MM - SD_TOP_DETENT_INTERFERENCE_MM
+        cls.end = cls.datum.rear - SD_FRONT_SHOULDER_MM - 2.0
+        cls.pocket_y0 = cls.end - SD_TOP_DETENT_LENGTH_MM - SD_JOINT_CLEARANCE_MM
+
+    def _first_hit_z(self, x, y, z_start=None):
+        """Height of the first upward surface hit above z_start at (x, y), or None."""
+        from trimesh.ray.ray_triangle import RayMeshIntersector
+        z_start = self.z0 - 5.0 if z_start is None else z_start
+        locations, index_ray, _ = RayMeshIntersector(self.top).intersects_location(
+            [[x, y, z_start]], [[0.0, 0.0, 1.0]])
+        hits = [loc[2] for loc, ray in zip(locations, index_ray) if ray == 0]
+        return min(hits) if hits else None
+
+    def test_channel_covers_full_travel_path(self):
+        x = self.datum.track_reach / 2
+        # The plate starts at datum.front and the pocket edge is pocket_y0, so the
+        # sweep runs between them (the endpoints themselves sit on the plate edge
+        # and the pocket's own edge, not in the travel path).
+        start, stop = self.datum.front + 0.2, self.pocket_y0 - 0.2
+        stations = [start + i * (stop - start) / 11 for i in range(12)]
+        for y in stations:
+            with self.subTest(y=y):
+                z = self._first_hit_z(x, y)
+                self.assertIsNotNone(z)
+                self.assertAlmostEqual(z, self.z0 + self.pocket_top, delta=0.05)
+
+    def test_cutter_bounds_ascend(self):
+        self.assertGreater(self.pocket_y0, self.datum.front - 0.2)
+
+    def test_pocket_and_bump_untouched(self):
+        self.assertEqual(SD_TOP_DETENT_BUMP_MM, 0.4)
+        self.assertEqual(SD_TOP_DETENT_INTERFERENCE_MM, 0.2)
+        self.assertEqual(SD_TOP_DETENT_LENGTH_MM, 6.0)
+        x = self.datum.track_reach / 2
+        z = self._first_hit_z(x, self.end - 3.0)
+        self.assertAlmostEqual(z, self.z0 + self.pocket_top, delta=0.05)
+        z = self._first_hit_z(x, self.end + 1.0)
+        self.assertAlmostEqual(z, self.z0 + 0.2, delta=0.05)
+
+    def test_top_watertight_positive_volume(self):
+        self.assertTrue(self.top.is_watertight)
+        self.assertGreater(self.top.volume, 0)
 
 
 if __name__ == "__main__":
