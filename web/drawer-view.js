@@ -381,6 +381,21 @@ DV.render = () => {
   DV.hits = DL.isPegboard(drawer) ? DV.paintPegboardScene(ctx, drawer, DV.cam) : DV.paintScene(ctx, drawer, DV.cam);
   // Taking a bin off the Space is a drop onto the staging rail beside it.
   $("#dl-staging")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.outside));
+  // The yellow/red height rims only exist for box/drawer spaces (Fix 1068),
+  // so their legend only shows there. The legend describes the rule the
+  // rims evaluate (Fix 1091 + Fix 1098 option A): drawers enforce the 2 mm
+  // running clearance as a hard cap — safe max = usable drawer height − 2 mm;
+  // boxes compare against the raw interior.
+  const heightLegend = $("#dl-height-legend");
+  if (heightLegend) {
+    const showRims = DL.isStorageBox() || DL.isStorageDrawers();
+    heightLegend.hidden = !showRims;
+    if (showRims) {
+      heightLegend.textContent = DL.isStorageDrawers()
+        ? "Yellow rim: the bin stack is below the safe height (drawer inside height minus 2 mm running clearance) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam"
+        : "Yellow rim: the bin stack is shorter than the inside height · Red rim: the bin stack is taller than the inside height — the lid will not close";
+    }
+  }
 };
 
 DV.paintPegboardScene = (ctx, drawer, cam) => {
@@ -675,16 +690,20 @@ DV.paintScene = (ctx, drawer, cam) => {
     });
     labels.forEach(({ path, face: topFace, ink }) => DV.drawLabel(ctx, { layers: path }, topFace, ink));
     // Fix 1068: yellow/red rim for under-/over-height bins (Storage Box / Drawer).
-    // Thresholds are literal vs the interior Z (Fix 1069): red when the stack
-    // top exceeds the interior, yellow for any stack top strictly below it.
+    // Fix 1098 (Opus H1, option A): for Storage Drawers the threshold is the
+    // safe max — usable drawer height minus 2 mm running clearance, the same
+    // hard rule New Bin applies and the Layout report enforces. Storage Box
+    // still compares against the raw interior. Red when the stack top exceeds
+    // the threshold, yellow for any stack top strictly below it.
     if (!entry.ghost && (DL.isStorageBox() || DL.isStorageDrawers()) &&
         entry.layers.some(layer => !DL.isSpacer(layer.bin))) {
       const interior = DL.isStorageBox() ? Number(DL.layout.space.z) : Number(drawer.height);
+      const threshold = DL.isStorageDrawers() ? interior - 2 : interior;
       const stackTop = Math.max(0, ...entry.layers.map(layer => Number(layer.z1) || 0));
       let rim = null;
-      if (interior > 0) {
-        if (stackTop > interior + 1e-6) rim = "#d43d2f";
-        else if (stackTop < interior - 1e-6) rim = "#e0a100";
+      if (threshold > 0) {
+        if (stackTop > threshold + 1e-6) rim = "#d43d2f";
+        else if (stackTop < threshold - 1e-6) rim = "#e0a100";
       }
       if (rim) {
         // Stack-level footprint: the ACTUAL union perimeter of all layer
@@ -1298,7 +1317,8 @@ DV.buildOverlay = () => {
     </div>
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
     <div id="dl-empty-state" class="dl-empty-state" hidden></div>
-    <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>`);
+    <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
+    <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden>Yellow rim: the bin stack is below the safe height (drawer inside height minus 2 mm running clearance) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam</div>`);
   // The staging rail sits immediately beside the physical Space, before the canvas.
   wrap.insertAdjacentHTML("afterbegin", `
     <aside id="dl-staging" class="dl-staging" aria-label="Unplaced bins">

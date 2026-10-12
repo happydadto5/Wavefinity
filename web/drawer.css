@@ -116,6 +116,8 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 /* The camera controls and hint float over the canvas, not over the rail. */
 .canvas-wrap[data-canvas="drawer"] .dl-view-controls { left: 202px; }
 .canvas-wrap[data-canvas="drawer"] .dl-hint { left: 202px; }
+/* Fix 1091: legend for the yellow/red bin-height rims; sits above the hint. */
+.canvas-wrap[data-canvas="drawer"] .dl-height-legend { left: 202px; bottom: 54px; }
 .dl-staging.receiving { background: var(--teal-soft); box-shadow: inset -3px 0 0 var(--teal); }
 .dl-staging.has-selection .dl-staging-head strong { color: var(--teal-dark); }
 .dl-staged .dl-swatch { width: 34px; }
@@ -203,7 +205,7 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 }
 
 @media (max-width: 700px) {
-  .canvas-wrap[data-canvas="drawer"] .dl-view-controls, .canvas-wrap[data-canvas="drawer"] .dl-hint { left: 10px; }
+  .canvas-wrap[data-canvas="drawer"] .dl-view-controls, .canvas-wrap[data-canvas="drawer"] .dl-hint, .canvas-wrap[data-canvas="drawer"] .dl-height-legend { left: 10px; }
   .canvas-wrap[data-canvas="drawer"] .dl-view-controls { top: 146px; }
   .canvas-wrap[data-canvas="drawer"].active { flex-direction: column; }
   .dl-staging { flex: 0 0 auto; width: auto; max-height: 132px; border-right: 0; border-bottom: 1px solid var(--line-dark); }
