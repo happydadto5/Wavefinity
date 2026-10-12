@@ -1858,18 +1858,18 @@ body.relocating > :not(dialog) { pointer-events: none; }
   line-height: 1.45;
   color: var(--teal-dark);
 }
+/* Fix 1122: Bin Name used an inline label + input row while every other
+   designer field (Width / Depth / Height, mode selects) is label-above-input,
+   so its label baseline and input alignment never matched the header. Use the
+   same label-over-input geometry as the other fields. */
 .part-name-row {
-  display: flex;
-  flex: 1 1 120px;
-  min-width: 108px;
-  align-items: center;
-  gap: 4px;
+  display: block;
   margin: 0;
   font-size: 12px;
   font-weight: 700;
   color: var(--muted);
 }
-.part-name-row input { min-width: 45px; max-width: 180px; margin: 0; flex: 1; padding: 9px 10px; font-size: 13px; font-weight: 650; color: var(--ink); }
+.part-name-row input { width: 100%; margin: 5px 0 0; padding: 9px 10px; font-size: 13px; font-weight: 650; color: var(--ink); }
 
 @media (max-width: 420px) {
   .support-palette { grid-template-columns: repeat(2, minmax(0, 1fr)); }
