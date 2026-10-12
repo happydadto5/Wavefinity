@@ -849,13 +849,17 @@ def _datum_components(space, datum):
             for left in (True, False):
                 x = x0-datum.drawer_wall if left else x0+datum.field_x+datum.drawer_wall
                 a, b = (x-SD_RAIL_LEDGE_MM, x+0.4) if left else (x-0.4, x+SD_RAIL_LEDGE_MM)
-                # V-02: the fit setting sets running clearance, never bearing.
-                # Uncompensated bearing is 0.8-fit per side (0.20 mm at Loose);
-                # extend the runner bar toward the rail so engagement never
-                # drops below the proven Standard value of 0.40 mm per side:
-                # Tight/Standard/Loose are 0.50/0.40/0.40, with vertical
-                # clearances still exactly datum.fit.
-                _bearing_makeup = max(0.0, datum.fit - 0.40)
+                # Fix 1100 (Opus H3, PLAUSIBLE): the fit setting sets running
+                # clearance, never bearing. Bearing was 0.8-fit per side (0.40
+                # mm at Standard/Loose) — hypothesized too narrow to resist
+                # yaw once the drawer is pulled out. Extend the runner bar
+                # toward the rail so engagement never drops below 1.20 mm per
+                # side (the ledge is 2.4 mm wide; the runner's rail-side edge
+                # stays 1.4 mm inside the ledge's rail-side edge), with
+                # vertical clearances still exactly datum.fit. 1.20 mm is a
+                # hypothesis, not a proven sufficient value — the pre-release
+                # gate in this contract is what proves it.
+                _bearing_makeup = max(0.0, datum.fit + 0.40)
                 main_a, main_b = ((a-_bearing_makeup, a+1.0) if left
                                   else (b-1.0, b+_bearing_makeup))
                 runners.append(_runner(main_a, main_b, datum.front+SD_RAIL_LEADIN_MM,
