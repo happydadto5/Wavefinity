@@ -80,11 +80,21 @@ def _divider_grid_texts(
             continue
         avail_w = max(0.5, cell_w - 0.4)
         avail_d = max(0.5, cell_d - 0.4)
+        # Fix 1132: base-level division label orientation. "front_to_back"
+        # rotates the lettering 90 degrees so it reads front-to-back; the cap
+        # then fits the text's long dimension along the cell depth instead of
+        # the width. Absent (legacy designs) stays unrotated - the de-facto
+        # side-to-side layout.
+        front_to_back = str(options.get("division_label_orientation", "")).strip().lower() == "front_to_back"
         cap = max(2.5, min(avail_d, avail_w / (pw / 10.0)))
+        if front_to_back:
+            cap = max(2.5, min(avail_w, avail_d / (pw / 10.0)))
         try:
             outline = text_outline(text, cap)
         except Exception:
             continue
+        if front_to_back:
+            outline = affinity.rotate(outline, 90.0, origin=(0.0, 0.0), use_radians=False)
         outline = affinity.translate(
             outline, xoff=(x0 + x1) / 2.0, yoff=(y0 + y1) / 2.0
         )
@@ -489,8 +499,26 @@ def divider_division_texts(
         # only a hair of slack is needed here to keep glyph edges off the line.
         avail_run = max(0.5, slot_run - 0.4)
         avail_across = max(0.5, slot_across - 0.4)
+        # Fix 1132: base-level division label orientation. An explicit choice
+        # wins; absent (legacy designs) keeps the de-facto orientation -
+        # lettering along the divider run (rotated when along == "y").
+        # The cap math is written for the pre-rotation frame (text laid out
+        # horizontally, then rotated): it is already correct for the legacy
+        # rotation, so the run/across swap applies ONLY when the chosen
+        # rotation differs from the legacy one - otherwise legacy along=="y"
+        # labels would silently shrink.
+        orientation = str(options.get("division_label_orientation", "")).strip().lower()
+        if orientation == "front_to_back":
+            rotate_label = True
+        elif orientation == "side_to_side":
+            rotate_label = False
+        else:
+            rotate_label = (along == "y")
         cap_by_across = avail_across
         cap_by_run = avail_run / (pw / 10.0)
+        if rotate_label != (along == "y"):
+            cap_by_across = avail_run
+            cap_by_run = avail_across / (pw / 10.0)
         cap = max(2.5, min(cap_by_across, cap_by_run))
 
         try:
@@ -498,7 +526,7 @@ def divider_division_texts(
         except Exception:
             continue
 
-        if along == "y":
+        if rotate_label:
             outline = affinity.rotate(outline, 90.0, origin=(0.0, 0.0), use_radians=False)
 
         cx = (label_x0 + label_x1) / 2.0

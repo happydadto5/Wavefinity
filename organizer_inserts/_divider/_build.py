@@ -49,6 +49,11 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
     return {
         "wall_style": "straight",
         "thickness": RIB_THICKNESS,
+        # Fix 1132: default matches the de-facto grid layout (lettering
+        # unrotated, reading side to side). Legacy designs carry no explicit
+        # option and keep their geometry via the explicit-vs-absent rules in
+        # _divider_grid_texts / divider_division_texts.
+        "division_label_orientation": "side_to_side",
         "height": connector_keep_out(box) - base_z,
         "angle": 0.0,
         # Fence-post spacing: this many equal gaps fill the zone's cross
@@ -153,6 +158,7 @@ def _divider_scoops(
         OptionDefinition("Division level", "division_level", "base", "enum", False, choices=(("base", "Base"), ("rim", "Rim")), note="where division labels sit"),
         OptionDefinition("Division side", "division_side", "back", "enum", False, choices=SIDE_CHOICES, note="rim side that carries division labels (division_level = rim)"),
         OptionDefinition("Division labels", "division_labels", (), "json", False, note="list of label texts, one per compartment, when label_divisions is true"),
+        OptionDefinition("Division label orientation", "division_label_orientation", "side_to_side", "enum", False, choices=(("side_to_side", "Side to side"), ("front_to_back", "Front to back")), note="lettering direction of base-level division labels; front_to_back rotates the text 90 degrees so it reads front to back"),
         OptionDefinition("Compartment spans", "compartment_spans", (), "json", False, note="optional list describing merged compartments; leave empty unless merging"),
         OptionDefinition("Compartment Scoop", "scoop", {}, "json", False, note="optional object {enabled, ...} adding a scoop to every compartment; leave empty for none"),
     ), order=60,

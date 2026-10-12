@@ -44,6 +44,12 @@ function updateDraftFromFields(event) {
         cx + insideW / 2 + reach, cy + insideD / 2 + reach];
     }
   }
+  // Fix 1132: divider base-label orientation is a string enum, not a number -
+  // mirror the wall_style pattern so the generic numeric option: branch never
+  // sees it. Whitelist the two values; anything else falls back to the default.
+  if (one.kind === "divider" && changed === "option:division_label_orientation") {
+    one.options.division_label_orientation = get(changed) === "front_to_back" ? "front_to_back" : "side_to_side";
+  }
   if (info.flags.qty && one.kind !== "divider" && changed === "count") {
     const count = String(get("count") ?? "auto").trim().toLowerCase();
     one.count = one.kind === "steps"
@@ -345,7 +351,7 @@ function updateDraftFromFields(event) {
   }
   if (changed.startsWith("option:") &&
       !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom",
-        "slope_base", "bottom_mode", "slope_construction", "label_divisions", "label_type", "division_level", "division_side", "division_labels",
+        "slope_base", "bottom_mode", "slope_construction", "label_divisions", "label_type", "division_level", "division_side", "division_labels", "division_label_orientation",
         "level", "rim_side", "text_type",
         "lift_assist", "finger_position", "push_position", "angle_towards",
         "bore_style", "wall_style", "xy_size_mode", "height_size_mode", "holder_style", "auto_size", "repeat_spacing_percent"]

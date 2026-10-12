@@ -636,6 +636,15 @@ function renderDraftFields() {
         <option value="base" ${labelType === "base" ? "selected" : ""}>On base</option>
         <option value="rim" ${labelType === "rim" ? "selected" : ""}>Rim level</option>
       </select></label>`;
+      // Fix 1132: orientation only applies to base-level (floor) labels -
+      // "on base ... is the only one that would be relevant" (hopper H3).
+      if (labelType === "base") {
+        const labelOrientation = opt.division_label_orientation ?? state.draftResolvedOptions?.division_label_orientation ?? "side_to_side";
+        html += `<label>Label orientation<select data-draft="option:division_label_orientation">
+          <option value="side_to_side" ${labelOrientation === "side_to_side" ? "selected" : ""}>Side to side</option>
+          <option value="front_to_back" ${labelOrientation === "front_to_back" ? "selected" : ""}>Front to back</option>
+        </select></label>`;
+      }
 
       if (hasLabels) {
         // A cell per compartment: (Qty X + 1) columns by (Qty Y + 1) rows,
