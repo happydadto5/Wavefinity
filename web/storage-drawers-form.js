@@ -165,6 +165,7 @@
     const cabinet = group(form, "Cabinet"); cabinet.classList.add("sd-cabinet-group");
     const style = select(block.cabinet_style, [["full", "Full"], ["open", "Open"]]);
     const rear = select(block.rear_support, [["cross", "Rear cross"], ["solid", "Rear solid"]]);
+    rear.title = "Rear cross is an X brace that uses less filament. Rear solid is a full back panel.";
     const wallMounting = select(block.wall_mounting, [["off", "Off"], ["keyholes", "Keyholes"]]);
     const keyholeCount = select(String(block.wall_mount_keyholes_per_drawer), [["2", "2 — left and right"], ["4", "4 — two rows, left and right"]]);
     const keyholeCountField = labeled("Keyholes per drawer level", keyholeCount);
