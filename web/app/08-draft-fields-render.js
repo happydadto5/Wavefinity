@@ -264,7 +264,7 @@ function renderDraftFields() {
         : `<div class="editor-group"><span class="editor-group-label">Size</span><div class="draft-triple">${sizeFieldsHtml}</div></div>`;
       if (isSlot) {
         const geometryFieldsHtml = fieldFor("thickness", "Slot width", { unit: "mm", min: "0.1" })
-          + fieldFor("depth", "Slot depth", { unit: "mm", min: "0.1" })
+          + fieldFor("depth", "Slot depth", { unit: "mm", step: "0.01", min: "0.1" })
           + fieldFor("angle", "Tilt angle", { unit: "°", min: "0", max: "45" });
         html += `<div class="editor-group slot-rack-fields"><div class="draft-triple">${geometryFieldsHtml}</div></div>`;
       }
