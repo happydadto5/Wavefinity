@@ -635,7 +635,16 @@ def preview_geometry(
                             # still draw the uncut ledge.
                             if draft_error is None:
                                 draft_error = f"text pocket: {pocket_error}"
-                    solids = [draft_ledge, *solids]
+                    # Error branch: the ledge is emitted directly, but
+                    # it keeps the invalid kind. Under its saved-path
+                    # kind here it would render in its furniture colour
+                    # and the shelf - most of the rim block - would stop
+                    # signalling that this draft is invalid. (The normal
+                    # branch, Change 2, emits the saved-path kind.)
+                    start = len(geometry)
+                    geometry.extend(_mesh_preview_geometry(draft_ledge, "draft_invalid"))
+                    for face_index in range(start, len(geometry)):
+                        pick_faces[face_index] = {"type": "draft"}
                 if solids:
                     draft_overhang_mm = round(max(
                         0.0, max(float(s.bounds[1][2]) for s in solids) - box.z,
@@ -683,7 +692,15 @@ def preview_geometry(
                             # still draw the uncut ledge.
                             if draft_error is None:
                                 draft_error = f"text pocket: {pocket_error}"
-                    solids = [draft_ledge, *solids]
+                    # The ledge keeps its saved-path kind instead of the
+                    # draft kind: tagged "draft_text" it would take the
+                    # same draft highlight colour as the glyph, and an
+                    # inlaid glyph - flush, coplanar, same colour - would
+                    # vanish against its own shelf while editing.
+                    start = len(geometry)
+                    geometry.extend(_mesh_preview_geometry(draft_ledge, "top_label_ledge"))
+                    for face_index in range(start, len(geometry)):
+                        pick_faces[face_index] = {"type": "draft"}
                 if solids:
                     draft_overhang_mm = round(max(
                         0.0, max(float(s.bounds[1][2]) for s in solids) - box.z,

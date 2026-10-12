@@ -211,5 +211,54 @@ class BoreWebTests(unittest.TestCase):
         self.assertLess(span_wavy, 1.2 + 2.5 * WAVE_AMPLITUDE)
 
 
+class DraftRimLabelPreviewKindTests(unittest.TestCase):
+    """Fix 1136: while a rim Label is being edited, its shelf and its
+    lettering must reach the preview under different kinds. Under one
+    shared draft kind both take the draft highlight colour, and the
+    inlaid lettering - flush and coplanar with the shelf - cannot be
+    seen against it."""
+
+    def setUp(self):
+        self.box = BoxSpec(64, 64, 40, base_thickness=1.2, standard_base=False)
+
+    def rim(self, raised=False):
+        return text_feature(self.box, level="rim", side="back",
+                            raised=raised, cap=5.0)
+
+    def test_draft_rim_ledge_and_glyph_carry_distinct_kinds(self):
+        for raised in (False, True):
+            scene = app.preview_geometry(
+                self.box, "", (), "fused", draft=self.rim(raised))
+            self.assertIsNone(scene["draft_error"])
+            kinds = {(kind, layer) for _points, kind, _normal, layer, _owner
+                     in scene["geometry"]}
+            self.assertIn(("top_label_ledge", 0), kinds)
+            self.assertIn(("draft_text", 2), kinds)
+            self.assertNotIn(("draft_text", 0), kinds)
+
+    def test_saved_rim_ledge_and_glyph_kinds_unchanged(self):
+        scene = app.preview_geometry(self.box, "", (self.rim(),), "fused")
+        kinds = {(kind, layer) for _points, kind, _normal, layer, _owner
+                 in scene["geometry"]}
+        self.assertIn(("top_label_ledge", 0), kinds)
+        self.assertIn(("feature_text", 2), kinds)
+
+    def test_duplicate_rim_draft_error_branch_shelf_stays_invalid(self):
+        # A saved rim Label plus a second rim Label still being edited
+        # puts the draft on the error path ("Only one rim Label is
+        # allowed"). On that path the shelf - most of the visible rim
+        # block - must keep the invalid kind: under its saved-path kind
+        # it would render in its furniture colour and stop signalling
+        # that this draft is invalid. (The saved Label's own shelf is
+        # ("top_label_ledge", 0) in the same scene; this asserts the
+        # draft shelf did not take that kind.)
+        scene = app.preview_geometry(
+            self.box, "", (self.rim(),), "fused", draft=self.rim())
+        self.assertIsNotNone(scene["draft_error"])
+        kinds = {(kind, layer) for _points, kind, _normal, layer, _owner
+                 in scene["geometry"]}
+        self.assertIn(("draft_invalid", 0), kinds)
+
+
 if __name__ == "__main__":
     unittest.main()
