@@ -141,6 +141,10 @@
     const drawersRowA = el("div", "sd-size-grid");
     const fitField = labeled("Drawer fit", fit);
     fitField.title = "Standard is recommended for the first print. Tight leaves very little working clearance.";
+    // Fix 1119 (Opus L2): the warning was hover-only (title attribute), so a
+    // user who never hovers picks Tight blind. Keep Tight available; make
+    // the warning inline and always visible.
+    fitField.append(help("Tight leaves only about 0.05 mm of spare clearance — use Standard for a first print."));
     drawersRowA.append(countField, fitField);
     const drawersRowB = el("div", "sd-size-grid");
     drawersRowB.append(labeled("Handles", handles), handleField);
