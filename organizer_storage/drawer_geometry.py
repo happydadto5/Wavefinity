@@ -43,6 +43,11 @@ SD_TOP_DETENT_BUMP_MM = 0.4
 SD_TOP_DETENT_INTERFERENCE_MM = 0.2
 SD_TOP_DETENT_LENGTH_MM = 6.0
 SD_REAR_PANEL_INSET_MM = 0.1
+# Fix 1114 (Opus M1): the rear panel's top edge sat at exactly the Top plate
+# underside (outer_z - top); the Top slides ~body depth over it during
+# assembly, and a +0.1 mm flat-print tolerance scrapes or blocks seating.
+# 0.4 mm is the top of the audit's 0.3-0.4 mm range. Tabs are unaffected.
+SD_REAR_TOP_CLEAR_MM = 0.4
 # The plate ribs stop short of the side panel's top/bottom face: the panel bar
 SD_KEYHOLE_SHANK_MM = 5.2
 SD_KEYHOLE_HEAD_MM = 10.0
@@ -758,8 +763,9 @@ def _datum_components(space, datum):
         return tabs
     if block["rear_support"] == "solid":
         def rear_mesh():
+            # Fix 1114: top edge 0.4 mm below the Top plate underside.
             panel = _box(rear_lo, datum.rear-rear_t, datum.base,
-                         rear_hi, datum.rear, datum.outer_z-datum.top)
+                         rear_hi, datum.rear, datum.outer_z-datum.top-SD_REAR_TOP_CLEAR_MM)
             body = union([
                 panel, *rear_keys(),
                 *_wall_mount_reinforcement(wall_mount, datum, cross=False),
@@ -772,7 +778,7 @@ def _datum_components(space, datum):
             return body
         add("rear_solid", "Rear Solid Back",
             (datum.outer_x-2*datum.track_reach+rear_t, max(rear_t, SD_KEYHOLE_REINFORCEMENT_MM) if wall_mount else rear_t,
-             datum.outer_z-datum.top-datum.base/2), rear_mesh,
+             datum.outer_z-datum.top-SD_REAR_TOP_CLEAR_MM-datum.base/2), rear_mesh,
             ("broad_xz", "broad_xz_90"), flip_up=True)
     else:
         def rear_mesh():
@@ -780,7 +786,8 @@ def _datum_components(space, datum):
             # Two crossing diagonal bands as one printable component.
             from shapely.geometry import LineString
             lo, hi = rear_lo, rear_hi
-            zlo, zhi = datum.base, datum.outer_z-datum.top
+            # Fix 1114: bands clip 0.4 mm below the Top plate underside.
+            zlo, zhi = datum.base, datum.outer_z-datum.top-SD_REAR_TOP_CLEAR_MM
             a = LineString([(lo, zlo), (hi, zhi)]).buffer(width/2, cap_style=2)
             b = LineString([(lo, zhi), (hi, zlo)]).buffer(width/2, cap_style=2)
             poly = a.union(b).intersection(shape_box(lo, zlo, hi, zhi))
@@ -801,7 +808,7 @@ def _datum_components(space, datum):
             return body
         add("rear_cross", "Rear Cross Brace",
             (datum.outer_x-2*datum.track_reach+rear_t, max(rear_t, SD_KEYHOLE_REINFORCEMENT_MM) if wall_mount else rear_t,
-             datum.outer_z-datum.top-datum.base/2), rear_mesh,
+             datum.outer_z-datum.top-SD_REAR_TOP_CLEAR_MM-datum.base/2), rear_mesh,
             ("broad_xz", "broad_xz_90"), flip_up=True)
 
     # A drawer's promised floor is the interior reference plane. Base grows down.
