@@ -51,6 +51,20 @@
       <li>Every Storage Drawers part is <strong>designed to print without supports in the specified orientation</strong> (the one Wavefinity exported it in). That is a geometry check of overhang angles and short bridges, not a slicer or physical-print guarantee, so look at your slicer's preview. Pull ledges have a 45&deg; underside; the underside of a small bridge may show minor roughness. If your slicer wants supports, first check that the part has not been rotated.</li>
       <li>If a part will not fit your printer, open <strong>Printer Settings…</strong> and check the build volume, or reduce the cabinet size or drawer count.</li>
     </ul>
+    <h3>Plate plan (default cabinet)</h3>
+    <p>A default cabinet is eight large parts; if Stacking is on, it also includes four stack pegs — more than one plate holds on most printers. Use the seven-row template below as a grouping and print-order guide, splitting the files onto plates in plate order. (It is a template, not always exactly seven printed plates: the drawer row repeats as needed, and the stack-peg row only applies when Stacking is on.) Every file is already oriented for your printer, so keep that orientation on each plate — do not rotate parts to fit.</p>
+    <table>
+      <thead><tr><th>Plate</th><th>Files on this plate</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Cabinet Base</td><td>Print in plate order; it matches the assembly order in section 2.</td></tr>
+        <tr><td>2</td><td>Left Side</td><td>Open cabinets: Left Frame instead of the solid side.</td></tr>
+        <tr><td>3</td><td>Right Side</td><td>Open cabinets: Right Frame instead of the solid side.</td></tr>
+        <tr><td>4</td><td>Rear Cross Brace (or Rear Solid Back)</td><td>The rear part, per your Cabinet choice.</td></tr>
+        <tr><td>5</td><td>Drawer 1, Drawer 2, …</td><td>As many whole drawers per plate as your slicer allows; repeat this plate until all drawers are done.</td></tr>
+        <tr><td>6</td><td>Cabinet Top</td><td>Printed upside down on purpose — do not flip it.</td></tr>
+        <tr><td>7</td><td>Stack Peg 1–4 (stacking only)</td><td>The four pegs fit on one plate. <strong>Optional:</strong> you may merge the four peg files into a single 3MF, keeping each peg's orientation. This is optional — printing the four files as they come works fine.</td></tr>
+      </tbody>
+    </table>
     <p>Wavefinity does not prescribe temperatures or speeds; use your printer's usual settings for the material.</p>
 
     <p><a href="/">Back to Wavefinity</a></p>
