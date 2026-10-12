@@ -31,6 +31,11 @@ CABINET_LOCAL_DEBRIS_PREFIX = ".wavefinity-cabinet-local-"
 # The hosted recovery journal filename (written by the browser; read here only
 # to protect live backups). Mirrors SP.CABINET_JOURNAL in web/spaces.js.
 HOSTED_CABINET_JOURNAL_NAME = ".wavefinity-cabinet-journal.json"
+# The local recovery journal filename (Fix 1103). Written by _materialize
+# before any owned file is replaced and cleared once the save (or a rollback)
+# settles. The ".json" suffix keeps it outside the debris sweeper's "*.3mf"
+# pattern, so the journal itself is never swept.
+LOCAL_CABINET_JOURNAL_NAME = ".wavefinity-cabinet-local-journal.json"
 # Held for a whole local save (stage, install, manifest commit, cleanup) so debris
 # sweeping can never remove files an active transaction still owns.
 _TRANSACTION_LOCK = threading.RLock()
@@ -206,6 +211,277 @@ def _hosted_journal_backup_names(folder: Path) -> set[str]:
     return names
 
 
+def _write_local_journal(folder: Path, state: dict) -> None:
+    """Atomically and durably write the local cabinet recovery journal (Fix 1103).
+
+    The journal names every pre-install backup and every installed file, so a
+    crash or a failed rollback leaves an exact, retryable recovery record. The
+    temp+replace makes a torn write impossible: readers see the previous
+    complete journal or the new complete journal, never a half-written one.
+    The file fsync makes the content durable on disk before any destructive
+    move that depends on it. (Round 5) The directory fsync after the replace
+    makes the rename itself durable: the "committing"-phase record (with the
+    new manifest's identity) must survive a kill before commit(manifest)
+    executes, or the identity proof collapses. (Round 6) The directory fsync
+    is platform-safe via _fsync_directory: os.O_DIRECTORY does not exist on
+    Windows, so there the directory-fd step is a silent no-op and the write
+    never crashes -- the fsync'ed journal payload is the durability-critical
+    record on every platform.
+    """
+    folder = Path(folder)
+    payload = json.dumps({"journal_version": 1, **state}, indent=2, sort_keys=True).encode("utf-8")
+    fd, tmp_name = tempfile.mkstemp(prefix=CABINET_LOCAL_DEBRIS_PREFIX + "journal-", suffix=".tmp", dir=folder)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp_name, folder / LOCAL_CABINET_JOURNAL_NAME)
+        # Round 6 (Fix 1103): platform-safe directory fsync so the rename is
+        # durable. os.O_DIRECTORY is absent on Windows -- opening a directory
+        # fd there fails -- so this step is best-effort only and can never
+        # crash the journal write. The payload fsync above is the
+        # durability-critical write on every platform.
+        _fsync_directory(folder)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _fsync_directory(folder: Path) -> None:
+    """Best-effort fsync of a directory so a rename into it is durable.
+
+    (Fix 1103, round 6) On POSIX the directory is opened with os.O_DIRECTORY
+    and the fd is fsync'ed. os.O_DIRECTORY does not exist on Windows -- and a
+    directory cannot be opened this way there -- so os.open raises OSError and
+    this is a silent no-op. The journal payload itself is always fsync'ed by
+    _write_local_journal; this step only hardens the rename, never the
+    write's success.
+    """
+    open_flags = getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY
+    try:
+        dir_fd = os.open(folder, open_flags)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+    finally:
+        os.close(dir_fd)
+
+
+def _read_local_journal(folder: Path) -> dict | None:
+    """The live local recovery journal, or None when absent/unparseable."""
+    try:
+        text = (Path(folder) / LOCAL_CABINET_JOURNAL_NAME).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        journal = json.loads(text)
+    except ValueError:
+        return None
+    return journal if isinstance(journal, dict) else None
+
+
+def _clear_local_journal(folder: Path) -> None:
+    """Remove the local recovery journal; the save it described is settled."""
+    try:
+        (Path(folder) / LOCAL_CABINET_JOURNAL_NAME).unlink()
+    except OSError:
+        pass
+
+
+def _local_journal_backup_names(folder: Path) -> set[str]:
+    """Backup filenames a live local recovery journal still references.
+
+    (Fix 1103) Mirrors _hosted_journal_backup_names for the local journal: a
+    present journal means an unresolved local save, so every backup it names
+    must survive sweeping — including after a process restart, when the
+    in-process transaction lock can no longer protect them.
+    """
+    journal = _read_local_journal(folder)
+    names: set[str] = set()
+    backups = journal.get("backups") if isinstance(journal, dict) else None
+    if isinstance(backups, dict):
+        for backup_name in backups.values():
+            if isinstance(backup_name, str) and Path(backup_name).name == backup_name:
+                names.add(backup_name)
+    return names
+
+
+def _manifest_identity(manifest: dict) -> str:
+    """Cryptographic identity of a manifest: SHA-256 over canonical JSON.
+
+    (Fix 1103, round 5) The recovery promotion predicate compares this identity
+    against the identity journaled BEFORE commit(manifest) executed. A match
+    proves the NEW manifest (not a stale one) is the committed one; the
+    round-4 file-agreement check could not distinguish the two cases.
+    """
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def recover_interrupted_cabinet_save(folder: Path, stored_manifest=None) -> dict:
+    """Restore cabinet files from an unresolved local recovery journal.
+
+    (Fix 1103) Runs at the start of the next local save, inside the transaction
+    lock. ``stored_manifest`` is the manifest currently recorded for the
+    folder (the ``previous_manifest`` the new save was given). The journal's
+    ``status`` selects the phase:
+
+    - ``"installing"`` / ``"recovery-pending"``: roll back. Every journaled
+      backup is moved back over its final target; every installed file that
+      never had a backup (a new component from the interrupted save) is
+      removed — including names in ``pending_install`` whose install never
+      reached the per-install journal update (a kill between temp→final and
+      that update). The ``backups`` mapping is immutable — a file listed there
+      is a restored-or-restorable original, never a new install, even when its
+      backup file is already gone (consumed by an earlier pass). The
+      ``installed``/``pending_install`` cleanup therefore skips every name
+      present in ``backups``.
+    - ``"committed"``: the manifest already committed before the crash — finish
+      cleanup only (delete any surviving named backups); never restore old
+      bytes over committed output.
+
+    (Fix 1103, round 5) Three-phase journal: a kill after ``commit(manifest)``
+    returns but before the ``"committed"`` journal write leaves the durable
+    journal at ``"committing"`` with the new manifest's cryptographic identity.
+    Before trusting the journal status, recovery compares the stored manifest's
+    identity against the journaled identity: only an exact match proves the
+    NEW manifest (not a stale one) committed, so recovery runs the cleanup-only
+    branch — rolling back would destroy committed output. Any mismatch, missing
+    identity, or malformed manifest means the commit cannot be proven and
+    recovery rolls back. This also covers a failed ``_clear_local_journal``
+    after a successful commit: the stale journal is harmless because identity
+    match — not journal status — is the commit authority.
+
+    Recovery is idempotent: a backup that is gone while its target exists was
+    consumed by an earlier pass and is skipped, never reported missing. When
+    any backup is truly missing (neither backup nor target survives) or any
+    step fails, the journal is rewritten — never cleared — and the result
+    reports ``settled: False`` so the caller aborts the save with a
+    recovery-specific error instead of continuing against a mixed file set.
+    """
+    folder = Path(folder)
+    journal = _read_local_journal(folder)
+    if journal is None:
+        return {"recovered": False}
+    # Round 5 (Fix 1103): promotion requires cryptographic proof. The
+    # "committing" journal record holds the new manifest's identity, written
+    # durably BEFORE commit(manifest) executed. Only a stored manifest with
+    # the identical identity proves the new manifest committed.
+    if journal.get("status") == "committing":
+        journaled_identity = journal.get("new_manifest_identity")
+        if (isinstance(journaled_identity, str) and journaled_identity
+                and stored_manifest is not None
+                and _manifest_identity(stored_manifest) == journaled_identity):
+            # Proven: commit(manifest) executed with exactly this manifest.
+            # Cleanup only — never roll back committed output.
+            journal = {**journal, "status": "committed"}
+        # else: not proven — commit did not execute (or the journal predates
+        # it). Fall through to the rollback branch below.
+    raw_backups = journal.get("backups")
+    backups = raw_backups if isinstance(raw_backups, dict) else {}
+    raw_installed = journal.get("installed")
+    installed = raw_installed if isinstance(raw_installed, list) else []
+    if journal.get("status") == "committed":
+        cleaned: list[str] = []
+        failed: list[str] = []
+        for name, backup_name in backups.items():
+            if not isinstance(backup_name, str) or Path(backup_name).name != backup_name:
+                failed.append(str(name))
+                continue
+            try:
+                if (folder / backup_name).is_file():
+                    (folder / backup_name).unlink()
+                    cleaned.append(name)
+            except OSError:
+                failed.append(str(name))
+        if failed:
+            remaining = {name: backup_name for name, backup_name in backups.items()
+                         if str(name) in failed}
+            _write_local_journal(folder, {**journal, "backups": remaining})
+            return {"recovered": True, "settled": False, "phase": "committed",
+                    "cleaned": cleaned, "failed": failed}
+        _clear_local_journal(folder)
+        return {"recovered": True, "settled": True, "phase": "committed",
+                "cleaned": cleaned, "failed": []}
+    restored: list[str] = []
+    missing: list[str] = []
+    failed: list[str] = []
+    for name, backup_name in backups.items():
+        if not isinstance(name, str) or not isinstance(backup_name, str) \
+                or Path(backup_name).name != backup_name:
+            failed.append(str(name))
+            continue
+        try:
+            target = _safe_path(folder, name)
+        except ValueError:
+            failed.append(name)
+            continue
+        backup = folder / backup_name
+        try:
+            if backup.is_file():
+                os.replace(backup, target)
+                restored.append(name)
+            elif not target.is_file():
+                # Neither the backup nor the original survived: the old bytes
+                # are unrecoverable and the save must not continue.
+                missing.append(name)
+            # else: the backup was already consumed by an earlier pass and the
+            # target is in place — nothing to do.
+        except OSError:
+            failed.append(name)
+    removed: list[str] = []
+    # Fix 1103 (round 3): pending_install names the new components whose
+    # install intent was journaled before the install loop. A kill between a
+    # new component's temp→final and its per-install journal update leaves it
+    # out of `installed` — without this, recovery would have no record telling
+    # it to remove the uncommitted file. Removal is idempotent: a name whose
+    # final was never moved simply has no file to remove.
+    raw_pending = journal.get("pending_install")
+    pending = [n for n in raw_pending if isinstance(n, str)] if isinstance(raw_pending, list) else []
+    for name in installed + [n for n in pending if n not in installed]:
+        if not isinstance(name, str) or name in backups or name in restored:
+            continue
+        try:
+            target = _safe_path(folder, name)
+        except ValueError:
+            failed.append(name)
+            continue
+        try:
+            if target.is_file():
+                target.unlink()
+                removed.append(name)
+        except OSError:
+            failed.append(name)
+    if missing or failed:
+        # Unresolved: keep the full immutable mapping plus the restored record
+        # so the next attempt retries exactly what is left.
+        raw_restored = journal.get("restored")
+        prior = set(raw_restored) if isinstance(raw_restored, list) else set()
+        _write_local_journal(folder, {
+            "status": "recovery-pending",
+            "backups": {name: backup_name for name, backup_name in backups.items()
+                        if isinstance(backup_name, str)},
+            "restored": sorted(prior | set(restored)),
+            "installed": [name for name in installed if isinstance(name, str)],
+            "pending_install": list(pending),
+            "missing_backups": list(missing),
+            "failed": list(failed),
+        })
+        return {"recovered": True, "settled": False, "phase": "rollback",
+                "restored": restored, "missing_backups": missing,
+                "removed_new": removed, "failed": failed}
+    _clear_local_journal(folder)
+    return {"recovered": True, "settled": True, "phase": "rollback",
+            "restored": restored, "missing_backups": [], "removed_new": removed, "failed": []}
+
+
 def sweep_cabinet_debris(folder: Path) -> list[str]:
     """Remove orphan app-owned temp/backup files from one Space folder.
 
@@ -213,14 +489,20 @@ def sweep_cabinet_debris(folder: Path) -> list[str]:
     folder - the local transaction namespace (Fix 096 A7). Hosted recovery
     backups use a different prefix and can never match; as a second ownership
     check, any backup name referenced by a live hosted recovery journal is
-    never deleted. Skipped entirely while any save transaction is active.
+    never deleted. (Fix 1103) A third check: backups named by a live local
+    recovery journal are never deleted, so an interrupted local save keeps its
+    rollback originals across a process restart until the next save recovers.
+    Skipped entirely while any save transaction is active.
     """
     folder = Path(folder)
     if not folder.is_dir() or not _TRANSACTION_LOCK.acquire(blocking=False):
         return []
     removed: list[str] = []
     try:
-        protected = _hosted_journal_backup_names(folder)
+        # Fix 1103 (Astra AD-002 supplemental): a live local recovery journal
+        # means an interrupted local save whose backups must survive until the
+        # next save's recovery settles it — including after a process restart.
+        protected = _hosted_journal_backup_names(folder) | _local_journal_backup_names(folder)
         for entry in folder.iterdir():
             name = entry.name
             if name in protected:
@@ -296,6 +578,34 @@ def materialize_storage_drawers(space: dict, output_dir: Path, printer_profile: 
 
 
 def _materialize(space, folder, printer_profile, previous_manifest, commit) -> dict:
+    # Fix 1103 (Astra AD-002 supplemental): an interrupted earlier save may have
+    # left a mixed file set whose hashes no longer match the stored manifest.
+    # Recover it BEFORE the ownership checks below, or the hash check would
+    # refuse the replacement as an outside change. An unsettled recovery aborts
+    # the save outright: its journal is preserved for the next attempt.
+    # (Fix 1103, round 4) The stored manifest is passed so recovery can close
+    # the commit/journal atomicity gap: if its hashes match the files on disk,
+    # the previous save's commit demonstrably succeeded and recovery runs
+    # cleanup-only even when the journal still says "installing".
+    recovery = recover_interrupted_cabinet_save(Path(folder), previous_manifest)
+    if recovery.get("recovered") and not recovery.get("settled", True):
+        raise RuntimeError(
+            "The previous cabinet save was interrupted and its files could not be fully "
+            f"recovered (missing backups: {recovery.get('missing_backups') or []}; "
+            f"failed: {recovery.get('failed') or []}). The recovery record was kept in "
+            f"{LOCAL_CABINET_JOURNAL_NAME}; resolve the underlying file error and retry the save."
+        )
+    recovery_warnings = []
+    if recovery.get("recovered"):
+        parts = []
+        for name in recovery.get("restored") or []:
+            parts.append("restored " + name)
+        for name in recovery.get("removed_new") or []:
+            parts.append("removed uncommitted " + name)
+        if recovery.get("phase") == "committed":
+            parts.append("finished cleanup of an already-committed save")
+        if parts:
+            recovery_warnings.append("Recovered an interrupted cabinet save (" + "; ".join(parts) + ").")
     dry = structural_manifest_plan(space, folder, printer_profile)
     if not dry["fits_printer"]:
         raise ValueError(dry["first_fit_error"] or "Cabinet does not fit printer")
@@ -320,8 +630,10 @@ def _materialize(space, folder, printer_profile, previous_manifest, commit) -> d
     temporary: dict[str, Path] = {}
     backups: dict[str, Path] = {}
     installed: list[str] = []
-    warnings = list(plan.warnings)
+    warnings = recovery_warnings + list(plan.warnings)
     committed = False
+    recovery_pending = False
+    pending_install: list[str] = []
     try:
         for component, item, fit in zip(plan.components, dry["components"], fits):
             fd, name = tempfile.mkstemp(prefix=CABINET_LOCAL_DEBRIS_PREFIX, suffix=".3mf", dir=folder)
@@ -338,17 +650,44 @@ def _materialize(space, folder, printer_profile, previous_manifest, commit) -> d
                 export_mesh(body, temp, component.display_name)
                 validate_3mf(temp, 1)
             _check_exported_fit(temp, profile, component.display_name)
+        # Fix 1103: pre-allocate every backup name and write the durable
+        # recovery journal BEFORE the first destructive move. A kill anywhere
+        # below then leaves a complete mapping: each moved original has a
+        # journaled backup to restore from, and each not-yet-moved original is
+        # still in place (its pre-allocated backup name has no file yet, so
+        # recovery skips it without reporting it missing).
         for name in desired:
             final = _safe_path(folder, name)
             if final.exists():
                 fd, backup_name = tempfile.mkstemp(prefix=CABINET_LOCAL_DEBRIS_PREFIX + "backup-", suffix=".3mf", dir=folder)
                 os.close(fd)
-                backup = Path(backup_name)
-                backup.unlink()
-                os.replace(final, backup)
-                backups[name] = backup
+                Path(backup_name).unlink()
+                backups[name] = Path(backup_name)
+        # Fix 1103 (round 3): components with no backup are new installs. Their
+        # install intent is journaled BEFORE the install loop: a kill between a
+        # new component's temp→final and its per-install journal update would
+        # otherwise leave the new final on disk absent from both `backups` and
+        # the journaled `installed` list, with nothing telling recovery to
+        # remove the uncommitted file.
+        pending_install = [name for name in desired if name not in backups]
+        _write_local_journal(folder, {
+            "status": "installing",
+            "backups": {name: backup.name for name, backup in backups.items()},
+            "installed": [],
+            "pending_install": list(pending_install),
+        })
+        for name in desired:
+            final = _safe_path(folder, name)
+            if name in backups:
+                os.replace(final, backups[name])
             os.replace(temporary[name], final)
             installed.append(name)
+            _write_local_journal(folder, {
+                "status": "installing",
+                "backups": {name: backup.name for name, backup in backups.items()},
+                "installed": list(installed),
+                "pending_install": list(pending_install),
+            })
         manifest = {"signature": dry["signature"], "generator_version": STRUCTURAL_GENERATOR_VERSION,
                     "components": [{"key": item["key"], "filename": item["filename"],
                                     "sha256": _hash(_safe_path(folder, item["filename"])),
@@ -356,27 +695,103 @@ def _materialize(space, folder, printer_profile, previous_manifest, commit) -> d
                                     "orientation": fit["orientation"]}
                                    for item, fit in zip(dry["components"], fits)]}
         if commit is not None:
+            # Round 5 (Fix 1103): durably journal the commit intent — including
+            # the new manifest's cryptographic identity — BEFORE commit(manifest)
+            # executes. This write is atomic (temp + replace) and fsynced (file
+            # + directory), so a kill at any later point leaves a durable record.
+            # Recovery promotes to committed ONLY when the stored manifest's
+            # identity matches this journaled identity, proving the NEW manifest
+            # (not a stale one) is the committed one.
+            _write_local_journal(folder, {
+                "status": "committing",
+                "new_manifest_identity": _manifest_identity(manifest),
+                "backups": {name: backup.name for name, backup in backups.items()},
+                "installed": list(installed),
+                "pending_install": list(pending_install),
+            })
             # The backups still exist here; a failed commit rolls everything back.
             commit(manifest)
         committed = True
-    except Exception:
-        for name in reversed(installed):
-            final = _safe_path(folder, name)
-            if final.exists():
-                final.unlink()
-        for name, backup in list(backups.items()):
-            if backup.exists():
-                os.replace(backup, _safe_path(folder, name))
-            del backups[name]
+        # Fix 1103 (round 3): the committed-phase transition has its own guard.
+        # commit(manifest) already succeeded, so a failure in the journal write
+        # below must NEVER reach the rollback except above: restoring old bytes
+        # over committed output would split files from the committed metadata.
+        # (Round 5) If the committed-phase write fails or the process is killed
+        # first, the durable "committing" record + identity match still proves
+        # the commit: recovery promotes on identity match and runs cleanup-only.
+        # Identity match — not the journal's absence — is the commit authority.
+        # The write still happens BEFORE the finally below deletes the backups,
+        # so the happy path keeps a durable committed-phase record across that
+        # window.
+        try:
+            _write_local_journal(folder, {
+                "status": "committed",
+                "backups": {name: backup.name for name, backup in backups.items()},
+                "installed": list(installed),
+                "pending_install": list(pending_install),
+            })
+        except Exception:
+            # Best-effort clear only.
+            _clear_local_journal(folder)
+    except Exception as save_error:
+        # Fix 1103 (Astra AD-002): the backup mapping is never mutated — the
+        # journal keeps the complete original mapping plus exactly which files
+        # were restored, so a later recovery cannot misclassify a restored
+        # file as a new uncommitted install.
+        restored: list[str] = []
+        restore_error: Exception | None = None
+        try:
+            for name in reversed(installed):
+                final = _safe_path(folder, name)
+                if final.exists():
+                    final.unlink()
+            for name, backup in backups.items():
+                if backup.exists():
+                    os.replace(backup, _safe_path(folder, name))
+                    restored.append(name)
+        except Exception as exc:
+            restore_error = exc
+        if restore_error is not None:
+            # A failed restore must NEVER delete the surviving backups — they
+            # may be the only remaining copy of the last good output. Keep
+            # them, leave a durable recovery record, and let the finally below
+            # clean only staging temps.
+            recovery_pending = True
+            _write_local_journal(folder, {
+                "status": "recovery-pending",
+                "reason": f"cabinet save failed ({save_error}); rollback restore failed ({restore_error})",
+                "backups": {name: backup.name for name, backup in backups.items()},
+                "restored": list(restored),
+                "installed": list(installed),
+                "pending_install": list(pending_install),
+            })
+            raise RuntimeError(
+                "Cabinet save failed and the previous files could not be restored; "
+                "the surviving backups were kept and a recovery record was written to "
+                f"{LOCAL_CABINET_JOURNAL_NAME}. Retry the save to recover them."
+            ) from restore_error
+        _clear_local_journal(folder)
         raise
     finally:
-        for path in [*temporary.values(), *backups.values()]:
+        # Staging temps are always safe to clean. Backups are cleaned only when
+        # no recovery is pending — never merely because rollback was attempted.
+        for path in temporary.values():
             if path.exists():
                 try:
                     path.unlink()
                 except OSError:
                     pass
+        if not recovery_pending:
+            for path in backups.values():
+                if path.exists():
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
     if committed:
+        # The new manifest is committed and the backups are gone (finally
+        # above); the save is fully settled, so no recovery record remains.
+        _clear_local_journal(folder)
         for name, old in previous.items():
             if name in desired:
                 continue

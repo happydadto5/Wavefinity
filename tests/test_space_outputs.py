@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -567,6 +568,343 @@ class Fix1115ReliefChannelTests(unittest.TestCase):
     def test_top_watertight_positive_volume(self):
         self.assertTrue(self.top.is_watertight)
         self.assertGreater(self.top.volume, 0)
+
+
+class SimulatedKill(BaseException):
+    """A process kill: not an Exception, so the save's rollback never catches it."""
+
+
+class Fix1103JournalRecoveryTests(unittest.TestCase):
+    """Fix 1103: the cabinet rollback never deletes surviving backups, and a
+    durable local journal lets the next save recover an interrupted one."""
+
+    PROFILE = {"x_mm": 250.0, "y_mm": 250.0, "z_mm": 250.0}
+    BACKUP_GLOB = cabinet_outputs.CABINET_LOCAL_DEBRIS_PREFIX + "backup-*.3mf"
+    BASE = "Hardening - Base.3mf"
+    ADDED = "Hardening - Added.3mf"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.space = _cabinet()
+        cls.changed = _cabinet(drawers=[{"id": "00000000-0000-4000-8000-000000000001", "height_mm": 30}])
+        cls.built = [(space, resolve_storage_drawers_plan(space, build_meshes=True))
+                     for space in (cls.space, cls.changed)]
+
+    def _install_plan(self):
+        built = self.built
+        original = cabinet_outputs.resolve_storage_drawers_plan
+
+        def cached(space, *, build_meshes=True):
+            if build_meshes:
+                for known, plan in built:
+                    if known == space:
+                        return plan
+            return original(space, build_meshes=build_meshes)
+        patcher = patch.object(cabinet_outputs, "resolve_storage_drawers_plan", cached)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _save(self, folder, space=None, previous=None, commit=None):
+        return cabinet_outputs.materialize_storage_drawers(
+            space or self.space, folder, self.PROFILE, previous, commit=commit)
+
+    def _baseline(self, folder):
+        """A committed first save: the stored manifest and the on-disk bytes."""
+        saved = {}
+        self._save(folder, commit=saved.update)
+        return saved, self._bytes(folder, saved)
+
+    @staticmethod
+    def _bytes(folder, manifest):
+        return {item["filename"]: (folder / item["filename"]).read_bytes() for item in manifest["components"]}
+
+    def _journal_path(self, folder):
+        return folder / cabinet_outputs.LOCAL_CABINET_JOURNAL_NAME
+
+    def _write_installing(self, folder, **state):
+        cabinet_outputs._write_local_journal(folder, {
+            "status": "installing", "backups": {}, "installed": [], "pending_install": [], **state})
+
+    def _spy_writes(self):
+        """Record (status, state) for every journal write."""
+        real = cabinet_outputs._write_local_journal
+        writes = []
+
+        def spy(folder, state):
+            writes.append((state.get("status"), json.loads(json.dumps(state))))
+            return real(folder, state)
+        patcher = patch.object(cabinet_outputs, "_write_local_journal", spy)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return writes
+
+    def test_journal_mapping_is_durable_before_first_destructive_move(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            saved, old = self._baseline(folder)
+            real = cabinet_outputs._write_local_journal
+            first = {}
+
+            def spy(target, state):
+                if not first:
+                    first.update(state=json.loads(json.dumps(state)),
+                                 finals={name: (target / name).read_bytes() for name in old if (target / name).exists()},
+                                 backups=sorted(target.glob(self.BACKUP_GLOB)))
+                return real(target, state)
+            with patch.object(cabinet_outputs, "_write_local_journal", spy):
+                self._save(folder, previous=saved, commit=lambda manifest: None)
+            self.assertEqual(first["state"]["status"], "installing")
+            self.assertEqual(set(first["state"]["backups"]), set(old))
+            self.assertEqual(first["finals"], old)  # every original still at its final path
+            self.assertEqual(first["backups"], [])  # no backup file exists yet
+
+    def test_partial_rollback_keeps_immutable_backup_record(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            saved, old = self._baseline(folder)
+            real_replace = os.replace
+            restores = []
+
+            def flaky(src, dst):
+                if Path(src).name.startswith(cabinet_outputs.CABINET_LOCAL_DEBRIS_PREFIX + "backup-"):
+                    restores.append(Path(dst).name)
+                    if len(restores) == 2:
+                        raise OSError("simulated file lock")
+                return real_replace(src, dst)
+
+            def fail(_manifest):
+                raise RuntimeError("metadata write failed")
+            with patch.object(os, "replace", flaky):
+                with self.assertRaises(RuntimeError) as caught:
+                    self._save(folder, previous=saved, commit=fail)
+            self.assertIn(cabinet_outputs.LOCAL_CABINET_JOURNAL_NAME, str(caught.exception))
+            journal = cabinet_outputs._read_local_journal(folder)
+            self.assertEqual(journal["status"], "recovery-pending")
+            self.assertEqual(set(journal["backups"]), set(old))  # includes the already-restored file
+            self.assertEqual(journal["restored"], restores[:1])
+            kept = {name: backup for name, backup in journal["backups"].items() if name not in journal["restored"]}
+            self.assertTrue(kept)
+            for name, backup in kept.items():
+                self.assertEqual((folder / backup).read_bytes(), old[name])  # no backup was deleted
+            result = cabinet_outputs.recover_interrupted_cabinet_save(folder, saved)
+            self.assertTrue(result["settled"])
+            self.assertEqual(result["removed_new"], [])  # the restored file is not a "new" install
+            self.assertEqual(self._bytes(folder, saved), old)
+            self.assertFalse(self._journal_path(folder).exists())
+            self.assertEqual(sorted(folder.glob(self.BACKUP_GLOB)), [])
+            self._save(folder, previous=saved, commit=lambda manifest: None)  # no "changed outside" refusal
+
+    def test_unresolved_recovery_preserves_journal_and_aborts_save(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            backup = cabinet_outputs.CABINET_LOCAL_DEBRIS_PREFIX + "backup-gone.3mf"
+            self._write_installing(folder, backups={self.BASE: backup})
+            result = cabinet_outputs.recover_interrupted_cabinet_save(folder)
+            self.assertFalse(result["settled"])
+            self.assertEqual(result["missing_backups"], [self.BASE])
+            kept = cabinet_outputs._read_local_journal(folder)
+            self.assertEqual(kept["status"], "recovery-pending")
+            self.assertEqual(kept["backups"], {self.BASE: backup})
+            with self.assertRaises(RuntimeError) as caught:
+                self._save(folder)
+            self.assertIn("could not be fully recovered", str(caught.exception))
+            self.assertIn(self.BASE, str(caught.exception))
+            self.assertEqual(cabinet_outputs._read_local_journal(folder)["backups"], {self.BASE: backup})
+
+    def test_committed_phase_recovery_never_rolls_back(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            saved, committed_bytes = self._baseline(folder)
+            name = saved["components"][0]["filename"]
+            backup = folder / (cabinet_outputs.CABINET_LOCAL_DEBRIS_PREFIX + "backup-old.3mf")
+            backup.write_bytes(b"old bytes that differ from the committed final")
+            cabinet_outputs._write_local_journal(folder, {
+                "status": "committed", "backups": {name: backup.name},
+                "installed": list(committed_bytes), "pending_install": []})
+            result = cabinet_outputs.recover_interrupted_cabinet_save(folder)
+            self.assertEqual((result["phase"], result["settled"]), ("committed", True))
+            self.assertFalse(backup.exists())
+            self.assertEqual(self._bytes(folder, saved), committed_bytes)
+            self.assertFalse(self._journal_path(folder).exists())
+
+    def test_successful_save_writes_committed_phase(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            saved, _old = self._baseline(folder)
+            writes = self._spy_writes()
+            self._save(folder, previous=saved, commit=lambda manifest: None)
+            statuses = [status for status, _state in writes]
+            self.assertIn("committed", statuses)
+            self.assertLess(statuses.index("committing"), statuses.index("committed"))
+            committed = next(state for status, state in writes if status == "committed")
+            names = {item["filename"] for item in saved["components"]}
+            self.assertTrue(names)
+            self.assertEqual(set(committed["backups"]), names)
+            self.assertFalse(self._journal_path(folder).exists())
+            self.assertEqual(sorted(folder.glob(self.BACKUP_GLOB)), [])
+
+    def test_first_save_kill_after_install_is_removed_by_recovery(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            desired = [item["filename"] for item in
+                       cabinet_outputs.structural_manifest_plan(self.space, folder, self.PROFILE)["components"]]
+            real = cabinet_outputs._write_local_journal
+            calls = []
+
+            def kill_on_first_install_update(target, state):
+                calls.append(state["status"])
+                if len(calls) == 2:  # the first per-install update; the pre-loop write was call 1
+                    raise SimulatedKill()
+                return real(target, state)
+            with patch.object(cabinet_outputs, "_write_local_journal", kill_on_first_install_update):
+                with self.assertRaises(SimulatedKill):
+                    self._save(folder, commit=lambda manifest: None)
+            self.assertTrue((folder / desired[0]).is_file())  # temp->final already happened
+            journal = cabinet_outputs._read_local_journal(folder)
+            self.assertEqual(journal["pending_install"], desired)
+            self.assertEqual(journal["installed"], [])
+            result = cabinet_outputs.recover_interrupted_cabinet_save(folder)
+            self.assertTrue(result["settled"])
+            self.assertEqual(result["removed_new"], [desired[0]])
+            self.assertFalse((folder / desired[0]).exists())
+            self.assertFalse(self._journal_path(folder).exists())
+            self._save(folder, commit=lambda manifest: None)
+            self.assertTrue(all((folder / name).is_file() for name in desired))
+
+    def test_committed_journal_write_failure_never_rolls_back(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            saved, old = self._baseline(folder)
+            real = cabinet_outputs._write_local_journal
+            refused = []
+
+            def disk_full_on_committed(target, state):
+                if state.get("status") == "committed":
+                    refused.append(True)
+                    raise OSError("simulated disk full")
+                return real(target, state)
+            recorded = {}
+            with patch.object(cabinet_outputs, "_write_local_journal", disk_full_on_committed):
+                self._save(folder, space=self.changed, previous=saved, commit=recorded.update)
+            self.assertTrue(refused)
+            self.assertTrue(recorded)
+            new = self._bytes(folder, recorded)
+            for item in recorded["components"]:  # metadata and files agree: nothing was rolled back
+                self.assertEqual(cabinet_outputs._hash(folder / item["filename"]), item["sha256"])
+            self.assertTrue(any(new[name] != old[name] for name in new if name in old))
+            self.assertFalse(self._journal_path(folder).exists())
+            self.assertEqual(sorted(folder.glob(self.BACKUP_GLOB)), [])
+
+    def test_kill_between_commit_and_journal_promotes(self):
+        self._install_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            saved, old = self._baseline(folder)
+            real = cabinet_outputs._write_local_journal
+
+            def kill_before_committed(target, state):
+                if state.get("status") == "committed":
+                    raise SimulatedKill()
+                return real(target, state)
+            stored_new = {}
+            with patch.object(cabinet_outputs, "_write_local_journal", kill_before_committed):
+                with self.assertRaises(SimulatedKill):
+                    self._save(folder, space=self.changed, previous=saved, commit=stored_new.update)
+            journal = cabinet_outputs._read_local_journal(folder)
+            self.assertEqual(journal["status"], "committing")
+            self.assertEqual(journal["new_manifest_identity"], cabinet_outputs._manifest_identity(stored_new))
+            # A real kill never runs the in-process cleanup: put the surviving backups back.
+            for name, backup in journal["backups"].items():
+                (folder / backup).write_bytes(old[name])
+            new = self._bytes(folder, stored_new)
+            self.assertTrue(any(new[name] != old[name] for name in new if name in old))
+            result = cabinet_outputs.recover_interrupted_cabinet_save(folder, stored_manifest=stored_new)
+            self.assertEqual((result["phase"], result["settled"]), ("committed", True))
+            self.assertEqual(self._bytes(folder, stored_new), new)  # committed output is never rolled back
+            self.assertEqual(sorted(folder.glob(self.BACKUP_GLOB)), [])
+            self.assertFalse(self._journal_path(folder).exists())
+            self._save(folder, space=self.changed, previous=stored_new, commit=lambda manifest: None)
+
+    def test_committing_identity_mismatch_rolls_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            stored_old = {"components": [{"key": "base", "filename": self.BASE, "sha256": "0" * 64}]}
+            backup = folder / (cabinet_outputs.CABINET_LOCAL_DEBRIS_PREFIX + "backup-base.3mf")
+            backup.write_bytes(b"old base")
+            (folder / self.BASE).write_bytes(b"new base")
+            (folder / self.ADDED).write_bytes(b"added by the interrupted save")
+            cabinet_outputs._write_local_journal(folder, {
+                "status": "committing",
+                "new_manifest_identity": cabinet_outputs._manifest_identity({"components": ["new manifest"]}),
+                "backups": {self.BASE: backup.name},
+                "installed": [self.BASE, self.ADDED], "pending_install": [self.ADDED]})
+            result = cabinet_outputs.recover_interrupted_cabinet_save(folder, stored_manifest=stored_old)
+            self.assertEqual((result["phase"], result["settled"]), ("rollback", True))
+            self.assertEqual(result["removed_new"], [self.ADDED])
+            self.assertFalse((folder / self.ADDED).exists())
+            self.assertEqual((folder / self.BASE).read_bytes(), b"old base")
+            self.assertFalse(backup.exists())
+            self.assertFalse(self._journal_path(folder).exists())
+
+    def test_installing_phase_rolls_back_partial_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            backup = folder / (cabinet_outputs.CABINET_LOCAL_DEBRIS_PREFIX + "backup-base.3mf")
+            backup.write_bytes(b"old base")
+            (folder / self.BASE).write_bytes(b"half-installed base")
+            (folder / self.ADDED).write_bytes(b"partial")
+            self._write_installing(folder, backups={self.BASE: backup.name}, pending_install=[self.ADDED])
+            result = cabinet_outputs.recover_interrupted_cabinet_save(folder)
+            self.assertTrue(result["settled"])
+            self.assertEqual(result["removed_new"], [self.ADDED])
+            self.assertFalse((folder / self.ADDED).exists())
+            self.assertEqual((folder / self.BASE).read_bytes(), b"old base")
+            self.assertFalse(self._journal_path(folder).exists())
+
+    def _assert_journal_write_and_recovery(self, folder):
+        backup = folder / (cabinet_outputs.CABINET_LOCAL_DEBRIS_PREFIX + "backup-base.3mf")
+        backup.write_bytes(b"original")
+        (folder / self.BASE).write_bytes(b"installed")
+        self._write_installing(folder, backups={self.BASE: backup.name}, installed=[self.BASE])
+        on_disk = json.loads(self._journal_path(folder).read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["journal_version"], 1)
+        self.assertEqual(on_disk["backups"], {self.BASE: backup.name})
+        result = cabinet_outputs.recover_interrupted_cabinet_save(folder)
+        self.assertTrue(result["settled"])
+        self.assertEqual((folder / self.BASE).read_bytes(), b"original")
+        self.assertFalse(self._journal_path(folder).exists())
+
+    def test_journal_write_succeeds_without_O_DIRECTORY(self):
+        with self.subTest(platform="no os.O_DIRECTORY"), tempfile.TemporaryDirectory() as tmp:
+            had = hasattr(os, "O_DIRECTORY")
+            flag = getattr(os, "O_DIRECTORY", None)
+            if had:
+                del os.O_DIRECTORY
+            try:
+                self.assertFalse(hasattr(os, "O_DIRECTORY"))
+                self._assert_journal_write_and_recovery(Path(tmp))
+            finally:
+                if had:
+                    os.O_DIRECTORY = flag
+        with self.subTest(platform="directories cannot be opened"), tempfile.TemporaryDirectory() as tmp:
+            real_open = os.open
+            refused = []
+
+            def no_directories(path, *args, **kwargs):
+                if isinstance(path, (str, os.PathLike)) and os.path.isdir(path):
+                    refused.append(path)
+                    raise OSError("cannot open a directory here")
+                return real_open(path, *args, **kwargs)
+            with patch.object(os, "open", no_directories):
+                self._assert_journal_write_and_recovery(Path(tmp))
+            self.assertTrue(refused)  # the directory fsync was attempted and tolerated
 
 
 if __name__ == "__main__":
