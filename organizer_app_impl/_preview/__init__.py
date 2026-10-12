@@ -291,6 +291,14 @@ def preview_geometry(
                     text_pocket_error = f"text pocket: {error}"
         geometry.extend(_mesh_preview_geometry(plate, "insert_base"))
     base_z = base_height(box, mode)
+    from organizer_inserts._post import check_post_geometry_budget, MAX_POST_FEATURE_COUNT
+    check_post_geometry_budget(box, effective_features, base_z)
+    post_feature_count = sum(1 for one in effective_features if one.kind == "post")
+    if post_feature_count > MAX_POST_FEATURE_COUNT:
+        raise ValueError(
+            f"Too many Post features: at most {MAX_POST_FEATURE_COUNT} "
+            "Post features per layout"
+        )
     # Holders belong to whichever part they are printed as: the bin when fused,
     # the insert otherwise.  The prefix picks the colour family.
     part_kind = "feature" if mode == "fused" else "insert"

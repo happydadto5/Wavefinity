@@ -17,6 +17,7 @@ from shapely.geometry import Point, box as shapely_box
 
 import organizer_inserts._nest as nest_impl
 import organizer_inserts._divider as divider_impl
+import organizer_inserts._post as post_impl
 
 from organizer_engine import (
     BoxSpec,
@@ -2166,6 +2167,269 @@ class DividerCountBoundTests(unittest.TestCase):
                 }]})
                 with self.assertRaisesRegex(ValueError, message):
                     build_features(self.box, layout.features, self.box.base_thickness)
+
+
+class PostCountBoundTests(unittest.TestCase):
+    """Post X/Y quantities from the client are capped server-side (Fix 1044)."""
+
+    box = BoxSpec(80.0, 80.0, 40.0)
+    zone = Zone(-15.0, -20.0, 15.0, 20.0)
+
+    def test_grid_counts_accept_the_cap(self) -> None:
+        self.assertEqual(
+            post_impl.post_grid_counts({"count_x": 200, "count_y": 0}), (200, 0)
+        )
+
+    def test_grid_counts_refuse_over_the_cap(self) -> None:
+        for value in (201, 1_000_000_000, 10 ** 400):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "X quantity"):
+                    post_impl.post_grid_counts({"count_x": value})
+        with self.assertRaisesRegex(ValueError, "Y quantity must be at most 200"):
+            post_impl.post_grid_counts({"count_y": 201})
+
+    def test_grid_counts_refuse_non_finite_values(self) -> None:
+        for value in ("Infinity", "-Infinity", float("inf"), float("nan")):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "X quantity must be a valid number"):
+                    post_impl.post_grid_counts({"count_x": value})
+
+    def test_grid_counts_keep_their_lenient_parsing(self) -> None:
+        for value in (-5, "abc"):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    post_impl.post_grid_counts({"count_x": value}), (0, None)
+                )
+
+    def test_unset_axes_stay_unset(self) -> None:
+        self.assertEqual(
+            post_impl.post_grid_counts({"count_x": 3}), (3, None)
+        )
+        self.assertEqual(
+            post_impl.post_grid_counts({"count_x": "", "count_y": ""}), (None, None)
+        )
+
+    def test_total_cap_rejects_a_large_two_axis_combination(self) -> None:
+        # 200 × 200 = 40,000 > 10,000: GPT's Lens 3 attack shape (G2M-0269).
+        with self.assertRaisesRegex(ValueError, "Total posts"):
+            post_impl.post_grid_counts({"count_x": 200, "count_y": 200})
+
+    def test_total_cap_still_allows_real_world_layouts(self) -> None:
+        self.assertEqual(
+            post_impl.post_grid_counts({"count_x": 100, "count_y": 100}), (100, 100)
+        )
+
+    def test_total_cap_boundary_one_over_the_cap(self) -> None:
+        # G2M-0271 boundary test: 100 x 100 is accepted; 73 x 137 is one over.
+        with self.assertRaisesRegex(ValueError, "Total posts"):
+            post_impl.post_grid_counts({"count_x": 73, "count_y": 137})
+
+    def test_legacy_post_count_is_capped(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Post quantity must be at most 200"):
+            Feature("post", Zone(0, 0, 100, 100), None, 201, "x", {})
+        Feature("post", Zone(0, 0, 100, 100), None, 200, "x", {})
+
+    def test_the_cap_does_not_touch_other_kinds(self) -> None:
+        Feature("cradle", Zone(0, 0, 100, 100), None, 500, "x", {})
+
+    def test_client_payload_is_refused_before_any_geometry_is_built(self) -> None:
+        for value, message in (
+            (1_000_000, "X quantity must be at most 200"),
+            ("Infinity", "X quantity must be a valid number"),
+        ):
+            with self.subTest(value=value):
+                layout = layout_from_dict({"version": 1, "features": [{
+                    "kind": "post", "zone": [-15, -20, 15, 20],
+                    "options": {"count_x": value},
+                }]})
+                with self.assertRaisesRegex(ValueError, message):
+                    build_features(self.box, layout.features, self.box.base_thickness)
+
+    def test_large_two_axis_combination_is_refused_before_any_geometry_is_built(self) -> None:
+        # Regression for the G2M-0269 HOLD: 200 × 200 would fit a tiny-diameter
+        # zone and drive 40,000 revolve meshes. The total-cap guard fires in
+        # build_post before the zone-fit check and before the geometry loop.
+        layout = layout_from_dict({"version": 1, "features": [{
+            "kind": "post", "zone": [-15, -20, 15, 20],
+            "options": {"count_x": 200, "count_y": 200},
+        }]})
+        with self.assertRaisesRegex(ValueError, "Total posts"):
+            build_features(self.box, layout.features, self.box.base_thickness)
+
+
+class PostCumulativeBudgetTests(unittest.TestCase):
+    """Cumulative Post geometry budget across a layout/request (Fix 1044, G2M-0278)."""
+
+    box = BoxSpec(80.0, 80.0, 40.0)
+
+    def _post(self, zone, options=None, count=None, along="x"):
+        return Feature("post", Zone(*zone), None, count, along, options or {})
+
+    def _tiny(self, count_x, count_y):
+        # Adversarial small-post shape (cf. the benchmark): 0.1 mm posts slip
+        # the zone-fit check. taper 0.0 is required - the default taper (0.4)
+        # is not smaller than a 0.1 mm diameter, and build_post refuses that
+        # before any geometry is built.
+        return {"count_x": count_x, "count_y": count_y,
+                "diameter": 0.1, "spacing": 0, "taper": 0.0}
+
+    def test_cumulative_budget_accepts_exactly_at_budget_across_features(self) -> None:
+        # 5,000 + 5,000 = exactly 10,000 across two features: accepted at the
+        # check_layout level, and builds.
+        feats = [
+            self._post((-30, -20, -1, 20), self._tiny(100, 50)),
+            self._post((1, -20, 30, 20), self._tiny(100, 50)),
+        ]
+        check_layout(self.box, feats, None, self.box.base_thickness)
+        build_features(self.box, feats, self.box.base_thickness)
+
+    def test_cumulative_budget_refuses_one_over_before_any_geometry(self) -> None:
+        # 5,000 + 5,100 = 10,100 > 10,000: refused...
+        feats = [
+            self._post((-30, -20, -1, 20), self._tiny(100, 50)),
+            self._post((1, -20, 30, 20), self._tiny(100, 51)),
+        ]
+        with self.assertRaisesRegex(ValueError, "Total posts across all Post features"):
+            check_layout(self.box, feats, None, self.box.base_thickness)
+        # ...before any geometry is built: zero revolve calls, proven by
+        # counting, not just by the exception. (post_impl re-exports the
+        # trimesh module it imports, so no new import is needed.)
+        revolve_calls = []
+        real_revolve = post_impl.trimesh.creation.revolve
+
+        def counting_revolve(*args, **kwargs):
+            revolve_calls.append(1)
+            return real_revolve(*args, **kwargs)
+
+        post_impl.trimesh.creation.revolve = counting_revolve
+        try:
+            with self.assertRaisesRegex(ValueError, "Total posts across all Post features"):
+                build_features(self.box, feats, self.box.base_thickness)
+        finally:
+            post_impl.trimesh.creation.revolve = real_revolve
+        self.assertEqual(revolve_calls, [])
+
+    def test_cumulative_budget_single_max_plus_one_more_feature_refused(self) -> None:
+        # 10,000 + 1 > 10,000: refused even though each feature is legal alone
+        # under the per-feature cap (defense in depth keeps both).
+        feats = [
+            self._post((-30, -20, -1, 20), self._tiny(100, 100)),
+            self._post((1, -20, 30, 20), self._tiny(1, 1)),
+        ]
+        with self.assertRaisesRegex(ValueError, "Total posts across all Post features"):
+            check_layout(self.box, feats, None, self.box.base_thickness)
+
+    def test_cumulative_budget_mixed_manual_legacy_auto_modes(self) -> None:
+        # The budget must use the same effective counts the builder resolves:
+        # manual options, legacy Feature.count/along, and auto zone-fit.
+        manual = self._post((-30, -20, -1, 20), self._tiny(60, 100))       # 6,000
+        legacy = self._post((1, -20, 30, 20),
+                            {"diameter": 1.0, "spacing": 0.5, "taper": 0.0},
+                            count=19, along="x")                             # 19 x 1
+        auto = self._post((-30, 22, -1, 38),
+                          {"diameter": 2.0, "spacing": 1.0, "taper": 0.0})   # 10 x 5 = 50
+        # 6,069 <= 10,000: accepted.
+        check_layout(self.box, [manual, legacy, auto], None, self.box.base_thickness)
+        # Push the same triple over the budget: 10,000 + 19 + 50 = 10,069.
+        over = self._post((-30, -20, -1, 20), self._tiny(100, 100))
+        with self.assertRaisesRegex(ValueError, "Total posts across all Post features"):
+            check_layout(self.box, [over, legacy, auto], None, self.box.base_thickness)
+
+    def test_effective_counts_match_what_build_post_builds(self) -> None:
+        # Parity battery: the shared helper must agree with the builder's
+        # actual post count across all three resolution paths. The budget
+        # counts revolve posts (the expensive unit), not total meshes:
+        # direct build_post calls carry no wall-join flag, so no tab meshes
+        # append here.
+        cases = [
+            self._post((-30, -20, -1, 20), self._tiny(7, 3)),                  # manual, both axes
+            self._post((-30, -20, -1, 20),
+                       {"count_x": 7, "diameter": 2.0, "spacing": 1.0,
+                        "taper": 0.0}),                                       # manual, one axis
+            self._post((-30, -20, -1, 20),
+                       {"diameter": 2.0, "spacing": 1.0, "taper": 0.0},
+                       count=9, along="y"),                                   # legacy along y
+            self._post((-30, -20, -1, 20),
+                       {"diameter": 2.0, "spacing": 1.0, "taper": 0.0}),      # auto zone-fit
+        ]
+        for one in cases:
+            with self.subTest(options=one.options, count=one.count):
+                count_x, count_y = post_impl.post_effective_counts(
+                    self.box, one, self.box.base_thickness)
+                built = post_impl.build_post(self.box, one, self.box.base_thickness)
+                self.assertEqual(len(built), count_x * count_y)
+        self.assertEqual(
+            post_impl.post_effective_counts(
+                self.box, cases[1], self.box.base_thickness), (7, 1))
+        self.assertEqual(
+            post_impl.post_effective_counts(
+                self.box, cases[2], self.box.base_thickness), (1, 9))
+
+    def test_preview_draft_edge_saved_max_plus_draft_refused(self) -> None:
+        # Preview edge (G2M-0278): the saved layout passed check_layout at
+        # exactly 10,000, but the live draft was never part of it.
+        # preview_geometry (Change 14) enforces the budget over
+        # effective_features - the saved features with the draft substituted
+        # for / appended to them - before building anything. Pin the rule
+        # directly on the helper with that exact semantic.
+        saved = [self._post((-30, -20, 30, 20), self._tiny(100, 100))]  # 10,000
+        check_layout(self.box, saved, None, self.box.base_thickness)  # saved alone: fine
+        draft = self._post((-30, -20, 30, 20), self._tiny(1, 1))        # +1 post
+        with self.assertRaisesRegex(ValueError, "Total posts across all Post features"):
+            post_impl.check_post_geometry_budget(
+                self.box, [*saved, draft], self.box.base_thickness)
+
+    def test_fragmentation_bound_accepts_150_features_at_budget(self) -> None:
+        # G2M-0284, G2M-0343, Andrew FINAL 2026-10-12: 150 Post features = the cap, totaling exactly
+        # 10,000 posts (100 features at 8x8 = 6,400; 50 at 8x9 = 3,600):
+        # accepted at the check_layout level, and builds.
+        feats = [
+            self._post((x0, y0, x0 + 4.2, y0 + 6.0),
+                       self._tiny(8, 8) if i < 100 else self._tiny(8, 9))
+            for i in range(150)
+            for (x0, y0) in [(-38.5 + (i % 15) * 5.2, -34.5 + (i // 15) * 7.0)]
+        ]
+        check_layout(self.box, feats, None, self.box.base_thickness)
+        build_features(self.box, feats, self.box.base_thickness)
+
+    def test_fragmentation_bound_refuses_151_features_before_any_geometry(self) -> None:
+        # G2M-0284, G2M-0343, Andrew FINAL 2026-10-12: 151 Post features is refused by the fragmentation
+        # bound even though the aggregate (151 posts) is far under the post
+        # budget.
+        # The feature-count check sits at the head of check_layout, before
+        # any geometry or zone validation, so it fires first.
+        # G2M-0336: Post-specific — counts only kind == "post" features.
+        feats = [
+            self._post((x0, y0, x0 + 5.0, y0 + 5.0), self._tiny(1, 1))
+            for i in range(151)
+            for (x0, y0) in [(-37.5 + (i % 13) * 7.5, -37.5 + (i // 13) * 7.5)]
+        ]
+        with self.assertRaisesRegex(ValueError, "Too many Post features"):
+            check_layout(self.box, feats, None, self.box.base_thickness)
+
+    def test_fragmentation_bound_ignores_non_post_features(self) -> None:
+        # G2M-0336, G2M-0343: the Post-fragmentation bound must not consume
+        # budget for unrelated feature kinds. 150 Post features (at the bound)
+        # plus 50
+        # divider features must be accepted — the divider features do not
+        # count toward MAX_POST_FEATURE_COUNT.
+        feats = [
+            self._post((x0, y0, x0 + 1.0, y0 + 1.0), self._tiny(1, 1))
+            for i in range(150)
+            for (x0, y0) in [(-37.0 + (i % 15) * 5.0, -35.0 + (i // 15) * 7.0)]
+        ]
+        # Add 50 divider features in the gaps between Post zones. They must
+        # not trip the Post bound or overlap the Posts.
+        for i in range(50):
+            x0 = -37.0 + (i % 15) * 5.0
+            y0 = -35.0 + (i // 15) * 7.0
+            feats.append(Feature(
+                "divider",
+                Zone(x0 + 2.0, y0 + 0.2, x0 + 3.0, y0 + 0.8),
+                None, None, "x", {},
+            ))
+        # 150 Post features + 50 dividers: accepted (no exception).
+        check_layout(self.box, feats, None, self.box.base_thickness)
 
 
 if __name__ == "__main__":

@@ -378,7 +378,7 @@ function renderDraftFields() {
           if (info.kind === "post") {
             // Manual X/Y quantities - no Auto button, no "(Auto)" suffix, no help text.
             // (postQx/postQy are resolved in the quantity block above.)
-            html += `<div class="pair">${field("X quantity", "option:count_x", postQx, { min: "0", step: "1", tip: "Posts across the bin left to right. 0 for none." })}${field("Y quantity", "option:count_y", postQy, { min: "0", step: "1", tip: "Posts across the bin front to back. 0 for none." })}${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
+            html += `<div class="pair">${field("X quantity", "option:count_x", postQx, { min: "0", max: "200", step: "1", tip: "Posts across the bin left to right. 0 for none. X × Y total must be at most 10,000 per part, and at most 10,000 across all Post parts." })}${field("Y quantity", "option:count_y", postQy, { min: "0", max: "200", step: "1", tip: "Posts across the bin front to back. 0 for none. X × Y total must be at most 10,000 per part, and at most 10,000 across all Post parts." })}${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
           } else {
             const quantityLabel = info.kind === "steps" ? "Number of steps" : "Quantity";
             const autoState = info.kind !== "steps" && one.count == null;

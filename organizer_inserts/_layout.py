@@ -475,6 +475,14 @@ def check_layout(
     """Catch the mistakes that produce quietly wrong parts."""
     features = list(features)
     whole = bounds or Zone.whole(box)
+    from ._post import check_post_geometry_budget, MAX_POST_FEATURE_COUNT
+    check_post_geometry_budget(box, features, base_z)
+    post_feature_count = sum(1 for one in features if one.kind == "post")
+    if post_feature_count > MAX_POST_FEATURE_COUNT:
+        raise ValueError(
+            f"Too many Post features: at most {MAX_POST_FEATURE_COUNT} "
+            "Post features per layout"
+        )
     text_destinations = set()
     for one in features:
         if not is_text(one):

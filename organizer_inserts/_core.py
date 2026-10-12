@@ -222,6 +222,8 @@ class Feature:
             raise ValueError("feature count must be positive or automatic")
         if self.kind == "divider" and self.count is not None and self.count > MAX_DIVIDER_COUNT:
             raise ValueError(f"Divider quantity must be at most {MAX_DIVIDER_COUNT}")
+        if self.kind == "post" and self.count is not None and self.count > MAX_DIVIDER_COUNT:
+            raise ValueError(f"Post quantity must be at most {MAX_DIVIDER_COUNT}")
         if self.full_span and self.kind != "divider":
             raise ValueError("only a divider can span the full wall")
         if self.alternate_ends and self.kind not in {"cradle", "nest"}:
