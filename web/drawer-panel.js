@@ -1218,13 +1218,15 @@ DP.renderStats = () => {
       refreshNode.title = "Delete placed spacers, re-plan, and place replacements";
     }
   }
-  // Fix 1056: a plan with nothing selected is an enabled silent no-op -
-  // the click fires a backend round-trip ending in a cryptic "Nothing to
-  // fill" toast. Disable with a visible reason instead (Fix 019 Item 4).
-  // When there is no plan at all, the button keeps its guiding
-  // "No spacer plan to place…" toast and stays enabled.
+  // Fix 1071 (corrects Fix 1056 Change 3): the old guard skipped itself
+  // whenever the refresh block above had already set a spacer reason -
+  // exactly the case it was written for (plan exists, nothing selected,
+  // no placed spacers) - leaving Place Selected Spacers enabled with an
+  // empty selection. The else branch never touches the shared reason, so
+  // no gate is needed; when a selection is required its reason wins
+  // (Fix 096 F9: the last branch to disable a button wins).
   const generateNode = $("#dl-sp-generate");
-  if (generateNode && !nothingPlaced && !spacerReasonCurrent()) {
+  if (generateNode && !nothingPlaced) {
     const needsSelection = Boolean(DL.spacerPlan);
     const hasSelection = DL.spacerSelected && DL.spacerSelected.size > 0;
     if (needsSelection && !hasSelection) {
