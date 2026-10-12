@@ -465,7 +465,7 @@ SP.printCabinetAndBins = async event => {
   const savedName = state.activeSpace?.name || "the cabinet";
   const savedWhere = state.output;
   let wroteFiles = false;
-  const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\\\/]/).pop()))].join("\\n");
+  const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\\\/]/).pop()))].join("\n");
   SP.structuralBusy = true;
   SP.structuralBusyLabel = "Preparing cabinet and bins…";
   SP.renderSpaceInfo();
@@ -490,7 +490,7 @@ SP.printCabinetAndBins = async event => {
     if (result.partial) {
       toast(result.error || "Cabinet + bins files were saved, but the slicer did not open.", true, 8000);
     } else {
-      toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\\n${names(result.files)}`, false, 7000);
+      toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\n${names(result.files)}`, false, 7000);
     }
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
