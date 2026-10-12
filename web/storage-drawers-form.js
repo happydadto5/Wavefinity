@@ -484,7 +484,11 @@
       const nextFit = Number(fit.value);
       for (const row of block.drawers) {
         const oldUsable = roundMm(row.height_mm + previousFit);
-        row.height_mm = roundMm(oldUsable - nextFit);
+        // A looser fit must never push a minimum-height drawer below the
+        // structural floor: clamp there and let the usable height grow by
+        // the tiny remainder (bins still fit) instead of failing validation
+        // with a misleading "needs more usable height" error.
+        row.height_mm = Math.max(roundMm(oldUsable - nextFit), minDrawerHeight);
       }
       previousFit = nextFit;
       renderRowHeights(); syncHeightField(); schedule();
