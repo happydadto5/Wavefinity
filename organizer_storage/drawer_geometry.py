@@ -409,11 +409,14 @@ def _cosmetic_side_shell(cavity, x0, datum, floor, height):
     The first/last 8 mm in Y, the runner/catch band and the rim stay straight.
     Matching rings ramp from the existing wall at >=45 degrees. The cavity
     is subtracted afterwards, retaining the exact interior wave and phase.
+    The shell ends (SD_RAIL_LEDGE_MM + fit + 0.3) mm below the rim — clear
+    of the upper level's stop root — and its outward bulge is clipped back
+    to the drawer wall plane over the top ramp.
     """
     z0 = floor + 2*SD_RAIL_CAPTURE_MM + datum.fit
-    z1 = floor + height - 2.0
+    z1 = floor + height - (SD_RAIL_LEDGE_MM + datum.fit + 0.3)
     ramp = 0.8
-    if z1-z0 <= 2*ramp or datum.field_y <= 16.0:
+    if z1-z0 <= 3*ramp or datum.field_y <= 16.0:
         return None
     from shapely.affinity import translate
     profile = translate(cavity.buffer(datum.drawer_wall, join_style=2),
@@ -428,7 +431,11 @@ def _cosmetic_side_shell(cavity, x0, datum, floor, height):
     # ramp, and each vertex keeps its Y and the same canonical wave phase.
     if np.max(np.abs(upper-lower)) > ramp:
         raise ValueError("Cosmetic wall ramp exceeds the supported slope")
-    return _loft_cavity([lower, upper, upper, lower], [z0, z0+ramp, z1-ramp, z1])
+    # Five rings: full bulge between the ramps, then the bulge ramps back to
+    # the wall-plane-clipped profile so the shell's top band carries no
+    # outward crest the upper stop root could meet.
+    return _loft_cavity([lower, upper, upper, lower, lower],
+                        [z0, z0+ramp, z1-2*ramp, z1-ramp, z1])
 
 
 def _front_plan(block, width, row, ordinal):

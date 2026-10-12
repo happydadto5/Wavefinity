@@ -114,5 +114,70 @@ class StorageDrawersHeightTests(unittest.TestCase):
         self.assertEqual(catalog_payload()["storage_drawers_rules"]["max_usable_height_mm"], 2000.0)
 
 
+class Fix1117SideShellClearanceTests(unittest.TestCase):
+    def fixture(self, fit, style="full"):
+        from organizer_storage import drawer_geometry as geometry
+        block = storage_drawers_defaults(3)
+        block["drawer_fit_mm"] = fit
+        block["cabinet_style"] = style
+        space = normalise_storage_drawers_definition({
+            "kind": "storage_drawers", "name": "Shell clearance",
+            "x": 48.0, "y": 48.0, "storage_drawers": block})
+        datum = geometry._make_datum(space)
+        floor = datum.floors[1]
+        height = space["storage_drawers"]["drawers"][1]["height_mm"]
+        x0 = (datum.outer_x-datum.field_x)/2
+        cavity = geometry.wavy_rect_cavity(
+            datum.field_x/2 + geometry.WAVE_MATING_GAP/2,
+            datum.field_y/2 + geometry.WAVE_MATING_GAP/2, 0.0, wall=0.0)
+        shell = geometry._cosmetic_side_shell(cavity, x0, datum, floor, height)
+        return geometry, space, datum, x0, floor, height, cavity, shell
+
+    def test_shell_top_below_stop_root_all_fits(self):
+        for fit in (0.30, 0.40, 0.60):
+            with self.subTest(fit=fit):
+                g, _, d, x0, floor, height, cavity, shell = self.fixture(fit)
+                self.assertAlmostEqual(shell.bounds[1, 2],
+                    floor+height-(g.SD_RAIL_LEDGE_MM+fit+0.3))
+                short_height = 2*g.SD_RAIL_CAPTURE_MM+fit + g.SD_RAIL_LEDGE_MM+fit+0.3+2.4
+                self.assertIsNone(g._cosmetic_side_shell(cavity, x0, d, floor, short_height-1e-8))
+                from dataclasses import replace
+                self.assertIsNone(g._cosmetic_side_shell(cavity, x0, replace(d, field_y=16.0), floor, height))
+
+    def test_top_band_clipped_to_wall_plane(self):
+        for fit in (0.30, 0.40, 0.60):
+            with self.subTest(fit=fit):
+                g, _, d, x0, floor, height, _, shell = self.fixture(fit)
+                z1 = floor+height-(g.SD_RAIL_LEDGE_MM+fit+0.3)
+                band = shell.vertices[shell.vertices[:, 2] >= z1-0.8-1e-8]
+                self.assertGreater(len(band), 0)
+                self.assertGreaterEqual(band[:, 0].min(), x0-d.drawer_wall-1e-8)
+                self.assertLessEqual(band[:, 0].max(), x0+d.field_x+d.drawer_wall+1e-8)
+                self.assertTrue(shell.is_watertight)
+
+    def test_zero_contact_sweep(self):
+        import trimesh
+        for fit in (0.30, 0.40, 0.60):
+            for style in ("full", "open"):
+                g, space, d, x0, floor, height, _, shell = self.fixture(fit, style)
+                definitions, _ = g._datum_components(space, d)
+                # Use the production sides, restricted to the upper stop band.
+                stop_bottom = d.floors[0]-d.drawer_base-g.SD_RAIL_LEDGE_MM-fit
+                stop_y = d.front+g.SD_RAIL_LEADIN_MM+12.0
+                region = g._box(-1, stop_y, stop_bottom, d.outer_x+1,
+                                stop_y+g.SD_CATCH_LENGTH_MM, d.floors[0]+2)
+                stops = [trimesh.boolean.intersection([maker(), region], engine="manifold")
+                         for key, _, _, maker, _, _ in definitions
+                         if key in ("side_left", "side_right", "frame_left", "frame_right")]
+                for dx in (-fit, 0.0, fit):
+                    for dz in (0.0, fit):
+                        with self.subTest(fit=fit, style=style, dx=dx, dz=dz):
+                            moved = shell.copy()
+                            moved.apply_translation((dx, 0, dz))
+                            for stop in stops:
+                                contact = trimesh.boolean.intersection([moved, stop], engine="manifold")
+                                self.assertLess(abs(contact.volume), 1e-7)
+
+
 if __name__ == "__main__":
     unittest.main()
