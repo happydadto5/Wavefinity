@@ -46,9 +46,18 @@ async function init() {
 
 init();
 
-// Fix 124: Suppress browser autocomplete on all data-entry fields (page-wide)
-function suppressBrowserAutocomplete() {
-  document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])').forEach(el => {
+// Fix 1121 (hopper #89 item 1): shared helper — suppress browser autocomplete
+// on all data-entry controls. Supersedes the Fix 124 inline sweep: now a named
+// shared helper (callable on the whole document or on a single dynamic root),
+// and covers eligible text/number-like inputs AND textareas. An explicitly set
+// autocomplete attribute is always respected (opt-out).
+const AUTOCOMPLETE_SUPPRESS_SELECTOR = 'input[type="text"], input[type="number"], input:not([type]), textarea';
+function suppressBrowserAutocomplete(root) {
+  const scope = root || document;
+  const targets = [];
+  if (scope.matches && scope.matches(AUTOCOMPLETE_SUPPRESS_SELECTOR)) targets.push(scope);
+  scope.querySelectorAll(AUTOCOMPLETE_SUPPRESS_SELECTOR).forEach(el => targets.push(el));
+  targets.forEach(el => {
     if (!el.hasAttribute('autocomplete')) {
       el.setAttribute('autocomplete', 'off');
     }
@@ -56,12 +65,14 @@ function suppressBrowserAutocomplete() {
 }
 // Run on initial load
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', suppressBrowserAutocomplete);
+  document.addEventListener('DOMContentLoaded', () => suppressBrowserAutocomplete());
 } else {
   suppressBrowserAutocomplete();
 }
 // Re-run when dynamic content is added (MutationObserver for modals/editors)
-new MutationObserver(suppressBrowserAutocomplete).observe(document.body, {
+// NOTE: wrapped in an arrow function — the observer invokes its callback with
+// (mutations, observer), which must NOT be passed through as the helper's root.
+new MutationObserver(() => suppressBrowserAutocomplete()).observe(document.body, {
   childList: true,
   subtree: true
 });

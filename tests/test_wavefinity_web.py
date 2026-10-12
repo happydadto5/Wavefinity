@@ -2743,5 +2743,105 @@ class StorageBoxPreviewWarningCapTests(unittest.TestCase):
         self.assertIsNone(result["storage_box_height_warning"])
 
 
+class AutocompleteSuppressionTests(unittest.TestCase):
+    """Fix 1121: browser autocomplete suppression via shared helper."""
+
+    HELPER_START = "const AUTOCOMPLETE_SUPPRESS_SELECTOR"
+    HELPER_END = "// Run on initial load"
+
+    def _helper_block(self):
+        source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        start = source.index(self.HELPER_START)
+        block = source[start:source.index(self.HELPER_END, start)]
+        self.assertIn("function suppressBrowserAutocomplete(root)", block)
+        return block
+
+    def test_helper_selector_covers_text_number_textarea(self):
+        block = self._helper_block()
+        for token in ('input[type="text"]', 'input[type="number"]', "input:not([type])", "textarea"):
+            self.assertIn(token, block)
+
+    def test_observer_wraps_helper_call(self):
+        source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("new MutationObserver(() => suppressBrowserAutocomplete())", source)
+
+    def test_space_form_carries_autocomplete_off(self):
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        match = re.search(r'<form[^>]*id="space-form"[^>]*>', html)
+        self.assertIsNotNone(match)
+        self.assertIn('autocomplete="off"', match.group(0))
+
+    def test_helper_sets_off_on_eligible_and_respects_opt_out(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js unavailable")
+        block = self._helper_block()
+        harness = r"""
+const log = [];
+function makeEl(tag, typeAttr, existing) {
+  const attrs = {};
+  if (existing !== undefined) attrs.autocomplete = existing;
+  const el = {
+    tagName: tag.toUpperCase(),
+    typeAttr: typeAttr,
+    hasAttribute: (n) => n === "type" ? typeAttr !== null
+      : Object.prototype.hasOwnProperty.call(attrs, n),
+    setAttribute: (n, v) => {
+      attrs[n] = v;
+      log.push(tag + ":" + (typeAttr === null ? "(none)" : typeAttr) + ":" + n + "=" + v);
+    },
+    matches: (sel) => selMatch(el, sel),
+    querySelectorAll: (sel) => [],
+  };
+  return el;
+}
+// Minimal emulation of the exact selector grammar in
+// AUTOCOMPLETE_SUPPRESS_SELECTOR (pinned by the static token test above).
+function selMatch(el, selector) {
+  return selector.split(",").map((s) => s.trim()).some((part) => {
+    if (part === "textarea") return el.tagName === "TEXTAREA";
+    const m = part.match(/^input(\[type="([^"]+)"\]|:not\(\[type\]\))?$/);
+    if (!m || el.tagName !== "INPUT") return false;
+    if (m[1] === ":not([type])") return el.typeAttr === null;
+    if (m[2]) return el.typeAttr === m[2];
+    return true;
+  });
+}
+const document = { querySelectorAll: (sel) => docEls.filter((el) => selMatch(el, sel)) };
+const els = [
+  makeEl("input", "text"),        // eligible
+  makeEl("input", "number"),      // eligible
+  makeEl("input", null),          // eligible (typeless input defaults to text)
+  makeEl("textarea", null),       // eligible
+  makeEl("input", "checkbox"),    // excluded
+  makeEl("input", "radio"),       // excluded
+  makeEl("input", "range"),       // excluded
+  makeEl("input", "file"),        // excluded
+  makeEl("input", "button"),      // excluded
+  makeEl("select", null),         // excluded
+  makeEl("input", "text", "on"),  // opt-out: existing attribute must be kept
+];
+const container = { querySelectorAll: (sel) => els.filter((el) => selMatch(el, sel)) };
+suppressBrowserAutocomplete(container);   // container-root path
+const solo = makeEl("input", "text");
+suppressBrowserAutocomplete(solo);        // self-root path (matches() on the root itself)
+const docEls = [makeEl("input", "number")];
+suppressBrowserAutocomplete();            // default path (document)
+process.stdout.write(JSON.stringify(log));
+"""
+        result = subprocess.run(
+            [node, "-e", block + "\n" + harness], cwd=ROOT,
+            capture_output=True, text=True, check=True,
+        )
+        self.assertEqual(json.loads(result.stdout), [
+            "input:text:autocomplete=off",
+            "input:number:autocomplete=off",
+            "input:(none):autocomplete=off",
+            "textarea:(none):autocomplete=off",
+            "input:text:autocomplete=off",
+            "input:number:autocomplete=off",
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()
