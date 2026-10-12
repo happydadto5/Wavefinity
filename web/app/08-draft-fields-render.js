@@ -221,7 +221,7 @@ function renderDraftFields() {
           </select>
         </label>`;
       };
-      html += `<div class="bore-group wide">
+      html += `<div class="bore-group wide bore-group-nolabel">
         <div class="bore-group-fields bore-hole-fields">
           ${diameterField}
           ${shapeField}
