@@ -130,7 +130,7 @@ def scoop_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float
 
 
 @feature(
-    "scoop", title="Curved Scoop", display="Curved Scoop — retrieval ramp",
+    "scoop", title="Scoop", display="Scoop — retrieval ramp",
     description="A curved retrieval ramp for easy access to small parts.",
     options=(OptionDefinition("Depth", "depth", f"{SCOOP_DEFAULT_DEPTH:g}", minimum=SCOOP_MIN_DEPTH, maximum=SCOOP_MAX_DEPTH, note="percent of the usable bin height the scoop rises"),),
     order=90,

@@ -723,6 +723,172 @@ class DividerScoopTests(unittest.TestCase):
 
 
 
+    # --- Fix 1143: Divider Scoop side picker -------------------------------
+
+    def scoop_divider(self, side=None, depth=60.0, **options) -> Feature:
+        scoop = {"depth": depth}
+        if side is not None:
+            scoop["side"] = side
+        return Feature(
+            "divider", Zone.whole(self.box),
+            options={"count_x": 1, "count_y": 1, "scoop": scoop, **options},
+            full_span=True,
+        )
+
+    def test_each_side_builds_positive_volume_watertight_solids(self) -> None:
+        cells = inserts.divider_cells(self.box, self.divider(), self.base_z)
+        for side, per_cell in (("front", 1), ("back", 1), ("left", 1), ("right", 1), ("all", 4)):
+            with self.subTest(side=side):
+                solids = build_features(self.box, [self.scoop_divider(side)], self.base_z)
+                scoops = solids[-per_cell * len(cells):]
+                self.assertEqual(len(scoops), per_cell * len(cells))
+                for solid in scoops:
+                    self.assertTrue(solid.is_watertight)
+                    self.assertGreater(solid.volume, 0.0)
+
+    def test_each_side_sits_on_the_expected_compartment_side(self) -> None:
+        cells = inserts.divider_cells(self.box, self.divider(), self.base_z)
+        for side in ("front", "back", "left", "right"):
+            with self.subTest(side=side):
+                solids = build_features(self.box, [self.scoop_divider(side)], self.base_z)
+                for solid, cell in zip(solids[-len(cells):], cells):
+                    (bx0, by0, _), (bx1, by1, _) = solid.bounds
+                    z = cell.zone
+                    mid_x, mid_y = (z.x0 + z.x1) / 2.0, (z.y0 + z.y1) / 2.0
+                    if side == "front":
+                        self.assertAlmostEqual(by0, z.y0, places=6)
+                        self.assertLessEqual(by1, mid_y + 1e-6)
+                    elif side == "back":
+                        self.assertAlmostEqual(by1, z.y1, places=6)
+                        self.assertGreaterEqual(by0, mid_y - 1e-6)
+                    elif side == "left":
+                        self.assertAlmostEqual(bx0, z.x0, places=6)
+                        self.assertLessEqual(bx1, mid_x + 1e-6)
+                    else:
+                        self.assertAlmostEqual(bx1, z.x1, places=6)
+                        self.assertGreaterEqual(bx0, mid_x - 1e-6)
+
+    def test_unknown_or_missing_side_builds_the_front_scoop(self) -> None:
+        front = build_features(self.box, [self.scoop_divider("front")], self.base_z)
+        for side in (None, "bogus"):
+            with self.subTest(side=side):
+                solids = build_features(self.box, [self.scoop_divider(side)], self.base_z)
+                self.assertEqual(len(solids), len(front))
+                for got, want in zip(solids, front):
+                    self.assertTrue(np.allclose(got.bounds, want.bounds))
+        self.assertEqual(inserts.divider_scoop_side({"side": "bogus"}), "front")
+        self.assertEqual(inserts.divider_scoop_side({}), "front")
+
+    def test_normalize_divider_scoop_drops_unknown_side_and_keeps_known(self) -> None:
+        bogus = inserts.normalize_divider_scoop(
+            self.box, self.scoop_divider("bogus"), self.base_z)
+        self.assertNotIn("side", bogus.options["scoop"])
+        for side in inserts.DIVIDER_SCOOP_SIDES:
+            kept = inserts.normalize_divider_scoop(
+                self.box, self.scoop_divider(side), self.base_z)
+            self.assertEqual(kept.options["scoop"]["side"], side)
+
+    @staticmethod
+    def label_zone(width, depth) -> Zone:
+        return Zone(-width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0)
+
+    def test_label_rect_is_disjoint_from_real_scoop_solids(self) -> None:
+        from organizer_inserts._divider._build import _DIVIDER_SCOOP_SPECS
+        for side in ("front", "back", "left", "right", "all"):
+            for depth in (20, 60, 100):
+                for width, height in ((40, 40), (60, 30), (25, 80)):
+                    with self.subTest(side=side, depth=depth, size=(width, height)):
+                        zone = self.label_zone(width, height)
+                        settings = inserts.scoop_settings(self.box, {"depth": depth}, 0.0)
+                        rx0, ry0, rx1, ry1, collapsed = inserts.divider_scoop_label_rect(
+                            zone, settings, side)
+                        for along, mirror in _DIVIDER_SCOOP_SPECS[side]:
+                            region = inserts.scoop_region(zone, settings, along)
+                            solid = inserts.build_scoop_region(
+                                (region.x0, region.y0, region.x1, region.y1),
+                                0.0, settings.height, along,
+                            )
+                            (sx0, sy0, _), (sx1, sy1, _) = solid.bounds
+                            # Reflect across the zone midline (the origin here),
+                            # exactly as _mirror_scoop_solid does.
+                            if mirror and along == "x":
+                                sy0, sy1 = -sy1, -sy0
+                            elif mirror:
+                                sx0, sx1 = -sx1, -sx0
+                            if collapsed:
+                                continue
+                            self.assertTrue(
+                                rx1 <= sx0 or sx1 <= rx0 or ry1 <= sy0 or sy1 <= ry0,
+                                ((rx0, ry0, rx1, ry1), (sx0, sy0, sx1, sy1)),
+                            )
+
+    def test_label_rect_collapses_at_max_run_all_sides(self) -> None:
+        zone = self.label_zone(40, 40)
+        settings = inserts.scoop_settings(self.box, {"depth": 100}, 0.0)
+        run_x, run_y = inserts.divider_scoop_run_lengths(zone, settings)
+        self.assertAlmostEqual(run_x, 20.0, places=6)
+        self.assertAlmostEqual(run_y, 20.0, places=6)
+        self.assertTrue(inserts.divider_scoop_label_rect(zone, settings, "all")[4])
+
+    def test_label_rect_partial_run_all_sides_keeps_real_center(self) -> None:
+        zone = self.label_zone(40, 40)
+        settings = inserts.scoop_settings(self.box, {"depth": 20}, 0.0)
+        run = settings.height
+        self.assertLess(run, 20.0)
+        x0, y0, x1, y1, collapsed = inserts.divider_scoop_label_rect(zone, settings, "all")
+        self.assertFalse(collapsed)
+        want = (-20 + run + 1.5, -20 + run + 1.5, 20 - run - 1.5, 20 - run - 1.5)
+        for got, expected in zip((x0, y0, x1, y1), want):
+            self.assertAlmostEqual(got, expected, places=6)
+
+    def test_label_rect_matches_js_preview(self) -> None:
+        def js_port(zone, side, depth_pct, box_z):
+            # Line-for-line mirror of dividerScoopLabelRectClient (13-layout-geometry.js)
+            # with its own hardcoded constants.
+            zx0, zy0, zx1, zy1 = zone
+            if side not in ("front", "back", "left", "right", "all"):
+                side = "front"
+            scoop_height = max(0.0, box_z * depth_pct / 100.0)
+            run_x = min(scoop_height, (zx1 - zx0) / 2.0)
+            run_y = min(scoop_height, (zy1 - zy0) / 2.0)
+            x0, y0, x1, y1 = zx0, zy0, zx1, zy1
+            if side == "back":
+                y1 -= run_y
+            elif side == "left":
+                x0 += run_x
+            elif side == "right":
+                x1 -= run_x
+            elif side == "all":
+                x0 += run_x
+                y0 += run_y
+                x1 -= run_x
+                y1 -= run_y
+            else:
+                y0 += run_y
+            c = 1.5
+            rx0, ry0, rx1, ry1 = x0 + c, y0 + c, x1 - c, y1 - c
+            return (rx0, ry0, rx1, ry1, (rx1 - rx0) < 4.0 or (ry1 - ry0) < 3.0)
+
+        for side in ("front", "back", "left", "right", "all", "bogus"):
+            for depth in (10, 20, 60, 100):
+                for width, height in ((40, 40), (60, 30), (25, 80)):
+                    with self.subTest(side=side, depth=depth, size=(width, height)):
+                        zone = self.label_zone(width, height)
+                        settings = inserts.scoop_settings(self.box, {"depth": depth}, 0.0)
+                        want = inserts.divider_scoop_label_rect(zone, settings, side)
+                        got = js_port(
+                            (zone.x0, zone.y0, zone.x1, zone.y1), side, depth, self.box.z)
+                        for a, b in zip(got[:4], want[:4]):
+                            self.assertAlmostEqual(a, b, places=9)
+                        self.assertEqual(got[4], want[4])
+
+    def test_collapsed_label_is_suppressed(self) -> None:
+        one = self.scoop_divider(
+            "all", depth=100.0, label_divisions=True,
+            division_labels=["A", "B", "C", "D"],
+        )
+        self.assertEqual(inserts.divider_division_texts(self.box, one, self.base_z), [])
+
     def test_automatic_setting_cycles_are_rejected(self) -> None:
         rule = inserts.SettingInteraction
         with self.assertRaisesRegex(ValueError, "automatic setting loop"):

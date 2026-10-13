@@ -10,6 +10,7 @@ from organizer_engine import BoxSpec
 
 from ._core import MAX_DIVIDER_COUNT, Feature, Zone
 from ._registry import resolved_options
+from ._scoop import scoop_region, scoop_settings
 
 
 @dataclass(frozen=True)
@@ -202,6 +203,98 @@ def divider_cells(
     return tuple(sorted(cells, key=lambda cell: (cell.row, cell.column)))
 
 
+# Fix 1143: the Divider Scoop side picker. The scoop curves up from one
+# compartment side - front (the historical default), back, left, right -
+# or from all four sides at once ("all"), curving all the way around.
+DIVIDER_SCOOP_SIDES = ("front", "back", "left", "right", "all")
+
+# Fix 1143 round 2 (G2M-0470 HOLD): the base-division-label safe region is
+# derived from the ACTUAL per-axis Scoop run - never a hardcoded half of the
+# compartment.
+DIVIDER_SCOOP_LABEL_CLEARANCE = 1.5  # mm kept clear between a scoop strip and the label rect
+DIVIDER_SCOOP_MIN_LABEL_W = 4.0  # mm; a narrower remaining rect counts as collapsed
+DIVIDER_SCOOP_MIN_LABEL_H = 3.0  # mm; a shorter remaining rect counts as collapsed
+# The 4.0/3.0 collapse thresholds sit just above the label pipeline's 2.5 mm
+# minimum glyph cap (cap = max(2.5, ...) in _shelf.py), so a collapsed rect
+# could never hold legible text anyway.
+
+
+def divider_scoop_side(config) -> str:
+    """The compartment side carrying the Divider Scoop; 'front' unless chosen."""
+    side = config.get("side", "front") if isinstance(config, dict) else "front"
+    return side if side in DIVIDER_SCOOP_SIDES else "front"
+
+
+def divider_scoop_run_lengths(zone, settings):
+    """Actual per-axis Scoop strip run inside one compartment, in mm.
+
+    Derived from the real Scoop geometry: runs scoop_region() - the same
+    function the geometry pass builds the scoop solids from - on each axis
+    and measures the strip it returns (run = min(settings.height, dim/2),
+    capped by scoop_region itself). Returns (run_x, run_y). A regression
+    proves these runs match the real built solids' measured extents within
+    1e-6 mm, so the label region below is never a hardcoded half.
+    """
+    strip_x = scoop_region(zone, settings, "y")
+    strip_y = scoop_region(zone, settings, "x")
+    return (strip_x.x1 - strip_x.x0, strip_y.y1 - strip_y.y0)
+
+
+def divider_scoop_label_rect(zone, settings, side):
+    """Safe base-division-label rect for one compartment.
+
+    Derived from the actual Scoop run (divider_scoop_run_lengths), not a
+    hardcoded half: the rect is the compartment zone minus the scoop
+    strip(s) for ``side``, shrunk by DIVIDER_SCOOP_LABEL_CLEARANCE on every
+    side. The clearance also absorbs the <= thickness/2 wall-inset difference
+    between slot bounds and cell zones in the non-grid label path, so the
+    label can never touch a scoop strip there either.
+
+    Returns (x0, y0, x1, y1, collapsed). ``collapsed`` is True when the
+    remaining rect is narrower than DIVIDER_SCOOP_MIN_LABEL_W or shorter
+    than DIVIDER_SCOOP_MIN_LABEL_H - including the zero-area max-run "all"
+    case, where opposing strips meet at the compartment midlines. Callers
+    must suppress the label when collapsed, never emit overlapping text.
+    Unknown sides behave as "front".
+    """
+    run_x, run_y = divider_scoop_run_lengths(zone, settings)
+    x0, y0, x1, y1 = zone.x0, zone.y0, zone.x1, zone.y1
+    if side == "back":
+        y1 -= run_y
+    elif side == "left":
+        x0 += run_x
+    elif side == "right":
+        x1 -= run_x
+    elif side == "all":
+        x0 += run_x
+        y0 += run_y
+        x1 -= run_x
+        y1 -= run_y
+    else:  # "front", and any unknown value
+        y0 += run_y
+    c = DIVIDER_SCOOP_LABEL_CLEARANCE
+    rx0, ry0, rx1, ry1 = x0 + c, y0 + c, x1 - c, y1 - c
+    collapsed = (
+        (rx1 - rx0) < DIVIDER_SCOOP_MIN_LABEL_W
+        or (ry1 - ry0) < DIVIDER_SCOOP_MIN_LABEL_H
+    )
+    return (rx0, ry0, rx1, ry1, collapsed)
+
+
+def divider_scoop_label_placement(box, zone, config, base_z):
+    """((x0, y0, x1, y1), collapsed) for one compartment's base label.
+
+    Resolves the real scoop settings exactly as the geometry pass does
+    (scoop_settings(..., allow_legacy_height=False)) and derives the safe
+    rect from the actual per-axis Scoop run.
+    """
+    settings = scoop_settings(box, config, base_z, allow_legacy_height=False)
+    x0, y0, x1, y1, collapsed = divider_scoop_label_rect(
+        zone, settings, divider_scoop_side(config)
+    )
+    return ((x0, y0, x1, y1), collapsed)
+
+
 def divider_scoop_targets(
     box: BoxSpec, spec_feature: Feature, base_z: float = 0.0
 ) -> tuple[str, ...]:
@@ -217,7 +310,7 @@ def normalize_divider_scoop(
 ) -> Feature:
     """Normalize Scoop targeting and retire incompatible sloped bottoms.
 
-    A curved Scoop and a sloped floor both own the compartment floor, so an
+    A Scoop and a sloped floor both own the compartment floor, so an
     old design containing both resolves in favour of its Scoop.
     """
     config = spec_feature.options.get("scoop")
@@ -229,6 +322,11 @@ def normalize_divider_scoop(
         )
     normalized = dict(config)
     normalized.pop("cells", None)
+    # Fix 1143: the scoop side picker. Unknown values fall back to the
+    # historical front default at build time; drop them so saved designs
+    # stay clean.
+    if normalized.get("side") not in DIVIDER_SCOOP_SIDES:
+        normalized.pop("side", None)
     options["scoop"] = normalized
     for key in (
         "slope_base", "bottom_angle", "reverse_bottom", "alternate_bottom",

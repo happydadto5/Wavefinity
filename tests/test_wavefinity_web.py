@@ -331,7 +331,7 @@ class WebApplicationTests(unittest.TestCase):
             self.assertEqual(parts[kind]["max_instances"], 1)
             self.assertTrue(parts[kind]["palette_visible"])
             self.assertIn("box_modifier", parts[kind]["capabilities"])
-        self.assertEqual(parts["scoop"]["title"], "Curved Scoop")
+        self.assertEqual(parts["scoop"]["title"], "Scoop")
         self.assertEqual(parts["scoop"]["icon"], "scoop")
         self.assertFalse(parts["scoop"]["flags"]["size"])
         self.assertFalse(parts["scoop"]["flags"]["along"])

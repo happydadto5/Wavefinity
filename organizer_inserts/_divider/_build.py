@@ -16,6 +16,7 @@ from .._divider_cells import (
     divider_grid_counts,
     divider_grid_edges,
     divider_owner_matrix,
+    divider_scoop_side,
     divider_scoop_targets,
     normalize_divider_scoop,
     normalized_compartment_spans,
@@ -114,6 +115,45 @@ def divider_max_bottom_angle(box: BoxSpec, one: Feature, base_z: float) -> float
                         math.degrees(math.atan(limit / run)) - 1e-6))
 
 
+# Fix 1143: the Divider Scoop side picker. (along, mirror) build specs per
+# side. The shared scoop profile always rises from the region's low edge,
+# so back/right reuse the front/left strip mirrored across the cell midline.
+_DIVIDER_SCOOP_SPECS = {
+    "front": (("x", False),),
+    "back": (("x", True),),
+    "left": (("y", False),),
+    "right": (("y", True),),
+    "all": (("x", False), ("x", True), ("y", False), ("y", True)),
+}
+
+# Wall-join tab sides: the scoop fuses only into the wall(s) its ramp meets
+# at full height.
+_DIVIDER_SCOOP_JOIN_SIDES = {
+    "front": ("front",),
+    "back": ("back",),
+    "left": ("left",),
+    "right": ("right",),
+    "all": ("front", "back", "left", "right"),
+}
+
+
+def _mirror_scoop_solid(solid: trimesh.Trimesh, zone: Zone, along: str) -> trimesh.Trimesh:
+    """Mirror a Scoop solid across the cell midline so it rises from the far edge."""
+    import numpy as np
+    mirrored = solid.copy()
+    matrix = np.eye(4)
+    if along == "x":
+        mid = (zone.y0 + zone.y1) / 2.0
+        matrix[1, 1] = -1.0
+        matrix[1, 3] = 2.0 * mid
+    else:
+        mid = (zone.x0 + zone.x1) / 2.0
+        matrix[0, 0] = -1.0
+        matrix[0, 3] = 2.0 * mid
+    mirrored.apply_transform(matrix)
+    return mirrored
+
+
 def _divider_scoops(
     box: BoxSpec, spec_feature: Feature, base_z: float
 ) -> list[trimesh.Trimesh]:
@@ -123,16 +163,22 @@ def _divider_scoops(
     if not isinstance(config, dict) or not targets:
         return []
     settings = scoop_settings(box, config, base_z, allow_legacy_height=False)
+    side = divider_scoop_side(config)
     by_identity = {
         cell.identity: cell for cell in divider_cells(box, spec_feature, base_z)
     }
     solids = []
     for identity in targets:
-        region = scoop_region(by_identity[identity].zone, settings, "x")
-        solids.append(build_scoop_region(
-            (region.x0, region.y0, region.x1, region.y1),
-            base_z, settings.height, "x",
-        ))
+        zone = by_identity[identity].zone
+        for along, mirror in _DIVIDER_SCOOP_SPECS[side]:
+            region = scoop_region(zone, settings, along)
+            solid = build_scoop_region(
+                (region.x0, region.y0, region.x1, region.y1),
+                base_z, settings.height, along,
+            )
+            if mirror:
+                solid = _mirror_scoop_solid(solid, zone, along)
+            solids.append(solid)
     return solids
 
 
@@ -160,7 +206,7 @@ def _divider_scoops(
         OptionDefinition("Division labels", "division_labels", (), "json", False, note="list of label texts, one per compartment, when label_divisions is true"),
         OptionDefinition("Division label orientation", "division_label_orientation", "side_to_side", "enum", False, choices=(("side_to_side", "Side to side"), ("front_to_back", "Front to back")), note="lettering direction of base-level division labels; front_to_back rotates the text 90 degrees so it reads front to back"),
         OptionDefinition("Compartment spans", "compartment_spans", (), "json", False, note="optional list describing merged compartments; leave empty unless merging"),
-        OptionDefinition("Compartment Scoop", "scoop", {}, "json", False, note="optional object {enabled, ...} adding a scoop to every compartment; leave empty for none"),
+        OptionDefinition("Compartment Scoop", "scoop", {}, "json", False, note="optional object {depth, side, ...} adding a scoop to every compartment; leave empty for none"),
     ), order=60,
 )
 def build_divider(
@@ -193,10 +239,10 @@ def build_divider(
             # Full-span grids hug the wavy wall; non-full-span grid walls
             # ending at zone edges get tabs like standard dividers.
             # Keep-clear: empty (dividers are solid walls).
-            # The divider scoops are ramps: restrict them to the full-height
-            # side only (front; _divider_scoops hardcodes along="x"), like
-            # standalone scoops (Change 6). They are tabulated separately so
-            # the unrestricted wall tabs don't wall off the scoop sides, and
+            # The divider scoops are ramps: restrict them to their full-height
+            # side(s) (the picker's scoop side; Fix 1143), like standalone
+            # scoops (Change 6). They are tabulated separately so the
+            # unrestricted wall tabs don't wall off the scoop sides, and
             # meshed at the scoop's own height (not the divider's).
             _wj_keep_clear = Polygon()  # empty
             _wj_material = _footprint_from_solids(solids)
@@ -211,8 +257,11 @@ def build_divider(
                 _wj_scoop_material = _footprint_from_solids(_wj_scoop_solids)
                 _wj_scoop_tabs = _join_tabs(
                     box, _wj_scoop_material, _wj_keep_clear, JOIN_BAND,
-                    sides=_joined_sides(box, _wj_scoop_material,
-                                        "scoop", "x"),
+                    sides=_joined_sides(
+                        box, _wj_scoop_material, "scoop", "x",
+                        allowed_sides=_DIVIDER_SCOOP_JOIN_SIDES[
+                            divider_scoop_side(spec_feature.options.get("scoop"))],
+                    ),
                 )
                 _wj_scoop_height = scoop_settings(
                     box, spec_feature.options.get("scoop"), base_z,
@@ -291,10 +340,11 @@ def build_divider(
         # Material: union of the built divider solids' plan-view footprints
         # (walls, sloped bottoms, raised division labels - not the scoops).
         # Keep-clear: empty (dividers are solid walls).
-        # The divider scoops are ramps: tabulated front-only at their own
-        # height (same as the grid path, Change 2b), so a full-height wall
-        # tab can never wall off a scoop opening. Scoop solids are appended
-        # after the tab block so they are never tabulated as walls.
+        # The divider scoops are ramps: tabulated on their full-height side(s)
+        # only at their own height (same as the grid path, Change 2b), so a
+        # full-height wall tab can never wall off a scoop opening. Scoop
+        # solids are appended after the tab block so they are never tabulated
+        # as walls.
         # NOTE: the grid-divider early-return path above also gets tabs (Change 2b).
         _wj_keep_clear = Polygon()  # empty
         _wj_material = _footprint_from_solids(solids)
@@ -307,7 +357,11 @@ def build_divider(
             _wj_scoop_material = _footprint_from_solids(_wj_scoop_solids)
             _wj_scoop_tabs = _join_tabs(
                 box, _wj_scoop_material, _wj_keep_clear, JOIN_BAND,
-                sides=_joined_sides(box, _wj_scoop_material, "scoop", "x"),
+                sides=_joined_sides(
+                    box, _wj_scoop_material, "scoop", "x",
+                    allowed_sides=_DIVIDER_SCOOP_JOIN_SIDES[
+                        divider_scoop_side(spec_feature.options.get("scoop"))],
+                ),
             )
             _wj_scoop_height = scoop_settings(
                 box, spec_feature.options.get("scoop"), base_z,

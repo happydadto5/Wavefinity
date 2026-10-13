@@ -81,7 +81,7 @@ def _footprint_from_solids(solids) -> "Polygon":
     return unary_union(np.concatenate(batches))
 
 
-def _joined_sides(box, material, kind, along, hug=False) -> tuple:
+def _joined_sides(box, material, kind, along, hug=False, allowed_sides=None) -> tuple:
     """Side names whose wall the plan-view ``material`` actually reaches.
 
     Single source of truth for the kind-specific side restrictions, shared
@@ -92,7 +92,8 @@ def _joined_sides(box, material, kind, along, hug=False) -> tuple:
     before generating a tab. Scoops only fuse on their full-height side
     ("front" for along="x", "left" for along="y"); steps only on their high
     end ("back" for along="x", "right" for along="y"); every other kind may
-    join any side it reaches. Empty material reaches nothing.
+    join any side it reaches. Empty material reaches nothing. Divider
+    scoops pass their configured picker side via ``allowed_sides`` (Fix 1143).
     """
     reachable = HUG_REACH if hug else JOIN_TOUCH
     if material.is_empty:
@@ -105,7 +106,9 @@ def _joined_sides(box, material, kind, along, hug=False) -> tuple:
         "back": whole.y1 - y1,
         "front": y0 - whole.y0,
     }
-    if kind == "scoop":
+    if allowed_sides is not None:
+        allowed = tuple(allowed_sides)
+    elif kind == "scoop":
         allowed = ("front",) if along == "x" else ("left",)
     elif kind == "steps":
         allowed = ("back",) if along == "x" else ("right",)

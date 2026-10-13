@@ -657,7 +657,7 @@ Options include:
 
 ---
 
-## 6.8 Curved Scoop
+## 6.8 Scoop
 
 **Purpose:** Curved retrieval ramp that makes small items easier to remove.
 

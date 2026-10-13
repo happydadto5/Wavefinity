@@ -16,6 +16,10 @@ from organizer_geometry import (
 from .._core import Feature, Zone, connector_keep_out
 from .._text import preview_inlay_layer
 from .._divider_cells import (
+    DIVIDER_SCOOP_LABEL_CLEARANCE,
+    DIVIDER_SCOOP_MIN_LABEL_H,
+    DIVIDER_SCOOP_MIN_LABEL_W,
+    DIVIDER_SCOOP_SIDES,
     DividerCell,
     _divider_cross_centres,
     _even_centres,
@@ -23,6 +27,10 @@ from .._divider_cells import (
     divider_grid_counts,
     divider_grid_edges,
     divider_owner_matrix,
+    divider_scoop_label_placement,
+    divider_scoop_label_rect,
+    divider_scoop_run_lengths,
+    divider_scoop_side,
     divider_scoop_targets,
     normalize_divider_scoop,
     normalized_compartment_spans,
@@ -134,11 +142,11 @@ register_setting_interactions("divider", (
     ),
     SettingInteraction(
         "scoop.enabled", "slope_base", "reset", "divider-editor",
-        "A curved Scoop and a sloped bottom cannot own the same compartment floor.",
+        "A Scoop and a sloped bottom cannot own the same compartment floor.",
     ),
     SettingInteraction(
         "slope_base", "scoop.enabled", "reset", "divider-editor",
-        "Selecting a sloped bottom removes the mutually exclusive curved Scoop.",
+        "Selecting a sloped bottom removes the mutually exclusive Scoop.",
     ),
     SettingInteraction(
         "scoop.enabled", "division_labels.region", "auto-adjust", "divider",

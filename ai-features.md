@@ -252,7 +252,7 @@ Typical controls:
 - number of steps;
 - quantity/layout.
 
-## Curved Scoop
+## Scoop
 
 Curved retrieval ramp to make small contents easier to remove.
 

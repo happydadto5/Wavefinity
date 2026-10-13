@@ -26,6 +26,7 @@ from .._divider_cells import (
     _divider_cross_centres,
     divider_cells,
     divider_grid_counts,
+    divider_scoop_label_placement,
 )
 
 from ._consts import (
@@ -68,7 +69,16 @@ def _divider_grid_texts(
         x0, x1 = cell.zone.x0 + DIVISION_TEXT_MARGIN, cell.zone.x1 - DIVISION_TEXT_MARGIN
         y0, y1 = cell.zone.y0 + DIVISION_TEXT_MARGIN, cell.zone.y1 - DIVISION_TEXT_MARGIN
         if level == "base" and isinstance(options.get("scoop"), dict):
-            y0 = (y0 + y1) / 2.0
+            # Fix 1143 round 2 (G2M-0470 HOLD): derive the label-safe region
+            # from the actual Scoop run, never a hardcoded half; suppress the
+            # label when the center collapses (e.g. max-run "all" sides).
+            (lx0, ly0, lx1, ly1), collapsed = divider_scoop_label_placement(
+                box, cell.zone, options.get("scoop"), base_z
+            )
+            if collapsed:
+                continue
+            x0, y0, x1, y1 = (
+                max(x0, lx0), max(y0, ly0), min(x1, lx1), min(y1, ly1))
         cell_w, cell_d = max(1.0, x1 - x0), max(1.0, y1 - y0)
         try:
             probe = text_outline(text, 10.0)
@@ -475,9 +485,26 @@ def divider_division_texts(
             label_x0, label_x1 = inner_low, inner_high
             label_y0, label_y1 = zone.y0 + DIVISION_TEXT_MARGIN, zone.y1 - DIVISION_TEXT_MARGIN
         if level == "base" and isinstance(options.get("scoop"), dict):
-            # Scoops always rise from low Y and use no more than half the
-            # compartment depth. The back half is therefore a stable label band.
-            label_y0 = (label_y0 + label_y1) / 2.0
+            # Fix 1143 round 2 (G2M-0470 HOLD): derive the label-safe region
+            # from the actual Scoop run, never a hardcoded half; suppress the
+            # label when the center collapses (e.g. max-run "all" sides).
+            # The compartment here is the slot bounds (wall-centre); the
+            # 1.5 mm label clearance provably covers the <= thickness/2
+            # difference to the true cell zone, so the label can never touch
+            # a scoop strip.
+            compartment = (
+                Zone(zone.x0, slot_low, zone.x1, slot_high)
+                if along == "x"
+                else Zone(slot_low, zone.y0, slot_high, zone.y1)
+            )
+            (lx0, ly0, lx1, ly1), collapsed = divider_scoop_label_placement(
+                box, compartment, options.get("scoop"), base_z
+            )
+            if collapsed:
+                continue
+            label_x0, label_y0, label_x1, label_y1 = (
+                max(label_x0, lx0), max(label_y0, ly0),
+                min(label_x1, lx1), min(label_y1, ly1))
         slot_across = max(
             1.0,
             (label_y1 - label_y0) if along == "x" else (label_x1 - label_x0),

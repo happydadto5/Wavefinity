@@ -613,8 +613,14 @@ function renderDraftFields() {
         ? number(scoopConfig.depth, 60) : number(state.draftResolvedOptions?.curved_default_depth, 60);
       const depthChoices = [10, 20, 30, 40, 50, 60, 70, 80, 90];
       const legacyDepth = depthChoices.includes(scoopDepth) ? "" : `<option value="${escapeHtml(fmt(scoopDepth))}" selected>${escapeHtml(fmt(scoopDepth))}% — Existing</option>`;
-      html += `<label title="Every Divider compartment uses the same scoop depth, starting at its front floor edge.">Scoop depth<select data-divider-scoop-depth>${depthChoices.map(depth =>
+      const scoopSide = typeof scoopConfig.side === "string" ? scoopConfig.side : "front";
+      const sideChoices = [["front", "Front"], ["back", "Back"], ["left", "Left"], ["right", "Right"], ["all", "All sides"]];
+      const legacySide = sideChoices.some(([value]) => value === scoopSide)
+        ? "" : `<option value="${escapeHtml(scoopSide)}" selected>${escapeHtml(scoopSide)} — Existing</option>`;
+      html += `<label title="Every Divider compartment uses the same scoop depth, starting at the chosen side's floor edge.">Scoop depth<select data-divider-scoop-depth>${depthChoices.map(depth =>
         `<option value="${depth}" ${depth === scoopDepth ? "selected" : ""}>${depth}%</option>`).join("")}${legacyDepth}</select></label>`;
+      html += `<label title="Which compartment side the scoop curves up. All sides curves the scoop all the way around.">Scoop side<select data-divider-scoop-side>${sideChoices.map(([value, label]) =>
+        `<option value="${value}" ${value === scoopSide ? "selected" : ""}>${label}</option>`).join("")}${legacySide}</select></label>`;
     } else {
       html += `<div class="divider-bottom-empty" aria-hidden="true"></div>`;
     }
@@ -753,6 +759,18 @@ function renderDraftFields() {
     const raw = scoopDepth.value.trim();
     if (raw === "") delete config.depth;
     else config.depth = number(raw, state.draftResolvedOptions?.curved_default_depth ?? 60);
+    state.draftAutoCommit = true;
+    renderLayout2D();
+    refreshDraftSoon();
+  });
+  // Fix 1143: the Divider Scoop side picker. Persists into options.scoop.side;
+  // the geometry treats a missing side as "front" (the historical default).
+  const scoopSide = $('[data-divider-scoop-side]', $("#draft-fields"));
+  if (scoopSide) scoopSide.addEventListener("change", () => {
+    markDraftChanged();
+    state.draft.options ||= {};
+    const config = state.draft.options.scoop ||= {};
+    config.side = scoopSide.value || "front";
     state.draftAutoCommit = true;
     renderLayout2D();
     refreshDraftSoon();

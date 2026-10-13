@@ -848,7 +848,7 @@ placed or saved part protects its existing footprint the same way. Bin
 Width and Length entered by the user are also floors. Slot Rack Quantity grows
 its Base automatically; increasing Quantity is also how the user fills more of
 the bin. The explicit **Fit to pegs** action remains for Post Racks, while
-**Fill the bin** remains for free-size parts. Divider and Curved Scoop
+**Fill the bin** remains for free-size parts. Divider and Scoop
 footprints continue to follow the bin because full-span behavior is their
 purpose.
 
@@ -1071,7 +1071,7 @@ that rises above its own wall, but only under narrow conditions. In **Fused**
 mode, with no active stacking interface and no enabled lid, **Cradle**,
 **Bore**, **Post**, **Pocket**, **Slot Rack**, **Steps**, and a **Raised-Wall**
 Photo Nest may extend above the rim - a 30 mm post can stand as a ring holder
-on a 10 mm wall, for example. **Divider**, **Curved Scoop**, **Text**, and a
+on a 10 mm wall, for example. **Divider**, **Scoop**, **Text**, and a
 **Recessed** Photo Nest always stay bounded by the bin, in every mode, because
 their geometry genuinely depends on the material above them. Every part in
 **Separate** or **Cartridge** mode stays height-bound too. Stacking, a lid,

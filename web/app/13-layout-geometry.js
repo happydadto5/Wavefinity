@@ -1097,6 +1097,45 @@ function hitDividerSegment(point) {
   return best;
 }
 
+// Fix 1143 round 2 (G2M-0470 HOLD): client-side mirror of Python
+// divider_scoop_label_rect. The base-division-label safe region is derived
+// from the actual per-axis Scoop run - never a hardcoded half. Constants,
+// side policy, and the collapse rule match the Python side exactly; change
+// both together. A Python port of this function lives in the regression
+// tests and must produce identical rects and collapse flags.
+const DIVIDER_SCOOP_SIDES_CLIENT = ["front", "back", "left", "right", "all"];
+const DIVIDER_SCOOP_LABEL_CLEARANCE = 1.5; // mm
+const DIVIDER_SCOOP_MIN_LABEL_W = 4.0; // mm
+const DIVIDER_SCOOP_MIN_LABEL_H = 3.0; // mm
+
+function dividerScoopLabelRectClient(zone, scoop) {
+  // Returns [x0, y0, x1, y1, collapsed], mirroring the backend exactly.
+  const [zx0, zy0, zx1, zy1] = zone;
+  const side = scoop && DIVIDER_SCOOP_SIDES_CLIENT.includes(scoop.side)
+    ? scoop.side : "front";
+  // The same depth the editor's Scoop-depth select shows: the explicit
+  // choice, else the backend-resolved default (curved_default_depth is
+  // scoop_default_depth(box, base_z) from the backend), else 60.
+  const depthPct = Object.prototype.hasOwnProperty.call(scoop || {}, "depth")
+    ? number(scoop.depth, 60)
+    : number(state.draftResolvedOptions?.curved_default_depth, 60);
+  // Dividers are floor-standing: base_z = 0, matching the divider build path.
+  const scoopHeight = Math.max(0, number(state.design.box.z, 0) * depthPct / 100);
+  const runX = Math.min(scoopHeight, (zx1 - zx0) / 2);
+  const runY = Math.min(scoopHeight, (zy1 - zy0) / 2);
+  let x0 = zx0, y0 = zy0, x1 = zx1, y1 = zy1;
+  if (side === "back") y1 -= runY;
+  else if (side === "left") x0 += runX;
+  else if (side === "right") x1 -= runX;
+  else if (side === "all") { x0 += runX; y0 += runY; x1 -= runX; y1 -= runY; }
+  else y0 += runY; // "front", and any unknown value
+  const c = DIVIDER_SCOOP_LABEL_CLEARANCE;
+  const rx0 = x0 + c, ry0 = y0 + c, rx1 = x1 - c, ry1 = y1 - c;
+  const collapsed = (rx1 - rx0) < DIVIDER_SCOOP_MIN_LABEL_W ||
+    (ry1 - ry0) < DIVIDER_SCOOP_MIN_LABEL_H;
+  return [rx0, ry0, rx1, ry1, collapsed];
+}
+
 function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
   const opt = feature.options || {};
   let labels = opt.division_labels;
@@ -1113,10 +1152,27 @@ function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
     const text = String(labels[idx] || "").trim();
     if (!text) continue;
 
-    const [x0, rawY0, x1, y1] = cell.zone;
-    let y0 = rawY0;
+    const [zx0, zy0, zx1, zy1] = cell.zone;
+    let scoopCollapsed = false;
+    let x0 = zx0, y0 = zy0, x1 = zx1, y1 = zy1;
     if (opt.scoop && typeof opt.scoop === "object" && opt.division_level !== "rim") {
-      y0 = (y0 + y1) / 2;
+      // Fix 1143 round 2: keep division labels clear of the scoop, whichever
+      // side the picker put it on - derived from the actual Scoop run, never
+      // a hardcoded half (front is the historical default).
+      [x0, y0, x1, y1, scoopCollapsed] = dividerScoopLabelRectClient(cell.zone, opt.scoop);
+    }
+    if (scoopCollapsed) {
+      // Fix 1143 round 2: no flat center remains (e.g. max-run "all" sides) -
+      // the backend emits no label here either. Draw a small dashed
+      // placeholder so the missing label reads as intentional, not broken.
+      const [mx, my] = toCanvas([(zx0 + zx1) / 2, (zy0 + zy1) / 2]);
+      context.save();
+      context.strokeStyle = "#8a8a8a";
+      context.lineWidth = 1.5;
+      context.setLineDash([3, 2]);
+      context.strokeRect(mx - 3, my - 3, 6, 6);
+      context.restore();
+      continue;
     }
     const cellW = Math.max(1, x1 - x0);
     const cellD = Math.max(1, y1 - y0);

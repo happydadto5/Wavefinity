@@ -345,7 +345,7 @@ def build_scoop_region(
     height: float,
     along: str = "x",
 ) -> trimesh.Trimesh:
-    """Build the authoritative curved Scoop profile inside one floor region.
+    """Build the authoritative Scoop profile inside one floor region.
 
     ``along`` is the direction of the wall edge: ``x`` rises from the region's
     low-Y edge and ``y`` rises from its low-X edge. Containers decide which
