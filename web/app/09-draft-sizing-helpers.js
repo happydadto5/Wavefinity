@@ -470,7 +470,6 @@ async function duplicateNest() {
     previousSelected = index;
     const result = await api("/api/feature/duplicate", { design: state.design, index });
     state.design = result.design;
-    noteCommittedDesignChange(previousDesign);
     resetNestPhotoSession();
     state.selected = result.selected;
     state.draftSourceIndex = result.selected;
@@ -708,7 +707,14 @@ async function finishPhotoNestIfReady() {
     }
     const result = await api("/api/nest/photo", payload);
     state.design = result.design;
-    noteCommittedDesignChange(previousDesign);
+    // Fix 1137: undo is gone, but the starter-preview lifecycle is not. This
+    // commit bypasses the debounced commit, so a real change committed here
+    // must clear the pending flag itself, or the first preview after the
+    // commit re-snapshots the edited design as the pristine baseline and the
+    // edit never persists (the Change A8b data-loss path).
+    if (previousDesign && JSON.stringify(previousDesign) !== JSON.stringify(state.design)) {
+      state.spaceStarterPreviewPending = false;
+    }
     state.selected = result.selected;
     state.draftKind = "nest";
     state.draft = clone(state.design.layout.features[state.selected]);

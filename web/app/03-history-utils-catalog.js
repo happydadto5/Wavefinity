@@ -161,9 +161,6 @@ async function designerDuplicate() {
   try {
     const result = await api("/api/design/validate", { design });
     state.design = result.design;
-    // A duplicate is a new design identity: the old design's undo/redo
-    // history must not cross the identity boundary.
-    clearDesignerHistory();
     state.lastOrdinaryDesign = clone(state.design);
     state.cleanDesign = clone(state.design);
     state.designInventoryId = null;
@@ -191,123 +188,10 @@ function pinDraftAxis(axis) {
   state.pinnedZone[axis] = true;
 }
 
-function designerHistorySnapshot(design = state.design) {
-  return {
-    design: clone(design),
-    selected: Number.isInteger(state.selected) ? state.selected : null,
-    draftSourceIndex: Number.isInteger(state.draftSourceIndex) ? state.draftSourceIndex : null,
-    modifierEditing: state.modifierEditing || null,
-    lastDesignView: state.lastDesignView,
-  };
-}
-
-function clearDesignerHistory() {
-  state.designerHistory = [];
-  state.designerFuture = [];
-  updateDesignerHistoryButtons();
-}
-
-function updateDesignerHistoryButtons() {
-  const undo = $("#designer-undo");
-  const redo = $("#designer-redo");
-  if (undo) undo.disabled = state.designerHistoryRestoring || !state.designerHistory.length;
-  if (redo) redo.disabled = state.designerHistoryRestoring || !state.designerFuture.length;
-}
-
-function noteCommittedDesignChange(before = null) {
-  if (!before || JSON.stringify(before) === JSON.stringify(state.design)) return false;
-  if (!state.designerHistoryRestoring) {
-    state.designerHistory.push(designerHistorySnapshot(before));
-    if (state.designerHistory.length > 100) state.designerHistory.shift();
-    state.designerFuture = [];
-    updateDesignerHistoryButtons();
-  }
-  state.spaceStarterPreviewPending = false;
-  return true;
-}
-
-async function restoreDesignerHistory(redo = false) {
-  if (state.designerHistoryRestoring || state.designMutationBusy) return;
-  if (typeof DP !== "undefined" && DP.spaceEditing?.()) return;
-  const from = redo ? state.designerFuture : state.designerHistory;
-  const to = redo ? state.designerHistory : state.designerFuture;
-  if (!from.length) return;
-
-  const target = from.pop();
-  to.push(designerHistorySnapshot());
-  state.designerHistoryRestoring = true;
-  updateDesignerHistoryButtons();
-  cancelChangedDesignDebounce();
-  pendingDesignHistory = null;
-  cancelPendingDraftWork();
-  invalidatePendingPreview();
-
-  try {
-    state.design = clone(target.design);
-    state.lastOrdinaryDesign = clone(state.design);
-    state.selected = null;
-    state.draft = null;
-    state.draftKind = null;
-    state.draftSourceIndex = null;
-    state.draftIsNew = false;
-    state.draftTouched = false;
-    state.draftAutoCommit = false;
-    state.modifierEditing = null;
-    state.edgeMountEditing = false;
-    bindLidMemoryForDesign();
-    syncForm();
-    clearDraftSelection(false);
-
-    if (target.modifierEditing && modifierIsActive(target.modifierEditing)) {
-      await openModifier(target.modifierEditing, true);
-    } else {
-      const index = Number.isInteger(target.draftSourceIndex)
-        ? target.draftSourceIndex
-        : target.selected;
-      if (Number.isInteger(index) && state.design.layout.features[index]) {
-        state.selected = index;
-        state.draftSourceIndex = index;
-        state.draftKind = state.design.layout.features[index].kind;
-        state.draft = clone(state.design.layout.features[index]);
-        state.draftAutoCommit = true;
-        state.draftIsNew = false;
-        state.draftTouched = false;
-        renderDraftFields();
-      }
-    }
-
-    state.canGenerate = false;
-    updateGenerateAvailability();
-    renderPlaced();
-    updateSelectionButtons();
-    activatePreviewView(target.lastDesignView === "2d" ? "2d" : "3d");
-    await refreshPreview();
-
-    if (typedSpaceOrdinaryBin()) {
-      // Undo/redo persists through the same current Space context as
-      // ordinary design edits. (state.cleanDesign is a design object, not a
-      // space context: passing it as expectedContext failed
-      // DL.spaceContextCurrent, so every undo/redo rolled back with a bogus
-      // stale-space error.)
-      await persistSpaceDesignSource(null, false);
-      await settleStaleFileRefresh();
-    }
-  } catch (error) {
-    const rollback = to.pop();
-    if (rollback?.design) state.design = clone(rollback.design);
-    from.push(target);
-    syncForm();
-    renderPlaced();
-    updateSelectionButtons();
-    toast(`Could not ${redo ? "redo" : "undo"} that Designer change: ${error.message}`, true, 7000);
-  } finally {
-    state.designerHistoryRestoring = false;
-    updateDesignerHistoryButtons();
-  }
-}
-
-const designerUndo = () => restoreDesignerHistory(false);
-const designerRedo = () => restoreDesignerHistory(true);
+// Fix 1137: designer undo/redo removed - no history snapshots, no restore,
+// no noteCommittedDesignChange. The debounced commit path keeps one pre-edit
+// snapshot (pendingPreEditDesign in 06-form-sync-controls.js) for the
+// modifier-conflict guard only; that is live edit validation, not undo.
 
 function updateGenerateAvailability() {
   const binButton = $("#generate-bin");
@@ -770,11 +654,12 @@ function renderCatalog() {
         // A debounced draft must not disappear just because the user switches
         // print mode quickly after changing a field.
         committedDraft = await commitVisibleDraft({ previewAfterCommit: false });
-        const previousDesign = clone(state.design);
         const previousSelected = state.selected;
         const result = await api("/api/layout/mode", { design: state.design, mode: modes.value });
         state.design = result.design;
-        noteCommittedDesignChange(previousDesign);
+        // Fix 1137: this commit bypasses the debounced commit, so it clears
+        // the starter-preview flag itself (see Change A8b).
+        state.spaceStarterPreviewPending = false;
         syncForm();
         // A support that was already saved keeps being edited, just in its
         // converted form - only fall back to a fresh, not-yet-saved

@@ -1,6 +1,6 @@
 "use strict";
 
-// Drawer layout mode - data model, saving and undo.
+// Drawer layout mode - data model and saving.
 //
 // The inventory file ('Wavefinity bins.md' in the save location) is the single
 // source of truth: bin rows come from it, and the layout (drawers, where each
@@ -55,8 +55,6 @@ const DL = {
   saveState: "idle",     // idle | saving | saved | error
   savedAt: null,
   saveError: "",
-  history: [],
-  future: [],
   listeners: [],
   pegboardLayouts: {},
   pegboardRefreshError: "",
@@ -823,26 +821,23 @@ DL.fitsOn = (drawer, movingSet, target, movingKeys = null) => {
   return conflict ? { ok: false, reason: conflict } : { ok: true, reason: "" };
 };
 
-// ------------------------------------------------------------------ changes and undo
+// ------------------------------------------------------------------ changes
+// Fix 1137: no undo/redo. DL.change keeps its mutate/dirty/report/autosave
+// path, but there is no history stack anymore.
 
 DL.snapshot = () => JSON.stringify(DL.layout);
 
-DL.change = (mutate, { history = true } = {}) => {
+DL.change = mutate => {
   const before = DL.snapshot();
   mutate();
   if (DL.snapshot() === before) return false;
-  if (history) {
-    DL.history.push(before);
-    if (DL.history.length > 60) DL.history.shift();
-    DL.future = [];
-  }
   DL.afterChange();
   return true;
 };
 
 // A typed one-drawer Space owns its drawer's name and size. Space Edit calls
 // this to copy them into the loaded layout through the normal change path
-// (dirty, report, autosave); no undo entry, and nothing happens if unchanged.
+// (dirty, report, autosave); nothing happens if unchanged.
 DL.syncSingleDrawerFromSpace = space => {
   if (!DL.layout || !space || !["drawer", "pegboard"].includes(space.kind) || DL.layout.drawers.length !== 1) return false;
   return DL.change(() => {
@@ -856,7 +851,7 @@ DL.syncSingleDrawerFromSpace = space => {
       pegboard_holes_x: space.pegboard_holes_x, pegboard_holes_y: space.pegboard_holes_y,
       pegboard_residual_x: space.pegboard_residual_x, pegboard_residual_y: space.pegboard_residual_y,
     });
-  }, { history: false });
+  });
 };
 
 DL.afterChange = () => {
@@ -894,18 +889,7 @@ DL.clearSpacerPlan = ({ preserveFill = false } = {}) => {
   }
 };
 
-DL.restore = redo => {
-  const from = redo ? DL.future : DL.history;
-  const to = redo ? DL.history : DL.future;
-  if (!from.length) return;
-  to.push(DL.snapshot());
-  DL.layout = DL.normaliseLayout(JSON.parse(from.pop()));
-  DL.prune();
-  if (DL.selected && !DL.findPlacement(DL.selected)) DL.selected = null;
-  DL.afterChange();
-};
-DL.undo = () => DL.restore(false);
-DL.redo = () => DL.restore(true);
+// Fix 1137: the Space-layout history restore/undo/redo functions are removed.
 
 // Lift a placement out of wherever it is; whatever stood directly on it closes
 // the gap, keeping its absolute spot: each direct child moves up to the lifted
@@ -1059,8 +1043,6 @@ DL.load = async () => {
   // else is re-read so bins generated meanwhile show up placed as saved.
   if (!(sameFolder && DL.dirty && DL.layout)) {
     DL.normaliseLayout(data.layout);
-    DL.history = [];
-    DL.future = [];
     DL.dirty = false;
     DL.selected = null;
     DL.selectedRow = null;
@@ -1361,13 +1343,11 @@ DL.createSelectedFillBins = () => DL.busyWith("fill", async context => {
   if (typeof flushSpaceDesignAutosave === "function" &&
       !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   DL.requireSpaceContext(context);
-  const before = DL.snapshot();
   const result = await DL.inventoryCall("/api/drawer/surface-fill/create", {
     signature: DL.fillSignature, selected: [...DL.fillSelected],
   }, { context, sideEffect: true });
   DL.adopt(result);
   DL.normaliseLayout(result.layout);
-  if (DL.snapshot() !== before) { DL.history.push(before); DL.future = []; }
   DL.fillPlan = null;
   DL.fillSelected = new Set();
   DL.fillSignature = null;
@@ -1471,7 +1451,6 @@ DL.savePlannedSpacers = async context => {
     toast("No spacer plan to place. Click Find Spacer Candidates, choose spacers, then Place Selected Spacers.", true, 6000);
     return;
   }
-  const before = DL.snapshot();
   // Fix 096 C12: the backend rejects the write when the plan went stale; the
   // stale plan is discarded, never retried and never merged.
   let result;
@@ -1500,7 +1479,6 @@ DL.savePlannedSpacers = async context => {
   }
   DL.adopt(result);
   DL.normaliseLayout(result.layout);
-  if (DL.snapshot() !== before) { DL.history.push(before); DL.future = []; }
   DL.spacerPlan = null;
   DL.spacerPlanNotes = [];
   DL.spacerSelected = new Set();

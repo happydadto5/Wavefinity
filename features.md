@@ -217,7 +217,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 - Drawer walls use a safe minimum thickness; Design excludes thinner choices and repairs older thin-wall settings to a supported choice. Other cabinet and base material choices remain available.
 - One shared Inventory and parking lot for the whole cabinet; every drawer is a physical drawer with its own stable identity and usable height.
 - New Space and the Space-header **Edit** are a short basic form: Basics (Name, Width, Depth in millimeters on the 8 mm grid) and Drawers (count and each drawer's Usable height), with a quiet live Summary showing the inside size in mm, finished outside size, and printer fit. A new Space starts at 208 × 120 mm. **Design** is the one full editor, grouped as Basics, Drawers, Cabinet and Finish (labels and material). Hidden advanced settings are kept, never reset, when only the basic fields are edited.
-- A right-side navigator lists the drawers proportionally with their usable height, marks the active one, and offers Save Cabinet and Print Cabinet. Add Drawer and per-drawer Delete (only an empty drawer, and never the last) live only in Design. Switching drawers is not an undo step.
+- A right-side navigator lists the drawers proportionally with their usable height, marks the active one, and offers Save Cabinet and Print Cabinet. Add Drawer and per-drawer Delete (only an empty drawer, and never the last) live only in Design. (Fix 1137: there is no undo anywhere in the app.)
 - Drawer heights are **usable heights** (stored clear height + Drawer fit). They stay editable at all times, are never silently clamped or rounded while typed, show the minimum as a visible error, and keep their usable value when Drawer fit changes. Cabinet width and depth stay on the 8 mm grid; the typed value stays visible with "8 mm grid" beside it, or "Will save as N mm" when it will snap. A cabinet check that errors or times out settles into an editable error instead of a permanent "Checking cabinet…".
 - Drawer fronts are inset with one uniform 0.6 mm reveal on all four sides and a horizontal, support-conscious pull (a ledge with a 45° underside; narrow faces fall back to a finger scoop or no pull, with a message). Side-wall waves are cosmetic only, above the rails, catch and joint lands. The Cabinet Top is held by a ramped detent bump near the end of each dovetail, with a firm hand push to fit or remove it.
 - Every part is designed to print without supports in the specified orientation, checked by a geometry test of overhang angles and short bridges; this is not a slicer or physical-print guarantee.
@@ -1159,11 +1159,13 @@ Spaces can use **Spacers** to fill leftover physical area.
 
 ---
 
-# 15. Undo, redo, and design history
+# 15. No undo, redo, or design history
 
-- Undo.
-- Redo.
-- Ctrl+Z behavior.
+Wavefinity deliberately has no undo/redo, in the Designer or in Space-layout
+editing, and keeps no design-history snapshots. (Fix 1137: the history
+machinery was removed as overhead.) Changes commit immediately; the user
+re-edits or reverts by making a new change.
+
 - Design changes and Space-layout changes are owned by the active work area.
 - Design mutation guards prevent conflicting operations from racing each other.
 

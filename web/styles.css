@@ -1955,7 +1955,7 @@ body.structural-design-active #stack-note,
 body.structural-design-active #designer-duplicate,
 body.structural-design-active #ai-help-open,
 body.structural-design-active #designer-delete-bin,
-body.structural-design-active #designer-history-actions,
+
 body.structural-design-active .output-panel,
 body.structural-design-active #space-head-edit { display: none !important; }
 /* The 2D view of a structural target is the Space canvas, view only. */

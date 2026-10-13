@@ -792,7 +792,14 @@ async function autoCommitDraft(request) {
     if (request !== state.draftRequest) return;
     state.design = result.design;
     seedPartNameFromText(state.draft);
-    noteCommittedDesignChange(previousDesign);
+    // Fix 1137: undo is gone, but the starter-preview lifecycle is not. This
+    // commit bypasses the debounced commit, so a real change committed here
+    // must clear the pending flag itself, or the first preview after the
+    // commit re-snapshots the edited design as the pristine baseline and the
+    // edit never persists (the Change A8b data-loss path).
+    if (previousDesign && JSON.stringify(previousDesign) !== JSON.stringify(state.design)) {
+      state.spaceStarterPreviewPending = false;
+    }
     state.draftIsNew = false;
     state.draftTouched = false;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
@@ -863,7 +870,14 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
   // to adopt its pre-commit design while the transition is still in progress.
   if (!previewAfterCommit) invalidatePendingPreview();
   seedPartNameFromText(draft);
-  noteCommittedDesignChange(previousDesign);
+  // Fix 1137: undo is gone, but the starter-preview lifecycle is not. This
+  // commit bypasses the debounced commit, so a real change committed here
+  // must clear the pending flag itself, or the first preview after the
+  // commit re-snapshots the edited design as the pristine baseline and the
+  // edit never persists (the Change A8b data-loss path).
+  if (previousDesign && JSON.stringify(previousDesign) !== JSON.stringify(state.design)) {
+    state.spaceStarterPreviewPending = false;
+  }
   state.draftIsNew = false;
   state.draftTouched = false;
   state.selected = committed.selected;
@@ -1101,10 +1115,8 @@ async function appConfirmAction({ title, message, actionLabel = "OK", cancelLabe
 async function applySupport(index) {
   if (!state.draft || !beginDesignMutation()) return;
   try {
-    const previousDesign = clone(state.design);
     const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index });
     state.design = result.design;
-    noteCommittedDesignChange(previousDesign);
     state.selected = result.selected;
     state.draftIsNew = false;
     state.draftTouched = false;

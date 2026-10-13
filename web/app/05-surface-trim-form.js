@@ -38,7 +38,7 @@ async function maybePromptSurfaceObjectHeight() {
     const persistPreference = async () => {
       if (!noAsk.checked) return true;
       DL.requireSpaceContext(context);
-      DL.change(() => { DL.layout.settings.surface.ask_object_height = false; }, { history: false });
+      DL.change(() => { DL.layout.settings.surface.ask_object_height = false; });
       return DL.save();
     };
     // Escape and the visible Cancel button are one path: close and abort the

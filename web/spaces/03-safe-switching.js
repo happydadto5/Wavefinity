@@ -92,8 +92,6 @@ SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
   DL.pegboardRefreshError = "";
   DL.saveState = "idle";
   DL.saveError = "";
-  DL.history = [];
-  DL.future = [];
   DL.clearSpacerPlan();
   if (typeof DP !== "undefined") DP.printSelected = new Set();
   if (typeof DP !== "undefined") DP.signatures = {};

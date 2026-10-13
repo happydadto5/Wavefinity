@@ -1166,7 +1166,7 @@ DV.wire = () => {
   resized.observe(canvas);
 
   // Keys while the drawer is on screen. Capture phase, so the bin editor's
-  // own shortcuts (Undo, arrow nudges) never act on the hidden design.
+  // own shortcuts (arrow nudges) never act on the hidden design.
   window.addEventListener("keydown", event => {
     if (!DP.spaceEditing() || !DL.layout || readOnly()) return;
     if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return;
@@ -1190,9 +1190,7 @@ DV.wire = () => {
     const standing = DL.selected && DL.layerOf(DL.selected);
     const moves = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, 1], arrowdown: [0, -1] };
     let handled = true;
-    if (mod && key === "z") (event.shiftKey ? DL.redo : DL.undo)();
-    else if (mod && key === "y") DL.redo();
-    else if (mod && key === "s") DL.save();
+    if (mod && key === "s") DL.save();
     else if (mod || event.altKey) handled = false;
     else if (moves[key] && standing) {
       // Arrows nudge the selected bin and what stands on it one cell: on the
@@ -1222,15 +1220,6 @@ DV.wire = () => {
     }
   }, true);
 
-  // The header's Undo/Redo act on the drawer while this view is showing.
-  document.addEventListener("click", event => {
-    if (!DP.spaceEditing() || readOnly()) return;
-    const button = event.target.closest?.("#undo-design, #redo-design");
-    if (!button) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    (button.id === "undo-design" ? DL.undo : DL.redo)();
-  }, true);
 };
 
 // First-run guidance on the canvas, driven only by inventory/placement state.

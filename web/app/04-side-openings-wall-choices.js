@@ -209,7 +209,7 @@ function applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGener
 }
 
 function applyPendingLiveFormWithModifierConflictGuard() {
-  const previousDesign = pendingDesignHistory || clone(state.design);
+  const previousDesign = pendingPreEditDesign || clone(state.design);
   const previousCanGenerate = state.canGenerate;
   return applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate);
 }

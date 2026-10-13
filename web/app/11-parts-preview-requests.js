@@ -98,11 +98,9 @@ async function deleteSupportAt(index) {
   const deletingNest = state.design.layout.features[index]?.kind === "nest";
   let deleted = false;
   try {
-    const previousDesign = clone(state.design);
     const result = await api("/api/feature/delete", { design: state.design, index });
     state.design = result.design;
     if (deletingNest) resetNestPhotoSession();
-    noteCommittedDesignChange(previousDesign);
     state.selected = null;
     clearDraftSelection();
     renderPlaced();
@@ -144,13 +142,13 @@ function beginDesignMutation() {
     return false;
   }
 
-  const beforeForm = clone(pendingDesignHistory || state.design);
+  const beforeForm = clone(pendingPreEditDesign || state.design);
   const previousCanGenerate = state.canGenerate;
 
   // Flush/cancel the debounced ordinary path, but do not cancel unrelated
   // draft work until we know the live modifier form is allowed to commit.
   cancelChangedDesignDebounce();
-  pendingDesignHistory = null;
+  pendingPreEditDesign = null;
 
   if (!applyLiveFormWithModifierConflictGuard(beforeForm, previousCanGenerate)) {
     return false;
@@ -159,7 +157,6 @@ function beginDesignMutation() {
   // The mutation is now allowed to own a new design snapshot. Pending draft
   // work calculated against the old snapshot must not land afterward.
   cancelPendingDraftWork();
-  noteCommittedDesignChange(beforeForm);
   state.designMutationBusy = true;
   setMutationSurfacesInert(true);
   mutationControls().forEach(control => control.disabled = true);
@@ -851,7 +848,6 @@ async function sizeBinHeightToBore({ button = null, silent = false, guard = null
   if (!beginDesignMutation()) return "skipped";
   if (button) button.disabled = true;
   try {
-    const previousDesign = clone(state.design);
     const features = state.design.layout.features.map(
       (feature, index) => index === draftIndex ? state.draft : feature,
     );
@@ -867,7 +863,7 @@ async function sizeBinHeightToBore({ button = null, silent = false, guard = null
     });
     if (guard && !guard()) return "stale";
     state.design = result.design;
-    if (result.changed) noteCommittedDesignChange(previousDesign);
+
     state.selected = draftIndex;
     state.draftSourceIndex = draftIndex;
     state.draftIsNew = false;
@@ -942,7 +938,14 @@ async function autoExpandBin({ keepDraft = false, silent = false, fit = false, b
     if (guard && !guard()) return "stale";
     const changed = result.changed ?? result.grew;
     state.design = result.design;
-    if (changed) noteCommittedDesignChange(previousDesign);
+    // Fix 1137: undo is gone, but the starter-preview lifecycle is not. This
+    // commit bypasses the debounced commit, so a real change committed here
+    // must clear the pending flag itself, or the first preview after the
+    // commit re-snapshots the edited design as the pristine baseline and the
+    // edit never persists (the Change A8b data-loss path).
+    if (changed && previousDesign && JSON.stringify(previousDesign) !== JSON.stringify(state.design)) {
+      state.spaceStarterPreviewPending = false;
+    }
     state.fitError = false;
     if (opts.keepDraft && state.draft) {
       // Keep editing the same part with whatever zone the resize settled on.

@@ -193,7 +193,6 @@ async function addModifier(kind) {
   }
   return withDeferredDraftSwitch(async () => {
   if (kind === "edge_mount") {
-    const previous = clone(state.design);
     const rules = state.catalog?.edge_mount || {};
     const side = state.design.box.edge_mount?.side || "front";
     const normalDepth = ["front", "back"].includes(side)
@@ -228,13 +227,14 @@ async function addModifier(kind) {
       holes_enabled: false,
       label_text: "",
     };
-    noteCommittedDesignChange(previous);
+    // Fix 1137: this commit bypasses the debounced commit, so it clears the
+    // starter-preview flag itself (see Change A8b).
+    state.spaceStarterPreviewPending = false;
     syncForm();
     await openModifier(kind);
     await refreshPreview();
     return;
   }
-  const previous = clone(state.design);
   const seed = spaceModifierDefaults(kind) || {};
   if (kind === "lid_stacking") {
     if (seed.lid) {
@@ -267,7 +267,9 @@ async function addModifier(kind) {
     };
     clampSideOpeningTopForLid(state.design, true);
   }
-  noteCommittedDesignChange(previous);
+  // Fix 1137: this commit bypasses the debounced commit, so it clears the
+  // starter-preview flag itself (see Change A8b).
+  state.spaceStarterPreviewPending = false;
   syncForm();
   await openModifier(kind);
   refreshPreview();
@@ -283,7 +285,6 @@ async function removeModifier(kind) {
   return withDeferredDraftSwitch(async () => {
   if (!beginDesignMutation()) return;
   try {
-    const previous = clone(state.design);
     if (kind === "lid_stacking") {
       delete state.design.box.stack;
       delete state.design.box.lid;
@@ -297,7 +298,6 @@ async function removeModifier(kind) {
     }
     const result = await api("/api/design/validate", { design: state.design });
     state.design = result.design;
-    noteCommittedDesignChange(previous);
     state.paletteBrowsing = true;
     clearDraftSelection();
     // Forms must match the validated design before any later form read, or a
@@ -317,17 +317,16 @@ async function removeModifier(kind) {
 function flushModifierForm() {
   if (!state.modifierEditing) return true;
 
-  const previousDesign = pendingDesignHistory || clone(state.design);
+  const previousDesign = pendingPreEditDesign || clone(state.design);
   const previousCanGenerate = state.canGenerate;
 
   cancelChangedDesignDebounce();
-  pendingDesignHistory = null;
+  pendingPreEditDesign = null;
 
   if (!applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate)) {
     return false;
   }
 
-  noteCommittedDesignChange(previousDesign);
   // Fix 1017: a successful flush means no modifier is being edited anymore.
   // Without this, selectedFeature()/selectKind() leave a stale flag behind,
   // and the Fix 1011 single-badge gate points the badge and the Done/Delete
@@ -341,12 +340,11 @@ async function flushVisibleDesignEditsBeforeModeSwitch({ previewAfterCommit = tr
   if (state.draft && !(await guardDraftSwitch({ previewAfterCommit }))) return false;
   if (state.modifierEditing) return flushModifierForm();
 
-  const previousDesign = pendingDesignHistory || clone(state.design);
+  const previousDesign = pendingPreEditDesign || clone(state.design);
   const previousCanGenerate = state.canGenerate;
   cancelChangedDesignDebounce();
-  pendingDesignHistory = null;
+  pendingPreEditDesign = null;
   if (!applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate)) return false;
-  noteCommittedDesignChange(previousDesign);
   return true;
 }
 window.flushVisibleDesignEditsBeforeModeSwitch = flushVisibleDesignEditsBeforeModeSwitch;
@@ -411,10 +409,11 @@ async function growBinForNewCradle(request) {
   if (stale()) return "stale";
   const violation = aiSpaceViolation(trial.design, designAtStart);
   if (violation) return blocker(violation);
-  const previousDesign = clone(designAtStart);
   const previousBox = { ...designAtStart.box };
   state.design = trial.design;
-  noteCommittedDesignChange(previousDesign);
+  // Fix 1137: this commit bypasses the debounced commit, so it clears the
+  // starter-preview flag itself (see Change A8b).
+  state.spaceStarterPreviewPending = false;
   const at = features.length - 1;
   state.selected = at;
   state.draftIsNew = false;
@@ -527,10 +526,11 @@ async function selectKind(kind, reset = false) {
           index: null,
         });
         if (request !== state.kindRequest) return;
-        const previousDesign = clone(state.design);
         state.design = applyResult.design;
+        // Fix 1137: this commit bypasses the debounced commit, so it clears
+        // the starter-preview flag itself (see Change A8b).
+        state.spaceStarterPreviewPending = false;
         seedPartNameFromText(state.draft);
-        noteCommittedDesignChange(previousDesign);
         state.selected = applyResult.selected;
         state.draftIsNew = false;
         state.draftTouched = false;

@@ -139,9 +139,16 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   if (nameRow) nameRow.hidden = kind === "storage_drawers";
   if (kind === "storage_drawers") SP.mountStorageDrawersForm(prefillSpace, update);
   else SP.destroyStorageDrawersForm();
-  document.getElementById("space-name").value = prefillSpace?.name || "";
+  const spaceNameField = document.getElementById("space-name");
+  spaceNameField.value = prefillSpace?.name || "";
+  // Fix 1137: the Space name is tied to the folder name (see the folder help
+  // copy: "Wavefinity will save this Space under Documents\Wavefinity using
+  // the Space name"), so it is set at creation and never editable afterwards.
+  spaceNameField.disabled = update;
   document.getElementById("space-error").hidden = true;
-  document.getElementById("space-note").textContent = "";
+  document.getElementById("space-note").textContent = update
+    ? "The Space name can't be changed - it is tied to the folder."
+    : "";
   // Drawer setup names the field for what it is and says up front that a
   // name is needed and why a folder comes next. Other types keep "Name".
   document.getElementById("space-name-label").innerHTML =

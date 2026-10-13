@@ -185,24 +185,32 @@ async function maybeWarnSpaceWallMismatch(newWall) {
   }
 }
 
-let pendingDesignHistory = null;
+// Fix 1137: undo/redo is gone. This single pre-edit snapshot is NOT history -
+// it lets the modifier-conflict guard compare the committed design against
+// the design before the first edit of the burst.
+let pendingPreEditDesign = null;
 let pendingWallMismatchCheck = false;
 const applyChangedDesign = debounce(() => {
   const checkWall = pendingWallMismatchCheck;
   pendingWallMismatchCheck = false;
   if (state.designMutationBusy) {
-    pendingDesignHistory = null;
+    pendingPreEditDesign = null;
     return;
   }
-  const previousDesign = pendingDesignHistory || clone(state.design);
+  const previousDesign = pendingPreEditDesign || clone(state.design);
   const previousCanGenerate = state.canGenerate;
-  pendingDesignHistory = null;
+  pendingPreEditDesign = null;
   if (!applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate)) {
     return;
   }
 
   if (checkWall) maybeWarnSpaceWallMismatch(state.design.box.wall);
-  noteCommittedDesignChange(previousDesign);
+  // Fix 1137: undo is gone, but the starter-preview lifecycle is not. A real
+  // design change committed before the first preview must clear the pending
+  // flag, or pre-preview edits silently never persist.
+  if (previousDesign && JSON.stringify(previousDesign) !== JSON.stringify(state.design)) {
+    state.spaceStarterPreviewPending = false;
+  }
   // Re-fit contents-driven drafts after the bin changes. Arbitrarily sized
   // parts keep the size the user chose; if the bin was made too small, the
   // automatic grow pass below restores enough room instead of trimming them.
@@ -241,9 +249,10 @@ function changedDesign(previousDesign = null) {
   noteLidThicknessEdit();
   // Width/length keyboard, wheel and blur handlers update state immediately so
   // their inline inside-dimension readout stays correct. Preserve the snapshot
-  // from before the first such edit until the debounced commit lands.
-  if (previousDesign && pendingDesignHistory === null) {
-    pendingDesignHistory = clone(previousDesign);
+  // from before the first such edit until the debounced commit lands, so the
+  // modifier-conflict guard can compare against the pre-edit design.
+  if (previousDesign && pendingPreEditDesign === null) {
+    pendingPreEditDesign = clone(previousDesign);
   }
   applyChangedDesign();
 }
@@ -264,7 +273,6 @@ const commitNudge = debounce(async request => {
     && state.draft === draft
     && JSON.stringify(draft) === snapshot;
   try {
-    const previousDesign = clone(state.design);
     const result = await api("/api/feature/apply", {
       design: state.design,
       feature: draft,
@@ -273,7 +281,6 @@ const commitNudge = debounce(async request => {
     if (!ownsRequest()) return;
     state.design = result.design;
     pendingNudgeDraft = null;
-    noteCommittedDesignChange(previousDesign);
     if (request !== state.draftRequest) return;
     state.selected = result.selected;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
@@ -551,6 +558,13 @@ function wireControls() {
   $("#active-option-save")?.addEventListener("click", saveCurrentPart);
   $("#active-option-delete")?.addEventListener("click", async event => {
     const button = event.currentTarget;
+    // Fix 1137: undo is gone, so a misclick on Delete (adjacent to Done, no
+    // confirmation) would destroy work irrecoverably. Confirm once here, at
+    // the active-option click choke point, so all three delete branches
+    // below are covered and none can bypass the prompt.
+    const deleteLabel = $("#active-option-title")?.textContent?.trim()
+      || state.draft?.title || state.draft?.kind || "this part";
+    if (!confirm(`Delete ${deleteLabel}? This cannot be undone.`)) return;
     if (button.dataset.kind) { await removeModifier(button.dataset.kind); return; }
     if (button.dataset.index !== undefined) { await deleteSupportAt(Number(button.dataset.index)); return; }
     await deleteCurrentPart();
@@ -867,8 +881,7 @@ function wireControls() {
   // New Bin/Duplicate/Save/Load live at the bottom of the Designer.
   $("#designer-new-bin").addEventListener("click", () => designerNewBin());
   $("#designer-duplicate").addEventListener("click", designerDuplicate);
-  $("#designer-undo")?.addEventListener("click", () => designerUndo());
-  $("#designer-redo")?.addEventListener("click", () => designerRedo());
+
   aiWireHelp();
   $("#designer-save-file").addEventListener("click", saveDesign);
   $("#designer-open-file").addEventListener("change", openDesign);

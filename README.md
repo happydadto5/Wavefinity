@@ -117,8 +117,9 @@ never writes the new value back into the field the user is typing in.
 views of the bin (2D is where its interior parts are laid out).
 **Space is a mode, not a panel**: it swaps the whole screen: the inventory and
 its tools take the sidebar, the Space takes the workspace, and the bin editor's
-chrome (placed parts, the design file buttons) steps aside. Undo, Redo and
-Ctrl+Z act on the Space while it is showing. A Space has only two mental
+chrome (placed parts, the design file buttons) steps aside. There is no
+undo/redo anywhere in the app (Fix 1137): every change commits immediately.
+A Space has only two mental
 objects: **the Space** and **the bins inside it**. The top-level switch reads
 **Space | Design**. In Design, the main build fields, **Options**, and
 **Connectors** appear in separate cards.
@@ -1731,7 +1732,7 @@ plain dependency-free frontend files with no build step. Icon artwork lives in
 `app.js` holds the stateful editor, preview coordination, and typed-Space
 ordinary-bin autosave and status handoffs. All printable geometry still comes
 from the Python service. Drawer layout mode lives in `web/drawer-model.js`
-(data, saving, undo), `web/drawer-view.js` (the canvas) and
+(data, saving), `web/drawer-view.js` (the canvas) and
 `web/drawer-panel.js` (its sidebar), styled by `web/drawer.css`. These files
 share helpers and Space identity with `app.js`. The page's content-security
 policy refuses inline `style=""` attributes, so the drawer files set colours

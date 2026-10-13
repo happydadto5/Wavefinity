@@ -166,9 +166,7 @@ const state = {
   layoutOrientation: "match3d",
   previewSupportPolygons: [],
   designMutationBusy: false,
-  designerHistory: [],
-  designerFuture: [],
-  designerHistoryRestoring: false,
+  // Fix 1137: undo/redo removed - no designer history state is kept.
   canGenerate: true,
   // Bin/Interior/Xray are independent on/off switches, not one exclusive
   // mode - each button flips only its own state (see setPreviewToggle()).
@@ -358,11 +356,11 @@ async function acknowledgeSmallText() {
   });
   if (inSpace) {
     if (!DL.spaceContextCurrent(context)) return false;
-    DL.change(() => { DL.layout.settings.text_small_size_ack = true; }, { history: false });
+    DL.change(() => { DL.layout.settings.text_small_size_ack = true; });
     const saved = await DL.save();
     if (!DL.spaceContextCurrent(context)) return false;
     if (!saved) {
-      DL.change(() => { DL.layout.settings.text_small_size_ack = false; }, { history: false });
+      DL.change(() => { DL.layout.settings.text_small_size_ack = false; });
       return false;
     }
   }
@@ -910,7 +908,6 @@ async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
   const design = freshDesignForCurrentFolder();
   if (overrideBox) Object.assign(design.box, overrideBox);
   state.design = design;
-  clearDesignerHistory();
   state.designInventoryId = null;
   state.designTarget = null; // Fix 103
   state.lastOrdinaryDesign = clone(state.design);

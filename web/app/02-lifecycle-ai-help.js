@@ -7,8 +7,6 @@ function applyDesignerLifecycleVisibility() {
   const hide = (selector, hidden) => { const el = $(selector); if (el) el.hidden = hidden; };
   hide("#designer-save-file", typed);
   hide("#designer-open-file-label", typed);
-  hide("#designer-history-actions", typeof DP !== "undefined" && DP.spaceEditing?.());
-  updateDesignerHistoryButtons();
 }
 
 function typedSpaceOrdinaryBin() {
@@ -89,7 +87,7 @@ function settleStaleFileRefresh({ materialize = false } = {}) {
       if (!DL.spaceContextCurrent(context)) return false;
       if (choice !== "primary") { staleFileRefreshQueue.delete(key); return !materialize; }
       if (appConfirm.checked) {
-        DL.change(() => { DL.layout.settings.auto_update_changed_files = true; }, { history: false });
+        DL.change(() => { DL.layout.settings.auto_update_changed_files = true; });
         if (!(await DL.save()) || !DL.spaceContextCurrent(context)) return false;
       }
     }
@@ -250,7 +248,6 @@ async function installLoadedDesignSource(rowId, spec, {
     if (state.activeSpace !== sourceSpace || state.folderMode !== sourceFolder ||
         (acceptTransition && !acceptTransition())) return false;
     state.design = result.design;
-    clearDesignerHistory();
     state.lastOrdinaryDesign = clone(state.design);
     resetNestPhotoSession();
     state.cleanDesign = clone(spec);
@@ -406,7 +403,7 @@ async function aiRecordRecentDescription(description) {
       const kept = (DL.layout.settings.ai_design_recent_descriptions || [])
         .filter(one => one.trim().toLowerCase() !== trimmed.toLowerCase());
       DL.layout.settings.ai_design_recent_descriptions = [trimmed, ...kept].slice(0, 10);
-    }, { history: false });
+    });
     aiRenderRecentDescriptions();
     if (!(await DL.save())) throw new Error("Recent descriptions were not saved");
   } catch (_error) {

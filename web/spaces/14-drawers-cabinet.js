@@ -223,8 +223,6 @@ SP.adoptCabinetResult = result => {
   DL.normaliseLayout(result.layout);
   state.cabinetRecovery = null;
   DL.reconcileCabinet();
-  DL.history = [];
-  DL.future = [];
   DL.dirty = false;
   DL.selected = null;
   // Keep the row selected only when it still exists and physically lives in
@@ -317,7 +315,7 @@ SP.cabinetCallbacks = () => ({
     // button's disabled state) also closes SP.cabinetJumpToRow /
     // StorageDrawersWorkspace.jumpToInventoryRow, which call this directly.
     if (SP.structuralBusy) return;
-    DL.change(() => { DL.layout.active = id; }, { history: false });
+    DL.change(() => { DL.layout.active = id; });
     DL.selected = null;
     DL.emit();
   },

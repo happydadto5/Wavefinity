@@ -91,7 +91,7 @@
         selector.addEventListener("click", async () => {
           if (editing || layout.active === row.id) return;
           const oldId = layout.active;
-          await callbacks.setActiveDrawer?.(row.id, { history: false });
+          await callbacks.setActiveDrawer?.(row.id);
           callbacks.clearCanvasPlacementSelection?.();
           const selectedRow = callbacks.selectedRow?.();
           if (selectedRow && window.StorageDrawers.drawerHoldingRow(layout, selectedRow) === oldId) callbacks.clearSelectedRow?.();
@@ -156,7 +156,7 @@
       async jumpToInventoryRow(rowId) {
         const drawerId = window.StorageDrawers.drawerHoldingRow(current.layout, rowId);
         if (!drawerId) return false;
-        await callbacks.setActiveDrawer?.(drawerId, { history: false, preserveSelectedRow: rowId });
+        await callbacks.setActiveDrawer?.(drawerId, { preserveSelectedRow: rowId });
         callbacks.selectRow?.(rowId); callbacks.revealPlacement?.(rowId); callbacks.reframeCamera?.();
         return true;
       },

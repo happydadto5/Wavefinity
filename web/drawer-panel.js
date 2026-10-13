@@ -245,7 +245,7 @@ DP.wire = () => {
   drawerField("#dl-height", "height", positive("z", "Max height"));
   drawerField("#dl-name", "name", raw => raw.trim() || null);
   $("#dl-drawer").addEventListener("change", event => {
-    DL.change(() => { DL.layout.active = event.target.value; }, { history: false });
+    DL.change(() => { DL.layout.active = event.target.value; });
     DL.selected = null;
     DL.selectedRow = null;
     DV.fit();
@@ -287,7 +287,7 @@ DP.wire = () => {
     DL.change(() => {
       const target = group ? DL.layout.settings[group] : DL.layout.settings;
       target[key] = read(event.target);
-    }, { history: false });
+    });
   });
   setting("#dl-sp-type", "spacers", "flexible", node => node.value === "flexible");
   $("#dl-sp-height").addEventListener("change", event => {
@@ -295,10 +295,10 @@ DP.wire = () => {
     const restore = () => { event.target.value = DL.layout.settings.spacers.height; };
     if (value === null || String(event.target.value).trim() === "") { restore(); toast("Enter the spacer height as a number.", true); return; }
     if (value < 6) { restore(); toast("Spacer height must be at least 6 mm.", true); return; }
-    DL.change(() => { DL.layout.settings.spacers.height = value; }, { history: false });
+    DL.change(() => { DL.layout.settings.spacers.height = value; });
   });
   $("#dl-surface-ask-height").addEventListener("change", async event => {
-    DL.change(() => { DL.layout.settings.surface.ask_object_height = event.target.checked; }, { history: false });
+    DL.change(() => { DL.layout.settings.surface.ask_object_height = event.target.checked; });
     await DL.save();
   });
   $("#dl-fill-plan").addEventListener("click", () => DL.planSurfaceFill());
@@ -338,12 +338,12 @@ DP.wire = () => {
   $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", emptyAction);
 
   $("#dl-sp-auto-height").addEventListener("change", event => {
-    DL.change(() => { DL.layout.settings.spacers.height_auto = event.target.checked; }, { history: false });
+    DL.change(() => { DL.layout.settings.spacers.height_auto = event.target.checked; });
     $("#dl-sp-height").disabled = event.target.checked;
   });
   for (const side of ["left", "back", "right"]) {
     $(`#dl-sp-wall-${side}`).addEventListener("change", event => {
-      DL.change(() => { DL.layout.settings.spacers.walls[side] = event.target.checked; }, { history: false });
+      DL.change(() => { DL.layout.settings.spacers.walls[side] = event.target.checked; });
     });
   }
   $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
@@ -916,7 +916,6 @@ DP.confirmSpacerPrint = () => {
 
 DP.update = () => {
   if (!DL.active || !DP.built) return;
-  DP.syncHistory();
   const panel = $("#drawer-panel");
   if (panel) panel.inert = !DL.layout;
   if (!DL.layout) {
@@ -946,19 +945,7 @@ DP.update = () => {
   if (typeof SP !== "undefined" && SP.updateCabinetWorkspace) SP.updateCabinetWorkspace();
 };
 
-DP.syncHistory = () => {
-  // The header Undo/Redo own Space-layout history only (DL.undo/DL.redo):
-  // while Design owns the workspace they hide instead of lingering
-  // visible and stale.
-  const spaceOwns = DP.spaceEditing();
-  const undo = $("#undo-design");
-  const redo = $("#redo-design");
-  if (undo) undo.hidden = !spaceOwns;
-  if (redo) redo.hidden = !spaceOwns;
-  if (!spaceOwns) return;
-  if (undo) undo.disabled = !DL.history.length;
-  if (redo) redo.disabled = !DL.future.length;
-};
+// Fix 1137: the Space-layout history button sync is removed with the Undo/Redo buttons.
 
 DP.renderDrawer = () => {
   const drawer = DL.drawer();
@@ -1515,8 +1502,8 @@ DP.showPendingMode = mode => {
   if (busy) busy.hidden = !mode;
 };
 
-// The layout tools own the left panel (keys, Undo/Redo and the header
-// buttons act on the layout only then).
+// The layout tools own the left panel (keys and the header buttons act on
+// the layout only then).
 DP.spaceEditing = () => DL.active && DP.mode === "space";
 
 DP.applyMode = () => {
@@ -1536,7 +1523,6 @@ DP.applyMode = () => {
     button.tabIndex = on ? 0 : -1;
   });
   if (typeof SP !== "undefined" && SP.renderSpaceInfo) SP.renderSpaceInfo();
-  if (typeof DP.syncHistory === "function") DP.syncHistory();
 };
 
 DP.setMode = mode => {

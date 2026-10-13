@@ -83,29 +83,32 @@
     const compact = scope === "basic";
     const form = el("div", compact ? "sd-form sd-form-compact" : "sd-form"); host.append(form);
     const name = input(space.name); name.maxLength = 80; name.required = true;
+    // Fix 1137: like the drawer count below, the Space name is tied to the
+    // folder name, so it is set at creation and never editable afterwards.
+    name.disabled = mode === "edit";
     name.id = `sd-name-${epoch}`;
     name.dataset.heightNeutral = "1";
     const sizeGroup = group(form, "Basics"); sizeGroup.classList.add("sd-basics-group");
-    sizeGroup.append(labeled("Space name", name));
+    sizeGroup.append(labeled("Space name", name,
+      mode === "edit" ? "The Space name can't be changed - it is tied to the folder." : null));
     const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
     const x = input(space.x), y = input(space.y);
     x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
+    // Fix 1137: after the user leaves the field it shows "325 (40 units)"
+    // like bins do; resolveMm tolerates that suffix so arrow/wheel/3D-handle
+    // stepping, validation and save keep working on the displayed value.
+    const stripUnitsSuffix = value => value.replace(/\s*\(\d+\s*units\)\s*$/, "").trim();
     const resolveMm = field => {
-      const raw = field.value.trim();
+      const raw = stripUnitsSuffix(field.value);
       const requested = Number(raw);
       if (!raw || !Number.isFinite(requested) || requested <= 0) return { ok: false };
       const units = Math.round(requested / baseUnit);
       if (units < minUnits || units > maxUnits) return { ok: false };
       return { ok: true, units, mm: units * baseUnit };
     };
-    const sizeHelp = new Map([[x, help("")], [y, help("")]]);
-    const formatMm = field => {
+    const formatUnitsInline = field => {
       const resolved = resolveMm(field);
-      sizeHelp.get(field).textContent = resolved.ok
-        ? (Number(field.value) === resolved.mm
-          ? `${baseUnit} mm grid`
-          : `Will save as ${resolved.mm} mm · ${baseUnit} mm grid`)
-        : `${baseUnit} mm grid · valid range ${minUnits * baseUnit}–${maxUnits * baseUnit} mm`;
+      if (resolved.ok) field.value = `${resolved.mm} (${resolved.units} units)`;
     };
     for (const field of [x, y]) { field.inputMode = "decimal"; field.required = true; }
     // Usable height is local: the stored clear height plus the selected fit.
@@ -115,7 +118,11 @@
     const zHelp = help("");
     const zLabel = labeled("Usable height", zField, null, "mm"); zLabel.append(zHelp);
     for (const [field, title] of [[x, "Interior Width"], [y, "Interior Depth"]]) {
-      const label = labeled(title, field, null, "mm"); label.append(sizeHelp.get(field)); sizeGrid.append(label);
+      const label = labeled(title, field, null, "mm"); sizeGrid.append(label);
+      // Fix 1137: exiting the field shows "325 (40 units)" inline like bins;
+      // focusing it again restores the plain mm value for editing.
+      field.addEventListener("blur", () => formatUnitsInline(field), { signal: events.signal });
+      field.addEventListener("focus", () => { field.value = stripUnitsSuffix(field.value); }, { signal: events.signal });
     }
     if (structural) { sizeGrid.classList.add("sd-size-grid-three"); sizeGrid.append(zLabel); }
     // Fix 103 (Packet B): printer status lives beside Size, not in Summary.
@@ -398,7 +405,7 @@
       }
       const field = axis === "x" ? x : y;
       field.value = String(requested);
-      formatMm(field); schedule();
+      formatUnitsInline(field); schedule();
       const resolved = resolveMm(field);
       return resolved.ok ? resolved.mm : NaN;
     };
@@ -508,7 +515,6 @@
     };
     const showSummaryText = (text, bad = false) => { summary.replaceChildren(el("p", bad ? "sd-fit-verdict bad" : "sd-summary-line", text)); updatePrinterRow(); };
     const schedule = () => {
-      formatMm(x); formatMm(y);
       summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…"); notifyReady();
       renderRowHeights();
       syncHeightField();
@@ -599,7 +605,7 @@
       const resolved = resolveMm(field);
       return resolved.ok ? resolved.mm : `invalid:${field.value}`;
     };
-    formatMm(x); formatMm(y);
+    formatUnitsInline(x); formatUnitsInline(y);
     const snapshot = () => JSON.stringify([
       name.value.trim(), snapshotValue(x), snapshotValue(y), count.value,
       block.drawers.map(row => [row.id || "", row.height_mm, row.label_text]),
@@ -643,7 +649,7 @@
       setDisabled(value) {
         disabled = !!value;
         for (const control of form.querySelectorAll("input, select")) control.disabled = disabled;
-        if (!disabled) count.disabled = mode === "edit";
+        if (!disabled) { count.disabled = mode === "edit"; name.disabled = mode === "edit"; }
         renderRows();
         syncHeightField();
       },

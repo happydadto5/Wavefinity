@@ -17,16 +17,15 @@ async function generateParts(target) {
     toast("Choose a folder before saving files.", true);
     return;
   }
-  const beforeForm = pendingDesignHistory || clone(state.design);
+  const beforeForm = pendingPreEditDesign || clone(state.design);
   const previousCanGenerate = state.canGenerate;
 
   cancelChangedDesignDebounce();
-  pendingDesignHistory = null;
+  pendingPreEditDesign = null;
 
   if (!applyLiveFormWithModifierConflictGuard(beforeForm, previousCanGenerate)) {
     return;
   }
-  noteCommittedDesignChange(beforeForm);
 
   if ((target === "all" || target === "bin") && !state.canGenerate) {
     toast("Resolve the highlighted issue before saving.", true);

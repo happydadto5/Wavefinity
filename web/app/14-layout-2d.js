@@ -992,7 +992,6 @@ async function openDesign(event) {
       throw new Error("A Storage Box or Base Trim is saved from its Space, not opened in the Designer.");
     }
     state.design = result.design;
-    clearDesignerHistory();
     resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
     state.spaceStarterPreviewPending = false;
@@ -1025,7 +1024,6 @@ async function newDesign() {
   }))) return;
   if (!beginDesignMutation()) return;
   state.design = freshDesignForCurrentFolder();
-  clearDesignerHistory();
   state.surfaceHeightPromptSkipped = false;
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
