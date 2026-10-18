@@ -188,7 +188,7 @@ Project-wide coding and architecture guidance is centralized here for all agents
 
 ### Development handoff workflow
 
-**Wavefinity contains the product. [Wavefinity-Help-Code](https://github.com/happydadto5/Wavefinity-Help-Code) contains the development protocol and Fix records.** The helper repository is private and requires authenticated access. A missing local `/fixes` directory is intentional, not evidence that a Fix is missing. Never copy, restore, or commit helper Fix records into this product repository.
+**Wavefinity contains the product. [Help-Code](https://github.com/happydadto5/Help-Code) contains the development protocol and Fix records.** The helper repository is private and requires authenticated access. A missing local `/fixes` directory is intentional, not evidence that a Fix is missing. Never copy, restore, or commit helper Fix records into this product repository.
 
 | Authority | Where it lives |
 | --- | --- |

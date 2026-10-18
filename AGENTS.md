@@ -4,7 +4,7 @@ All authoritative developer and AI coding instructions are centralized in [READM
 
 ## Quick Summary
 - **Communication:** Operate in "caveman mode". Keep messages simple, plain, and short. User is not a programmer — avoid code jargon. Give a general sense of progress by showing steps in layman's terms.
-- **Workflow:** For a Help Code Fix/correction, fetch the current coder protocol and assignment from `happydadto5/Wavefinity-Help-Code`. For work explicitly not a Help Code task, follow the generic repository workflow in `README.md`.
+- **Workflow:** For a Help Code Fix/correction, fetch the current coder protocol and assignment from `happydadto5/Help-Code`. For work explicitly not a Help Code task, follow the generic repository workflow in `README.md`.
 - **Authority:** Read [README.md](README.md) for product guidance. Current Help Code coder protocol and assignments live in the helper repository.
 - **Testing:** For explicitly non-Help-Code work, the README's generic testing guidance applies.
 - **Scope:** Implement the requested change, inspect the affected path and diff, use the cheapest useful verification, then commit and push. Avoid testing bureaucracy, verbose logs, and browser-driving unless the README policy says the risk justifies it.
