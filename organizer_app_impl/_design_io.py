@@ -578,6 +578,10 @@ def convert_layout_mode(
     return layout
 
 
+MODULE_MARKER_KEY = "module_mm"
+MODULE_MARKER_MM = 7
+
+
 def design_to_dict(
     box: BoxSpec,
     layout: Layout,
@@ -721,6 +725,9 @@ def design_to_dict(
         # never silently rewritten; versions 1-7 migrate a (65, 70] lean
         # down to 65 at the load boundary.
         "version": 8,
+        # Story 2265: marks a record saved on the current 7 mm module. The
+        # editor-open path judges this marker, never the dimensions.
+        MODULE_MARKER_KEY: MODULE_MARKER_MM,
         "box": box_block,
         "label": label,
         "label_position": label_position(label_location),
@@ -935,12 +942,6 @@ def design_from_dict(
         allowance = WAVE_MATING_GAP + 2.0 * wall_depth + 2.0 * WAVE_AMPLITUDE
         x = max(GRID_PITCH, round((x - allowance) / GRID_PITCH) * GRID_PITCH)
         y = max(GRID_PITCH, round((y - allowance) / GRID_PITCH) * GRID_PITCH)
-    # Clean break from the old 8 mm module: a saved footprint that is not a
-    # whole number of 7 mm units re-bases deterministically to the closest
-    # multiple of 7 (ties go up), never rejected and never guessed from other data.
-    if math.isfinite(x) and math.isfinite(y):
-        x = max(GRID_PITCH, math.floor(x / GRID_PITCH + 0.5 + 1e-9) * GRID_PITCH)
-        y = max(GRID_PITCH, math.floor(y / GRID_PITCH + 0.5 + 1e-9) * GRID_PITCH)
     raw_wall = float(raw.get("wall", DEFAULT_WALL))
     if not math.isfinite(raw_wall) or not MIN_WALL <= raw_wall <= MAX_WALL:
         raise ValueError(

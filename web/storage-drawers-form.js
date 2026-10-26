@@ -73,7 +73,7 @@
     // A brand-new Space starts at the legal grid size nearest 210 × 120 mm; a
     // supplied prefill keeps its own dimensions exactly.
     const startMm = mm => baseUnit * Math.min(maxUnits, Math.max(minUnits, Math.round(mm / baseUnit)));
-    const space = copy(initialSpace || { kind: "storage_drawers", name: "", x: startMm(210), y: startMm(120) });
+    const space = copy(initialSpace || { kind: "storage_drawers", name: "", x: startMm(210), y: startMm(119) });
     space.storage_drawers = { ...defaults(), ...copy(space.storage_drawers || {}) };
     const block = space.storage_drawers;
     const tail = [];

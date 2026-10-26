@@ -187,6 +187,7 @@ from organizer_spaces import (
     storage_startup_state,
     structural_output_manifest,
 )
+from organizer_app_impl._design_io import MODULE_MARKER_KEY, MODULE_MARKER_MM
 from organizer_app import (
     LABEL_POSITIONS,
     APP_DIR,
@@ -2882,9 +2883,36 @@ def _ai_space_cap_violation(design: dict[str, Any], raw_space: Any) -> str | Non
     return None
 
 
+OLD_MODULE_NOTICE = (
+    "This design was built on the retired 8 mm module; the current app uses the "
+    "7 mm module. It will not be changed. Close it and start a new design on the "
+    "current standard."
+)
+
+
+def _validate_design_open_guard(payload: dict[str, Any]) -> dict[str, Any]:
+    """Every editor entry validates its raw saved design here (Story 2265).
+
+    A saved record (the shape design_to_dict writes) without the 7 mm marker is
+    refused with a notice and never handed to the editor or rewritten. Fresh
+    in-editor designs and non-record payloads pass through unchanged.
+    """
+    raw = payload.get("design") if isinstance(payload, dict) else None
+    if (
+        isinstance(raw, dict)
+        and raw.get("design_kind") != "base_trim"
+        and isinstance(raw.get("version"), int)
+        and isinstance(raw.get("box"), dict)
+        and isinstance(raw.get("layout"), dict)
+        and raw.get(MODULE_MARKER_KEY) != MODULE_MARKER_MM
+    ):
+        raise ValueError(OLD_MODULE_NOTICE)
+    return validate_design_payload(payload)
+
+
 POST_ROUTES = {
     "/api/preview": preview_payload,
-    "/api/design/validate": validate_design_payload,
+    "/api/design/validate": _validate_design_open_guard,
     "/api/ai/prompt": ai_prompt_payload,
     "/api/ai/candidate": ai_candidate_payload,
     "/api/ai/repair-prompt": ai_repair_prompt_payload,
