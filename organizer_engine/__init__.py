@@ -8,8 +8,9 @@ Design summary
 * Boxes tile on a plain ``x`` by ``y`` grid.  Their solid outline is smaller
   than that pitch by ``WAVE_MATING_GAP`` so neighbouring wavy walls interlock
   with a constant gap.
-* The wave is a fixed-pitch sine: ``WAVE_LENGTH`` mm per full cycle (out and
-  back) and ``WAVE_AMPLITUDE`` mm of deviation each way.  It runs at full
+* The circular-arc wave has ``WAVE_LENGTH`` mm per full cycle and
+  ``WAVE_AMPLITUDE`` mm of deviation each way. The signed X/Y phases match
+  under quarter-turns.  It runs at full
   amplitude the whole length of every wall, straight into the corners; there
   is no corner blend.  Corners are a short chamfer rounded to
   ``CORNER_FILLET``.
@@ -168,6 +169,7 @@ from ._specs import (
 from ._wave import (
     nested_clearance,
     wave_value,
+    wall_wave_value,
     wave_cycles,
     lock_positions,
     lock_lattice,

@@ -13,7 +13,7 @@ from organizer_engine import (
     BoxSpec,
     _rounded,
     _wall_points,
-    wave_value,
+    wall_wave_value,
 )
 from organizer_engine.product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD_XY
 
@@ -79,10 +79,10 @@ class B4BLayout:
         return x1 - x0, y1 - y0
 
     def front_wall_y(self, x: float) -> float:
-        return -self.outer_half_y + wave_value(x)
+        return -self.outer_half_y + wall_wave_value(x, "x")
 
     def rear_wall_y(self, x: float) -> float:
-        return self.outer_half_y + wave_value(x)
+        return self.outer_half_y + wall_wave_value(x, "x")
 
 
 @lru_cache(maxsize=64)

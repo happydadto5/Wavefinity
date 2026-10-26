@@ -33,30 +33,33 @@ from ._specs import (
 
 
 def nested_clearance() -> float:
-    """The real air gap between two mated walls, measured perpendicular.
+    """Conservative normal clearance from the arc wave's maximum slope.
 
-    ``WAVE_MATING_GAP`` is the gap measured *across* the seam, but the walls
-    lean, so the shortest distance between them is shorter than that by the
-    wave's own slope.  This is the number a slicer sees, and it is the same for
-    every pair of bins that mate, whatever sizes they are.
+    ``WAVE_MATING_GAP`` is measured across the seam. The maximum tangent
+    slope gives a lower bound on separation, including partial seams.
     """
     return WAVE_MATING_GAP / math.sqrt(1.0 + max_wave_slope() ** 2)
 
 
 def wave_value(coordinate: float) -> float:
-    """Fixed-pitch wave, measured from the centre of the wall it runs along.
+    """Odd, periodic wave made from alternating tangent circular arcs.
 
-    The wave is **odd** about the wall centre - it leaves it at zero and comes
-    back inverted - and that is what lets a box be turned round.  Spin a box
-    180 degrees and its +X wall lands where its -X wall was; an odd wave means
-    the two carry the same shape, so the turned box still nests with its
-    neighbours.  An even wave would put a crest against a crest instead.
-
-    Because the phase depends only on the distance from the wall centre, two
-    boxes interlock exactly when their centres are a whole number of cycles
-    apart along that wall.  ``GRID_PITCH`` guarantees it.
+    Each half-cycle is a circular segment through zero, its extremum and zero.
+    Adjacent segments share a tangent at zero; the radius is fixed by the
+    quarter-cycle chord and amplitude. Coordinates use the global grid phase.
     """
-    return WAVE_AMPLITUDE * math.sin(2.0 * math.pi * coordinate / WAVE_LENGTH)
+    quarter = WAVE_LENGTH / 4.0
+    radius = (quarter * quarter + WAVE_AMPLITUDE ** 2) / (2.0 * WAVE_AMPLITUDE)
+    phase = coordinate % WAVE_LENGTH
+    sign = 1.0 if phase < 2.0 * quarter else -1.0
+    local = phase % (2.0 * quarter) - quarter
+    return sign * (math.sqrt(max(0.0, radius * radius - local * local))
+                   - (radius - WAVE_AMPLITUDE))
+
+
+def wall_wave_value(coordinate: float, run_axis: str) -> float:
+    """Global seam displacement; the signed X/Y pair survives quarter-turns."""
+    return wave_value(coordinate) * (-1.0 if run_axis == "x" else 1.0)
 
 
 def wave_cycles(straight_length: float) -> float:
@@ -132,7 +135,7 @@ def _wall_points(
     ``phase_x``/``phase_y`` shift the wave sampled on the front/back walls
     (which run along X) and the left/right walls (which run along Y)
     respectively.  A normal, validly grid-sized ``BoxSpec`` always leaves
-    these at 0: its own centre is guaranteed to land on the global 4 mm wave
+    these at 0: its own centre is guaranteed to land on the global 3.5 mm wave
     lattice (``GRID_PITCH``/``BASE_UNIT`` are chosen exactly so this holds),
     so evaluating the wave in this shape's own local frame already equals
     the shared global wave. A caller whose real placement centre will NOT be
@@ -150,10 +153,10 @@ def _wall_points(
     xs = np.linspace(-tangent_x, tangent_x, count_x)
     ys = np.linspace(-tangent_y, tangent_y, count_y)
     points: list[tuple[float, float]] = []
-    points += [(float(s), -half_y + wave_value(float(s) + phase_x)) for s in xs]
-    points += [(half_x + wave_value(float(s) + phase_y), float(s)) for s in ys]
-    points += [(float(s), half_y + wave_value(float(s) + phase_x)) for s in xs[::-1]]
-    points += [(-half_x + wave_value(float(s) + phase_y), float(s)) for s in ys[::-1]]
+    points += [(float(s), -half_y + wall_wave_value(float(s) + phase_x, "x")) for s in xs]
+    points += [(half_x + wall_wave_value(float(s) + phase_y, "y"), float(s)) for s in ys]
+    points += [(float(s), half_y + wall_wave_value(float(s) + phase_x, "x")) for s in xs[::-1]]
+    points += [(-half_x + wall_wave_value(float(s) + phase_y, "y"), float(s)) for s in ys[::-1]]
     return points
 
 
@@ -288,8 +291,8 @@ def mating_clearance(
     same curve offset by ``WAVE_MATING_GAP``.  Two that meet only at a corner
     measure more: a corner chord cuts *inward* from the wave envelope, so a
     corner can only ever add clearance.  That is why the corner flats - which
-    the odd wave makes longer on one diagonal than on the other - are a
-    cosmetic asymmetry and never a mating problem.
+    join the four rotationally matching wall runs - are a
+    corner transitions rather than a separate mating phase.
 
     Raises if the two outlines actually intersect.  A collision is a fault in
     the sizes or the placement, not a clearance worth reporting.
@@ -364,14 +367,15 @@ def _rect_wall_lock_paths(
     )
     paths: list[tuple[list[tuple[float, float]], tuple[float, float]]] = []
     for run_axis, wave_half, face, inward, phase in walls:
-        for base_centre in lock_positions(wave_half - CORNER_INSET - LOCK_CORNER_CLEAR):
+        limit = wave_half - CORNER_INSET - LOCK_CORNER_CLEAR - LOCK_RUN / 2.0
+        for base_centre in lock_lattice(-limit + phase, limit + phase):
             centre = base_centre - phase
             lo, hi = centre - LOCK_RUN / 2.0, centre + LOCK_RUN / 2.0
             ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
             if run_axis == "y":
-                path = [(face + wave_value(float(s) + phase), float(s)) for s in ss]
+                path = [(face + wall_wave_value(float(s) + phase, run_axis), float(s)) for s in ss]
             else:
-                path = [(float(s), face + wave_value(float(s) + phase)) for s in ss]
+                path = [(float(s), face + wall_wave_value(float(s) + phase, run_axis)) for s in ss]
             paths.append((path, inward))
     return paths
 
@@ -427,9 +431,9 @@ def wall_lock_receivers(
             continue
         ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
         if run_axis == "y":
-            path = [(face + wave_value(float(t)), float(t)) for t in ss]
+            path = [(face + wall_wave_value(float(t), run_axis), float(t)) for t in ss]
         else:
-            path = [(float(t), face + wave_value(float(t))) for t in ss]
+            path = [(float(t), face + wall_wave_value(float(t), run_axis)) for t in ss]
         cutters.append(translated(_sweep_profile(path, inward, profile), (0.0, 0.0, spec.z)))
     return cutters
 

@@ -15,7 +15,7 @@ from organizer_engine import (
     _sample_count,
     text_outline,
     text_prism,
-    wave_value,
+    wall_wave_value,
 )
 from organizer_geometry import (
     _extrude_yz_profile,
@@ -318,13 +318,13 @@ def _b4b_wave_mask_1d(t: float, half_span: float, flat_border: float, blend: flo
 def _b4b_wavy_front_y(plate_w: float, plate_h: float, plate_t: float):
     """The Wavy style's front-face height function ``front_y(x, z)``.
 
-    Exactly the Storage Box/Wavefinity front-wall wave (``wave_value``, unmodified)
+    Exactly the Storage Box/Wavefinity front-wall wave (``wall_wave_value`` along X)
     in the centre of the plate, blending out within
     ``B4B_FRONT_LABEL_FLAT_BORDER`` of every edge to the same flat face the
     Flat style uses - so, viewed straight on, the Wavy label's outline is the
     identical rectangle and its side/top/bottom edges are perfectly flat,
     exactly where the side channels and bottom lip touch it.  The plate is
-    centred on the case's own X=0, the same datum ``wave_value`` measures
+    centred on the case's own X=0, the same datum the global wave measures
     from, so the wave picked up here is in true phase with the surrounding
     front wall - never a restarted cycle at the label's own edge.
     """
@@ -338,7 +338,7 @@ def _b4b_wavy_front_y(plate_w: float, plate_h: float, plate_t: float):
             _b4b_wave_mask_1d(x, half_w, border, blend)
             * _b4b_wave_mask_1d(z, half_h, border, blend)
         )
-        return base_y + wave_value(x) * mask
+        return base_y + wall_wave_value(x, "x") * mask
 
     return front_y
 

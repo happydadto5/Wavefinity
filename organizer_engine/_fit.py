@@ -9,7 +9,7 @@ from shapely.geometry import Polygon
 from organizer_geometry import translated
 
 from ._specs import BoxSpec, ConnectorSpec
-from ._wave import wave_value, _sample_count
+from ._wave import wall_wave_value, _sample_count
 from ._boxes import make_box, connector_bin_heights
 
 
@@ -150,7 +150,7 @@ def _plain_corridor(
     dense = np.linspace(
         samples[0], samples[-1], _sample_count(float(samples[-1] - samples[0]))
     )
-    offsets = [wave_value(position + float(v)) for v in dense]
+    offsets = [wall_wave_value(position + float(v), axis) for v in dense]
     if axis == "y":
         near = [(o - half_width, float(v)) for v, o in zip(dense, offsets)]
         far = [

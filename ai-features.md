@@ -12,6 +12,16 @@
 
 ---
 
+## Universal wave connections
+
+Bins on the 7 mm placement grid can mate any compatible sides after a quarter,
+half or three-quarter turn, including partial seams between different sizes.
+The global-phase circular-arc walls and snap connectors share one profile.
+Keep wall thicknesses compatible and allow enough common wall for a connector;
+existing lid and height restrictions still apply. Arbitrary angles or off-grid
+placement do not promise a mating fit. Regenerate neighbouring bins and clips
+together: older sine-wave prints use a different profile.
+
 # 1. What the external AI is designing
 
 AI Design designs **one ordinary Wavefinity Bin**.

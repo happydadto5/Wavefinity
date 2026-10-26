@@ -10,25 +10,18 @@ from organizer_features.pegboard import PegboardMountSpec
 # --------------------------------------------------------------------------- #
 # wave and box constants
 # --------------------------------------------------------------------------- #
-WAVE_LENGTH = 3.5        # one full cycle: 1.75 mm out, 1.75 mm back
+WAVE_LENGTH = 3.5        # two tangent circular arcs per cycle; two cycles per grid cell
 WAVE_AMPLITUDE = 0.4     # deviation each way (0.8 mm peak to peak)
 WAVE_MATING_GAP = 0.25   # gap left between two neighbouring walls
 SAMPLES_PER_MM = 16
 
 # Box X and Y must be whole multiples of this.
 #
-# The wave is anchored at each wall's centre, which makes every wall symmetric
-# and every box the same whichever way round you turn it.  The price is that a
-# box's centre must land on the wave lattice.  Pack boxes edge to edge and a
-# box of size S has its centre half a size in from its edge, so sizes must be
-# multiples of 2 * WAVE_LENGTH for every centre to land on a multiple of
-# WAVE_LENGTH.  Once they do, ``cos(2*pi*(y - centre)/WAVE_LENGTH)`` collapses
-# to ``cos(2*pi*y/WAVE_LENGTH)``: the wave stops depending on which box it
-# belongs to and becomes one global function of position.  Any two walls that
-# meet then nest, whatever the two boxes measure.
-#
-# Off-grid sizes still tile with their own clones, but collide the moment they
-# meet a box of a different size, so they are rejected.
+# Global phase repeats twice per 7 mm cell, including at half-cell centres.
+# The odd arc wave displaces X along Y and displaces Y by its negative along X.
+# This signed pair is invariant under quarter-turns: after any 90-degree turn,
+# every physical wall still follows the same global seam. Mixed lengths and
+# partial seams therefore need no per-bin phase or orientation setting.
 GRID_PITCH = 2.0 * WAVE_LENGTH   # 7.0
 MIN_BOX_SIZE = GRID_PITCH        # 7.0 - one grid step
 MAX_BOX_SIZE = 350.0             # public-service resource ceiling for X and Y
@@ -881,7 +874,9 @@ class ConnectorSpec:
 # the wave
 # --------------------------------------------------------------------------- #
 def max_wave_slope() -> float:
-    return WAVE_AMPLITUDE * 2.0 * math.pi / WAVE_LENGTH
+    quarter = WAVE_LENGTH / 4.0
+    radius = (quarter * quarter + WAVE_AMPLITUDE ** 2) / (2.0 * WAVE_AMPLITUDE)
+    return quarter / (radius - WAVE_AMPLITUDE)
 
 
 def wall_depth_for(wall: float) -> float:

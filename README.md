@@ -1253,25 +1253,30 @@ without changing the layout file format or editor data model.
 
 ### The wave
 
-Every straight wall carries the same fixed-pitch wave:
+Every straight wall carries the same global-phase circular-arc wave:
 
-- **4.0 mm per full cycle** — 2 out, 2 back
-- **0.4 mm deviation each way**, 0.8 mm peak to peak
-- **Odd about the wall's centre** — it leaves the middle at zero and comes back
-  inverted
-- **Full amplitude the whole way into the corners**; there is no corner blend
+- **3.5 mm per full cycle**, two cycles per 7 mm grid cell.
+- **0.4 mm deviation each way**, 0.8 mm peak to peak.
+- Alternating circular segments meet with a shared tangent at each zero crossing.
+- The wave stays at full amplitude up to the corner chords.
 
-Changing X or Y reveals more or fewer whole cycles; it never stretches the wave.
+The displacement is `f(y)` on walls running along Y and `-f(x)` on walls
+running along X, where `f` is odd and periodic. A quarter-turn maps this pair
+back onto itself. Any side can therefore mate with any compatible side after
+0, 90, 180 or 270 degrees of rotation, including a short wall meeting part of
+a longer wall. Placement still follows the 7 mm grid; arbitrary angles and
+off-grid translations are not supported mating positions.
 
-Bins have an assembly orientation: **left mates with right, and top mates with
-bottom**. Same-side seams are not part of the supported layout. The odd wave
-keeps each opposing pair on the same global phase lattice.
+Side and corner connectors follow that same signed arc profile, including their
+arms, different-height webs and lock notches. The existing chamfered wall bumps
+and receiving notches keep their locking action. Connector positions remain
+whole 3.5 mm cycles: a half-cycle shift still needs a mirrored channel.
+Compatible seams require matching wall thicknesses and enough shared wall for
+the connector, with the existing rim-height and lid restrictions.
 
-Turning a bin 180 degrees is still fine, and that is what the odd wave buys.
-Spun, a bin's +X wall lands where its —X wall was, and an odd wave means the two
-carry the same shape, so the turned bin tiles exactly as before
-(`test_a_box_still_tiles_when_it_is_turned_round`). The orientation rule above
-is about which *faces* meet, not about keeping every bin the same way up.
+This changes printable geometry. Regenerate adjoining bins and connectors as a
+set; earlier sine-wave prints do not share the new mating profile. Physical fit
+and lock feel still need a print review.
 
 ### The 7 mm size grid
 
@@ -1294,15 +1299,14 @@ hold it gives a clear error rather than bad geometry.
 
 The rule falls out of wanting to drop boxes of any size into a drawer and have
 every seam work. Pack boxes edge to edge and a box of size `S` sits with its
-centre half a size in from its edge. Sizes that are multiples of `2 × 4 mm` put
+centre half a size in from its edge. Sizes that are multiples of `2 × 3.5 mm` put
 every box centre on a multiple of the wave, and once that holds,
-`sin(2π(y − centre)/4)` collapses to `sin(2πy/4)`: **the wave stops depending on
+`f(y - centre)` becomes `f(y)`: **the wave stops depending on
 which box it belongs to and becomes one global function of position in the
 drawer.** Any two walls that meet then nest, whatever the boxes measure.
 
 Off-grid sizes still tile with their own clones but foul the moment they meet a
-different size — a half-wave shift puts crest against crest, a 0.55 mm
-interference. They are rejected with the nearest legal size named.
+different size: a phase shift can put crest against crest. They are rejected with the nearest legal size named.
 
 ### What a size actually measures
 
@@ -1946,9 +1950,9 @@ these numbers look arbitrary and are not.
 
 | | Value | Notes |
 |---|---:|---|
-| Wave cycle | **4.0** | 2 out, 2 back |
+| Wave cycle | **3.5** | two tangent circular arcs |
 | Wave amplitude | **0.4** | 0.8 peak to peak |
-| Wave shape | **odd sine** about each wall centre | load-bearing |
+| Wave shape | **odd circular arcs**, signed by wall axis | global phase; quarter-turn compatible |
 | Mating gap | **0.25** | between two neighbouring walls |
 | Size grid | **7.0** | box X and Y must be whole multiples |
 | Minimum box | **7.0** | one grid step |
@@ -1962,7 +1966,7 @@ these numbers look arbitrary and are not.
 | **Connector tolerance** | **0.02** | **locked** by a physical print |
 | **Connector length** | **12.0** | **locked** |
 | **Connector height** | **9.6** | **locked**; cap 1.2, arms 1.0 thick |
-| Connector position step | **4.0** | one whole wave; half a wave wants a mirrored part |
+| Connector position step | **3.5** | one whole wave; half a wave wants a mirrored part |
 | Base Trim field range | **8–1200** | whole 7 mm units on each axis |
 | Base Trim unit | **7.0** | enclosed field step |
 | Base Trim size presets | **Small 6.5, Medium 7.5 (default), Large 10, XL 15, XXL 20** | square width = height |
@@ -1971,8 +1975,8 @@ these numbers look arbitrary and are not.
 | Base Trim joint length / clearance | **0.55 × min(width, height) / 0.20** | one scaled drop-in dovetail; only used when the ring must split |
 | Base Trim split-joint structural skin | **1.0 mm minimum** | between cleared joint and each physical face |
 | Base Trim outer taper | **1.0 per side** | outside only |
-| Mated wall clearance | **0.21** | 0.25 across the seam, measured perpendicular |
-| Lock bump | **0.35** proud, 1.0 tall, **1.2** long | on every wave extremum, so every **2.0** |
+| Mated wall clearance | slope-derived | 0.25 across the seam; normal clearance uses the arc maximum slope |
+| Lock bump | **0.35** proud, 1.0 tall, **1.2** long | on every wave extremum, so every **1.75** |
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |
 | Bump band | top **4.0** below the rim | |
 | Text letters | **15.0** usual base height, **5.0** readable minimum | centered; Letter height sets size; Inlay depth / Raised height **0.2–0.8** subject to backing |
@@ -2078,9 +2082,10 @@ Both were stated as done and later found false. Tests now exist for each.
 - **The `.venv` here is the only Python that works.** Use
   `.venv\Scripts\python.exe`, not the system interpreter.
 
-## Verified behaviour
+## Historical geometry evidence
 
-Measured and regression-tested; run the suite for the current exact count.
+The measurements below describe earlier sine-wave geometry. They are retained
+as history, not acceptance evidence for the Story 2260 arc walls and connectors.
 
 **Mating and the grid**
 - Boxes one pitch apart: **0.0 mm³** interference, constant 0.25 mm clearance

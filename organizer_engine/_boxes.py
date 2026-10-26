@@ -39,7 +39,7 @@ from ._specs import (
     ConnectorSpec,
 )
 from ._wave import (
-    wave_value,
+    wall_wave_value,
     lock_lattice,
     _sample_count,
     _rounded,
@@ -190,7 +190,7 @@ def _connector_corridor_polygon(
     added only when evaluating the wave.
     """
     coordinates = geometry_coordinates
-    low = high = [wave_value(phase_offset + float(v)) for v in coordinates]
+    low = high = [wall_wave_value(phase_offset + float(v), axis) for v in coordinates]
     if axis == "y":
         near = [(o - half_width, float(v)) for v, o in zip(coordinates, low)]
         far = [
@@ -317,7 +317,7 @@ def make_side_connector(
         return _connector_corridor_polygon(axis, coordinates, position, half_width)
 
     def arm_strip(sign: float, coordinates: np.ndarray) -> Polygon:
-        offsets = [wave_value(position + float(v)) for v in coordinates]
+        offsets = [wall_wave_value(position + float(v), axis) for v in coordinates]
         if axis == "y":
             if sign < 0:
                 near = [(o - outer_hw, float(v)) for v, o in zip(coordinates, offsets)]
@@ -339,7 +339,7 @@ def make_side_connector(
     ) -> Polygon:
         """One arm's footprint with its two faces set explicitly, ``half_near``
         and ``half_far`` measured from the seam centre-line (near < far)."""
-        offsets = [wave_value(position + float(v)) for v in coordinates]
+        offsets = [wall_wave_value(position + float(v), axis) for v in coordinates]
         if axis == "y":
             near = [(o + sign * half_near, float(v)) for v, o in zip(coordinates, offsets)]
             far = [(o + sign * half_far, float(v)) for v, o in zip(coordinates[::-1], offsets[::-1])]
@@ -508,7 +508,7 @@ def _connector_arm_notches(
         local = centre - phase_offset
         lo, hi = local - LOCK_RUN / 2.0, local + LOCK_RUN / 2.0
         ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
-        offsets = [wave_value(phase_offset + float(s)) for s in ss]
+        offsets = [wall_wave_value(phase_offset + float(s), axis) for s in ss]
         for sign in signs:
             # The arm's wall-facing face is its inner one; the notch is cut from
             # there outward into the arm, matching the bump that pokes in.
