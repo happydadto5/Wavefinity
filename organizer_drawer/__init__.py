@@ -19,11 +19,11 @@ matched.
 
 Placements
 ----------
-* On the grid: ``gx``/``gy`` in 8 mm units from the grid's front-left corner.
+* On the grid: ``gx``/``gy`` in 7 mm units from the grid's front-left corner.
   A drawer that snaps to 4 mm (``snap = 4``) allows half units: the wave
   repeats every 4 mm, so a bin shifted half a unit along a seam still nests.
 * Stacked: ``on`` names the one placement it stands on (``"B3:0"``) and
-  ``ox``/``oy`` are its offset in 8 mm units from that placement's front-left
+  ``ox``/``oy`` are its offset in 7 mm units from that placement's front-left
   corner (missing means 0, which is what older same-footprint stacks carry).
   Only a stackable bin of the same stacking style can snap onto another; direct
   and Storage Box stacking need the same footprint, while a snap-on lid can
@@ -35,7 +35,7 @@ Placements
 * Free, for an edge-facing spacer: ``x``/``y``/``w``/``d`` in mm from the
   drawer's inside front-left corner, plus the ``side`` it lines.  Its width
   across the wall is the drawer's real leftover play, not rounded to a grid
-  unit - a physically genuine residual, not a whole-8-mm footprint.
+  unit - a physically genuine residual, not a whole-7-mm footprint.
 
 An ordinary bin row is one placement identity: at most one placement per
 row. Its print state is the row's own ``status``, never the placement. A

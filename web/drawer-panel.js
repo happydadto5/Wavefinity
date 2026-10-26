@@ -44,7 +44,7 @@ DP.syncFilterSpace = () => {
 // uses: one Wavefinity unit plus hard-wall clearance across, ordinary-bin
 // minimum height up.
 DP.drawerMinima = () => {
-  const xy = Number(state.catalog?.base_unit || 8) + drawerHardClearance();
+  const xy = Number(state.catalog?.base_unit || 7) + drawerHardClearance();
   return { x: xy, y: xy, z: ordinaryBinMinimumHeight() };
 };
 
@@ -1104,8 +1104,8 @@ DP.renderSpacerPlanTruth = () => {
 // that gate through the existing client grid owner DL.grid
 // (web/drawer-model.js), with the backend's max(1, ...) clamp applied
 // locally below (global DL.grid is unchanged). For standard drawers the
-// backend uses step = drawer["snap"] (4.0 preserved by normalise_drawer,
-// anything else normalised to 8.0) while DL.grid hardcodes step = 8, so
+// backend uses step = drawer["snap"] (3.5 preserved by normalise_drawer,
+// anything else normalised to 7.0) while DL.grid hardcodes step = 7, so
 // the gate is derived locally below with the backend's effective snap and
 // the same usable-dimension/slack formula DL.grid uses. When the gate is
 // closed (zero-grid/legacy drawer), tallest stays 0 and the fallback below
@@ -1128,12 +1128,12 @@ DP.spacerAutoHeight = () => {
     gateCols = Math.max(1, grid.cols);
   } else {
     // Backend-equivalent gate for standard drawers: drawer_grid uses
-    // step = drawer["snap"] (normalise_drawer preserves exactly 4.0 and
-    // maps anything else to 8.0) while DL.grid hardcodes step = 8, so the
+    // step = drawer["snap"] (normalise_drawer preserves 3.5 (old 4) and
+    // maps anything else to 7.0) while DL.grid hardcodes step = 7, so the
     // gate is derived locally here with the backend's effective snap and
     // the same usable-dimension/slack formula DL.grid uses. DL.grid itself
     // is not changed.
-    const step = Number(drawer.snap) === 4 ? 4 : 8;
+    const step = Number(drawer.snap) === 3.5 || Number(drawer.snap) === 4 ? 3.5 : 7;
     const slack = DL.slack(drawer);
     gateCols = Math.max(0, Math.floor((drawer.width - slack) / step + 1e-6));
     gateRows = Math.max(0, Math.floor((drawer.depth - slack) / step + 1e-6));

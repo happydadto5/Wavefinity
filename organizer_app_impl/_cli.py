@@ -22,7 +22,7 @@ def parse_sizes(text: str) -> tuple[tuple[float, float], ...]:
 
     One unit is ``BASE_UNIT``.  Bare numbers are units; append ``mm`` to give
     millimetres instead.  Guessing from magnitude would be ambiguous now that a
-    unit is 8 mm - ``8x8`` could plausibly mean either - so it is explicit.
+    unit is 7 mm - ``8x8`` could plausibly mean either - so it is explicit.
     """
     sizes: list[tuple[float, float]] = []
     for chunk in text.split(","):

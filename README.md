@@ -19,14 +19,14 @@ insert and export engines.
 The basic system has a box and **connectors**. The normal **Side connector** is a
 small staple that joins two boxes across their shared seam and supports same or
 different bin heights. Holders can be fused into the box, printed as a
-removable fitted insert, or printed on an optional 8 mm cartridge footprint.
+removable fitted insert, or printed on an optional 7 mm cartridge footprint.
 
 Connector fit always comes automatically from the active bin's wall thickness;
 there is no separate connector wall setting. Two compact top/rim connectors
 join bins around one grid corner: the **3-Way Corner** joins three bins (its open
 quadrant is chosen by rotating the printed part) and the **4-Way Corner** joins
 four. Corner connectors need equal-height, equal-wall bins, do not support
-different heights, and need at least 16 mm (2 Wavefinity units) in both X and Y.
+different heights, and need at least 14 mm (2 Wavefinity units) in both X and Y.
 Corner Quantity (1–20) prints separate copies on one plate. A Space may mix wall
 thicknesses, but a connector never bridges different walls; Wavefinity shows a
 non-blocking warning when you change Wall in a Space that already has an
@@ -352,7 +352,7 @@ dimensions.
 **Base** and **Walls** are named preset selects sitting side by side. *Standard*
 walls keep the original 0.8 mm wall; the other presets run from very thin
 (0.4 mm) up to a 2.4 mm maximum. Only the cavity moves, while the exterior wave
-and 8 mm grid stay fixed. Custom-wall connectors are generated for that wall
+and 7 mm grid stay fixed. Custom-wall connectors are generated for that wall
 thickness and include it in their filename. Use a connector only with bins of
 the same wall thickness.
 
@@ -392,7 +392,7 @@ generation.
 
 **Base Trim** is an open-centre rectangular perimeter ring, not a tray: there
 is no bottom beneath the bins. Its X/Y values describe the enclosed Wavefinity
-bin field in whole 8 mm units, independently of ordinary-bin wall thickness.
+bin field in whole 7 mm units, independently of ordinary-bin wall thickness.
 The inner wall is the existing globally phased Wavefinity mating wave; internal
 bin seams are not encoded into the trim, so bins may be rearranged later as
 long as they still fill that same rectangular field. The clean outer wall is
@@ -623,7 +623,7 @@ which suppress Inventory logging entirely.
   size are shown read-only; **Edit Space** opens the same fields in place with
   **Save Changes** and **Cancel** (never the New Space buttons).
 - **Drawers.** A drawer's inside width, depth and **max height** come from its
-  Space. The layout has one fixed rule set, not choices: an **8 mm** whole-unit
+  Space. The layout has one fixed rule set, not choices: a **7 mm** whole-unit
   grid, width running left to right, the grid against the front-left corner, and the
   catalog's hard-wall allowance (none against a Storage Box's own mating
   boundary) with spacers taking up the rest. Older saves are normalised on
@@ -657,7 +657,7 @@ which suppress Inventory logging entirely.
   Inventory **Delete** button removes selected ordinary bins. Spacers remain
   visible below ordinary bins. *Clear selection* is disabled while nothing is ticked.
 - **Placing.** Drag a bin from **Unplaced bins** (or its Inventory row) onto the
-  Space. Drag placed bins to move them: they snap to the 8 mm grid and refuse
+  Space. Drag placed bins to move them: they snap to the 7 mm grid and refuse
   overlaps and the Space edge. Drag one off the Space, or select it and press
   **Delete**, to unplace it - it returns to Unplaced bins and stays in Inventory.
   Keys: the arrows move one unit, **Delete** unplaces, **F** fits the view, **Esc**
@@ -677,7 +677,7 @@ which suppress Inventory logging entirely.
   between the grid and the drawer walls become **edge-facing spacers**, cut
   from a virtual bin standing just outside the grid: wavy and interlocking on
   the bin-facing side, flat on the wall side, and sized to the drawer's real
-  leftover millimetres. Neither kind of spacer is forced onto the whole 8 mm
+  leftover millimetres. Neither kind of spacer is forced onto the whole 7 mm
   grid a normal bin's own size must be - a genuine 4 mm-wide leftover, edge or
   interior, is filled at its real size.
   Only a genuine manufacturability floor - is there still room for a cavity
@@ -828,7 +828,7 @@ intentional choice, not an error to correct.
 New Bores, Cradles, Posts, and Slot Racks begin with a contents-driven
 footprint. Increasing a hole grid, tool size, quantity, spacing, or lean grows
 that part automatically. If the part no longer fits, the bin's width and/or
-length grows on the 8 mm grid. Shrinking a bin below any existing Pocket,
+length grows on the 7 mm grid. Shrinking a bin below any existing Pocket,
 Steps, rack, or holder grows the bin back around the part instead of trimming
 the part. When growth creates a collision, the part being edited stays put and
 the other parts move outward only as much as needed.
@@ -861,14 +861,14 @@ permanent — and **Removable**, where holders print separately on a thin
 0.6 mm base plate that drops into the bin, so the interior can be swapped
 while the bin stays put.
 
-A third mode, **8 mm cartridge**, exists at the engine and CLI level
-(`--mode cartridge`): a removable insert constrained to whole 8 mm cells, so
+A third mode, **7 mm cartridge**, exists at the engine and CLI level
+(`--mode cartridge`): a removable insert constrained to whole 7 mm cells, so
 it is repeatable and interchangeable between matching bins at the cost of
 some usable edge area (on the 128 x 88 comparison bin that is 120 x 80 mm,
 9.8% less floor). The browser UI does not expose it as a choice — reusable
 coordinate footprints across bins are a scripting concern, and picking it by
 mistake in the editor just produced a confusing revert once an already-placed
-interior part did not land on an 8 mm cell.
+interior part did not land on a 7 mm cell.
 
 Tall holders may use the middle of the bin, but anything entering the 2 mm strip
 beside a wall is capped below the connector arms. The editor's default divider
@@ -1063,7 +1063,7 @@ auto-computed edge rounds up to the 1 mm editor grid so the pipeline's snap
 can't trim a trough below what the tool needs.
 
 When an interior part does not fit, its editor offers **Grow the bin** and the
-same growth normally happens automatically. The bin grows on the 8 mm grid to
+same growth normally happens automatically. The bin grows on the 7 mm grid to
 hold every part at its real footprint. It never shrinks an already-large bin.
 
 **Bin Height means wall height, not interior part height.** A shallow bin -
@@ -1273,21 +1273,21 @@ carry the same shape, so the turned bin tiles exactly as before
 (`test_a_box_still_tiles_when_it_is_turned_round`). The orientation rule above
 is about which *faces* meet, not about keeping every bin the same way up.
 
-### The 8 mm size grid
+### The 7 mm size grid
 
-**Box X and Y must be whole multiples of 8 mm, from 8 mm up.** X and Y are
+**Box X and Y must be whole multiples of 7 mm, from 7 mm up.** X and Y are
 independent, so 16x16, 16x48, 40x56 and so on are all fine — nothing has to
 scale proportionally.
 
-**One unit is 8 mm** — the grid step itself — so every legal size is a whole
-number of units and no decimals are needed: 1, 2, 3, 4, 5, 6 = 8, 16, 24, 32,
-40, 48 mm. The browser UI takes the modular drawer footprint in millimetres and
-snaps it to the nearest 8 mm step. Usable interior is a derived measurement;
+**One unit is 7 mm** — the grid step itself — so every legal size is a whole
+number of units and no decimals are needed: 1, 2, 3, 4, 5, 6 = 7, 14, 21, 28,
+35, 42 mm. The browser UI takes the modular drawer footprint in millimetres and
+snaps it to the nearest 7 mm step. Usable interior is a derived measurement;
 making it the input would add the wall allowance once per bin and break mixed-size
 tiling.
 
-**16 mm (2 units)** is the smallest box that takes a connector on both sides. A
-1-unit side is still legal and useful: an 8 mm wall is too short for a connector
+**14 mm (2 units)** is the smallest box that takes a connector on both sides. A
+1-unit side is still legal and useful: a 7 mm wall is too short for a connector
 and too short to seat a lock bump, so a narrow bin joins on its long sides only
 — put the clips where clips work. Asking for a connector on a wall that cannot
 hold it gives a clear error rather than bad geometry.
@@ -1310,12 +1310,12 @@ The UI shows this live as you change the size:
 
 | X units | Grid footprint | Outside (crest to crest) | Usable inside | Joins on |
 |---:|---:|---:|---:|---|
-| 1 | 8 x 48 | 8.55 x 48.55 | 5.06 x 45.06 | long sides only |
-| 2 | 16 x 48 | 16.55 x 48.55 | 13.06 x 45.06 | both |
-| 4 | 32 x 48 | 32.55 x 48.55 | 29.06 x 45.06 | both |
-| 6 | 48 x 48 | 48.55 x 48.55 | 45.06 x 45.06 | both |
+| 1 | 7 x 42 | 7.55 x 42.55 | 4.06 x 39.06 | long sides only |
+| 2 | 14 x 42 | 14.55 x 42.55 | 12.06 x 39.06 | both |
+| 4 | 28 x 42 | 28.55 x 42.55 | 25.06 x 39.06 | both |
+| 6 | 42 x 42 | 42.55 x 42.55 | 39.06 x 39.06 | both |
 
-(All 6 units deep, so 48 mm in Y.)
+(All 6 units deep, so 42 mm in Y.)
 
 **Grid footprint** is what the box occupies in the drawer. **Outside** is the
 real bounding box — the wave crests stand one amplitude proud of the footprint
@@ -1362,8 +1362,8 @@ and each connector arm has **matching notches**:
 
 - **0.35 mm** protrusion, 1.0 mm tall, 1.2 mm long
 - One on **every** wave extremum the wall can carry — crests as well as troughs,
-  so every 2 mm — kept clear of the corners. A 16 mm wall gets four, a 48 mm wall
-  gets twenty, an 8 mm wall gets none
+  so every 2 mm — kept clear of the corners. A 14 mm wall gets four, a 42 mm wall
+  gets twenty, a 7 mm wall gets none
 - Both faces run at exactly **45 degrees** from the buried root right out to the
   tip, so there is no horizontal face anywhere on the feature: it prints
   **without supports** in either orientation
@@ -1616,7 +1616,7 @@ never change. Default is off.
   Saved designs keep their original `from_bottom_percent` and
   `from_top_percent` values.
 
-A wall needs to be at least **2 Wavefinity units (16 mm)** long to take a
+A wall needs to be at least **2 Wavefinity units (14 mm)** long to take a
 Side Opening at all, with a 4 mm solid corner shoulder kept at each end of
 the opening. That modular rule means a 2-unit wall only offers Small, a
 3-unit wall offers up to Large, and a 4-unit-or-larger wall offers every
@@ -1653,8 +1653,8 @@ python organizer_app.py organizer --layout drivers.wavefinity.json --output-dir 
 python organizer_app.py organizer --layout drivers.wavefinity.json --mode cartridge --label HEX --part-name "Driver rack" --output-dir generated
 ```
 
-X and Y must be multiples of 8 mm (minimum 8); Z and wall are free. `--boxes`
-takes units (`2x6`), or millimetres with an explicit suffix (`16x48mm`).
+X and Y must be multiples of 7 mm (minimum 7); Z and wall are free. `--boxes`
+takes units (`2x6`), or millimetres with an explicit suffix (`14x42mm`).
 
 Generated box files are named for their size, plus the part name if there is
 one: `Box 16 x 48 x 40.3mf` or `Box 16 x 48 x 40 Driver rack.3mf`. Lettering
@@ -1683,7 +1683,7 @@ individual-part commands.
 Run the sampler command above to create `WAVY_SAMPLE_SET.3mf` with eight
 separately selectable objects:
 
-- **2 x 6 (16 x 48 mm)**, **4 x 6 (32 x 48 mm)** and **6 x 6 (48 x 48 mm)** boxes
+- **2 x 6 (14 x 42 mm)**, **4 x 6 (28 x 42 mm)** and **6 x 6 (42 x 42 mm)** boxes
 - **Five identical connectors** at the locked 0.02 mm tolerance
 
 Print the boxes open side up and the connectors cap side down; no supports either
@@ -1950,10 +1950,10 @@ these numbers look arbitrary and are not.
 | Wave amplitude | **0.4** | 0.8 peak to peak |
 | Wave shape | **odd sine** about each wall centre | load-bearing |
 | Mating gap | **0.25** | between two neighbouring walls |
-| Size grid | **8.0** | box X and Y must be whole multiples |
-| Minimum box | **8.0** | one grid step |
-| Maximum requested X/Y | **350.0** | the 8 mm grid makes 344 mm the largest valid size |
-| One "unit" | **8.0** | so 1, 2, 3 units = 8, 16, 24 mm |
+| Size grid | **7.0** | box X and Y must be whole multiples |
+| Minimum box | **7.0** | one grid step |
+| Maximum requested X/Y | **350.0** | the 7 mm grid makes 350 mm the largest valid size |
+| One "unit" | **7.0** | so 1, 2, 3 units = 7, 14, 21 mm |
 | Smallest box that clips on both sides | **16.0** | derived, not hard-coded |
 | Wall | **0.8** | independent of the floor |
 | Base thickness | **0.8** default, **0.4** minimum | shown under Advanced in Build your bin |
@@ -1963,8 +1963,8 @@ these numbers look arbitrary and are not.
 | **Connector length** | **12.0** | **locked** |
 | **Connector height** | **9.6** | **locked**; cap 1.2, arms 1.0 thick |
 | Connector position step | **4.0** | one whole wave; half a wave wants a mirrored part |
-| Base Trim field range | **8–1200** | whole 8 mm units on each axis |
-| Base Trim unit | **8.0** | enclosed field step |
+| Base Trim field range | **8–1200** | whole 7 mm units on each axis |
+| Base Trim unit | **7.0** | enclosed field step |
 | Base Trim size presets | **Small 6.5, Medium 7.5 (default), Large 10, XL 15, XXL 20** | square width = height |
 | Base Trim width / height range / step | **4–20 / 0.5** | millimetres; presets are the normal path, legacy values still load |
 | Base Trim default bed / effective area | **256 × 256 / 236 × 236** | 10 mm is reserved at each edge |
@@ -1995,7 +1995,7 @@ Do not re-derive these.
 | Raised (proud) floor labels *as the only option* | Replaced with a sunk inlay by default; **Stand proud** is now a per-text choice. |
 | One label per bin, owned by the design | Replaced by `text` interior parts, any number of them. One label meant no answer to "which compartment is this size for", and the label already had bespoke move/rotate/resize code duplicating the feature editor. |
 | Reading "flat inside walls" as a horizontal fill depth | Wrong. It is a **height**: a flat-walled band rising from the floor, with the wave unchanged above it. |
-| 16 mm "bin" as the unit | Replaced with 8 mm so whole numbers reach 8/16/24/32/40/48. |
+| 16 mm "bin" as the unit | Replaced with 8 mm, then re-based to 7 mm so whole numbers reach 7/14/21/28/35/42. |
 | Success dialog after generating | Removed; the status line reports instead. Failures still get a dialog. |
 | Connector-fit line in the size readout | Removed. |
 | Native `.f3d` export | Impossible outside Fusion. A build script was written and is now stale — it predates the 4 mm wave and the removal of the corner connector. |
@@ -2128,7 +2128,7 @@ Measured and regression-tested; run the suite for the current exact count.
 - Fused outputs remain one watertight solid; fitted and cartridge inserts clear
   the bin walls and stand on their own 0.6 mm print-flat plate
 - Normal moves and resizes snap to 1 mm. Cartridge coordinates and sizes are
-  validated on 8 mm cell edges and survive a JSON round trip
+  validated on 7 mm cell edges and survive a JSON round trip
 - All three production modes were exported as strict, zero-warning 3MF files;
   a lettered output is a one-build-item assembly of the body and every piece of
   lettering as named parts, and two texts reading the same thing stay distinct

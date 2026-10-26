@@ -554,7 +554,7 @@ function aiSpaceViolation(design, baseline) {
       ? null : "Pegboard mounting belongs to a Pegboard Space and cannot be changed here.";
   }
   const kind = space.kind;
-  const unit = number(state.catalog?.base_unit, 8);
+  const unit = number(state.catalog?.base_unit, 7);
   const capacity = mm => kind === "drawer" ? drawerSpaceCapacity(mm) : Math.floor(number(mm, 0) / unit + 1e-9);
   const maxX = capacity(space.x) * unit, maxY = capacity(space.y) * unit;
   if (box.x > maxX + 1e-6 || box.y > maxY + 1e-6) {

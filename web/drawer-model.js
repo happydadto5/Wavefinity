@@ -7,7 +7,7 @@
 // copy sits, settings) is saved back into it. Bin rows are edited on the
 // server by id, so a bin generated while this view is open is never lost.
 //
-// A placement is on the grid (gx/gy in 8 mm units, halves allowed on a 4 mm
+// A placement is on the grid (gx/gy in 7 mm units, halves allowed on a 3.5 mm
 // drawer), stacked (`on` names the one placement it stands on; `ox`/`oy` are its
 // whole-unit offset from that placement's front-left corner, 0 when missing), or a free edge-facing
 // spacer (x/y/w/d mm). One ordinary Inventory row is one placement identity: it
@@ -19,7 +19,7 @@
 // debounce, escapeHtml and state.output.
 
 const DL = {
-  UNIT: 8,
+  UNIT: 7,
   stackSteps: { lid: 1, direct: 3, b4b: 2 },   // replaced by the server's values on load
   stackMetrics: {},
   storageBoxHeadroomDefault: 1, // replaced by the server's canonical default on load
@@ -97,7 +97,7 @@ DL.defaultDrawer = (name, from = null) => ({
   depth: from?.depth ?? 300,
   height: from?.height ?? 60,
   boundary: from?.boundary ?? "wall",
-  // Not user choices: one 8 mm grid, width left-right, grid against the
+  // Not user choices: one 7 mm grid, width left-right, grid against the
   // front-left corner, and the product-rule wall allowance.
   ...DL.canonicalLayoutRules(from?.boundary ?? "wall"),
   placements: [],
@@ -111,7 +111,7 @@ DL.canonicalLayoutRules = boundary => ({
   clearance: boundary === "mating" || boundary === "pegboard" ? 0 : drawerHardClearance(),
   anchor: "front-left",
   bin_axis: "x",
-  snap: 8,
+  snap: 7,
 });
 
 DL.cleanTextConsent = designSpecs => {
@@ -165,11 +165,11 @@ DL.normaliseLayout = raw => {
     one.placements = (Array.isArray(one.placements) ? one.placements : [])
       .filter(p => p && typeof p === "object" && p.bin);
     one.placements.forEach(p => { delete p.locked; }); // retired: there is no Lock
-    // Legacy 4 mm layouts go onto the one 8 mm grid: bins sitting half a unit
+    // Legacy 4 mm layouts go onto the one 7 mm grid: bins sitting half a unit
     // along snap to the nearest whole unit (the report flags any overlap that
     // makes). Legacy axis, anchor and clearance settings are no longer
     // choices, so they are put back to the canonical rules.
-    if (Number(one.snap) === 4) one.placements.forEach(p => {
+    if (Number(one.snap) === 4 || Number(one.snap) === 3.5) one.placements.forEach(p => {
       if (DL.onGrid(p)) { p.gx = Math.round(p.gx); p.gy = Math.round(p.gy); }
       else if (p.on !== undefined) {
         if (p.ox !== undefined) p.ox = Math.round(DL.offsetOf(p.ox));
@@ -277,9 +277,9 @@ DL.label = one => {
   return base;
 };
 DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
-// The user-facing Wavefinity unit is always 8 mm - see the "8 mm size grid"
+// The user-facing Wavefinity unit is always 7 mm - see the "7 mm size grid"
 // section of README.md. The one place this conversion belongs.
-DL.mmToUnits = mm => fmt(mm / 8);
+DL.mmToUnits = mm => fmt(mm / 7);
 DL.isSpacer = one => one?.kind === "spacer";
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
 DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct snap", b4b: "Storage Box stacking" })[mode] || "Not stackable";
@@ -332,7 +332,7 @@ DL.grid = (drawer = DL.drawer()) => {
       gapLeft: ox, gapRight: drawer.width - ox - cols * stepX,
       gapFront: oy, gapBack: drawer.depth - oy - rows * stepY };
   }
-  const step = 8;
+  const step = 7;
   const slack = DL.slack(drawer);
   const usableX = drawer.width - slack;
   const usableY = drawer.depth - slack;
@@ -783,7 +783,7 @@ DL.fitsOn = (drawer, movingSet, target, movingKeys = null) => {
   const refusal = DL.stackRefusal(root.bin, lower);
   if (refusal) return { ok: false, reason: refusal };
   const { cx, cy } = target;
-  if (!Number.isInteger(cx) || !Number.isInteger(cy)) return { ok: false, reason: "Stacked bins sit on the 8 mm grid." };
+  if (!Number.isInteger(cx) || !Number.isInteger(cy)) return { ok: false, reason: "Stacked bins sit on the 7 mm grid." };
   if (cx < 0 || cy < 0 || cx + root.w > support.w || cy + root.d > support.d) {
     return { ok: false, reason: `${DL.label(root.bin)} would stick out past the edge of ${DL.label(lower)}.` };
   }

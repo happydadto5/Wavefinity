@@ -119,7 +119,7 @@ WALL_HUG_FLAG = "_wall_hug"
 JOIN_TOUCH = 0.05             # envelope this close to a wall counts as reaching it
 JOIN_BAND = 1.2               # wall-only material this close to the wall is blended in
 JOIN_SKIN = 0.15              # a joined blend never comes closer than this to the outside
-HUG_REACH = 8.0               # bin_to_bore leaves under one 8 mm grid step to the wall
+HUG_REACH = 7.0               # bin_to_bore leaves under one 7 mm grid step to the wall
 WAVE_NOISE_FLOOR = 1e-4       # trough sits a hair outside the clear opening, so
                               # float noise cannot fold the outline back on itself
 WAVE_SAMPLES_PER_CYCLE = 32   # keeps a wavy sleeve smooth in the STL and preview

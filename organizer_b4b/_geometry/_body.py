@@ -204,7 +204,7 @@ def _skirt_polygons(eff: BoxSpec) -> tuple[Polygon, Polygon]:
     tripped the validator and B4B stopped generating entirely.
 
     Keeping it inside the mating face also leaves the lid footprint exactly the
-    body footprint, so B4Bs still sit side by side on the 8 mm lattice.
+    body footprint, so B4Bs still sit side by side on the 7 mm lattice.
     """
     clr = B4B_LID_SEAT_CLEARANCE
     layout = b4b_layout(eff)

@@ -447,7 +447,7 @@ def occupied_zones(
     Only a fused layout judges this on the real footprint. A removable insert
     prints on a base plate spanning the whole bin floor, so its supports are
     one interchangeable tile and each keeps its whole zone; cartridge mode
-    needs whole 8 mm cells for the same reason.
+    needs whole 7 mm cells for the same reason.
     """
     cells = cartridge_zone(box) if mode == "cartridge" else None
     occupied = []
@@ -589,7 +589,7 @@ def bore_bin_minimum(
 
     Each such Bore is measured by its true physical footprint (every row and
     column, wave and foot included), kept exactly where it was placed, and the
-    bin - stepping on the normal 8 mm grid, exactly like any bin size - is the
+    bin - stepping on the normal 7 mm grid, exactly like any bin size - is the
     smallest whose usable inside contains it. ``None`` when no Bore sizes the
     bin (none present, or a removable-insert layout). The browser uses this
     cheap answer to decide when the (exact) fit search needs to run.

@@ -313,7 +313,7 @@ SP.readSetupValues = async () => {
   const name = document.getElementById("space-name").value.trim();
   if (!name) return fail("Give the Space a name.", "#space-name");
 
-  const unit = Number(state.catalog?.base_unit || 8);
+  const unit = Number(state.catalog?.base_unit || 7);
 
   if (kind === "drawer") {
     const x = Number(document.getElementById("drawer-x").value);

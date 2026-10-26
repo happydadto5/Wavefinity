@@ -350,7 +350,7 @@ function formatDimField(axis) {
   // Blurred state keeps the whole fit story short enough to stay in the field.
   // The unit count is the integer number of whole grid steps, from the
   // authoritative base unit.
-  const unit = state.catalog?.base_unit || 8;
+  const unit = state.catalog?.base_unit || 7;
   const units = Math.round(val / unit);
   // Fix 081 E: physical mm first, then usable-inside mm, then the spelled-out
   // unit count - never a count glued to a letter like "30X".

@@ -723,7 +723,7 @@ function drawerHardClearance() {
 }
 
 function drawerSpaceCapacity(mm) {
-  const unit = number(state.catalog?.base_unit, 8);
+  const unit = number(state.catalog?.base_unit, 7);
   const clearance = drawerHardClearance();
   return Math.max(
     0,
@@ -790,7 +790,7 @@ function applySpaceSizingDefaults(design, remembered = null, keepStarterXY = fal
   const space = kind === "storage_drawers"
     ? { ...state.activeSpace, ...cabinetActiveLimits() }
     : state.activeSpace;
-  const unit = state.catalog?.base_unit || 8;
+  const unit = state.catalog?.base_unit || 7;
   const rememberedBox = plainObject(remembered?.box) ? remembered.box : {};
   const rememberedLayout = plainObject(remembered?.layout) ? remembered.layout : {};
   const largestUnits = Math.floor((state.catalog?.max_box_size || 350) / unit);
@@ -893,12 +893,12 @@ function freshDesignForCurrentFolder() {
   const starter = clone(state.catalog.defaults.design);
   const remembered = spaceBinPreferences();
   if (!remembered) {
-    // Fix 1012/1015: a fresh ordinary New Bin starts at 48x48 mm
-    // (grid-stable; 50 would snap to 48 on first edit — Andrew 2026-10-10).
+    // Fix 1012/1015: a fresh ordinary New Bin starts at 49x49 mm
+    // (closest multiple of 7 to the old 48 default; 50 would snap to 49 on first edit — Andrew 2026-10-10).
     // Spaces have no default size of their own; the bin default stands
     // in Space mode too.
-    starter.box.x = 48;
-    starter.box.y = 48;
+    starter.box.x = 49;
+    starter.box.y = 49;
     return applySpaceSizingDefaults(starter, null, true);
   }
   return applySpaceSizingDefaults(mergeDesignDefaults(starter, remembered), remembered);

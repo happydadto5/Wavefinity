@@ -196,7 +196,7 @@ SP.wire = () => {
 };
 
 SP.updateReadouts = () => {
-    const unit = state.catalog?.base_unit || 8;
+    const unit = state.catalog?.base_unit || 7;
     const kind = SP.setupKind;
     if (kind === "drawer") {
         const x = Number(document.getElementById("drawer-x").value);

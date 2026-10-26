@@ -442,7 +442,7 @@ def make_fitted_insert(
 def make_cartridge_insert(
     box: BoxSpec, features: Iterable[Feature]
 ) -> trimesh.Trimesh:
-    """Standalone insert on the optional centred 8 mm cartridge footprint."""
+    """Standalone insert on the optional centred 7 mm cartridge footprint."""
     bounds = cartridge_zone(box)
     footprint = insert_footprint(box, "cartridge")
     plate = make_insert_plate(box, "cartridge")

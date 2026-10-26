@@ -376,7 +376,7 @@ def _surface_base_cutter(cx: float, cy: float, opening: float, roof_top: float) 
 
 def apply_surface_lightweight_base(body: trimesh.Trimesh, box: BoxSpec,
                                    layout: Layout) -> trimesh.Trimesh:
-    """Remove hidden 8 mm cell cavities from a Surface platform only."""
+    """Remove hidden 7 mm cell cavities from a Surface platform only."""
     if not layout.surface_lightweight_base:
         return body
     if box.b4b.enabled or stack_enabled(box) or lid_stackable(box):

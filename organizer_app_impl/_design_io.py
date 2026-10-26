@@ -335,7 +335,7 @@ def default_feature(
         available_across = bounds.depth if along == "x" else bounds.width
         cradle_across = item.widest + _cradle_rib_thickness(item.widest)
         wanted_across = max(
-            8.0,
+            7.0,
             cradle_across,
         )
         across = min(
@@ -345,7 +345,7 @@ def default_feature(
         width, depth = ((required_length, across) if along == "x"
                         else (across, required_length))
     elif kind == "nest":
-        width, depth = min(8.0, bounds.width), min(8.0, bounds.depth)
+        width, depth = min(7.0, bounds.width), min(7.0, bounds.depth)
         # A brand-new (not yet photographed) Photo Nest must show the new-
         # scan defaults immediately - Recessed, Auto-size, Automatic finger
         # access - so the editor never displays a holder style the upload it
@@ -432,7 +432,7 @@ def default_feature(
     elif kind == "slot":
         feature_options["wall_style"] = "wavy"
         if mode == "cartridge":
-            # One 8 mm cell still fits a useful starter opening after the
+            # One 7 mm cell still fits a useful starter opening after the
             # required 0.4 mm wave margin on each outside wall.
             feature_options["thickness"] = 3.7
         run = _starter_span(bounds.width if along == "x" else bounds.depth, 32.0, mode)
@@ -927,7 +927,7 @@ def design_from_dict(
             math.floor(round(y / GRID_PITCH) - old_slack + 1e-6) * GRID_PITCH,
         )
     # Brief browser builds stored a requested usable size plus the wall
-    # allowance. Recover the user's 8 mm modular choice when those designs are
+    # allowance. Recover the user's 7 mm modular choice when those designs are
     # reopened; every BoxSpec remains grid-locked after migration.
     if bool(raw.get("interior_sizing", False)):
         wall = float(raw.get("wall", DEFAULT_WALL))
@@ -935,6 +935,12 @@ def design_from_dict(
         allowance = WAVE_MATING_GAP + 2.0 * wall_depth + 2.0 * WAVE_AMPLITUDE
         x = max(GRID_PITCH, round((x - allowance) / GRID_PITCH) * GRID_PITCH)
         y = max(GRID_PITCH, round((y - allowance) / GRID_PITCH) * GRID_PITCH)
+    # Clean break from the old 8 mm module: a saved footprint that is not a
+    # whole number of 7 mm units re-bases deterministically to the closest
+    # multiple of 7 (ties go up), never rejected and never guessed from other data.
+    if math.isfinite(x) and math.isfinite(y):
+        x = max(GRID_PITCH, math.floor(x / GRID_PITCH + 0.5 + 1e-9) * GRID_PITCH)
+        y = max(GRID_PITCH, math.floor(y / GRID_PITCH + 0.5 + 1e-9) * GRID_PITCH)
     raw_wall = float(raw.get("wall", DEFAULT_WALL))
     if not math.isfinite(raw_wall) or not MIN_WALL <= raw_wall <= MAX_WALL:
         raise ValueError(

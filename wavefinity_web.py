@@ -1724,7 +1724,7 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if skipped_types:
         plan["skipped_types"] = skipped_types
         plan["skipped_reason"] = (
-            "Corner connectors need at least 16 mm (2 Wavefinity units) in both "
+            "Corner connectors need at least 14 mm (2 Wavefinity units) in both "
             "X and Y so the clip can clear the corners and engage the wall locks."
         )
     reply = {"connector_plan": plan}

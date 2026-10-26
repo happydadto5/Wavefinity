@@ -30,7 +30,7 @@ MIN_FEATURE_GAP = 0.8      # material between two features
 MAX_DIVIDER_COUNT = 200
 CONNECTOR_EDGE_KEEP_OUT = 2.0  # interior strip kept low for connector arms
 EDITOR_SNAP = 1.0          # normal editor movement; effectively no floor loss
-CARTRIDGE_PITCH = 8.0      # optional interchangeable standalone-insert grid
+CARTRIDGE_PITCH = 7.0      # optional interchangeable standalone-insert grid
 ENVELOPE_ZONE_SLACK = 1.5  # a bin-sized Walls Only zone may overhang the floor this far
 LAYOUT_MODES = ("fused", "separate", "cartridge")
 
@@ -234,7 +234,7 @@ class Layout:
 
     ``fused`` grows holders from the bin floor. ``separate`` makes a fitted,
     removable full-floor insert. ``cartridge`` is the same removable form but
-    restricts the useful area to centred 8 mm cells so layouts can be reused in
+    restricts the useful area to centred 7 mm cells so layouts can be reused in
     another bin with the same cell footprint. Normal editing snaps to 1 mm.
     """
 
@@ -293,7 +293,7 @@ class Layout:
                     for value in values
                 ):
                     raise ValueError(
-                        "cartridge feature positions and sizes must use 8 mm cells"
+                        "cartridge feature positions and sizes must use 7 mm cells"
                     )
 
 
@@ -311,7 +311,7 @@ def cartridge_zone(box: BoxSpec) -> Zone:
     width = math.floor((whole.width + 1e-9) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
     depth = math.floor((whole.depth + 1e-9) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
     if width < CARTRIDGE_PITCH or depth < CARTRIDGE_PITCH:
-        raise ValueError("this bin is too small for one 8 mm cartridge cell")
+        raise ValueError("this bin is too small for one 7 mm cartridge cell")
     return Zone(-width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0)
 
 

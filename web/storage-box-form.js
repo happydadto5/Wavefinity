@@ -65,7 +65,7 @@
   function mount({ host, initialSpace, callbacks = {} }) {
     const catalog = (typeof state !== "undefined" && state.catalog) || null;
     const rules = catalog?.b4b_rules || {};
-    const unit = Number(catalog?.base_unit || 8);
+    const unit = Number(catalog?.base_unit || 7);
     const maxXY = Math.floor(Number(catalog?.max_box_size || 350) / unit) * unit;
     const minField = Number(rules.min_field_mm) || unit;
     const minHeight = Number(rules.min_secure_height_mm) || 1;

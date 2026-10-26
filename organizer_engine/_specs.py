@@ -10,7 +10,7 @@ from organizer_features.pegboard import PegboardMountSpec
 # --------------------------------------------------------------------------- #
 # wave and box constants
 # --------------------------------------------------------------------------- #
-WAVE_LENGTH = 4.0        # one full cycle: 2 mm out, 2 mm back
+WAVE_LENGTH = 3.5        # one full cycle: 1.75 mm out, 1.75 mm back
 WAVE_AMPLITUDE = 0.4     # deviation each way (0.8 mm peak to peak)
 WAVE_MATING_GAP = 0.25   # gap left between two neighbouring walls
 SAMPLES_PER_MM = 16
@@ -29,11 +29,11 @@ SAMPLES_PER_MM = 16
 #
 # Off-grid sizes still tile with their own clones, but collide the moment they
 # meet a box of a different size, so they are rejected.
-GRID_PITCH = 2.0 * WAVE_LENGTH   # 8.0
-MIN_BOX_SIZE = GRID_PITCH        # 8.0 - one grid step
+GRID_PITCH = 2.0 * WAVE_LENGTH   # 7.0
+MIN_BOX_SIZE = GRID_PITCH        # 7.0 - one grid step
 MAX_BOX_SIZE = 350.0             # public-service resource ceiling for X and Y
 BASE_UNIT = GRID_PITCH           # one unit is one grid step, so sizes are whole
-                                 # numbers of units: 1, 2, 3 ... = 8, 16, 24 mm
+                                 # numbers of units: 1, 2, 3 ... = 7, 14, 21 mm
 
 # A wall shorter than a connector plus its corner insets simply cannot take one,
 # and a wall too short to seat a lock bump clear of both corners gets none.  Both
@@ -139,7 +139,7 @@ DIFFERING_LENGTH_GAIN = 0.5     # + this fraction of length at the full drop
 DIFFERING_WEB_TAPER = 6.0       # ramp back to a plain arm before it enters the bin
 DIFFERING_WEB_RUN_CLEARANCE = 0.15  # running gap to the taller bin's outer face.
                                 # Looser than the arms' 0.02: this face guides
-                                # for the whole drop, not 8 mm, so it has to
+                                # for the whole drop, not 7 mm, so it has to
                                 # slide rather than grip.
 
 
@@ -786,7 +786,7 @@ class BoxSpec:
 
     @property
     def units(self) -> tuple[int, int]:
-        """Size in whole units, e.g. ``(2, 6)`` for 16 x 48 mm.
+        """Size in whole units, e.g. ``(2, 6)`` for 14 x 42 mm.
 
         One unit is one grid step, so every legal size is a whole number of
         units and no decimals are needed.
@@ -888,7 +888,7 @@ def wall_depth_for(wall: float) -> float:
     """``BoxSpec.wall_depth``'s formula, standalone.
 
     Lets a caller that builds wavy geometry without a full ``BoxSpec`` -
-    a spacer filler, whose x/y need not be the 8 mm-grid size a normal bin's
+    a spacer filler, whose x/y need not be the 7 mm-grid size a normal bin's
     ``BoxSpec`` requires - use the exact same wall-thickness math.
     """
     return wall * math.sqrt(1.0 + max_wave_slope() ** 2)

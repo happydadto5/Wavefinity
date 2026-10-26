@@ -87,7 +87,7 @@ SP.run = async task => {
 
 SP.sizeText = size => Array.isArray(size) ? `${size.map(fmt).join(" × ")} mm` : "";
 SP.snap = mm => {
-  const unit = state.catalog?.base_unit || 8;
+  const unit = state.catalog?.base_unit || 7;
   const max = Math.floor((state.catalog?.max_box_size || 350) / unit) * unit;
   return Math.min(max, Math.max(unit, Math.round(mm / unit) * unit));
 };

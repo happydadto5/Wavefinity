@@ -487,7 +487,7 @@ function drawStructuralOverlay(context, camera, project, buffers) {
   const drag = state.structuralDimensionDrag;
   if (drag) size["xyz".indexOf(drag.axis)] += drag.currentValue - drag.startValue;
   const interior = record.form.getInterior();
-  const unit = Number(state.catalog?.base_unit || 8);
+  const unit = Number(state.catalog?.base_unit || 7);
   let zSpan = null;
   if (record.kind === "storage_drawers") {
     const owner = `drawer:${record.form.activeDrawerId?.()}`;

@@ -284,7 +284,7 @@ function reconcileSideOpeningsAfterResize(design) {
       : "";
     const verb = result.removed.length === 1 ? "was" : "were";
     const wall = result.removed.length === 1 ? "that wall is" : "those walls are";
-    sideOpeningAdjustmentNote = `${removed} ${verb} turned off because ${wall} now shorter than 2 units (16 mm).${replacement}`;
+    sideOpeningAdjustmentNote = `${removed} ${verb} turned off because ${wall} now shorter than 2 units (14 mm).${replacement}`;
   }
 }
 

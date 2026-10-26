@@ -32,7 +32,7 @@ def _default_printer_profile() -> dict[str, float]:
     )))
 
 UNIT = BASE_UNIT
-SNAPS = (8.0, 4.0)
+SNAPS = (7.0, 3.5)
 # Server-authoritative size bounds: a drawer's width/depth/height arrive from the
 # client with no upper bound, and the grid is width/snap by depth/snap cells -
 # a 10 m "drawer" would ask numpy for a billion-cell array and exhaust server
@@ -71,7 +71,7 @@ STACK_STEPS = {
 
 DRAWER_DEFAULTS: dict[str, Any] = {
     "name": "Drawer", "width": 400.0, "depth": 300.0, "height": 60.0,
-    "clearance": 1.0, "anchor": "front-left", "bin_axis": "x", "snap": 8.0,
+    "clearance": 1.0, "anchor": "front-left", "bin_axis": "x", "snap": 7.0,
     "boundary": "wall",
 }
 ANCHORS = ("front-left", "center")
@@ -139,7 +139,7 @@ def normalise_drawer(raw: dict[str, Any]) -> dict[str, Any]:
     # A hard drawer wall always gets the slack the outermost bins' wave
     # crests need. A B4B/Box's own mating boundary is already the correct
     # interlocking surface - flooring its clearance the same way would
-    # silently eat a real 8 mm row or column from its exact interior.
+    # silently eat a real 7 mm row or column from its exact interior.
     drawer["clearance"] = (
         requested_clearance if drawer["boundary"] in ("mating", "pegboard") else max(MIN_CLEARANCE, requested_clearance)
     )
@@ -147,7 +147,8 @@ def normalise_drawer(raw: dict[str, Any]) -> dict[str, Any]:
         drawer["anchor"] = "front-left"
     if drawer["bin_axis"] not in ("x", "y"):
         drawer["bin_axis"] = "x"
-    drawer["snap"] = 4.0 if float(drawer.get("snap") or 8.0) == 4.0 else 8.0
+    # Old 8 mm drawers (snap 8 / 4) re-base deterministically onto 7 / 3.5.
+    drawer["snap"] = 3.5 if float(drawer.get("snap") or 7.0) in (3.5, 4.0) else 7.0
     drawer.pop("keepouts", None)  # the old Keep-out Zone feature is gone
     drawer["placements"] = [one for one in drawer.get("placements") or [] if isinstance(one, dict)]
     return drawer
@@ -165,7 +166,7 @@ def find_drawer(layout: dict[str, Any], drawer_id: str | None = None) -> dict[st
 def drawer_grid(drawer: dict[str, Any]) -> dict[str, Any]:
     """Where the grid sits in the drawer and what it leaves at the edges.
 
-    ``cols``/``rows`` count snap cells (8 mm, or 4 mm on a fine drawer).  The
+    ``cols``/``rows`` count snap cells (7 mm, or 3.5 mm on a fine drawer).  The
     clearance is total slack per axis: half of it sits at each wall so the wave
     crests of the outermost bins clear the drawer sides.
     """
@@ -213,7 +214,7 @@ def drawer_grid(drawer: dict[str, Any]) -> dict[str, Any]:
 
 
 def _per_unit(drawer: dict[str, Any]) -> int:
-    """Grid cells per 8 mm unit: 1, or 2 on a drawer that snaps to 4 mm."""
+    """Grid cells per 7 mm unit: 1, or 2 on a drawer that snaps to 3.5 mm."""
     return int(round(UNIT / drawer["snap"]))
 
 
@@ -507,7 +508,7 @@ def _stack_item(root: dict, drawer: dict[str, Any], by_id: dict[str, dict],
                     or gx + w > parent["gx"] + parent["w"] or gy + d > parent["gy"] + parent["d"]):
                 issues.append(f"{_label(one)} sticks out past the edge of {_label(below)}")
             if per_unit == 1 and (_offset(placement.get("ox")) % 1 or _offset(placement.get("oy")) % 1):
-                issues.append(f"{_label(one)} sits off the 8 mm grid on {_label(below)}")
+                issues.append(f"{_label(one)} sits off the 7 mm grid on {_label(below)}")
             below_plan = (plans or {}).get(below["id"], {})
             pitch = below_plan.get("pitch_mm", stack_pitch(below))
             bottom = (parent["z0"] + pitch
@@ -660,14 +661,14 @@ def _largest_empty(free: np.ndarray, min_cells: int = 1) -> tuple[int, int, int,
 
 
 def surface_fill_plan(inventory: dict[str, Any]) -> dict[str, Any]:
-    """Partition the authoritative Surface's free 8 mm cells into legal bins."""
+    """Partition the authoritative Surface's free 7 mm cells into legal bins."""
     layout = inventory.get("layout")
     if not is_surface_layout(layout):
         raise ValueError("Fill Empty Space is available only in Surface Space")
     drawer = normalise_drawer(find_drawer(layout))
     grid = drawer_grid(drawer)
     if grid["step"] != UNIT:
-        raise ValueError("Surface Fill needs the 8 mm Surface grid")
+        raise ValueError("Surface Fill needs the 7 mm Surface grid")
     bins = inventory["bins"]
     by_id = {one["id"]: one for one in bins}
     footprint = sorted((one["id"], one["x"], one["y"]) for one in bins

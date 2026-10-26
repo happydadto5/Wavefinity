@@ -136,7 +136,7 @@ def _wall_points(
     lattice (``GRID_PITCH``/``BASE_UNIT`` are chosen exactly so this holds),
     so evaluating the wave in this shape's own local frame already equals
     the shared global wave. A caller whose real placement centre will NOT be
-    on that lattice - a spacer sized to a genuine, non-8-mm-multiple free
+    on that lattice - a spacer sized to a genuine, non-7-mm-multiple free
     region - passes the centre's own offset from the lattice here instead,
     so the wave this shape shows once actually placed still matches its
     neighbours' along every seam (see ``organizer_drawer.spacer_frame``).
@@ -201,14 +201,14 @@ def wavy_rect_outer(
     phase_x: float = 0.0, phase_y: float = 0.0,
 ) -> Polygon:
     """The same wavy outline ``wavy_outer_polygon`` builds, from raw half-
-    extents instead of a ``BoxSpec`` - so a caller whose x/y is not the 8 mm
+    extents instead of a ``BoxSpec`` - so a caller whose x/y is not the 7 mm
     grid size a normal bin's ``BoxSpec`` requires (a spacer filler) can still
     build the identical, correctly-phased wave.
 
     A normal ``BoxSpec``'s own centre always lands on the global wave
     lattice, so its local wave already equals the shared global one and
     ``phase_x``/``phase_y`` stay 0. A shape whose real placement centre will
-    NOT land on that lattice - a spacer sized to a genuine non-8-mm-multiple
+    NOT land on that lattice - a spacer sized to a genuine non-7-mm-multiple
     free region - must pass its centre's own offset from the lattice (see
     ``_wall_points``) so the wave still matches a neighbour's along every
     seam once it is actually placed.
@@ -233,7 +233,7 @@ def wavy_rect_cavity(
 ) -> Polygon:
     """The same interior outline ``wavy_cavity_polygon`` builds - the outer
     walls shifted straight in by ``wall_depth`` - from raw half-extents. See
-    ``wavy_rect_outer`` for why this needs no 8 mm-grid-sized ``BoxSpec``,
+    ``wavy_rect_outer`` for why this needs no 7 mm-grid-sized ``BoxSpec``,
     and for what ``phase_x``/``phase_y`` correct for."""
     tx, ty = half_x - CORNER_INSET, half_y - CORNER_INSET
     polygon = Polygon(_wall_points(half_x - wall_depth, half_y - wall_depth, tx, ty, phase_x=phase_x, phase_y=phase_y))
@@ -350,7 +350,7 @@ def _rect_wall_lock_paths(
 ) -> list[tuple[list[tuple[float, float]], tuple[float, float]]]:
     """Bump centre-lines on the interior face of all four walls, plus the
     inward direction each bump grows in - from raw half-extents. See
-    ``wavy_rect_outer`` for why this needs no 8 mm-grid-sized ``BoxSpec``,
+    ``wavy_rect_outer`` for why this needs no 7 mm-grid-sized ``BoxSpec``,
     and for what ``phase_x``/``phase_y`` correct for: the bump lattice sits
     on the same wave extrema the wall surface does, so it needs the same
     shift, applied to both the wave itself and the lattice positions it
@@ -388,7 +388,7 @@ def make_wall_lock_bumps_raw(
 ) -> list[trimesh.Trimesh]:
     """Small chamfered bumps standing proud of each wall's interior face -
     from raw half-extents. See ``wavy_rect_outer`` for why this needs no
-    8 mm-grid-sized ``BoxSpec``, and for what ``phase_x``/``phase_y`` correct
+    7 mm-grid-sized ``BoxSpec``, and for what ``phase_x``/``phase_y`` correct
     for."""
     embed = min(LOCK_EMBED, wall_depth - LOCK_SAFE_SKIN)
     profile = _lock_profile(LOCK_PROTRUSION, embed=embed)

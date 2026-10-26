@@ -375,7 +375,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
             problems.append({"type": "too_tall", "keys": item["keys"], "message": f"{label} is {item['h']:g} mm tall; this Space takes {height_cap:g} mm"})
         base = item["chain"][0]
         if per_unit == 1 and (float(base["gx"]) % 1 or float(base["gy"]) % 1):
-            problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sits off the 8 mm grid - move it to snap it back"})
+            problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sits off the 7 mm grid - move it to snap it back"})
         x0, y0, x1, y1 = item["rect"]
         if x0 < 0 or y0 < 0 or x1 > cols or y1 > rows:
             problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sticks out of the Surface" if surface else f"{label} sticks out of the drawer"})
@@ -449,7 +449,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         "edge_mm2": round(max(0.0, drawer["width"] * drawer["depth"] - rows * cols * step * step - edge_area)),
         # Up to the two largest genuine bin-placement openings, largest
         # first - real usable rectangles, not a statistic. mm is authoritative;
-        # the browser divides by 8 for the user-facing Wavefinity-unit line.
+        # the browser divides by 7 for the user-facing Wavefinity-unit line.
         "opens": [
             {"gx": gx, "gy": gy, "w": w, "d": d, "w_mm": w * step, "d_mm": d * step}
             for gx, gy, w, d in opens
