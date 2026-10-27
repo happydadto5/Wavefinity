@@ -185,7 +185,7 @@ SP.wire = () => {
     const input = document.getElementById(id);
     if (input) input.addEventListener("input", SP.updateReadouts);
   });
-  ["portable-lid-type", "portable-latch-count", "portable-handle", "portable-stacking", "portable-wall", "portable-base", "portable-lid-snugness", "portable-label-location", "portable-front-label-style"].forEach(id =>
+  ["portable-lid-type", "portable-latch-count", "portable-hinge-count", "portable-handle", "portable-stacking", "portable-wall", "portable-base", "portable-lid-snugness", "portable-label-location", "portable-front-label-style"].forEach(id =>
     document.getElementById(id)?.addEventListener("change", SP.updateReadouts));
   ["portable-label-text"].forEach(id => document.getElementById(id)?.addEventListener("input", SP.updateReadouts));
   ["portable-lid-type", "portable-label-location"].forEach(id =>

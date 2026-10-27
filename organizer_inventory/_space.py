@@ -16,6 +16,7 @@ from organizer_engine import (
     BASE_UNIT,
     MIN_HEIGHT_ABOVE_BASE,
 )
+from organizer_engine._specs import B4B_HINGE_COUNTS
 from organizer_engine.product_rules import (
     B4B_LATCHED_MIN_HEIGHT,
     B4B_MIN_FIELD_XY,
@@ -88,6 +89,7 @@ def storage_box_defaults() -> dict[str, Any]:
     return {
         "secure_lid": True,
         "latch_count": "auto",
+        "hinge_count": "2",
         "latch_strength": "standard",
         "lid_headroom_mm": 1.0,
         "label_enabled": False,
@@ -166,6 +168,7 @@ def normalise_storage_box(raw: Any) -> dict[str, Any]:
     return {
         "secure_lid": _storage_box_flag(merged["secure_lid"], "secure lid"),
         "latch_count": _storage_box_choice(merged["latch_count"], B4B_LATCH_COUNTS, "latch count"),
+        "hinge_count": _storage_box_choice(merged["hinge_count"], B4B_HINGE_COUNTS, "hinge count"),
         "latch_strength": _storage_box_choice(merged["latch_strength"], B4B_LATCH_STRENGTHS, "latch strength"),
         "lid_headroom_mm": match,
         "label_enabled": _storage_box_flag(merged["label_enabled"], "label"),

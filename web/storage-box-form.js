@@ -54,7 +54,7 @@
   function defaults(catalog) {
     const rules = catalog?.b4b_rules || {};
     return {
-      secure_lid: true, latch_count: "auto", lid_headroom_mm: 1,
+      secure_lid: true, latch_count: "auto", hinge_count: "2", lid_headroom_mm: 1,
       label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
       stacking: false, handle: false,
       wall_mm: Number(rules.default_wall_mm ?? 1.6),
@@ -117,8 +117,11 @@
     const latchCount = select([["auto", "Auto"], ["1", "1"], ["2", "2"]], box.latch_count || "auto");
     latchCount.id = id("latch-count");
     const latchRow = labeled("Number of latches", latchCount);
+    const hingeCount = select([["2", "2"], ["1", "1"]], String(box.hinge_count) === "1" ? "1" : "2");
+    hingeCount.id = id("hinge-count");
+    const hingeRow = labeled("Number of hinges", hingeCount);
     const snugnessRow = labeled("Lid snugness", snugness);
-    lidRow.append(labeled("Lid type", lidType), snugnessRow, latchRow);
+    lidRow.append(labeled("Lid type", lidType), snugnessRow, latchRow, hingeRow);
     lidGroup.append(lidRow);
     caseWrap.append(lidGroup);
 
@@ -246,6 +249,7 @@
     function syncVisibility() {
       const latched = lidType.value === "latched";
       latchRow.hidden = !latched;
+      hingeRow.hidden = !latched;
       snugnessRow.hidden = !latched;
       handleRow.hidden = !latched;
       if (!latched) handle.value = "false";
@@ -280,6 +284,7 @@
           storage_box: {
             secure_lid: latched,
             latch_count: latched ? latchCount.value : "auto",
+            hinge_count: latched ? hingeCount.value : "2",
             lid_headroom_mm: latched ? Number(snugness.value) : 1,
             label_enabled: labelOn,
             label_text: labelOn ? labelText.value.trim() : "",
@@ -302,7 +307,7 @@
     function onChange() {
       if (callbacks.onChange) callbacks.onChange(read());
     }
-    for (const input of [lidType, snugness, latchCount, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel]) {
+    for (const input of [lidType, snugness, latchCount, hingeCount, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel]) {
       input.addEventListener("input", onChange, { signal: events.signal });
       input.addEventListener("change", onChange, { signal: events.signal });
     }
@@ -320,6 +325,7 @@
       lidType.value = b.secure_lid ? "latched" : "lid_only";
       snugness.value = String(b.lid_headroom_mm ?? 1);
       latchCount.value = b.latch_count || "auto";
+      hingeCount.value = String(b.hinge_count) === "1" ? "1" : "2";
       stacking.value = String(!!b.stacking);
       handle.value = String(!!b.handle);
       labelLoc.value = b.label_enabled ? (b.label_location || "top") : "none";

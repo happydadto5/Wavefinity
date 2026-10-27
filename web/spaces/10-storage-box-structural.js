@@ -7,7 +7,7 @@
 // case settings on the Space setup/Edit form.
 
 SP.storageBoxDefaults = () => ({
-  secure_lid: true, latch_count: "auto", lid_headroom_mm: 1,
+  secure_lid: true, latch_count: "auto", hinge_count: "2", lid_headroom_mm: 1,
   label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
   stacking: false, handle: false,
   wall_mm: Number(state.catalog?.b4b_rules?.default_wall_mm ?? 1.6),
@@ -31,6 +31,7 @@ SP.fillStorageBoxForm = box => {
   set("portable-lid-snugness", one.lid_headroom_mm);
   set("portable-stacking", Boolean(one.stacking));
   set("portable-latch-count", ["1", "2"].includes(String(one.latch_count)) ? String(one.latch_count) : "auto");
+  set("portable-hinge-count", String(one.hinge_count) === "1" ? "1" : "2");
   set("portable-handle", Boolean(one.handle) && one.secure_lid !== false);
   set("portable-label-location", one.label_enabled ? (one.label_location === "front" ? "front" : "top") : "none");
   set("portable-label-text", one.label_text || "");
@@ -45,6 +46,7 @@ SP.syncStorageBoxForm = () => {
   const hide = (id, hidden) => { const node = document.getElementById(id); if (node) node.hidden = hidden; };
   const latched = value("portable-lid-type") !== "lid_only";
   hide("portable-latch-count-row", !latched);
+  hide("portable-hinge-count-row", !latched);
   hide("portable-handle-row", !latched);
   if (!latched) {
     const handle = document.getElementById("portable-handle");
@@ -111,6 +113,7 @@ SP.readStorageBoxForm = () => {
   return {
     secure_lid: latched,
     latch_count: latched ? (value("portable-latch-count") || "auto") : "auto",
+    hinge_count: latched ? (value("portable-hinge-count") === "1" ? "1" : "2") : "2",
     lid_headroom_mm: parseFloat(value("portable-lid-snugness")) || 1,
     label_enabled: labelled,
     label_text: labelled ? String(value("portable-label-text") || "").trim() : "",

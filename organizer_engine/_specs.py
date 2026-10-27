@@ -264,6 +264,8 @@ B4B_LID_HEADROOM_CHOICES = (0.5, 1.0, 2.0)   # UI: Lid snugness (Tight/Standard/
 # still parses; neither is offered as a new choice.
 B4B_LATCH_COUNTS = ("auto", "1", "2")
 B4B_LATCH_STRENGTHS = ("lightweight", "standard")
+# Rear hinge count for a secure lid; two is the default at every size.
+B4B_HINGE_COUNTS = ("1", "2")
 B4B_LABEL_LOCATIONS = ("none", "top", "front")
 # Cosmetic style of the removable front label only; meaningless for the top
 # label or when there is no label at all.
@@ -427,6 +429,7 @@ class B4BSpec:
     secure_lid: bool = True
     latch_count: str = "auto"          # legacy only; derived from case width
     latch_strength: str = "standard"   # legacy only; derived from screw family
+    hinge_count: str = "2"             # 1 | 2; meaningful only with a secure lid
     lid_headroom_mm: float = 1.0       # UI: Lid snugness
     label_enabled: bool = False
     label_text: str = ""
@@ -441,6 +444,10 @@ class B4BSpec:
         if self.latch_count not in B4B_LATCH_COUNTS:
             raise ValueError(
                 f"latch count must be one of {', '.join(B4B_LATCH_COUNTS)}"
+            )
+        if self.hinge_count not in B4B_HINGE_COUNTS:
+            raise ValueError(
+                f"hinge count must be one of {', '.join(B4B_HINGE_COUNTS)}"
             )
         if self.latch_strength not in B4B_LATCH_STRENGTHS:
             raise ValueError(
@@ -495,6 +502,7 @@ class B4BSpec:
             secure_lid=secure,
             latch_count=latch_count,
             latch_strength=latch_strength,
+            hinge_count=self.hinge_count,
             lid_headroom_mm=self.lid_headroom_mm,
             label_enabled=self.label_enabled,
             label_text=self.label_text,

@@ -402,6 +402,23 @@ def validate_b4b_design(
                 f"the largest support-free hardware barrel would bridge {bridge:.2f} mm "
                 f"unsupported (limit {B4B_SUPPORT_FREE_BRIDGE_MAX:.1f} mm)"
             )
+        if len(plan.hinge_centers_x) == 2:
+            # _root_centres forces a minimum separation even when it no longer
+            # fits, so bound the gap by the corner-clear span the two roots
+            # actually have; a narrow box then fails here, plainly.
+            corner_clear = (
+                layout.outer_half_x - CORNER_INSET - B4B_ROOT_CORNER_CLEARANCE
+            )
+            gap = min(
+                2.0 * min(abs(c) for c in plan.hinge_centers_x)
+                - plan.hinge_root_width,
+                2.0 * (corner_clear - plan.hinge_root_width),
+            )
+            if gap + _EPS < B4B_HINGE_CENTRE_GAP:
+                raise ValueError(
+                    f"the two hinge roots are only {gap:.2f} mm apart "
+                    f"(need {B4B_HINGE_CENTRE_GAP:.1f} mm)"
+                )
         for what, centres, width in (
             ("hinge", plan.hinge_centers_x, plan.hinge_root_width),
             ("latch", plan.latch_centers_x, plan.latch_root_width),
@@ -412,16 +429,6 @@ def validate_b4b_design(
                 raise ValueError(
                     f"a {what} root reaches {reach - limit:.2f} mm into the "
                     f"corner keep-out; this Storage Box is too narrow for its hardware"
-                )
-        if len(plan.hinge_centers_x) == 2:
-            gap = (
-                2.0 * min(abs(c) for c in plan.hinge_centers_x)
-                - plan.hinge_root_width
-            )
-            if gap + _EPS < B4B_HINGE_CENTRE_GAP:
-                raise ValueError(
-                    f"the two hinge roots are only {gap:.2f} mm apart "
-                    f"(need {B4B_HINGE_CENTRE_GAP:.1f} mm)"
                 )
         for what, target in (
             ("hinge", profile.hinge_root_depth),

@@ -308,7 +308,9 @@ B4B_PRINT_PART_GAP = 8.0
 # Stacking boss self-locating lead-in (a real printed taper, not a claim).
 B4B_STACK_BOSS_CHAMFER = 0.6
 
-# --- rear hinges (one or two based on overall lid span) --------------------- #
+# --- rear hinges ------------------------------------------------------------ #
+# Retained only because organizer_b4b/__init__.py re-exports it; the hinge
+# count is now the design's hinge_count option and this decides nothing.
 B4B_HINGE_TWO_ABOVE_SPAN = 160.0
 # Lid opening requirement.  This is a case lid, not a fold-flat box.
 B4B_LID_OPEN_ANGLE = 120.0

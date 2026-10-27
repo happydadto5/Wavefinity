@@ -15,7 +15,6 @@ from ._constants import (
     B4B_HW_CLEARANCE,
     B4B_LID_FITTING_DROP,
     B4B_HW_FILLET,
-    B4B_HINGE_TWO_ABOVE_SPAN,
     B4B_LID_OPEN_ANGLE,
     B4B_SWEEP_STEP_DEG,
     B4B_LID_RELIEF_MAX,
@@ -380,8 +379,8 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
     fillet = min(B4B_HW_FILLET, 0.5 * B4B_LID_FITTING_DROP, 0.3 * profile.pivot_radius)
     wall_depth = eff.wall_depth
 
-    # ---- rear hinges: one or two based on width, nominally at +/- child_x/4 -- #
-    hinge_count = 2 if max(eff.x, eff.y) > B4B_HINGE_TWO_ABOVE_SPAN else 1
+    # ---- rear hinges: the design's choice (1 or 2), nominally at +/- child_x/4 #
+    hinge_count = 2 if eff.b4b.hinge_count == "2" else 1
     hinge_centers_x = _root_centres(
         layout, eff.x / 4.0, profile.hinge_root_width, hinge_count
     )
