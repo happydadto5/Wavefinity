@@ -37,8 +37,9 @@ SP.wire = () => {
   if (tutorialOpen) tutorialOpen.addEventListener("click", SP.showTutorial);
   const tutorialBack = document.getElementById("space-tutorial-back");
   if (tutorialBack) tutorialBack.addEventListener("click", SP.showTypeCards);
-  const welcomeResumeContinue = document.getElementById("welcome-resume-continue");
-  if (welcomeResumeContinue) welcomeResumeContinue.addEventListener("click", () => SP.run(SP.confirmResume));
+  const resumeLastSpace = () => SP.run(SP.confirmResume);
+  document.querySelectorAll("#welcome-resume-card, #welcome-resume-continue")
+    .forEach(el => el.addEventListener("click", resumeLastSpace));
   document.getElementById("welcome-resume-create")?.addEventListener("click", SP.beginCreateNew);
   const welcomeResumeSwitch = document.getElementById("welcome-resume-switch");
   if (welcomeResumeSwitch) welcomeResumeSwitch.addEventListener("click", () => {

@@ -41,6 +41,8 @@ Wavefinity has two top-level work areas:
 
 A **Space** owns the real-world context and inventory. The Designer owns one ordinary bin at a time.
 
+On **Welcome back**, click the last-Space summary card or **Open Last Space** to resume that Space. The card also supports keyboard focus and Enter/Space activation.
+
 Structural Space outputs are not ordinary Designer bins:
 
 - **Storage Box** creates its own Storage Box case.
