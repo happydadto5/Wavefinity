@@ -76,6 +76,8 @@ SP.wire = () => {
   if (spaceForm) {
     // Defensive only: typing/Enter in a field is never permission to create.
     spaceForm.addEventListener("submit", event => event.preventDefault());
+    spaceForm.addEventListener("input", SP.refreshSetupError);
+    spaceForm.addEventListener("change", SP.refreshSetupError);
   }
 
   document.getElementById("space-create")

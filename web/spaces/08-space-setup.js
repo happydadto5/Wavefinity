@@ -115,6 +115,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   // Fix 004 Correction 6.F.
   SP.isUpdate = update;
   SP.setupKind = kind;
+  SP.setupValidationStarted = false;
   SP.dialog().classList.toggle("storage-drawers-config", kind === "storage_drawers" && !update);
   const typeLabel = SP_KINDS[kind]?.label || kind;
   const typeLine = document.getElementById("space-form-type");
@@ -303,13 +304,20 @@ SP.startUntyped = async () => {
 // Surface presets) are enforced identically in one place - Fix 004
 // Correction 11.A6.
 SP.readSetupValues = async () => {
+  SP.setupValidationStarted = true;
+  if (SP.setupKind === "storage_drawers") return SP.readStorageDrawersSetup();
+  return SP.readOrdinarySetupValues();
+};
+
+// Live feedback uses the same rules as Create/Save, without moving focus or
+// entering the cabinet's asynchronous Continue path.
+SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
   const fail = (message, selector) => {
-    SP.fail(message, selector);
+    SP.fail(message, focus ? selector : null);
     return null;
   };
 
   const kind = SP.setupKind;
-  if (kind === "storage_drawers") return SP.readStorageDrawersSetup();
   const name = document.getElementById("space-name").value.trim();
   if (!name) return fail("Give the Space a name.", "#space-name");
 
@@ -416,6 +424,17 @@ SP.readSetupValues = async () => {
   }
 
   return fail("Choose a Space type.", "#space-name");
+};
+
+// Once a check has failed, keep its feedback current while editing. The
+// cabinet already owns live field/server feedback inside its embedded form;
+// discard its old Continue message and let that owner show current problems.
+SP.refreshSetupError = () => {
+  const error = document.getElementById("space-error");
+  if (!error || (error.hidden && !SP.setupValidationStarted)) return;
+  if (SP.setupKind !== "storage_drawers" && !SP.readOrdinarySetupValues({ focus: false })) return;
+  error.textContent = "";
+  error.hidden = true;
 };
 
 SP.create = async () => {
@@ -885,7 +904,7 @@ SP.useUntypedFolder = async () => {
 SP.fail = (message, selector) => {
   $("#space-error").textContent = message;
   $("#space-error").hidden = false;
-  $(selector)?.focus();
+  if (selector) $(selector)?.focus();
 };
 
 // Fix 019 Item 6: "no remembered folder" and "permission not (yet) granted"
