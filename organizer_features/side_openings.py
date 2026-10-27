@@ -30,10 +30,10 @@ from organizer_engine import (
 from organizer_geometry import _extrude_xz_profile, _extrude_yz_profile, difference, union
 
 # A wall shorter than this simply cannot take a Side Opening at all.
-SIDE_OPENING_MIN_SIDE_MM = 2.0 * BASE_UNIT       # 16 mm
+SIDE_OPENING_MIN_SIDE_MM = 2.0 * BASE_UNIT       # 14 mm
 # Solid corner shoulder kept at each end of an opening, from the Wavefinity
 # grid rather than an unrelated magic number.
-SIDE_OPENING_CORNER_MARGIN_MM = BASE_UNIT / 2.0  # 4 mm
+SIDE_OPENING_CORNER_MARGIN_MM = BASE_UNIT / 2.0  # 3.5 mm
 # The fixed continuous bridge Top Support leaves across the top of the wall.
 # Deliberately the same 4 mm as the existing lock geometry's upper chamfer.
 SIDE_OPENING_TOP_BRIDGE_MM = LOCK_TOP_BELOW_RIM

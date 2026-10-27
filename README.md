@@ -1407,7 +1407,7 @@ printed height, including any extension for a shorter bin.
 For equal-height bins it is one universal part and goes on either way round.
 For unequal-height bins, generate the connector with the two actual rim heights.
 Its centre has to land on a **whole wave**, so `--position` must be a whole
-multiple of **4 mm**; anything else is rejected.
+multiple of **3.5 mm**; anything else is rejected.
 
 Whole waves, not half waves. The corridor between the arms is cut to the wall's
 wave, and that wave *inverts* every half cycle. A clip made a half-wave along is
@@ -1420,7 +1420,7 @@ whole wave, so nothing caught it.
 A clip also needs open cavity on **both** sides of the seam. Where two short bins
 butt end to end, the far side of the seam at that joint is their end walls, full
 height — so the clip has to clear the joint by half its own length, which on the
-4 mm lattice makes the first usable spot 8 mm away.
+3.5 mm lattice makes the first usable spot 7 mm away.
 
 Reversibility is why the bumps sit on **every** extremum rather than every other
 one. Two things have to line up when you spin a connector: the wall it hugs must

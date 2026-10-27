@@ -17,13 +17,13 @@ FIT_PRELUDE = "\n".join([
     # state.design is the CURRENTLY OPEN bin - deliberately given a different
     # base_thickness than the candidate in tests below, so a test that reads
     # the wrong one (Fix 064 Correction 1) is caught.
-    "const state = { catalog: { base_unit: 8, max_box_size: 350, min_height_above_base_mm: 5 }, design: { box: { base_thickness: 0.6 } } };",
+    "const state = { catalog: { base_unit: 7, max_box_size: 350, min_height_above_base_mm: 5 }, design: { box: { base_thickness: 0.6 } } };",
     function_source("normalizeBinDimension"),
     function_source("insideBinFitForStorageBox"),
 ])
 
 
-def fit(space, base_unit=8, max_box_size=350, base_thickness=0.6, candidate_base_thickness=None, open_bin_base_thickness=0.6):
+def fit(space, base_unit=7, max_box_size=350, base_thickness=0.6, candidate_base_thickness=None, open_bin_base_thickness=0.6):
     candidate_base = base_thickness if candidate_base_thickness is None else candidate_base_thickness
     out = node_run(FIT_PRELUDE + js("""
 state.catalog.base_unit = __UNIT__;
@@ -38,19 +38,19 @@ process.stdout.write(JSON.stringify(out));
 
 class InsideBinFitTests(unittest.TestCase):
     def test_rounds_down_to_whole_units(self):
-        # 81 x 97 x 42 usable interior at an 8 mm unit -> 80 x 96 x 42.
+        # 81 x 97 x 42 usable interior at a 7 mm unit -> 77 x 91 x 42.
         out = fit({"x": 81, "y": 97, "z": 42})
-        self.assertEqual(out, {"x": 80, "y": 96, "z": 42})
+        self.assertEqual(out, {"x": 77, "y": 91, "z": 42})
 
     def test_respects_catalog_max_box_size(self):
-        out = fit({"x": 200, "y": 200, "z": 42}, max_box_size=96)
-        self.assertEqual(out["x"], 96)
-        self.assertEqual(out["y"], 96)
+        out = fit({"x": 200, "y": 200, "z": 42}, max_box_size=98)
+        self.assertEqual(out["x"], 98)
+        self.assertEqual(out["y"], 98)
 
     def test_axis_smaller_than_one_unit_is_rejected(self):
-        out = fit({"x": 7, "y": 97, "z": 42})
+        out = fit({"x": 6, "y": 97, "z": 42})
         self.assertIn("error", out)
-        out = fit({"x": 80, "y": 7, "z": 42})
+        out = fit({"x": 80, "y": 6, "z": 42})
         self.assertIn("error", out)
 
     def test_space_shorter_than_legal_bin_minimum_is_rejected(self):
@@ -89,7 +89,7 @@ DESIGNER_PRELUDE = "\n".join([
     "let loadedOverride = null; async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox) { calls.push('load'); loadedOverride = overrideBox; }",
     # state.design is the CURRENTLY OPEN bin, with its own (different) Base
     # thickness, so a regression that reads it instead of the candidate is caught.
-    "const state = { catalog: { base_unit: 8, max_box_size: 350, min_height_above_base_mm: 5 }, design: { box: { base_thickness: 99 } }, activeSpace: null, designInventoryId: 'B3', surfaceHeightPromptSkipped: true };",
+    "const state = { catalog: { base_unit: 7, max_box_size: 350, min_height_above_base_mm: 5 }, design: { box: { base_thickness: 99 } }, activeSpace: null, designInventoryId: 'B3', surfaceHeightPromptSkipped: true };",
     function_source("normalizeBinDimension"),
     function_source("insideBinFitForStorageBox"),
     function_source("designerMakeInsideBin"),
@@ -123,7 +123,7 @@ class DesignerMakeInsideBinTests(unittest.TestCase):
     def test_success_overrides_only_box_dimensions_and_resets_identity(self):
         out = run_designer({"x": 81, "y": 97, "z": 42})
         self.assertEqual(out["calls"], ["guard", "flush", "fresh", "begin", "load", "finish"])
-        self.assertEqual(out["loadedOverride"], {"x": 80, "y": 96, "z": 42})
+        self.assertEqual(out["loadedOverride"], {"x": 77, "y": 91, "z": 42})
         self.assertIsNone(out["designInventoryId"])
         self.assertFalse(out["surfaceHeightPromptSkipped"])
         self.assertEqual(out["toasts"][-1][0], "Started an inside bin.")

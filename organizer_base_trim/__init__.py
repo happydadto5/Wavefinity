@@ -549,7 +549,7 @@ def _seam_frame(
 ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
     inner_x, inner_y = spec.inner_half_extents
     top_width = spec.width_mm - BASE_TRIM_OUTER_TAPER
-    # The inner face swings a full +/- wave across every 4 mm seam. Centre the
+    # The inner face swings a full +/- wave across every 3.5 mm seam. Centre the
     # joint in the guaranteed material between the fixed outside face and the
     # most outward inner crest, rather than in the nominal straight band.
     wave_offset = WAVE_AMPLITUDE / 2.0

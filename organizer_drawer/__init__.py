@@ -20,8 +20,8 @@ matched.
 Placements
 ----------
 * On the grid: ``gx``/``gy`` in 7 mm units from the grid's front-left corner.
-  A drawer that snaps to 4 mm (``snap = 4``) allows half units: the wave
-  repeats every 4 mm, so a bin shifted half a unit along a seam still nests.
+  A drawer that snaps to 3.5 mm (``snap = 3.5``) allows half units: the wave
+  repeats every 3.5 mm, so a bin shifted half a unit along a seam still nests.
 * Stacked: ``on`` names the one placement it stands on (``"B3:0"``) and
   ``ox``/``oy`` are its offset in 7 mm units from that placement's front-left
   corner (missing means 0, which is what older same-footprint stacks carry).

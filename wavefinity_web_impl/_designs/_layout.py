@@ -42,7 +42,7 @@ from ._features import _bore_required_bin_z
 
 def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     _reject_if_b4b(payload, "auto-expanding the layout")
-    """Resize the bin - on the 8 mm grid, both axes - to the smallest size that
+    """Resize the bin - on the 7 mm grid, both axes - to the smallest size that
     fits every interior support at the footprint it actually needs, then trim
     back any axis that overshot. A cradle footprint is recomputed from its
     tool, and a bore / post / slot zone is grown (never shrunk) to hold the

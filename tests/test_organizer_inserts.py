@@ -1573,7 +1573,7 @@ class LayoutModelTests(unittest.TestCase):
 
     def test_a_non_cell_cartridge_layout_is_refused(self) -> None:
         bad = inserts.Layout((Feature("pocket", Zone(-5, -5, 5, 5)),), "cartridge")
-        with self.assertRaisesRegex(ValueError, "8 mm cells"):
+        with self.assertRaisesRegex(ValueError, "7 mm cells"):
             bad.validate(BIN)
 
     def test_layout_json_round_trip_preserves_custom_items_and_options(self) -> None:

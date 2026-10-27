@@ -54,7 +54,7 @@ function renderLayout2D() {
   context.stroke(cavityPath);
   context.save();
   context.clip(cavityPath);
-  const pitch = state.design.layout.mode === "cartridge" ? 8 : 1;
+  const pitch = state.design.layout.mode === "cartridge" ? 7 : 1;
   if (pitch * scale >= 8) {
     context.strokeStyle = "rgba(55,96,105,.10)";
     context.lineWidth = 1;
@@ -736,7 +736,7 @@ function wireLayoutInteraction() {
       return;
     }
     const world = layoutPoint(event);
-    const pitch = state.design.layout.mode === "cartridge" ? 8 : 1;
+    const pitch = state.design.layout.mode === "cartridge" ? 7 : 1;
     const snap = value => Math.round(value / pitch) * pitch;
     const original = drag.original.zone;
     if (drag.mode === "point") {

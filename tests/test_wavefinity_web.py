@@ -412,7 +412,7 @@ class WebApplicationTests(unittest.TestCase):
 
     def test_invalid_1u_side_selection_is_rejected(self):
         design = default_design()
-        design["box"]["x"] = 8.0
+        design["box"]["x"] = 7.0
         design["box"]["y"] = 48.0
         design["box"]["side_openings"] = {
             "enabled": True, "shape": "curved", "sides": ["front"],
@@ -538,7 +538,7 @@ class WebApplicationTests(unittest.TestCase):
 
     def test_ineligible_corner_size_still_generates_side_and_reports_skipped_types(self):
         design = default_design()
-        # 8 mm is one Wavefinity unit - below MIN_JOINABLE_SIZE (16 mm), so the
+        # 7 mm is one Wavefinity unit - below MIN_JOINABLE_SIZE, so the
         # real corner geometry must refuse it while the Side connector, which
         # has no such minimum, still succeeds.
         design["box"]["x"] = 8.0

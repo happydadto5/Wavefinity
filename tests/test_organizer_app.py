@@ -254,7 +254,7 @@ class BoxTests(unittest.TestCase):
             self.assertEqual(intersection_volume(first, second), 0.0)
 
     def test_a_mixed_size_seam_clears_exactly_as_much_as_a_matched_one(self) -> None:
-        """The point of the 8 mm grid: size has no say in how walls mate.
+        """The point of the 7 mm grid: size has no say in how walls mate.
 
         Zero overlap is not enough to prove that - two bins parked a mile apart
         also fail to overlap.  Every shared wall has to measure the *same* gap

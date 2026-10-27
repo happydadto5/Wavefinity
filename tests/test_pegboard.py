@@ -166,7 +166,7 @@ class PegboardPlacementTests(unittest.TestCase):
             "boundary": "pegboard", "pegboard_standard": "standard",
             "pegboard_holes_x": 10, "pegboard_holes_y": 10,
             "pegboard_residual_x": 0, "pegboard_residual_y": 0,
-            "clearance": 0, "anchor": "front-left", "bin_axis": "x", "snap": 8,
+            "clearance": 0, "anchor": "front-left", "bin_axis": "x", "snap": 7,
             "placements": [],
         }
         self.bin = {

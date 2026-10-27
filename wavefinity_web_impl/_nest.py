@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 from organizer_engine import BASE_UNIT, MIN_HEIGHT_ABOVE_BASE, BoxSpec
 from organizer_inserts import (
+    CARTRIDGE_PITCH,
     EDITOR_SNAP,
     MIN_FEATURE_GAP,
     Feature,
@@ -479,7 +480,7 @@ def _first_open_position(
             box, one, base_height(box, layout.mode), layout.mode, layout.snap
         ))
     bounds = layout_zone(box, layout.mode)
-    pitch = 8.0 if layout.mode == "cartridge" else layout.snap
+    pitch = CARTRIDGE_PITCH if layout.mode == "cartridge" else layout.snap
     xs = np.arange(
         bounds.x0 + one.zone.width / 2.0,
         bounds.x1 - one.zone.width / 2.0 + 1e-8,
