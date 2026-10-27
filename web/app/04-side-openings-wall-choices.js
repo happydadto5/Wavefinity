@@ -700,16 +700,8 @@ function syncForm() {
   const { box, layout } = state.design;
   ensureRimFeatureInLayout();
   syncRimLabelFromFeatures();
-  if (document.activeElement === $("#x-size")) {
-    $("#x-size").value = fmt(box.x);
-  } else {
-    formatDimField("x");
-  }
-  if (document.activeElement === $("#y-size")) {
-    $("#y-size").value = fmt(box.y);
-  } else {
-    formatDimField("y");
-  }
+  formatDimField("x");
+  formatDimField("y");
   if (document.activeElement === $("#z")) {
     $("#z").value = fmt(box.z);
   } else {

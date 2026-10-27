@@ -79,8 +79,8 @@
             <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
           </label>
           <div id="ordinary-size-row" class="field-grid three">
-            <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
-            <label><span id="y-size-label">Depth</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
+            <div><label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric" aria-describedby="x-size-hint"></label><span id="x-size-hint" class="dimension-field-hint"></span></div>
+            <div><label><span id="y-size-label">Depth</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric" aria-describedby="y-size-hint"></label><span id="y-size-hint" class="dimension-field-hint"></span></div>
             <label><span id="z-size-label">Height</span> <span class="unit">mm</span><input id="z" type="text" inputmode="numeric"></label>
           </div>
           <p id="container-inside-hint" class="inline-help" hidden></p>

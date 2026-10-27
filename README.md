@@ -113,6 +113,10 @@ typed — stacking raising the wall and floor — it
 says so in plain language in a note under the control that caused it, and it
 never writes the new value back into the field the user is typing in.
 
+Width and Depth fields show only the physical size. Their inside dimension
+(or updating status) and whole-unit count wrap below each input. Formatting
+leaves focused Width and Depth values alone; blur commits and reformats them.
+
 **Space and Design are separate top-level work areas.** Design has 3D and 2D
 views of the bin (2D is where its interior parts are laid out).
 **Space is a mode, not a panel**: it swaps the whole screen: the inventory and

@@ -511,6 +511,16 @@ input[type="number"]::-webkit-inner-spin-button {
 .post-unit-fields .unit { float: none; margin-left: 4px; }
 .field-grid { display: grid; gap: 10px; }
 .field-grid.three { grid-template-columns: repeat(3, 1fr); }
+#ordinary-size-row > div { min-width: 0; }
+.dimension-field-hint {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 @media (min-width: 621px) {
   #ordinary-size-row.field-grid.three { grid-template-columns: 1.2fr 1.2fr 0.6fr; }
 }

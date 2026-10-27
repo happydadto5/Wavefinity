@@ -339,7 +339,7 @@ function getInsideDimension(axis, val) {
 function formatDimField(axis) {
   const selector = axis === "x" ? "#x-size" : "#y-size";
   const input = $(selector);
-  if (!input || document.activeElement === input) return;
+  if (!input) return;
   const val = state.design?.box?.[axis];
   if (val == null) return;
   const key = axis === "x" ? "inside_x" : "inside_y";
@@ -347,16 +347,14 @@ function formatDimField(axis) {
     state.previewDesignKey === JSON.stringify(state.design) &&
     state.preview?.dimensions?.[key] != null;
   const inside = previewCurrent ? state.preview.dimensions[key] : null;
-  // Blurred state keeps the whole fit story short enough to stay in the field.
-  // The unit count is the integer number of whole grid steps, from the
-  // authoritative base unit.
+  // Keep the size in the field and the wrapping fit details below it.
   const unit = state.catalog?.base_unit || 7;
   const units = Math.round(val / unit);
-  // Fix 081 E: physical mm first, then usable-inside mm, then the spelled-out
-  // unit count - never a count glued to a letter like "30X".
-  input.value = inside == null
-    ? `${fmt(val)} mm (inside updating…) — ${units} unit${units === 1 ? "" : "s"}`
-    : `${fmt(val)} mm (${fmt(inside)} mm inside) — ${units} unit${units === 1 ? "" : "s"}`;
+  if (document.activeElement !== input) input.value = `${fmt(val)} mm`;
+  const hint = $(`${selector}-hint`);
+  if (hint) hint.textContent = inside == null
+    ? `Inside updating… · ${units} unit${units === 1 ? "" : "s"}`
+    : `${fmt(inside)} mm inside · ${units} unit${units === 1 ? "" : "s"}`;
 }
 
 function formatHeightField() {
