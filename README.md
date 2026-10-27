@@ -1983,6 +1983,13 @@ these numbers look arbitrary and are not.
 | At-rim Text | **5.0** target letters, **7.0** ledge | auto-shrinks; 45-degree underside; Raised lowers the ledge by its height |
 | Scoop | **60%** of usable wall height | full usable width at front |
 
+Corner construction (Story 2272): the shared wall-outline builder caps each
+wall run at the neighbouring faces' inward wave envelope. This keeps reduced
+cavity corner chords from crossing a wall when arc-wave wall depth exceeds
+the outside corner inset. Outside bin walls keep their original runs and
+global wave; phased spacer outlines use the same rule. Preview rings retain
+matching point counts even when cavity runs are shorter.
+
 Connector tolerance, length and height were chosen from a **printed five-clip fit
 plate** — the leftmost clip, read back from that 3MF as `side_clip_tol_0p020`.
 

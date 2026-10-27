@@ -124,9 +124,11 @@ def _wall_points(
 ) -> list[tuple[float, float]]:
     """Counter-clockwise outline: four wavy walls joined by corner chords.
 
-    ``half_*`` place the faces; ``tangent_*`` say where the walls stop short of
-    the nominal corner and always come from the outer profile, so an inner
-    outline stays exactly parallel to the outer one.  ``points_per_cycle``
+    ``half_*`` place the faces; ``tangent_*`` give the requested wall ends,
+    normally from the outer profile. Each run is capped at the innermost
+    possible face of its neighbouring walls, so a reduced cavity cannot
+    overhang those walls and cross its own corner chords. The surviving
+    wall runs keep exactly the same wave and phase. ``points_per_cycle``
     overrides the sampling with a *density* rather than a fixed total, so a
     long wall and a short one on the same box come out equally smooth - the
     preview uses this to get a coarse ring it can draw quickly without a
@@ -150,6 +152,13 @@ def _wall_points(
     else:
         count_x = max(4, round(points_per_cycle * 2.0 * tangent_x / WAVE_LENGTH))
         count_y = max(4, round(points_per_cycle * 2.0 * tangent_y / WAVE_LENGTH))
+    # Keep counts based on the requested tangents: preview outer/cavity rings
+    # must still match point for point even when their corner runs differ.
+    # The amplitude bound works for every phase, including off-grid spacers.
+    # Wall strips and the rectangles containing their corner chords then
+    # have disjoint interiors, preventing corner self-intersections.
+    tangent_x = min(tangent_x, max(0.0, half_x - WAVE_AMPLITUDE))
+    tangent_y = min(tangent_y, max(0.0, half_y - WAVE_AMPLITUDE))
     xs = np.linspace(-tangent_x, tangent_x, count_x)
     ys = np.linspace(-tangent_y, tangent_y, count_y)
     points: list[tuple[float, float]] = []
