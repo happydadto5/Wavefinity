@@ -910,6 +910,12 @@ async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
   state.design = design;
   state.designInventoryId = null;
   state.designTarget = null; // Fix 103
+  // A fresh bin must not inherit the previous target's visible geometry
+  // while its own preview is building (including the first bin in a Box).
+  invalidatePendingPreview();
+  state.preview = null;
+  state.previewDesignKey = null;
+  renderPreview3D();
   state.lastOrdinaryDesign = clone(state.design);
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);

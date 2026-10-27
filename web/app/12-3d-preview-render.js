@@ -890,7 +890,18 @@ function renderPreview3D() {
   // slot through its own scene; the ordinary predicates below read
   // state.design and must never see the structural target.
   if (typeof structuralDesignActive === "function" && structuralDesignActive()) { renderStructuralPreview3D(); return; }
-  if (!state.preview) return;
+  if (!state.preview) {
+    // Both layers belong to the outgoing target until explicitly cleared.
+    // In particular, a structural scene may be the last WebGL drawing.
+    const { context, width, height } = canvasSize($("#preview-3d"));
+    context.clearRect(0, 0, width, height);
+    const solidCanvas = $("#preview-3d-solid");
+    if (solidCanvas) solidCanvas.hidden = true;
+    state.previewDimensionHandles = [];
+    state.previewSupportPolygons = [];
+    state.previewPickMeshContext = null;
+    return;
+  }
   checkBinSizeChange();
   const overlayCanvas = $("#preview-3d");
   const solidCanvas = $("#preview-3d-solid");
