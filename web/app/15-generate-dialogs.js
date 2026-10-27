@@ -708,19 +708,21 @@ function renderSimpleMarkdown(md) {
   return processed.join("\n");
 }
 
-// ---- Fix 096 F5: backdrop dismissal convention. Only these six dialogs
+// ---- Fix 096 F5: backdrop dismissal convention. Only these five dialogs
 // close when the backdrop is clicked: informational or single-action dialogs
 // where an accidental close loses nothing. Decision dialogs
 // (#app-confirm-dialog, #draft-switch-dialog, #surface-object-height-dialog,
 // #printer-settings-dialog), the busy #generation-dialog, and the Connector
 // Replace dialog never dismiss on backdrop click.
+// Spaces owns #welcome-dialog dismissal through SP.requestClose, including
+// its unsaved-setup guard. A second listener here would close the setup
+// underneath the confirmation, even when the user chooses Keep Editing.
 const SAFE_BACKDROP_DIALOG_IDS = [
   "support-layout-dialog",
   "spacer-print-dialog",
   "ai-help-dialog",
   "bin-name-dialog",
   "about-dialog",
-  "welcome-dialog",
 ];
 function wireDialogBackdropDismiss(dialog) {
   if (!dialog || dialog.dataset.backdropWired === "true") return;
