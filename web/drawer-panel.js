@@ -471,19 +471,19 @@ DP.renderBatch = () => {
   $("#dl-batch-filter-note").hidden = !hiddenBins;
   $("#dl-batch-clear").disabled = !DP.printSelected.size;
   $("#dl-batch-delete").disabled = !DP.printSelected.size || Boolean(DL.busy);
-  if (hosted) return;
-  const noSlicer = !state.slicer || !state.slicer.available;
   const busy = Boolean(DL.busy);
 
   const save = $("#dl-batch-save");
   const saveCount = scope.subset ? scope.picked.length : scope.save.length;
   save.textContent = DL.busy === "save-bins" ? "Saving files…"
     : scope.subset ? `Save Selected (${saveCount})` : `Save All Needed (${saveCount})`;
-  save.disabled = busy || (scope.subset ? needFiles === 0 : scope.save.length === 0);
+  save.disabled = busy || (scope.subset ? scope.picked.length === 0 : scope.save.length === 0);
   save.title = save.disabled && !busy
-    ? (scope.subset ? "Every selected bin already has current files." : "Every bin already has current files.")
+    ? (scope.subset ? "No selected bins are eligible to save." : "Every bin already has current files.")
     : "Make the print files without opening Bambu Studio.";
 
+  if (hosted) return;
+  const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
   const printCount = scope.print.length;
   button.classList.toggle("primary", printCount >= 2);
@@ -514,6 +514,7 @@ DP.onInventoryClick = async event => {
   if (!one) return;
   const action = event.target.closest("[data-act]")?.dataset.act;
   if (action === "duplicate") DP.duplicateRow(one);
+  else if (action === "save") DL.saveSelectedBins([one.id], false);
   else if (action === "print") DL.printSelectedBins({ [one.id]: DL.printCount(one) }, false);
   else if (action === "printed") DL.markPrinted(one);
   else if (action === "not-printed") DL.markNotPrinted(one);
@@ -1440,6 +1441,7 @@ DP.renderInventory = (force = false) => {
             : sourceMissing ? `<button type="button" class="button secondary dl-small" data-act="edit" disabled title="The original editable design for this row is unavailable, so it can't be edited.">Edit</button>` : ""}
           <button type="button" class="button danger dl-small" data-act="delete">Delete</button>
           ${designSource ? `<button type="button" class="button secondary dl-small" data-act="duplicate">Duplicate</button>` : ""}
+          ${eligible ? `<button type="button" class="button secondary dl-small" data-act="save">Save</button>` : ""}
           ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}
           ${statusTracked ? (printed
             ? `<button type="button" class="button secondary dl-small" data-act="not-printed">Mark Not Printed</button>`
