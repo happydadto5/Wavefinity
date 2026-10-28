@@ -17,7 +17,6 @@ from organizer_geometry import (
 
 from ._specs import (
     WAVE_LENGTH,
-    WAVE_AMPLITUDE,
     WAVE_MATING_GAP,
     CORNER_INSET,
     MIN_JOINABLE_SIZE,
@@ -39,7 +38,8 @@ from ._specs import (
     ConnectorSpec,
 )
 from ._wave import (
-    wall_wave_value,
+    _wall_face_offset,
+    _periodic_wall_face,
     lock_lattice,
     _sample_count,
     _rounded,
@@ -57,19 +57,25 @@ from ._lift_grabbers import make_lift_grabbers
 def flat_cavity_polygon(spec: BoxSpec) -> Polygon:
     """Straight-sided cavity profile for the flat band at the bottom.
 
-    Sized to the innermost the wavy cavity ever reaches, so the band adds
-    material against the wall and never cuts into it.  It is exactly the
-    rectangle ``usable_inside`` reports, which is why turning the band on does
-    not change how much straight-sided room the box has.
+    Straight faces meet the innermost points of the built offset. Intersect
+    rounded corners with the actual cavity too, so the band only adds material
+    at its eroded corner transitions. The reported fit rectangle remains the
+    existing, more conservative ``usable_inside`` envelope.
     """
-    half_x = spec.half_x - spec.wall_depth - WAVE_AMPLITUDE
-    half_y = spec.half_y - spec.wall_depth - WAVE_AMPLITUDE
+    def inset(axis: str) -> float:
+        return max(
+            float(np.max(-side * _periodic_wall_face(spec.wall_depth, axis, side)[1]))
+            for side in (-1.0, 1.0)
+        )
+
+    half_x = spec.half_x - inset("y")
+    half_y = spec.half_y - inset("x")
     if half_x <= 0.0 or half_y <= 0.0:
         raise ValueError("box is too small for a flat-walled band")
     return _rounded(
         shapely_box(-half_x, -half_y, half_x, half_y),
         max(0.2, spec.corner_fillet - spec.wall),
-    )
+    ).intersection(wavy_cavity_polygon(spec))
 
 
 def make_box(spec: BoxSpec) -> trimesh.Trimesh:
@@ -181,29 +187,44 @@ def joinable_sides(
     return connector_fits(box, "x", length), connector_fits(box, "y", length)
 
 
-def _connector_corridor_polygon(
-    axis: str, geometry_coordinates, phase_offset: float, half_width: float
-) -> Polygon:
-    """Wall-following corridor polygon shared by every connector type.
+def _connector_face_paths(
+    axis: str, coordinates, phase_offset: float, half_width: float,
+    wall_depth: float,
+):
+    """Both connector faces, anchored to the same eroded face as the bumps.
 
-    ``geometry_coordinates`` are where the polygon is drawn; ``phase_offset`` is
-    added only when evaluating the wave.
+    ``half_width`` retains the old fit-envelope number. Replace its envelope
+    inset with each built face's local inset, leaving tolerance and arm width
+    untouched. Retain every offset breakpoint so a chord cannot cut a crest.
     """
-    coordinates = geometry_coordinates
-    low = high = [wall_wave_value(phase_offset + float(v), axis) for v in coordinates]
+    coordinates = np.asarray(coordinates, dtype=float)
+    extra = []
+    for side in (-1.0, 1.0):
+        samples, _faces = _periodic_wall_face(wall_depth, axis, side)
+        first = math.floor((coordinates[0] + phase_offset) / WAVE_LENGTH) - 1
+        last = math.ceil((coordinates[-1] + phase_offset) / WAVE_LENGTH) + 1
+        for cycle in range(first, last + 1):
+            shifted = samples + cycle * WAVE_LENGTH - phase_offset
+            extra.extend(shifted[(shifted > coordinates[0]) & (shifted < coordinates[-1])])
+    coordinates = np.unique(np.concatenate((coordinates, extra)))
+    coordinates = coordinates[np.r_[True, np.diff(coordinates) > 1e-7]]
+    phase = phase_offset + coordinates
+    near = _wall_face_offset(phase, axis, 1.0, wall_depth) - half_width + wall_depth
+    far = _wall_face_offset(phase, axis, -1.0, wall_depth) + half_width - wall_depth
     if axis == "y":
-        near = [(o - half_width, float(v)) for v, o in zip(coordinates, low)]
-        far = [
-            (o + half_width, float(v))
-            for v, o in zip(coordinates[::-1], high[::-1])
-        ]
-    else:
-        near = [(float(v), o - half_width) for v, o in zip(coordinates, low)]
-        far = [
-            (float(v), o + half_width)
-            for v, o in zip(coordinates[::-1], high[::-1])
-        ]
-    polygon = Polygon(near + far)
+        return list(zip(near, coordinates)), list(zip(far, coordinates))
+    return list(zip(coordinates, near)), list(zip(coordinates, far))
+
+
+def _connector_corridor_polygon(
+    axis: str, geometry_coordinates, phase_offset: float, half_width: float,
+    wall_depth: float = 0.0,
+) -> Polygon:
+    """Wall-following corridor measured from the built inward-offset faces."""
+    near, far = _connector_face_paths(
+        axis, geometry_coordinates, phase_offset, half_width, wall_depth,
+    )
+    polygon = Polygon(near + far[::-1])
     if not polygon.is_valid:
         raise RuntimeError("side-connector corridor is not a valid polygon")
     return polygon
@@ -314,39 +335,32 @@ def make_side_connector(
     )
 
     def corridor(half_width: float, coordinates: np.ndarray) -> Polygon:
-        return _connector_corridor_polygon(axis, coordinates, position, half_width)
-
-    def arm_strip(sign: float, coordinates: np.ndarray) -> Polygon:
-        offsets = [wall_wave_value(position + float(v), axis) for v in coordinates]
-        if axis == "y":
-            if sign < 0:
-                near = [(o - outer_hw, float(v)) for v, o in zip(coordinates, offsets)]
-                far = [(o - inner_hw, float(v)) for v, o in zip(coordinates[::-1], offsets[::-1])]
-            else:
-                near = [(o + inner_hw, float(v)) for v, o in zip(coordinates, offsets)]
-                far = [(o + outer_hw, float(v)) for v, o in zip(coordinates[::-1], offsets[::-1])]
-        else:
-            if sign < 0:
-                near = [(float(v), o - outer_hw) for v, o in zip(coordinates, offsets)]
-                far = [(float(v), o - inner_hw) for v, o in zip(coordinates[::-1], offsets[::-1])]
-            else:
-                near = [(float(v), o + inner_hw) for v, o in zip(coordinates, offsets)]
-                far = [(float(v), o + outer_hw) for v, o in zip(coordinates[::-1], offsets[::-1])]
-        return Polygon(near + far)
+        return _connector_corridor_polygon(
+            axis, coordinates, position, half_width, box.wall_depth,
+        )
 
     def offset_strip(
-        sign: float, half_near: float, half_far: float, coordinates: np.ndarray
+        sign: float, half_near: float, half_far: float, coordinates: np.ndarray,
+        reach_ramp: float = 0.0,
     ) -> Polygon:
-        """One arm's footprint with its two faces set explicitly, ``half_near``
-        and ``half_far`` measured from the seam centre-line (near < far)."""
-        offsets = [wall_wave_value(position + float(v), axis) for v in coordinates]
-        if axis == "y":
-            near = [(o + sign * half_near, float(v)) for v, o in zip(coordinates, offsets)]
-            far = [(o + sign * half_far, float(v)) for v, o in zip(coordinates[::-1], offsets[::-1])]
-        else:
-            near = [(float(v), o + sign * half_near) for v, o in zip(coordinates, offsets)]
-            far = [(float(v), o + sign * half_far) for v, o in zip(coordinates[::-1], offsets[::-1])]
-        return Polygon(near + far)
+        near_pair = _connector_face_paths(axis, coordinates, position, half_near, box.wall_depth)
+        far_pair = _connector_face_paths(axis, coordinates, position, half_far, box.wall_depth)
+        index = 0 if sign < 0 else 1
+        near = near_pair[index]
+        if reach_ramp:
+            across = 0 if axis == "y" else 1
+            moved = []
+            for point in near:
+                point = list(point)
+                coordinate = point[1 - across] + position
+                reach = differing_web_reach(box, connector, coordinate, axis, sign)
+                point[across] -= sign * reach * reach_ramp
+                moved.append(tuple(point))
+            near = moved
+        return Polygon(near + far_pair[index][::-1])
+
+    def arm_strip(sign: float, coordinates: np.ndarray) -> Polygon:
+        return offset_strip(sign, inner_hw, outer_hw, coordinates)
 
     def unbraced_web(sign: float, drop: float) -> list[trimesh.Trimesh]:
         """The fattened, tapered arm over the shorter bin's missing wall.
@@ -397,7 +411,7 @@ def make_side_connector(
             ramp = 1.0 if z1 >= z_rim + taper else (z1 - z_rim) / taper
             slab = _extrude_polygon(
                 offset_strip(
-                    sign, inner_hw - move_in * ramp, outer_hw + move_out * ramp, samples
+                    sign, inner_hw, outer_hw + move_out * ramp, samples, reach_ramp=ramp
                 ),
                 h + 0.02,
             )
@@ -471,7 +485,8 @@ def _arm_notches(
 ) -> list[trimesh.Trimesh]:
     """Side-connector notches: the arm interval is centred on ``position``."""
     return _connector_arm_notches(
-        connector, axis, -length / 2.0, length / 2.0, position, inner_hw, z_offsets
+        connector, axis, -length / 2.0, length / 2.0, position, inner_hw, z_offsets,
+        wall_depth=box.wall_depth,
     )
 
 
@@ -484,6 +499,7 @@ def _connector_arm_notches(
     inner_hw: float,
     z_offsets: dict[float, float] | None = None,
     signs: tuple[float, ...] = (1.0, -1.0),
+    wall_depth: float = 0.0,
 ) -> list[trimesh.Trimesh]:
     """Recesses in the arms that receive the walls' lock bumps.
 
@@ -508,16 +524,12 @@ def _connector_arm_notches(
         local = centre - phase_offset
         lo, hi = local - LOCK_RUN / 2.0, local + LOCK_RUN / 2.0
         ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
-        offsets = [wall_wave_value(phase_offset + float(s), axis) for s in ss]
+        near, far = _connector_face_paths(axis, ss, phase_offset, inner_hw, wall_depth)
         for sign in signs:
             # The arm's wall-facing face is its inner one; the notch is cut from
             # there outward into the arm, matching the bump that pokes in.
-            if axis == "y":
-                path = [(o + sign * inner_hw, float(s)) for s, o in zip(ss, offsets)]
-                lateral = (sign, 0.0)
-            else:
-                path = [(float(s), o + sign * inner_hw) for s, o in zip(ss, offsets)]
-                lateral = (0.0, sign)
+            path = near if sign < 0 else far
+            lateral = (sign, 0.0) if axis == "y" else (0.0, sign)
             notches.append(
                 translated(
                     _sweep_profile(path, lateral, profile),
@@ -547,7 +559,7 @@ def _corner_connector_direction(
         return np.linspace(lo, hi, _sample_count(hi - lo))
 
     cap = _extrude_polygon(
-        _connector_corridor_polygon(axis, span(0.0, end), 0.0, outer_hw),
+        _connector_corridor_polygon(axis, span(0.0, end), 0.0, outer_hw, box.wall_depth),
         connector.cap_thickness,
     )
     cap.apply_translation((0.0, 0.0, connector.arm_depth))
@@ -556,16 +568,18 @@ def _corner_connector_direction(
 
     arm_coords = span(start, end)
     body = _extrude_polygon(
-        _connector_corridor_polygon(axis, arm_coords, 0.0, outer_hw),
+        _connector_corridor_polygon(axis, arm_coords, 0.0, outer_hw, box.wall_depth),
         connector.arm_depth + 0.01,
     )
     channel = _extrude_polygon(
-        _connector_corridor_polygon(axis, span(start, end, 0.5), 0.0, inner_hw),
+        _connector_corridor_polygon(axis, span(start, end, 0.5), 0.0, inner_hw, box.wall_depth),
         connector.arm_depth,
     )
     arm = difference([body, channel])
     lo, hi = float(arm_coords[0]), float(arm_coords[-1])
-    notches = _connector_arm_notches(connector, axis, lo, hi, 0.0, inner_hw)
+    notches = _connector_arm_notches(
+        connector, axis, lo, hi, 0.0, inner_hw, wall_depth=box.wall_depth,
+    )
     if notches:
         arm = difference([arm, *notches])
     return union([arm, cap])

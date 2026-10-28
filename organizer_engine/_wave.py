@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 import numpy as np
 import trimesh
 from shapely.affinity import translate as translate_polygon
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from organizer_geometry import _sweep_profile, translated
 
 from ._specs import (
@@ -29,6 +30,7 @@ from ._specs import (
     LOCK_NOTCH_CLEARANCE,
     BoxSpec,
     max_wave_slope,
+    wall_depth_for,
 )
 
 
@@ -189,22 +191,20 @@ def _rounded(polygon: Polygon, radius: float) -> Polygon:
 def preview_rings(
     spec: BoxSpec, points_per_cycle: float = 7.0
 ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
-    """Coarse outer and cavity rings for drawing, matched point for point.
+    """Matched preview rings; project each outer point onto the built cavity.
 
-    Both come from the same walk of the same walls, so ring[i] on one is
-    directly opposite ring[i] on the other and the two can be stitched into
-    quads without any searching.  The corner fillet is left off: at preview
-    size it is smaller than a pixel. ``points_per_cycle`` is a density, not a
-    per-wall total, so the short and long pair of walls on a non-square box
-    read equally smooth instead of the longer pair coming out faceted.
+    Projection also suppresses folded crests, keeping the preview tied to the
+    printable offset rather than drawing the old axis-shifted wall.
     """
-    tangent_x = spec.half_x - CORNER_INSET
-    tangent_y = spec.half_y - CORNER_INSET
-    depth = spec.wall_depth
-    outer = _wall_points(spec.half_x, spec.half_y, tangent_x, tangent_y, points_per_cycle)
-    cavity = _wall_points(
-        spec.half_x - depth, spec.half_y - depth, tangent_x, tangent_y, points_per_cycle
+    outer = _wall_points(
+        spec.half_x, spec.half_y, spec.half_x - CORNER_INSET,
+        spec.half_y - CORNER_INSET, points_per_cycle,
     )
+    boundary = wavy_cavity_polygon(spec).exterior
+    cavity = [
+        tuple(boundary.interpolate(boundary.project(Point(point))).coords[0])
+        for point in outer
+    ]
     return outer, cavity
 
 
@@ -238,27 +238,103 @@ def wavy_outer_polygon(spec: BoxSpec) -> Polygon:
     return wavy_rect_outer(spec.half_x, spec.half_y, spec.corner_fillet)
 
 
+@lru_cache(maxsize=128)
 def wavy_rect_cavity(
     half_x: float, half_y: float, wall_depth: float,
     corner_fillet: float = DEFAULT_CORNER_FILLET, wall: float = DEFAULT_WALL,
     phase_x: float = 0.0, phase_y: float = 0.0,
 ) -> Polygon:
-    """The same interior outline ``wavy_cavity_polygon`` builds - the outer
-    walls shifted straight in by ``wall_depth`` - from raw half-extents. See
-    ``wavy_rect_outer`` for why this needs no 7 mm-grid-sized ``BoxSpec``,
-    and for what ``phase_x``/``phase_y`` correct for."""
-    tx, ty = half_x - CORNER_INSET, half_y - CORNER_INSET
-    polygon = Polygon(_wall_points(half_x - wall_depth, half_y - wall_depth, tx, ty, phase_x=phase_x, phase_y=phase_y))
-    if not polygon.is_valid:
-        polygon = polygon.buffer(0)
-    if not isinstance(polygon, Polygon) or not polygon.is_valid:
-        raise RuntimeError("wavy cavity outline is not a valid single polygon")
-    return _rounded(polygon, max(0.2, corner_fillet - wall))
+    """Constant-distance erosion of the *built* outer outline by ``wall``.
+
+    Round joins retain the distance invariant at concave vertices. GEOS
+    discards folds when a thick offset passes a crest's centre of curvature;
+    those crests have extra material, never less than the declared wall.
+    ``wall_depth`` remains a compatibility/fit-envelope argument only.
+    """
+    outer = wavy_rect_outer(half_x, half_y, corner_fillet, phase_x, phase_y)
+    polygon = outer.buffer(-wall, join_style=1, quad_segs=64) if wall else outer
+    if not isinstance(polygon, Polygon) or polygon.is_empty or not polygon.is_valid:
+        raise RuntimeError("wavy cavity erosion did not produce a valid single polygon")
+    return polygon
 
 
 def wavy_cavity_polygon(spec: BoxSpec) -> Polygon:
-    """Interior outline: the outer walls shifted straight in by ``wall_depth``."""
+    """Interior outline, eroded by the declared perpendicular wall thickness."""
     return wavy_rect_cavity(spec.half_x, spec.half_y, spec.wall_depth, spec.corner_fillet, spec.wall)
+
+
+def _wall_face_values(
+    cavity: Polygon, coordinates, run_axis: str, side: float,
+) -> np.ndarray:
+    """Sample one built cavity face, including its suppressed crest segments.
+
+    ``side`` selects the positive or negative wall. Intersecting the actual
+    polygon edges makes this the shared face definition for every attachment.
+    """
+    vertices = np.asarray(cavity.exterior.coords)
+    along = 1 if run_axis == "y" else 0
+    across = 1 - along
+    starts, ends = vertices[:-1], vertices[1:]
+    delta = ends[:, along] - starts[:, along]
+    values = []
+    for coordinate in coordinates:
+        mask = ((np.minimum(starts[:, along], ends[:, along]) <= coordinate)
+                & (np.maximum(starts[:, along], ends[:, along]) >= coordinate)
+                & (np.abs(delta) > 1e-12))
+        if not np.any(mask):
+            raise ValueError("wall attachment extends beyond the built cavity")
+        fraction = (coordinate - starts[mask, along]) / delta[mask]
+        hits = starts[mask, across] + fraction * (ends[mask, across] - starts[mask, across])
+        values.append(float(np.max(hits) if side > 0 else np.min(hits)))
+    return np.asarray(values)
+
+
+def _wall_face_path(cavity: Polygon, coordinates, run_axis: str, side: float):
+    """A face path with every polygon breakpoint retained between its ends."""
+    coordinates = np.asarray(coordinates, dtype=float)
+    along = 1 if run_axis == "y" else 0
+    vertices = np.asarray(cavity.exterior.coords)[:, along]
+    inside = vertices[(vertices > coordinates[0]) & (vertices < coordinates[-1])]
+    samples = np.unique(np.concatenate((coordinates, inside)))
+    # Opposite faces can contribute numerically coincident breakpoints. Avoid
+    # zero-area sweep faces after trimesh merges their vertices.
+    samples = samples[np.r_[True, np.diff(samples) > 1e-7]]
+    faces = _wall_face_values(cavity, samples, run_axis, side)
+    return [(float(f), float(s)) if run_axis == "y" else (float(s), float(f))
+            for s, f in zip(samples, faces)]
+
+
+@lru_cache(maxsize=64)
+def _periodic_wall_face(wall_depth: float, run_axis: str, side: float):
+    """One period of the built face, away from the corner transitions.
+
+    Ordinary grid bins have the same 1/16 mm outer sampling lattice. This
+    reference outline uses that lattice too; only its central period is kept,
+    so connectors also follow the wall when their cap spans a bin corner.
+    """
+    half = 4.0 * WAVE_LENGTH - WAVE_MATING_GAP / 2.0
+    wall = wall_depth / wall_depth_for(1.0)
+    cavity = wavy_rect_cavity(half, half, wall_depth, wall=wall)
+    path = np.asarray(_wall_face_path(
+        cavity, [-WAVE_LENGTH / 2.0, WAVE_LENGTH / 2.0], run_axis, side,
+    ))
+    along = 1 if run_axis == "y" else 0
+    return path[:, along], path[:, 1 - along] - side * half
+
+
+def _wall_face_offset(
+    coordinates, run_axis: str, side: float, wall_depth: float,
+) -> np.ndarray:
+    """Built interior face relative to its nominal outer wall axis."""
+    samples, faces = _periodic_wall_face(wall_depth, run_axis, side)
+    phase = (np.asarray(coordinates, dtype=float) + WAVE_LENGTH / 2.0) % WAVE_LENGTH - WAVE_LENGTH / 2.0
+    return np.interp(phase, samples, faces)
+
+
+def _lock_embed(path, outer: Polygon) -> float:
+    """Reserve safe exterior skin using the actual local wall, not its envelope."""
+    thickness = outer.boundary.distance(LineString(path))
+    return max(0.0, min(LOCK_EMBED, thickness - LOCK_SAFE_SKIN))
 
 
 def placed_outline(
@@ -359,61 +435,62 @@ def _lock_profile(
 def _rect_wall_lock_paths(
     half_x: float, half_y: float, wall_depth: float,
     phase_x: float = 0.0, phase_y: float = 0.0,
+    *, wall: float | None = None, corner_fillet: float = DEFAULT_CORNER_FILLET,
 ) -> list[tuple[list[tuple[float, float]], tuple[float, float]]]:
-    """Bump centre-lines on the interior face of all four walls, plus the
-    inward direction each bump grows in - from raw half-extents. See
-    ``wavy_rect_outer`` for why this needs no 7 mm-grid-sized ``BoxSpec``,
-    and for what ``phase_x``/``phase_y`` correct for: the bump lattice sits
-    on the same wave extrema the wall surface does, so it needs the same
-    shift, applied to both the wave itself and the lattice positions it
-    hangs bumps from.
-    """
-    walls = (
-        ("y", half_y, half_x - wall_depth, (-1.0, 0.0), phase_y),   # +X wall
-        ("y", half_y, -(half_x - wall_depth), (1.0, 0.0), phase_y),  # -X wall
-        ("x", half_x, half_y - wall_depth, (0.0, -1.0), phase_x),    # +Y wall
-        ("x", half_x, -(half_y - wall_depth), (0.0, 1.0), phase_x),  # -Y wall
+    """Lock paths on the built cavity, retaining the global extremum lattice."""
+    if wall is None:
+        wall = wall_depth / wall_depth_for(1.0)
+    cavity = wavy_rect_cavity(
+        half_x, half_y, wall_depth, corner_fillet, wall, phase_x, phase_y,
     )
-    paths: list[tuple[list[tuple[float, float]], tuple[float, float]]] = []
-    for run_axis, wave_half, face, inward, phase in walls:
+    walls = (
+        ("y", half_y, 1.0, (-1.0, 0.0), phase_y),
+        ("y", half_y, -1.0, (1.0, 0.0), phase_y),
+        ("x", half_x, 1.0, (0.0, -1.0), phase_x),
+        ("x", half_x, -1.0, (0.0, 1.0), phase_x),
+    )
+    paths = []
+    for run_axis, wave_half, side, inward, phase in walls:
         limit = wave_half - CORNER_INSET - LOCK_CORNER_CLEAR - LOCK_RUN / 2.0
         for base_centre in lock_lattice(-limit + phase, limit + phase):
             centre = base_centre - phase
-            lo, hi = centre - LOCK_RUN / 2.0, centre + LOCK_RUN / 2.0
-            ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
-            if run_axis == "y":
-                path = [(face + wall_wave_value(float(s) + phase, run_axis), float(s)) for s in ss]
-            else:
-                path = [(float(s), face + wall_wave_value(float(s) + phase, run_axis)) for s in ss]
-            paths.append((path, inward))
+            ss = np.linspace(centre - LOCK_RUN / 2.0, centre + LOCK_RUN / 2.0, _sample_count(LOCK_RUN))
+            paths.append((_wall_face_path(cavity, ss, run_axis, side), inward))
     return paths
 
 
 def _wall_lock_paths(
     spec: BoxSpec,
 ) -> list[tuple[list[tuple[float, float]], tuple[float, float]]]:
-    return _rect_wall_lock_paths(spec.half_x, spec.half_y, spec.wall_depth)
+    return _rect_wall_lock_paths(
+        spec.half_x, spec.half_y, spec.wall_depth,
+        wall=spec.wall, corner_fillet=spec.corner_fillet,
+    )
 
 
 def make_wall_lock_bumps_raw(
     half_x: float, half_y: float, wall_depth: float, z: float,
     phase_x: float = 0.0, phase_y: float = 0.0,
+    *, wall: float | None = None, corner_fillet: float = DEFAULT_CORNER_FILLET,
 ) -> list[trimesh.Trimesh]:
-    """Small chamfered bumps standing proud of each wall's interior face -
-    from raw half-extents. See ``wavy_rect_outer`` for why this needs no
-    7 mm-grid-sized ``BoxSpec``, and for what ``phase_x``/``phase_y`` correct
-    for."""
-    embed = min(LOCK_EMBED, wall_depth - LOCK_SAFE_SKIN)
-    profile = _lock_profile(LOCK_PROTRUSION, embed=embed)
-    return [
-        translated(_sweep_profile(path, inward, profile), (0.0, 0.0, z))
-        for path, inward in _rect_wall_lock_paths(half_x, half_y, wall_depth, phase_x=phase_x, phase_y=phase_y)
-    ]
+    """Bumps on the eroded face, with roots limited by real local thickness."""
+    outer = wavy_rect_outer(half_x, half_y, corner_fillet, phase_x, phase_y)
+    bumps = []
+    for path, inward in _rect_wall_lock_paths(
+        half_x, half_y, wall_depth, phase_x, phase_y,
+        wall=wall, corner_fillet=corner_fillet,
+    ):
+        profile = _lock_profile(LOCK_PROTRUSION, embed=_lock_embed(path, outer))
+        bumps.append(translated(_sweep_profile(path, inward, profile), (0.0, 0.0, z)))
+    return bumps
 
 
 def make_wall_lock_bumps(spec: BoxSpec) -> list[trimesh.Trimesh]:
-    """Small chamfered bumps standing proud of each wall's interior face."""
-    return make_wall_lock_bumps_raw(spec.half_x, spec.half_y, spec.wall_depth, spec.z)
+    """Small chamfered bumps standing proud of each wall's built interior face."""
+    return make_wall_lock_bumps_raw(
+        spec.half_x, spec.half_y, spec.wall_depth, spec.z,
+        wall=spec.wall, corner_fillet=spec.corner_fillet,
+    )
 
 
 def wall_lock_receivers(
@@ -430,19 +507,20 @@ def wall_lock_receivers(
     positions and rim height as the bump, so a part cut with them seats over
     the bumps without touching and still catches on their chamfers.
     """
-    run_axis, wave_half, face, inward = _wall_face_table(spec)[wall]
-    embed = min(LOCK_EMBED, spec.wall_depth - LOCK_SAFE_SKIN)
-    profile = _lock_profile(LOCK_PROTRUSION, LOCK_NOTCH_CLEARANCE, embed=embed)
+    run_axis, wave_half, _face, inward = _wall_face_table(spec)[wall]
+    side = 1.0 if wall.startswith("+") else -1.0
+    cavity = wavy_cavity_polygon(spec)
+    outer = wavy_outer_polygon(spec)
     cutters: list[trimesh.Trimesh] = []
     for centre in lock_positions(wave_half - CORNER_INSET - LOCK_CORNER_CLEAR):
         lo, hi = centre - LOCK_RUN / 2.0, centre + LOCK_RUN / 2.0
         if hi < low or lo > high:
             continue
         ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
-        if run_axis == "y":
-            path = [(face + wall_wave_value(float(t), run_axis), float(t)) for t in ss]
-        else:
-            path = [(float(t), face + wall_wave_value(float(t), run_axis)) for t in ss]
+        path = _wall_face_path(cavity, ss, run_axis, side)
+        profile = _lock_profile(
+            LOCK_PROTRUSION, LOCK_NOTCH_CLEARANCE, embed=_lock_embed(path, outer),
+        )
         cutters.append(translated(_sweep_profile(path, inward, profile), (0.0, 0.0, spec.z)))
     return cutters
 
@@ -458,12 +536,29 @@ _LIFT_GRABBER_WALL_LABELS = {
 def _wall_face_table(
     spec: BoxSpec,
 ) -> dict[str, tuple[str, float, float, tuple[float, float]]]:
-    """Interior wall faces keyed by name: ``(run axis, half-reach along the
-    wall, face position on the perpendicular axis, inward unit vector)``."""
-    depth = spec.wall_depth
+    """Built face anchor for flat attachments, plus wall metadata.
+
+    Flat grabbers retain their existing root depth. Limit their anchor by the
+    actual exterior's inward envelope so rebasing the face cannot expose a
+    root. Curved locks use ``_wall_face_path`` throughout their whole span.
+    """
+    cavity = wavy_cavity_polygon(spec)
+    outer = wavy_outer_polygon(spec)
+    root = min(WAVE_AMPLITUDE + LOCK_EMBED, spec.wall_depth - WAVE_AMPLITUDE - LOCK_SAFE_SKIN)
+
+    def anchor(axis: str, side: float) -> float:
+        face = side * float(_wall_face_values(cavity, [0.0], axis, side)[0])
+        exterior = side * _wall_face_values(
+            outer, [-WAVE_LENGTH / 4.0, WAVE_LENGTH / 4.0], axis, side,
+        )
+        return side * min(face, float(np.min(exterior)) - LOCK_SAFE_SKIN - root)
+
     return {
-        "+x": ("y", spec.half_y, spec.half_x - depth, (-1.0, 0.0)),
-        "-x": ("y", spec.half_y, -(spec.half_x - depth), (1.0, 0.0)),
-        "+y": ("x", spec.half_x, spec.half_y - depth, (0.0, -1.0)),
-        "-y": ("x", spec.half_x, -(spec.half_y - depth), (0.0, 1.0)),
+        name: (axis, reach, anchor(axis, side), inward)
+        for name, axis, reach, side, inward in (
+            ("+x", "y", spec.half_y, 1.0, (-1.0, 0.0)),
+            ("-x", "y", spec.half_y, -1.0, (1.0, 0.0)),
+            ("+y", "x", spec.half_x, 1.0, (0.0, -1.0)),
+            ("-y", "x", spec.half_x, -1.0, (0.0, 1.0)),
+        )
     }

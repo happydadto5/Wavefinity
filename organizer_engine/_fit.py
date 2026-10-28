@@ -9,8 +9,8 @@ from shapely.geometry import Polygon
 from organizer_geometry import translated
 
 from ._specs import BoxSpec, ConnectorSpec
-from ._wave import wall_wave_value, _sample_count
-from ._boxes import make_box, connector_bin_heights
+from ._wave import _sample_count
+from ._boxes import make_box, connector_bin_heights, _connector_corridor_polygon
 
 
 def mesh_report(name: str, mesh: trimesh.Trimesh) -> dict[str, object]:
@@ -146,21 +146,8 @@ def validate_corner_fit(
 def _plain_corridor(
     box: BoxSpec, axis: str, position: float, samples: np.ndarray, half_width: float
 ) -> Polygon:
-    wave_half = box.half_x if axis == "x" else box.half_y
+    """Unnotched fit sampler following the actual eroded interior faces."""
     dense = np.linspace(
         samples[0], samples[-1], _sample_count(float(samples[-1] - samples[0]))
     )
-    offsets = [wall_wave_value(position + float(v), axis) for v in dense]
-    if axis == "y":
-        near = [(o - half_width, float(v)) for v, o in zip(dense, offsets)]
-        far = [
-            (o + half_width, float(v))
-            for v, o in zip(dense[::-1], offsets[::-1])
-        ]
-    else:
-        near = [(float(v), o - half_width) for v, o in zip(dense, offsets)]
-        far = [
-            (float(v), o + half_width)
-            for v, o in zip(dense[::-1], offsets[::-1])
-        ]
-    return Polygon(near + far)
+    return _connector_corridor_polygon(axis, dense, position, half_width, box.wall_depth)

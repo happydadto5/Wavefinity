@@ -144,17 +144,31 @@ def differing_drop_fraction(drop: float) -> float:
     return max(0.0, min(1.0, (drop - DIFFERING_MIN_DROP) / span))
 
 
-def differing_web_reach(box: "BoxSpec", connector: "ConnectorSpec") -> float:
-    """How far the web reaches inward, past the plain arm's inner face.
+def differing_web_reach(
+    box: "BoxSpec", connector: "ConnectorSpec", coordinate: float | None = None,
+    axis: str = "y", sign: float = 1.0,
+) -> float:
+    """Reach from the built arm face to the taller wall's outer running face.
 
-    Enough to cross the half of the channel the missing wall would have filled
-    and stop ``DIFFERING_WEB_RUN_CLEARANCE`` short of the taller bin's outer
-    face.  A property of the seam, so it is the same at every drop - which is
-    exactly why it must not be scaled by ``differing_drop_fraction``.
+    A coordinate gives the local reach used to build each web segment. Without
+    one, return the full-period maximum for planning the web's overall width.
+    The reach remains independent of the height drop.
     """
-    inner_hw = box.wall_depth + WAVE_MATING_GAP / 2.0 + connector.tolerance
+    # Geometry imports specs, so defer this shared built-face lookup.
+    from ._wave import _periodic_wall_face, _wall_face_offset, wall_wave_value
+
+    def local(value: float, run_axis: str, arm_sign: float) -> float:
+        face = float(_wall_face_offset([value], run_axis, -arm_sign, box.wall_depth)[0])
+        inset = arm_sign * (face - wall_wave_value(value, run_axis))
+        return max(0.0, inset + WAVE_MATING_GAP + connector.tolerance - DIFFERING_WEB_RUN_CLEARANCE)
+
+    if coordinate is not None:
+        return local(coordinate, axis, sign)
     return max(
-        0.0, inner_hw + WAVE_MATING_GAP / 2.0 - DIFFERING_WEB_RUN_CLEARANCE
+        local(float(value), run_axis, arm_sign)
+        for run_axis in ("x", "y")
+        for arm_sign in (-1.0, 1.0)
+        for value in _periodic_wall_face(box.wall_depth, run_axis, -arm_sign)[0]
     )
 
 
@@ -813,12 +827,11 @@ class BoxSpec:
 
     @property
     def usable_inside(self) -> tuple[float, float]:
-        """Largest axis-aligned rectangle that fits the cavity.
+        """Conservative straight-sided fit rectangle, unchanged by erosion.
 
-        Both faces of a wall carry the same wave, so the cavity is a channel of
-        constant width that weaves from side to side.  A straight-sided object
-        has to clear the wave's full swing, which costs one amplitude at each
-        end on top of the two walls.
+        The wall is a constant normal-distance offset, with thicker suppressed
+        crests above the arc radius. Keep the full-slope axis envelope plus
+        one wave amplitude on each side for the existing fit-size promise.
         """
         clear_x = 2.0 * (self.half_x - self.wall_depth) - 2.0 * WAVE_AMPLITUDE
         clear_y = 2.0 * (self.half_y - self.wall_depth) - 2.0 * WAVE_AMPLITUDE
@@ -840,10 +853,10 @@ class BoxSpec:
 
     @property
     def wall_depth(self) -> float:
-        """Wall thickness measured along the axis, not along the surface normal.
+        """Maximum axis-inset envelope for clearance and cavity-size math.
 
-        Shifting the outline by this much keeps the true perpendicular wall at
-        or above ``wall`` everywhere on the wave.
+        This full-slope bound stays unchanged. Cavity construction and interior
+        attachment anchors use the built normal offset, never this envelope.
         """
         return wall_depth_for(self.wall)
 
@@ -888,10 +901,9 @@ def max_wave_slope() -> float:
 
 
 def wall_depth_for(wall: float) -> float:
-    """``BoxSpec.wall_depth``'s formula, standalone.
+    """Maximum axis-inset fit envelope, also available to off-grid spacers.
 
-    Lets a caller that builds wavy geometry without a full ``BoxSpec`` -
-    a spacer filler, whose x/y need not be the 7 mm-grid size a normal bin's
-    ``BoxSpec`` requires - use the exact same wall-thickness math.
+    The cavity is eroded by ``wall`` itself; this conservative slope-derived
+    bound is retained for size/clearance calculations and raw API callers.
     """
     return wall * math.sqrt(1.0 + max_wave_slope() ** 2)
