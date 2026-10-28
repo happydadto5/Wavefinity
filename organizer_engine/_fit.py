@@ -117,32 +117,6 @@ def validate_side_fit(
     return overlap
 
 
-def installed_corner_boxes(box: BoxSpec, ways: int) -> list[trimesh.Trimesh]:
-    """The 3 or 4 bins meeting at the junction (0, 0)."""
-    if ways not in (3, 4):
-        raise ValueError("corner connector must be 3-way or 4-way")
-    mesh = make_box(box)
-    quadrants = [(-1, 1), (1, 1), (-1, -1), (1, -1)][:ways]
-    return [
-        translated(mesh, (sx * box.x / 2.0, sy * box.y / 2.0, 0.0))
-        for sx, sy in quadrants
-    ]
-
-
-def validate_corner_fit(
-    box: BoxSpec, connector: ConnectorSpec, clip: trimesh.Trimesh, ways: int
-) -> float:
-    """Overlap of the seated corner connector with the bins it joins."""
-    boxes = installed_corner_boxes(box, ways)
-    seated = translated(clip, (0.0, 0.0, box.z - connector.arm_depth))
-    overlap = sum(intersection_volume(seated, item) for item in boxes)
-    if overlap > 0.01:
-        raise RuntimeError(
-            f"corner connector collides with installed boxes: {overlap:.6f} mm^3"
-        )
-    return overlap
-
-
 def _plain_corridor(
     box: BoxSpec, axis: str, position: float, samples: np.ndarray, half_width: float
 ) -> Polygon:

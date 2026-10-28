@@ -6,7 +6,6 @@ import argparse
 import math
 from pathlib import Path
 import re
-import trimesh
 from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
@@ -174,53 +173,6 @@ def connector_filename(
     if not diff:
         return f"Connector - Same height{suffix}"
     return f"Connector - {' '.join(diff)}{suffix}"
-
-
-CORNER_WAYS_NAMES = {3: "3-Way Corner", 4: "4-Way Corner"}
-MAX_CORNER_QUANTITY = 20
-CORNER_COPY_GAP = 4.0
-
-
-def corner_connector_filename(
-    ways: int, quantity: int = 1, wall: float = DEFAULT_WALL, suffix: str = ".3mf"
-) -> str:
-    parts = [CORNER_WAYS_NAMES[ways]]
-    if quantity > 1:
-        parts[0] += f" x{quantity}"
-    if not math.isclose(wall, DEFAULT_WALL, abs_tol=1e-9):
-        parts.append(f"Wall {wall:g}mm")
-    return f"Connector - {' - '.join(parts)}{suffix}"
-
-
-def validate_corner_quantity(quantity) -> int:
-    if (
-        isinstance(quantity, bool)
-        or not isinstance(quantity, int)
-        or not 1 <= quantity <= MAX_CORNER_QUANTITY
-    ):
-        raise ValueError(
-            f"corner connector quantity must be a whole number from 1 to {MAX_CORNER_QUANTITY}"
-        )
-    return quantity
-
-
-def arrange_connector_copies(mesh: trimesh.Trimesh, quantity: int) -> trimesh.Trimesh:
-    """Lay out ``quantity`` separate copies of a print-oriented connector."""
-    if quantity == 1:
-        return mesh
-    size_x, size_y = (float(v) for v in mesh.extents[:2])
-    columns = math.ceil(math.sqrt(quantity))
-    copies = []
-    for index in range(quantity):
-        row, col = divmod(index, columns)
-        copy = mesh.copy()
-        copy.apply_translation((
-            col * (size_x + CORNER_COPY_GAP),
-            row * (size_y + CORNER_COPY_GAP),
-            0.0,
-        ))
-        copies.append(copy)
-    return trimesh.util.concatenate(copies)
 
 
 SIZE_LIKE = re.compile(r"^\s*\d+(\.\d+)?\s*(mm)?\s*$", re.IGNORECASE)

@@ -54,7 +54,6 @@ from organizer_engine import (
     make_box,
     flat_cavity_polygon,
     make_side_connector,
-    make_corner_connector,
     label_mesh_report,
     export_bambu_compatible_3mf,
     measure_lock,
@@ -72,7 +71,6 @@ from organizer_engine import (
     union,
     difference,
     validate_side_fit,
-    validate_corner_fit,
     validate_3mf,
     export_object_groups_3mf,
     validate_object_groups_3mf,
@@ -243,12 +241,6 @@ from organizer_app_impl._filenames import (
     lid_label_regions,
     insert_filename,
     connector_filename,
-    CORNER_WAYS_NAMES,
-    MAX_CORNER_QUANTITY,
-    CORNER_COPY_GAP,
-    corner_connector_filename,
-    validate_corner_quantity,
-    arrange_connector_copies,
     SIZE_LIKE,
     part_name_seed,
 )
@@ -276,7 +268,6 @@ from organizer_app_impl._generation import (
     _rewrite_staged_paths,
     log_bin_to_folder,
     generate_side_file,
-    generate_corner_file,
     generate_kit_files,
 )
 from organizer_app_impl._cli import (

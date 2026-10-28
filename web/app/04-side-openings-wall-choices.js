@@ -880,10 +880,6 @@ function syncConnectorHeightControls() {
   syncConnectorActionLabels();
 }
 
-// Mirrors organizer_engine.MIN_JOINABLE_SIZE; corner connectors below this
-// in either X or Y are physically impossible regardless of user choice.
-const MIN_CORNER_JOINABLE_MM = 16;
-
 function syncConnectorSectionVisibility() {
   const noConnectors = baseTrimEnabled() || b4bEnabled();
   const heightWrap = $("#connector-height-wrap");
@@ -917,23 +913,16 @@ function syncConnectorSectionVisibility() {
   syncConnectorActionLabels();
 }
 
-// Fix 019 Item 7: same-height bins auto-bundle Side + 3-Way + 4-Way
-// connectors; different-height bins only ever produce a Side connector -
-// keep the action wording matching that actual bundle, on every
-// syncForm()/height-mode change, not just at first render.
 function syncConnectorActionLabels() {
   const allButton = $("#generate-all");
   const connectorButton = $("#generate-connector");
   if (!allButton && !connectorButton) return;
-  const different = $("#connector-height-mode")?.value === "different";
   if (allButton) {
-    allButton.textContent = different ? "Save Bin + Side Connector" : "Save Bin + Connectors";
+    allButton.textContent = "Save Bin + Side Connector";
   }
   if (connectorButton) {
-    connectorButton.textContent = different ? "Save Side Connector" : "Save Connectors";
-    connectorButton.title = different
-      ? "Save the Side connector for the current bin"
-      : "Save Side, 3-Way Corner, and 4-Way Corner connectors for the current bin";
+    connectorButton.textContent = "Save Side Connector";
+    connectorButton.title = "Save the Side connector for the current bin";
   }
 }
 
@@ -951,27 +940,6 @@ function renderConnectorReadout(plan = null) {
   // a lid.
   if (connectorsUnavailable()) {
     el.textContent = "Side connectors aren't available with a lid.";
-    el.hidden = false;
-    return;
-  }
-  // Audit 006 J3: the readout is exception-only. An ordinary eligible
-  // same-height bin gets no generic explanation - only a set that actually
-  // changed (different heights, or too small for corners) earns a line.
-  const different = plan
-    ? Boolean(plan.different_heights)
-    : $("#connector-height-mode").value === "different";
-  if (different) {
-    el.textContent = "Side connector only — corner connectors require equal-height bins.";
-    el.hidden = false;
-    return;
-  }
-  const x = Number(plan?.box_x_mm ?? state.design?.box?.x);
-  const y = Number(plan?.box_y_mm ?? state.design?.box?.y);
-  const cornersSkipped = Array.isArray(plan?.skipped_types) && plan.skipped_types.length > 0;
-  const tooSmall = cornersSkipped
-    || (Number.isFinite(x) && Number.isFinite(y) && (x < MIN_CORNER_JOINABLE_MM || y < MIN_CORNER_JOINABLE_MM));
-  if (tooSmall) {
-    el.textContent = `Side connector only — corner connectors need at least ${MIN_CORNER_JOINABLE_MM} mm in both X and Y.`;
     el.hidden = false;
     return;
   }

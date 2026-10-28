@@ -87,20 +87,6 @@ LOCKED_TOLERANCE = 0.02       # chosen from the printed 5-clip fit plate
 LOCKED_CONNECTOR_HEIGHT = 9.6
 LOCKED_CONNECTOR_LENGTH = 12.0
 
-# The smallest box that can take a connector on both sides.  A 1-unit side is
-# still legal - it just joins on its long sides only.
-MIN_JOINABLE_SIZE = (
-    math.ceil(
-        (2.0 * (LOCKED_CONNECTOR_LENGTH / 2.0 + CORNER_INSET) + WAVE_MATING_GAP - 1e-9)
-        / GRID_PITCH
-    )
-    * GRID_PITCH
-)
-
-# Corner connectors: hanging arms start half a pitch from the junction so they
-# clear the perpendicular walls; only the cap bridges the junction itself.
-CORNER_CONNECTOR_ARM_START = GRID_PITCH / 2.0
-CORNER_CONNECTOR_END = GRID_PITCH - CORNER_INSET
 DEFAULT_CONNECTOR_HEIGHT = LOCKED_CONNECTOR_HEIGHT
 DEFAULT_CAP_THICKNESS = 1.2
 DEFAULT_ARM_THICKNESS = 1.0   # two 0.5 mm perimeters
@@ -714,8 +700,8 @@ class SideOpeningSpec:
 
 @dataclass(frozen=True)
 class BoxSpec:
-    x: float = MIN_JOINABLE_SIZE
-    y: float = MIN_JOINABLE_SIZE
+    x: float = 3.0 * GRID_PITCH
+    y: float = 3.0 * GRID_PITCH
     z: float = 40.0
     wall: float = DEFAULT_WALL
     corner_fillet: float = DEFAULT_CORNER_FILLET

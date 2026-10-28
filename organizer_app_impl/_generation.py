@@ -1,11 +1,10 @@
-"""Wavefinity staged file generation, inventory logging and kit/side/corner files."""
+"""Wavefinity staged file generation, inventory logging and kit/side files."""
 
 from __future__ import annotations
 
 from datetime import datetime
 import os
 from pathlib import Path
-import trimesh
 from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
@@ -19,16 +18,12 @@ from organizer_engine import (
     make_labelled_box,
     make_box,
     make_side_connector,
-    make_corner_connector,
-    label_mesh_report,
-    export_bambu_compatible_3mf,
     measure_lock,
     mesh_report,
     scoop_floor_zone,
     top_label_report,
     union,
     validate_side_fit,
-    validate_corner_fit,
 )
 from organizer_b4b import b4b_effective_box
 from organizer_inventory import append_bin
@@ -53,9 +48,6 @@ from ._filenames import (
     box_filename,
     check_filename_bytes,
     connector_filename,
-    CORNER_WAYS_NAMES,
-    validate_corner_quantity,
-    arrange_connector_copies,
 )
 from ._design_io import inventory_bin_record
 
@@ -297,41 +289,6 @@ def generate_side_file(
         "bin_b_height_mm": bin_b_height if bin_b_height is not None else box.z,
         "print_orientation": "flat cap down",
     })
-    return _part_result(output, report, fit)
-
-
-def generate_corner_file(
-    box: BoxSpec,
-    connector: ConnectorSpec,
-    output: Path,
-    ways: int,
-    quantity: int = 1,
-) -> dict[str, object]:
-    if ways not in CORNER_WAYS_NAMES:
-        raise ValueError("corner connector must be 3-way or 4-way")
-    quantity = validate_corner_quantity(quantity)
-    mesh = make_corner_connector(box, connector, ways)
-    report = mesh_report("corner_connector", mesh)
-    overlap = validate_corner_fit(box, connector, mesh, ways)
-    print_mesh = arrange_connector_copies(connector_for_print(mesh), quantity)
-    if quantity == 1:
-        export_mesh(print_mesh, output, "corner_connector")
-    else:
-        # Separate identical pieces on one plate: several solids by design.
-        copies = label_mesh_report("corner_connector", print_mesh)["components"]
-        if copies != quantity:
-            raise RuntimeError(f"expected {quantity} corner connector copies, got {copies}")
-        scene = trimesh.Scene()
-        scene.units = "mm"
-        scene.add_geometry(print_mesh, node_name="corner_connector", geom_name="corner_connector")
-        export_bambu_compatible_3mf(scene, output)
-    fit = {
-        "seated_overlap_mm3": round(overlap, 6),
-        "ways": ways,
-        "quantity": quantity,
-        "wall_mm": box.wall,
-        "print_orientation": "flat cap down",
-    }
     return _part_result(output, report, fit)
 
 

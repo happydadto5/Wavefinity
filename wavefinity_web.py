@@ -198,14 +198,12 @@ from organizer_app import (
     clean_label,
     convert_layout_mode,
     connector_filename,
-    corner_connector_filename,
     default_feature,
     design_from_dict,
     design_source_payload,
     design_to_dict,
     generate_organizer_files,
     generate_organizer_files_transactional,
-    generate_corner_file,
     generate_side_file,
     inside_handle_conflict,
     inventory_bin_record,
@@ -1647,30 +1645,6 @@ def _generate_side_connector(
     return result, plan
 
 
-def _generate_corner_connector(
-    box: Any, output_dir: Path, ways: int,
-) -> tuple[Any, dict[str, Any]]:
-    # Corner connectors are automatic bundle members: always quantity 1, with
-    # fresh defaults, since hidden Side/Different settings never reach them.
-    connector = ConnectorSpec()
-    connector_box = stack_effective_box(box) if box.stack.mode == "direct" else box
-    filename = corner_connector_filename(ways, 1, connector_box.wall)
-    with GEOMETRY_LOCK:
-        result = generate_corner_file(
-            connector_box, connector, output_dir / filename, ways, 1
-        )
-    plan = {
-        "type": "three_way" if ways == 3 else "four_way",
-        "quantity": 1,
-        "wall_mm": round(connector_box.wall, 3),
-        "requires_equal_height": True,
-        "requires_same_wall": True,
-        "printed_height_mm": round(connector.height, 3),
-        "webbed": False,
-    }
-    return result, plan
-
-
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if _is_base_trim_design(payload.get("design")):
         raise ValueError(
@@ -1698,36 +1672,13 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         return _generation_reply(result={"side": side_result}, output=output_dir, extra=reply)
 
     results: dict[str, Any] = {"side": side_result}
-    types = ["side"]
-    skipped_types: list[str] = []
-    for ways, key in ((3, "three_way"), (4, "four_way")):
-        try:
-            corner_result, _corner_plan = _generate_corner_connector(box, output_dir, ways)
-        except ValueError:
-            skipped_types.append(key)
-            continue
-        except Exception as error:
-            # An unfit corner is a normal ValueError skip, handled above.
-            # Anything else is unexpected - the connectors already in
-            # `results` (at least the Side connector) are real files on
-            # disk and must not be lost behind this exception.
-            raise _PartialConnectorBundleError(error, dict(results), output_dir) from error
-        results[key] = corner_result
-        types.append(key)
-
     plan = {
         "mode": "auto",
-        "types": types,
+        "types": ["side"],
         "different_heights": False,
         "wall_mm": side_plan.get("wall_mm"),
         "requires_same_wall": True,
     }
-    if skipped_types:
-        plan["skipped_types"] = skipped_types
-        plan["skipped_reason"] = (
-            "Corner connectors need at least 14 mm (2 Wavefinity units) in both "
-            "X and Y so the clip can clear the corners and engage the wall locks."
-        )
     reply = {"connector_plan": plan}
     return _generation_reply(result=results, output=output_dir, extra=reply)
 
@@ -1914,8 +1865,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
             )
 
     # Only the explicit "with connectors" print (target "all") carries the
-    # automatic connector bundle (a Side connector, plus 3-Way and 4-Way
-    # corners when the bin is eligible). A bin-only print never generates
+    # Side connector bundle. A bin-only print never generates
     # connectors. Never for a B4B, whose lid controls the rim and which does not use the
     # connector, nor for a lidded bin or a Base Trim design.
     design = payload.get("design")

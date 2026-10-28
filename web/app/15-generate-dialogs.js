@@ -54,9 +54,7 @@ async function generateParts(target) {
   }
 
   const boxTitle = `Bin (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} × ${fmt(state.design.box.z)} mm)`;
-  const connTitle = state.connector.different_heights
-    ? "Side Connector"
-    : "Connectors (Side + 3-Way + 4-Way)";
+  const connTitle = "Side Connector";
 
   const items = [];
   if (target === "all" || target === "bin") {

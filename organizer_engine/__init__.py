@@ -15,9 +15,7 @@ Design summary
   is no corner blend.  Corners are a short chamfer rounded to
   ``CORNER_FILLET``.
 * Connectors: the **side connector**, a staple that drops over the seam
-  between two boxes, plus compact **3-Way / 4-Way Corner** connectors.  All share
-  the same wall-following fit profile; the compact corner types deliberately do
-  not use the side connector's variable-height web.
+  between two boxes, with a variable-height web for differing bin heights.
 * Each wall carries small chamfered **lock bumps** on its interior face; the
   connector arms have matching notches so the clip locks in.  Every bump and
   notch face is chamfered at 45 degrees or shallower, so both parts print
@@ -70,9 +68,6 @@ from ._specs import (
     LOCKED_TOLERANCE,
     LOCKED_CONNECTOR_HEIGHT,
     LOCKED_CONNECTOR_LENGTH,
-    MIN_JOINABLE_SIZE,
-    CORNER_CONNECTOR_ARM_START,
-    CORNER_CONNECTOR_END,
     DEFAULT_CONNECTOR_HEIGHT,
     DEFAULT_CAP_THICKNESS,
     DEFAULT_ARM_THICKNESS,
@@ -219,9 +214,6 @@ from ._boxes import (
     make_side_connector,
     _arm_notches,
     _connector_arm_notches,
-    _corner_connector_direction,
-    _corner_connector_branches,
-    make_corner_connector,
     connector_for_print,
 )
 from ._fit import (
@@ -232,8 +224,6 @@ from ._fit import (
     installed_side_boxes,
     seat_transform,
     validate_side_fit,
-    installed_corner_boxes,
-    validate_corner_fit,
     _plain_corridor,
 )
 from ._export import (

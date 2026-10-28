@@ -19,9 +19,6 @@ from ._specs import (
     WAVE_LENGTH,
     WAVE_MATING_GAP,
     CORNER_INSET,
-    MIN_JOINABLE_SIZE,
-    CORNER_CONNECTOR_ARM_START,
-    CORNER_CONNECTOR_END,
     DEFAULT_SIDE_LENGTH,
     DIFFERING_MIN_DROP,
     DIFFERING_WEB_THICKNESS,
@@ -537,86 +534,6 @@ def _connector_arm_notches(
                 )
             )
     return notches
-
-
-def _corner_connector_direction(
-    box: BoxSpec,
-    connector: ConnectorSpec,
-    axis: str,
-    direction: int,
-    include_grip: bool = True,
-) -> trimesh.Trimesh:
-    """One corner branch: always a cap bridge, optionally a locked grip arm."""
-    if axis not in {"x", "y"} or direction not in (-1, 1):
-        raise ValueError("corner leg needs axis x/y and direction -1/+1")
-    inner_hw, outer_hw = connector_half_widths(box, connector)
-    end = CORNER_CONNECTOR_END
-    start = CORNER_CONNECTOR_ARM_START
-
-    def span(a: float, b: float, extra: float = 0.0) -> np.ndarray:
-        lo, hi = (a, b) if direction > 0 else (-b, -a)
-        lo, hi = lo - extra, hi + extra
-        return np.linspace(lo, hi, _sample_count(hi - lo))
-
-    cap = _extrude_polygon(
-        _connector_corridor_polygon(axis, span(0.0, end), 0.0, outer_hw, box.wall_depth),
-        connector.cap_thickness,
-    )
-    cap.apply_translation((0.0, 0.0, connector.arm_depth))
-    if not include_grip:
-        return _cleaned(cap)
-
-    arm_coords = span(start, end)
-    body = _extrude_polygon(
-        _connector_corridor_polygon(axis, arm_coords, 0.0, outer_hw, box.wall_depth),
-        connector.arm_depth + 0.01,
-    )
-    channel = _extrude_polygon(
-        _connector_corridor_polygon(axis, span(start, end, 0.5), 0.0, inner_hw, box.wall_depth),
-        connector.arm_depth,
-    )
-    arm = difference([body, channel])
-    lo, hi = float(arm_coords[0]), float(arm_coords[-1])
-    notches = _connector_arm_notches(
-        connector, axis, lo, hi, 0.0, inner_hw, wall_depth=box.wall_depth,
-    )
-    if notches:
-        arm = difference([arm, *notches])
-    return union([arm, cap])
-
-
-def _corner_connector_branches(ways: int) -> tuple[tuple[str, int, bool], ...]:
-    """Installed-seam topology for the compact corner connectors."""
-    if ways == 3:
-        # NW, NE and SW bins are installed.  East completes the T cap, but the
-        # empty SE quadrant means it cannot honestly carry a two-wall grip.
-        return (("y", 1, True), ("x", -1, True), ("x", 1, False))
-    if ways == 4:
-        return (("y", 1, True), ("y", -1, True), ("x", 1, True), ("x", -1, True))
-    raise ValueError("corner connector must be 3-way or 4-way")
-
-
-def make_corner_connector(
-    box: BoxSpec, connector: ConnectorSpec, ways: int
-) -> trimesh.Trimesh:
-    """A compact 3-way or 4-way top connector for equal-height, same-wall bins.
-
-    The 3-way cap is a T: north and west have real two-bin grip channels,
-    while east is cap-only because the south-east quadrant is open. Rotate it
-    to suit. The 4-way part has four full-grip branches.
-    """
-    branches = _corner_connector_branches(ways)
-    if box.x < MIN_JOINABLE_SIZE - 1e-9 or box.y < MIN_JOINABLE_SIZE - 1e-9:
-        raise ValueError(
-            "Corner connectors need at least 16 mm (2 Wavefinity units) in both X "
-            "and Y so the clip can clear the corners and engage the wall locks."
-        )
-    _validate_connector_arm_clearance(box, connector, (box.z,))
-    parts = [
-        _corner_connector_direction(box, connector, axis, direction, include_grip)
-        for axis, direction, include_grip in branches
-    ]
-    return _cleaned(union(parts))
 
 
 def connector_for_print(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
