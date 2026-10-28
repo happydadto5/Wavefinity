@@ -18,6 +18,8 @@ from ._specs import (
     DEFAULT_WALL,
     DEFAULT_CORNER_FILLET,
     CORNER_INSET,
+    CORNER_POST_FLANK_RADIUS,
+    CORNER_POST_TIP_DISTANCE,
     LOCK_PROTRUSION,
     LOCK_FLAT,
     LOCK_CHAMFER,
@@ -124,13 +126,13 @@ def _wall_points(
     phase_x: float = 0.0,
     phase_y: float = 0.0,
 ) -> list[tuple[float, float]]:
-    """Counter-clockwise outline: four wavy walls joined by corner chords.
+    """Counter-clockwise outline: four wavy walls joined by pointed posts.
 
     ``half_*`` place the faces; ``tangent_*`` give the requested wall ends,
-    normally from the outer profile. Each run is capped at the innermost
-    possible face of its neighbouring walls, so a reduced cavity cannot
-    overhang those walls and cross its own corner chords. The surviving
-    wall runs keep exactly the same wave and phase. ``points_per_cycle``
+    normally from the outer profile. Each run retains its existing cap at
+    the innermost possible face of its neighbouring walls. Pointed corner
+    posts join the unchanged run ends; wall runs keep the same wave and
+    phase. ``points_per_cycle``
     overrides the sampling with a *density* rather than a fixed total, so a
     long wall and a short one on the same box come out equally smooth - the
     preview uses this to get a coarse ring it can draw quickly without a
@@ -154,20 +156,69 @@ def _wall_points(
     else:
         count_x = max(4, round(points_per_cycle * 2.0 * tangent_x / WAVE_LENGTH))
         count_y = max(4, round(points_per_cycle * 2.0 * tangent_y / WAVE_LENGTH))
-    # Keep counts based on the requested tangents: preview outer/cavity rings
-    # must still match point for point even when their corner runs differ.
-    # The amplitude bound works for every phase, including off-grid spacers.
-    # Wall strips and the rectangles containing their corner chords then
-    # have disjoint interiors, preventing corner self-intersections.
+    # Keep the existing wall sampling and amplitude cap, including spacers.
+    # Preview cavity points are projected from the completed outer ring.
     tangent_x = min(tangent_x, max(0.0, half_x - WAVE_AMPLITUDE))
     tangent_y = min(tangent_y, max(0.0, half_y - WAVE_AMPLITUDE))
     xs = np.linspace(-tangent_x, tangent_x, count_x)
     ys = np.linspace(-tangent_y, tangent_y, count_y)
+    walls = [
+        [(float(s), -half_y + wall_wave_value(float(s) + phase_x, "x")) for s in xs],
+        [(half_x + wall_wave_value(float(s) + phase_y, "y"), float(s)) for s in ys],
+        [(float(s), half_y + wall_wave_value(float(s) + phase_x, "x")) for s in xs[::-1]],
+        [(-half_x + wall_wave_value(float(s) + phase_y, "y"), float(s)) for s in ys[::-1]],
+    ]
+
+    def flank(start, previous, tip):
+        # Continue the existing run's end tangent to a radius-fixed circle
+        # through the tip. The shorter solution keeps the blend in the corner.
+        direction = np.asarray(start) - previous
+        length = float(np.linalg.norm(direction))
+        if length <= 1e-12:
+            return None
+        direction /= length
+        normal = np.array([-direction[1], direction[0]])
+        delta = np.asarray(tip) - start
+        height = float(np.dot(delta, normal))
+        turn = 1.0 if height >= 0.0 else -1.0
+        height = abs(height)
+        radius = CORNER_POST_FLANK_RADIUS
+        if height <= 1e-12:
+            return [start, tip]
+        discriminant = 2.0 * radius * height - height * height
+        if discriminant < 0.0:
+            return None
+        extension = float(np.dot(delta, direction)) - math.sqrt(discriminant)
+        if extension < -1e-9:
+            return None
+        contact = np.asarray(start) + max(0.0, extension) * direction
+        centre = contact + turn * radius * normal
+        angle = math.atan2(contact[1] - centre[1], contact[0] - centre[0])
+        sweep = turn * math.acos(max(-1.0, min(1.0, 1.0 - height / radius)))
+        angles = np.linspace(angle, angle + sweep, _sample_count(radius * abs(sweep)))
+        arc = [(float(centre[0] + radius * math.cos(a)),
+                float(centre[1] + radius * math.sin(a))) for a in angles]
+        # Keep the exact run end and exact shared tip, avoiding tiny join edges.
+        arc[0], arc[-1] = tuple(contact), tip
+        return [start] + (arc if extension > 1e-9 else arc[1:])
+
+    # half_* already includes the fit inset; add it back to locate the nominal
+    # grid meeting M. Tip distance is measured radially, not once per axis.
+    tip_inset = CORNER_POST_TIP_DISTANCE / math.sqrt(2.0)
+    tip_x = half_x + WAVE_MATING_GAP / 2.0 - tip_inset
+    tip_y = half_y + WAVE_MATING_GAP / 2.0 - tip_inset
     points: list[tuple[float, float]] = []
-    points += [(float(s), -half_y + wall_wave_value(float(s) + phase_x, "x")) for s in xs]
-    points += [(half_x + wall_wave_value(float(s) + phase_y, "y"), float(s)) for s in ys]
-    points += [(float(s), half_y + wall_wave_value(float(s) + phase_x, "x")) for s in xs[::-1]]
-    points += [(-half_x + wall_wave_value(float(s) + phase_y, "y"), float(s)) for s in ys[::-1]]
+    for index, (sign_x, sign_y) in enumerate(((1, -1), (1, 1), (-1, 1), (-1, -1))):
+        wall, following = walls[index], walls[(index + 1) % len(walls)]
+        points += wall
+        tip = (sign_x * tip_x, sign_y * tip_y)
+        incoming = flank(wall[-1], wall[-2], tip)
+        outgoing = flank(following[0], following[1], tip)
+        # Off-grid spacer phases can put the fixed-radius tangent outside the
+        # corner region. Retain their original chord rather than fold a flank.
+        if incoming is not None and outgoing is not None:
+            points += incoming[1:]
+            points += outgoing[-2:0:-1]
     return points
 
 

@@ -81,6 +81,9 @@ BASE_PRESETS = (
 )
 DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner
+# Story 2300: pointed-post flanks survive the unchanged 0.6 mm rounding.
+CORNER_POST_FLANK_RADIUS = 0.65
+CORNER_POST_TIP_DISTANCE = 0.45  # from the nominal grid meeting, on its diagonal
 # Locked in after the physical tolerance print: these are no longer tuning
 # knobs, they are the connector's specification.
 LOCKED_TOLERANCE = 0.02       # chosen from the printed 5-clip fit plate
