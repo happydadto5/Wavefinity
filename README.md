@@ -1335,33 +1335,33 @@ end on top of the two walls.
 
 ### Grid and mating
 
-Boxes tile on a plain X by Y pitch. The solid outline is smaller than that pitch
-by a **0.25 mm mating gap**, so two boxes placed one pitch apart have their waves
-nested with a constant 0.25 mm clearance and never touch. Measured perpendicular
-to the leaning wall rather than straight across the seam that is **0.21 mm**
-— `nested_clearance()`, and the figure a slicer actually sees.
+Boxes tile on a 7 mm grid. The signed circular-arc wave keeps its 3.5 mm
+cycle, 0.4 mm amplitude and nominal **0.25 mm mating gap** outside the local
+junction relief. Clearance measured perpendicular to the wall is smaller;
+the finished Story 2335 profile has a minimum of about **0.171 mm**.
 
-Where two wavy walls meet, the corner is a short chamfer eased to a **0.6 mm
-fillet**. The rounding is a morphological opening, which only affects convex
-corners sharper than that radius — the wave's own crests are far blunter, so they
-come through untouched.
+Bin wall runs keep their original ends. Short straight flanks meet at a tip
+pulled **0.20 mm radially** back from the nominal grid corner, then a **0.25 mm
+morphological opening** rounds the finished tip. This fixed bin-tip radius is
+separate from the existing fillets used by other parts. The four-bin junction
+has a **0.617 mm diagonal opening**, not a zero gap. Using the same 1.3 mm-radius
+disk measurement, uncovered area falls from **2.064 to 1.310 mm²**.
 
-**Two of the four corners look flatter than the other two, and that is correct.**
-Walls stop `CORNER_INSET` = 1.0 mm short of the nominal corner, wherever the wave
-happens to be at that point. Because the wave is odd, one diagonal's walls end on
-a crest and the other's on a trough, so the chamfer joining them comes out about
-**1.97 mm** on one pair of corners and **0.86 mm** on the other. The 0.6 mm
-fillet eases the ends of each chord but does not remove it, leaving roughly
-**1.26 mm** and **0.50 mm** of flat in the exported solid. This is real geometry,
-not a preview artefact.
+At every interior nominal 7 mm node, a long bin wall moves inward by a smooth
+cosine relief: **0.30 mm maximum over ±1.20 mm**. Nodes are derived from the
+current nominal edges, so mixed sizes and quarter-turns share the same lattice.
+This leaves space for a smaller bin's corner at a T-junction. Off-grid spacer
+outlines explicitly keep their old corners, waveform and phase, without these
+bin-only recesses.
 
-It is also not a mating surface. A corner is a chord across the wave, and a
-chord cuts *inward* from the envelope the walls sweep — so a corner can only
-ever add clearance, never take it away. Two bins sharing a wall clear each other
-by 0.21 mm the whole length of that wall, matched sizes and mixed sizes alike;
-two meeting only at a corner clear each other by about **1.2 mm**.
-`mating_clearance()` measures exactly this, and the suite pins it for a packed
-drawer of seven different sizes.
+The cavity is the finished exterior eroded by the declared wall thickness.
+Preview rings use that same finished outline and cavity. Side-connector arms,
+caps and notches clear the inward envelope of both node parities, so one clip
+still works at whole-wave positions. Bumps follow each bin's actual eroded face;
+the inside-size report also accounts for relief when it exceeds the old fit
+allowance. Ordinary bins on half-cell offsets are reported as incompatible,
+even in a Space with fine snapping. Regenerate adjoining bins and side clips
+together.
 
 ### Lock detent
 
@@ -1966,7 +1966,7 @@ these numbers look arbitrary and are not.
 | Wall | **0.8** | independent of the floor |
 | Base thickness | **0.8** default, **0.4** minimum | shown under Advanced in Build your bin |
 | Flat wall band | **0–1.0**, default 0 | height above the floor, not a fill depth |
-| Corner fillet | **0.6** | walls stop `CORNER_INSET` = 1.0 short of the nominal corner |
+| Bin corner tip | **0.25** radius | 0.20 radial pullback; wall runs retain `CORNER_INSET` = 1.0 |
 | **Connector tolerance** | **0.02** | **locked** by a physical print |
 | **Connector length** | **12.0** | **locked** |
 | **Connector height** | **9.6** | **locked**; cap 1.2, arms 1.0 thick |

@@ -374,7 +374,10 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         if not is_surface_layout(layout) and item["h"] > height_cap + 1e-6:
             problems.append({"type": "too_tall", "keys": item["keys"], "message": f"{label} is {item['h']:g} mm tall; this Space takes {height_cap:g} mm"})
         base = item["chain"][0]
-        if per_unit == 1 and (float(base["gx"]) % 1 or float(base["gy"]) % 1):
+        # Fine snapping still serves spacers, but ordinary bin corners need
+        # the common 7 mm relief lattice, even when the wave alone would fit.
+        ordinary = item["kind"] not in (*SPACER_KINDS, "b4b")
+        if (per_unit == 1 or ordinary) and (float(base["gx"]) % 1 or float(base["gy"]) % 1):
             problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sits off the 7 mm grid - move it to snap it back"})
         x0, y0, x1, y1 = item["rect"]
         if x0 < 0 or y0 < 0 or x1 > cols or y1 > rows:

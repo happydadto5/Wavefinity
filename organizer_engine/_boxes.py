@@ -188,11 +188,12 @@ def _connector_face_paths(
     axis: str, coordinates, phase_offset: float, half_width: float,
     wall_depth: float,
 ):
-    """Both connector faces, anchored to the same eroded face as the bumps.
+    """Both connector faces clear either parity of the relieved bin walls.
 
     ``half_width`` retains the old fit-envelope number. Replace its envelope
-    inset with each built face's local inset, leaving tolerance and arm width
-    untouched. Retain every offset breakpoint so a chord cannot cut a crest.
+    inset with the common inward face, leaving tolerance and arm width
+    untouched. Arms, caps, webs and notches all share this universal envelope.
+    Retain every offset breakpoint so a chord cannot cut a crest or recess.
     """
     coordinates = np.asarray(coordinates, dtype=float)
     extra = []

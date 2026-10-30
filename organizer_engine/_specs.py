@@ -79,11 +79,16 @@ BASE_PRESETS = (
     (1.0, "Extra Heavy"),
     (1.2, "Maximum"),
 )
-DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
+DEFAULT_CORNER_FILLET = 0.6   # legacy/general fillet; bin tips use their own radius
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner
-# Story 2300: pointed-post flanks survive the unchanged 0.6 mm rounding.
+# Legacy off-grid spacer corners retain their original profile.
 CORNER_POST_FLANK_RADIUS = 0.65
-CORNER_POST_TIP_DISTANCE = 0.45  # from the nominal grid meeting, on its diagonal
+CORNER_POST_TIP_DISTANCE = 0.45
+# Story 2335: bin-only printable tips and inward relief at nominal grid nodes.
+CORNER_TIP_PULLBACK = 0.20     # radial distance from the nominal grid meeting
+CORNER_TIP_FILLET = 0.25
+T_NODE_RELIEF_DEPTH = 0.30
+T_NODE_RELIEF_HALFWIDTH = 1.20
 # Locked in after the physical tolerance print: these are no longer tuning
 # knobs, they are the connector's specification.
 LOCKED_TOLERANCE = 0.02       # chosen from the printed 5-clip fit plate
@@ -816,15 +821,25 @@ class BoxSpec:
 
     @property
     def usable_inside(self) -> tuple[float, float]:
-        """Conservative straight-sided fit rectangle, unchanged by erosion.
+        """Conservative straight-sided fit rectangle inside the relieved walls.
 
-        The wall is a constant normal-distance offset, with thicker suppressed
-        crests above the arc radius. Keep the full-slope axis envelope plus
-        one wave amplitude on each side for the existing fit-size promise.
+        Retain the old full-slope envelope unless a real recessed face reaches
+        farther inward (notably the legacy 0.2 mm wall). A one-cell wall has
+        no interior nodes. The cached face depends on current wall depth;
+        dimensions and their odd/even node positions are never cached here.
         """
-        clear_x = 2.0 * (self.half_x - self.wall_depth) - 2.0 * WAVE_AMPLITUDE
-        clear_y = 2.0 * (self.half_y - self.wall_depth) - 2.0 * WAVE_AMPLITUDE
-        return clear_x, clear_y
+        from ._wave import _periodic_wall_face
+
+        def inset(axis: str, run_length: float) -> float:
+            envelope = self.wall_depth + WAVE_AMPLITUDE
+            if run_length > GRID_PITCH:
+                for side in (-1.0, 1.0):
+                    _, faces = _periodic_wall_face(self.wall_depth, axis, side)
+                    envelope = max(envelope, float(max(-side * faces)))
+            return envelope
+
+        return (2.0 * (self.half_x - inset("y", self.y)),
+                2.0 * (self.half_y - inset("x", self.x)))
 
     @property
     def usable_opening(self) -> tuple[float, float]:

@@ -507,7 +507,8 @@ def _stack_item(root: dict, drawer: dict[str, Any], by_id: dict[str, dict],
             if (gx < parent["gx"] or gy < parent["gy"]
                     or gx + w > parent["gx"] + parent["w"] or gy + d > parent["gy"] + parent["d"]):
                 issues.append(f"{_label(one)} sticks out past the edge of {_label(below)}")
-            if per_unit == 1 and (_offset(placement.get("ox")) % 1 or _offset(placement.get("oy")) % 1):
+            ordinary = one.get("kind", "bin") not in (*SPACER_KINDS, "b4b")
+            if (per_unit == 1 or ordinary) and (_offset(placement.get("ox")) % 1 or _offset(placement.get("oy")) % 1):
                 issues.append(f"{_label(one)} sits off the 7 mm grid on {_label(below)}")
             below_plan = (plans or {}).get(below["id"], {})
             pitch = below_plan.get("pitch_mm", stack_pitch(below))
