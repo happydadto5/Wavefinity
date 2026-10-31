@@ -18,13 +18,6 @@ from ._specs import (
     DEFAULT_WALL,
     DEFAULT_CORNER_FILLET,
     CORNER_INSET,
-    CORNER_POST_FLANK_RADIUS,
-    CORNER_POST_TIP_DISTANCE,
-    CORNER_TIP_PULLBACK,
-    CORNER_TIP_FILLET,
-    T_NODE_RELIEF_DEPTH,
-    T_NODE_RELIEF_HALFWIDTH,
-    GRID_PITCH,
     LOCK_PROTRUSION,
     LOCK_FLAT,
     LOCK_CHAMFER,
@@ -122,19 +115,6 @@ def _sample_count(span: float) -> int:
 # --------------------------------------------------------------------------- #
 # profiles
 # --------------------------------------------------------------------------- #
-def _node_relief(coordinate: float, nominal_half: float) -> float:
-    """Bin-local nodes anchored to nominal edges, including odd cell counts."""
-    node_index = round((coordinate + nominal_half) / GRID_PITCH)
-    cells = round(2.0 * nominal_half / GRID_PITCH)
-    if not 0 < node_index < cells:
-        return 0.0
-    distance = coordinate - (-nominal_half + node_index * GRID_PITCH)
-    if abs(distance) >= T_NODE_RELIEF_HALFWIDTH:
-        return 0.0
-    return T_NODE_RELIEF_DEPTH * (1.0 + math.cos(
-        math.pi * distance / T_NODE_RELIEF_HALFWIDTH)) / 2.0
-
-
 def _wall_points(
     half_x: float,
     half_y: float,
@@ -143,17 +123,18 @@ def _wall_points(
     points_per_cycle: float | None = None,
     phase_x: float = 0.0,
     phase_y: float = 0.0,
-    *, bin_profile: bool = False,
 ) -> list[tuple[float, float]]:
-    """Counter-clockwise outline: four wavy walls joined by pointed posts.
+    """Counter-clockwise outline: four wavy walls joined by corner chords.
 
     ``half_*`` place the faces; ``tangent_*`` give the requested wall ends,
-    normally from the outer profile. Each run retains its existing cap at
-    the innermost possible face of its neighbouring walls. Pointed corner
-    posts join the unchanged run ends; wall runs keep the same wave and
-    phase. Bin profiles add inward relief only at interior nominal nodes.
-    ``points_per_cycle`` is a density override for raw outline callers;
-    the bin preview uses the finished, rounded production polygon instead.
+    normally from the outer profile. Each run is capped at the innermost
+    possible face of its neighbouring walls, so a reduced cavity cannot
+    overhang those walls and cross its own corner chords. The surviving
+    wall runs keep exactly the same wave and phase. ``points_per_cycle``
+    overrides the sampling with a *density* rather than a fixed total, so a
+    long wall and a short one on the same box come out equally smooth - the
+    preview uses this to get a coarse ring it can draw quickly without a
+    fixed point budget starving whichever pair of walls is longer.
 
     ``phase_x``/``phase_y`` shift the wave sampled on the front/back walls
     (which run along X) and the left/right walls (which run along Y)
@@ -173,80 +154,20 @@ def _wall_points(
     else:
         count_x = max(4, round(points_per_cycle * 2.0 * tangent_x / WAVE_LENGTH))
         count_y = max(4, round(points_per_cycle * 2.0 * tangent_y / WAVE_LENGTH))
-    # Keep the existing wall sampling and amplitude cap, including spacers.
-    # Preview cavity points are projected from the completed outer ring.
+    # Keep counts based on the requested tangents: preview outer/cavity rings
+    # must still match point for point even when their corner runs differ.
+    # The amplitude bound works for every phase, including off-grid spacers.
+    # Wall strips and the rectangles containing their corner chords then
+    # have disjoint interiors, preventing corner self-intersections.
     tangent_x = min(tangent_x, max(0.0, half_x - WAVE_AMPLITUDE))
     tangent_y = min(tangent_y, max(0.0, half_y - WAVE_AMPLITUDE))
     xs = np.linspace(-tangent_x, tangent_x, count_x)
     ys = np.linspace(-tangent_y, tangent_y, count_y)
-    # Only ordinary bins opt in. Raw/off-grid spacer calls retain their phase
-    # and old corners, with no inferred or cached local relief lattice.
-    rx = [_node_relief(float(s), half_x + WAVE_MATING_GAP / 2.0)
-          if bin_profile else 0.0 for s in xs]
-    ry = [_node_relief(float(s), half_y + WAVE_MATING_GAP / 2.0)
-          if bin_profile else 0.0 for s in ys]
-    walls = [
-        [(float(s), -half_y + wall_wave_value(float(s) + phase_x, "x") + r) for s, r in zip(xs, rx)],
-        [(half_x + wall_wave_value(float(s) + phase_y, "y") - r, float(s)) for s, r in zip(ys, ry)],
-        [(float(s), half_y + wall_wave_value(float(s) + phase_x, "x") - r) for s, r in zip(xs[::-1], rx[::-1])],
-        [(-half_x + wall_wave_value(float(s) + phase_y, "y") + r, float(s)) for s, r in zip(ys[::-1], ry[::-1])],
-    ]
-
-    def flank(start, previous, tip):
-        # Continue the existing run's end tangent to a radius-fixed circle
-        # through the tip. The shorter solution keeps the blend in the corner.
-        direction = np.asarray(start) - previous
-        length = float(np.linalg.norm(direction))
-        if length <= 1e-12:
-            return None
-        direction /= length
-        normal = np.array([-direction[1], direction[0]])
-        delta = np.asarray(tip) - start
-        height = float(np.dot(delta, normal))
-        turn = 1.0 if height >= 0.0 else -1.0
-        height = abs(height)
-        radius = CORNER_POST_FLANK_RADIUS
-        if height <= 1e-12:
-            return [start, tip]
-        discriminant = 2.0 * radius * height - height * height
-        if discriminant < 0.0:
-            return None
-        extension = float(np.dot(delta, direction)) - math.sqrt(discriminant)
-        if extension < -1e-9:
-            return None
-        contact = np.asarray(start) + max(0.0, extension) * direction
-        centre = contact + turn * radius * normal
-        angle = math.atan2(contact[1] - centre[1], contact[0] - centre[0])
-        sweep = turn * math.acos(max(-1.0, min(1.0, 1.0 - height / radius)))
-        angles = np.linspace(angle, angle + sweep, _sample_count(radius * abs(sweep)))
-        arc = [(float(centre[0] + radius * math.cos(a)),
-                float(centre[1] + radius * math.sin(a))) for a in angles]
-        # Keep the exact run end and exact shared tip, avoiding tiny join edges.
-        arc[0], arc[-1] = tuple(contact), tip
-        return [start] + (arc if extension > 1e-9 else arc[1:])
-
-    # half_* already includes the fit inset; add it back to locate the nominal
-    # grid meeting M. Tip distance is measured radially, not once per axis.
-    pullback = CORNER_TIP_PULLBACK if bin_profile else CORNER_POST_TIP_DISTANCE
-    tip_inset = pullback / math.sqrt(2.0)
-    tip_x = half_x + WAVE_MATING_GAP / 2.0 - tip_inset
-    tip_y = half_y + WAVE_MATING_GAP / 2.0 - tip_inset
     points: list[tuple[float, float]] = []
-    for index, (sign_x, sign_y) in enumerate(((1, -1), (1, 1), (-1, 1), (-1, -1))):
-        wall, following = walls[index], walls[(index + 1) % len(walls)]
-        points += wall
-        tip = (sign_x * tip_x, sign_y * tip_y)
-        if bin_profile:
-            # Two short straight flanks, subsequently opened at the tip radius.
-            points.append(tip)
-            continue
-        incoming = flank(wall[-1], wall[-2], tip)
-        outgoing = flank(following[0], following[1], tip)
-        # Off-grid spacer phases can put the fixed-radius tangent outside the
-        # corner region. Retain their original chord rather than fold a flank.
-        if incoming is not None and outgoing is not None:
-            points += incoming[1:]
-            points += outgoing[-2:0:-1]
+    points += [(float(s), -half_y + wall_wave_value(float(s) + phase_x, "x")) for s in xs]
+    points += [(half_x + wall_wave_value(float(s) + phase_y, "y"), float(s)) for s in ys]
+    points += [(float(s), half_y + wall_wave_value(float(s) + phase_x, "x")) for s in xs[::-1]]
+    points += [(-half_x + wall_wave_value(float(s) + phase_y, "y"), float(s)) for s in ys[::-1]]
     return points
 
 
@@ -275,8 +196,7 @@ def preview_rings(
     Projection also suppresses folded crests, keeping the preview tied to the
     printable offset rather than drawing the old axis-shifted wall.
     """
-    # Use the finished printable outline, including the tip rounding and relief.
-    # Keep every breakpoint; coarse wall chords can hide the small junction gap.
+    # Draw the finished printable outline, keeping its smooth wall samples.
     outer = list(wavy_outer_polygon(spec).exterior.coords)[:-1]
     boundary = wavy_cavity_polygon(spec).exterior
     cavity = [
@@ -289,7 +209,6 @@ def preview_rings(
 def wavy_rect_outer(
     half_x: float, half_y: float, corner_fillet: float = DEFAULT_CORNER_FILLET,
     phase_x: float = 0.0, phase_y: float = 0.0,
-    *, bin_profile: bool = False,
 ) -> Polygon:
     """The same wavy outline ``wavy_outer_polygon`` builds, from raw half-
     extents instead of a ``BoxSpec`` - so a caller whose x/y is not the 7 mm
@@ -302,24 +221,19 @@ def wavy_rect_outer(
     NOT land on that lattice - a spacer sized to a genuine non-7-mm-multiple
     free region - must pass its centre's own offset from the lattice (see
     ``_wall_points``) so the wave still matches a neighbour's along every
-    seam once it is actually placed. ``bin_profile`` is an explicit opt-in
-    for grid bins; raw spacers keep their old waveform, corners and phasing.
+    seam once it is actually placed.
     """
     tx, ty = half_x - CORNER_INSET, half_y - CORNER_INSET
-    polygon = Polygon(_wall_points(
-        half_x, half_y, tx, ty, phase_x=phase_x, phase_y=phase_y,
-        bin_profile=bin_profile,
-    ))
+    polygon = Polygon(_wall_points(half_x, half_y, tx, ty, phase_x=phase_x, phase_y=phase_y))
     if not polygon.is_valid:
         polygon = polygon.buffer(0)
     if not isinstance(polygon, Polygon) or not polygon.is_valid:
         raise RuntimeError("wavy box outline is not a valid single polygon")
-    radius = CORNER_TIP_FILLET if bin_profile else corner_fillet
-    return _rounded(polygon, radius)
+    return _rounded(polygon, corner_fillet)
 
 
 def wavy_outer_polygon(spec: BoxSpec) -> Polygon:
-    return wavy_rect_outer(spec.half_x, spec.half_y, spec.corner_fillet, bin_profile=True)
+    return wavy_rect_outer(spec.half_x, spec.half_y, spec.corner_fillet)
 
 
 @lru_cache(maxsize=128)
@@ -327,7 +241,6 @@ def wavy_rect_cavity(
     half_x: float, half_y: float, wall_depth: float,
     corner_fillet: float = DEFAULT_CORNER_FILLET, wall: float = DEFAULT_WALL,
     phase_x: float = 0.0, phase_y: float = 0.0,
-    *, bin_profile: bool = False,
 ) -> Polygon:
     """Constant-distance erosion of the *built* outer outline by ``wall``.
 
@@ -336,9 +249,7 @@ def wavy_rect_cavity(
     those crests have extra material, never less than the declared wall.
     ``wall_depth`` remains a compatibility/fit-envelope argument only.
     """
-    outer = wavy_rect_outer(
-        half_x, half_y, corner_fillet, phase_x, phase_y, bin_profile=bin_profile,
-    )
+    outer = wavy_rect_outer(half_x, half_y, corner_fillet, phase_x, phase_y)
     polygon = outer.buffer(-wall, join_style=1, quad_segs=64) if wall else outer
     if not isinstance(polygon, Polygon) or polygon.is_empty or not polygon.is_valid:
         raise RuntimeError("wavy cavity erosion did not produce a valid single polygon")
@@ -347,10 +258,7 @@ def wavy_rect_cavity(
 
 def wavy_cavity_polygon(spec: BoxSpec) -> Polygon:
     """Interior outline, eroded by the declared perpendicular wall thickness."""
-    return wavy_rect_cavity(
-        spec.half_x, spec.half_y, spec.wall_depth, spec.corner_fillet, spec.wall,
-        bin_profile=True,
-    )
+    return wavy_rect_cavity(spec.half_x, spec.half_y, spec.wall_depth, spec.corner_fillet, spec.wall)
 
 
 def _wall_face_values(
@@ -396,27 +304,20 @@ def _wall_face_path(cavity: Polygon, coordinates, run_axis: str, side: float):
 
 @lru_cache(maxsize=64)
 def _periodic_wall_face(wall_depth: float, run_axis: str, side: float):
-    """Universal clip face enclosing both parities of the 7 mm node lattice.
+    """One period of the built face, away from the corner transitions.
 
-    Moving a printed clip one wave (3.5 mm), or joining odd/even cell counts,
-    swaps the relief parity without changing the wave. Intersect both actual
-    cavities with their outer wall axes aligned: the inward envelope clears
-    either wall while retaining the fixed arm thickness and lock dimensions.
-    The envelope repeats every wave and includes every crossing breakpoint.
+    Ordinary grid bins have the same 1/16 mm outer sampling lattice. This
+    reference outline uses that lattice too; only its central period is kept,
+    so connectors also follow the wall when their cap spans a bin corner.
     """
+    half = 4.0 * WAVE_LENGTH - WAVE_MATING_GAP / 2.0
     wall = wall_depth / wall_depth_for(1.0)
-    cavities = []
-    for cycles in (4.0, 5.0):
-        half = cycles * WAVE_LENGTH - WAVE_MATING_GAP / 2.0
-        cavity = wavy_rect_cavity(half, half, wall_depth, wall=wall, bin_profile=True)
-        offset = (-side * half, 0.0) if run_axis == "y" else (0.0, -side * half)
-        cavities.append(translate_polygon(cavity, *offset))
-    common = cavities[0].intersection(cavities[1])
+    cavity = wavy_rect_cavity(half, half, wall_depth, wall=wall)
     path = np.asarray(_wall_face_path(
-        common, [-WAVE_LENGTH / 2.0, WAVE_LENGTH / 2.0], run_axis, side,
+        cavity, [-WAVE_LENGTH / 2.0, WAVE_LENGTH / 2.0], run_axis, side,
     ))
     along = 1 if run_axis == "y" else 0
-    return path[:, along], path[:, 1 - along]
+    return path[:, along], path[:, 1 - along] - side * half
 
 
 def _wall_face_offset(
@@ -466,21 +367,19 @@ def mating_clearance(
     b: BoxSpec,
     b_centre: tuple[float, float],
 ) -> float:
-    """Smallest gap for bins whose nominal edges share the 7 mm node lattice.
+    """Smallest gap between two bins standing side by side on the grid.
 
-    Whole-wave centres alone are insufficient: a half-cell edge shift retains
-    the wave but moves a corner away from the neighbour's T-node relief.
-    Reject that placement rather than rephase either printed bin locally.
+    Two bins that share a wall measure ``nested_clearance()`` whatever their
+    sizes, because that wall is one global wave and the two outlines are the
+    same curve offset by ``WAVE_MATING_GAP``.  Two that meet only at a corner
+    measure more: a corner chord cuts *inward* from the wave envelope, so a
+    corner can only ever add clearance.  That is why the corner flats - which
+    join the four rotationally matching wall runs - are a
+    corner transitions rather than a separate mating phase.
+
+    Raises if the two outlines actually intersect.  A collision is a fault in
+    the sizes or the placement, not a clearance worth reporting.
     """
-    for axis, size_a, size_b, centre_a, centre_b in zip(
-        ("X", "Y"), (a.x, a.y), (b.x, b.y), a_centre, b_centre,
-    ):
-        cells = ((centre_b - size_b / 2.0) - (centre_a - size_a / 2.0)) / GRID_PITCH
-        if abs(cells - round(cells)) > 1e-6:
-            raise ValueError(
-                f"bin edges must share the {GRID_PITCH:g} mm grid on {axis} "
-                "so corners meet the neighbouring wall relief"
-            )
     first = placed_outline(a, a_centre)
     second = placed_outline(b, b_centre)
     overlap = first.intersection(second)
@@ -535,14 +434,12 @@ def _rect_wall_lock_paths(
     half_x: float, half_y: float, wall_depth: float,
     phase_x: float = 0.0, phase_y: float = 0.0,
     *, wall: float | None = None, corner_fillet: float = DEFAULT_CORNER_FILLET,
-    bin_profile: bool = False,
 ) -> list[tuple[list[tuple[float, float]], tuple[float, float]]]:
     """Lock paths on the built cavity, retaining the global extremum lattice."""
     if wall is None:
         wall = wall_depth / wall_depth_for(1.0)
     cavity = wavy_rect_cavity(
         half_x, half_y, wall_depth, corner_fillet, wall, phase_x, phase_y,
-        bin_profile=bin_profile,
     )
     walls = (
         ("y", half_y, 1.0, (-1.0, 0.0), phase_y),
@@ -565,7 +462,7 @@ def _wall_lock_paths(
 ) -> list[tuple[list[tuple[float, float]], tuple[float, float]]]:
     return _rect_wall_lock_paths(
         spec.half_x, spec.half_y, spec.wall_depth,
-        wall=spec.wall, corner_fillet=spec.corner_fillet, bin_profile=True,
+        wall=spec.wall, corner_fillet=spec.corner_fillet,
     )
 
 
@@ -573,16 +470,13 @@ def make_wall_lock_bumps_raw(
     half_x: float, half_y: float, wall_depth: float, z: float,
     phase_x: float = 0.0, phase_y: float = 0.0,
     *, wall: float | None = None, corner_fillet: float = DEFAULT_CORNER_FILLET,
-    bin_profile: bool = False,
 ) -> list[trimesh.Trimesh]:
     """Bumps on the eroded face, with roots limited by real local thickness."""
-    outer = wavy_rect_outer(
-        half_x, half_y, corner_fillet, phase_x, phase_y, bin_profile=bin_profile,
-    )
+    outer = wavy_rect_outer(half_x, half_y, corner_fillet, phase_x, phase_y)
     bumps = []
     for path, inward in _rect_wall_lock_paths(
         half_x, half_y, wall_depth, phase_x, phase_y,
-        wall=wall, corner_fillet=corner_fillet, bin_profile=bin_profile,
+        wall=wall, corner_fillet=corner_fillet,
     ):
         profile = _lock_profile(LOCK_PROTRUSION, embed=_lock_embed(path, outer))
         bumps.append(translated(_sweep_profile(path, inward, profile), (0.0, 0.0, z)))
@@ -593,7 +487,7 @@ def make_wall_lock_bumps(spec: BoxSpec) -> list[trimesh.Trimesh]:
     """Small chamfered bumps standing proud of each wall's built interior face."""
     return make_wall_lock_bumps_raw(
         spec.half_x, spec.half_y, spec.wall_depth, spec.z,
-        wall=spec.wall, corner_fillet=spec.corner_fillet, bin_profile=True,
+        wall=spec.wall, corner_fillet=spec.corner_fillet,
     )
 
 

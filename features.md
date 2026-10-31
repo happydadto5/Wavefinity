@@ -18,12 +18,10 @@ The global-phase circular-arc walls and snap connectors share one profile.
 Keep wall thicknesses compatible and allow enough common wall for a connector;
 existing lid and height restrictions still apply. Arbitrary angles or off-grid
 placement do not promise a mating fit. Regenerate neighbouring bins and clips
-together: older prints use a different profile. Rounded bin tips leave a small
-printable opening where corners meet. Shallow recesses along long walls give
-smaller bins room at T-junctions; off-grid spacers keep their existing profile.
-These details are automatic, with no extra design setting or corner connector.
-Ordinary bins must stay on whole 7 mm cell edges, including in a Space with
-fine snapping; a half-cell offset is reported as incompatible.
+together: older sine-wave prints use a different profile. Walls follow the
+same uninterrupted wave, with rounded, set-back corners and a small opening
+where four bins meet. The corner-tightening wall recesses have been removed;
+regenerate bins and side clips made with that profile as a set.
 
 ## Status
 

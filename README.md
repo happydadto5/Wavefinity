@@ -1335,33 +1335,28 @@ end on top of the two walls.
 
 ### Grid and mating
 
-Boxes tile on a 7 mm grid. The signed circular-arc wave keeps its 3.5 mm
-cycle, 0.4 mm amplitude and nominal **0.25 mm mating gap** outside the local
-junction relief. Clearance measured perpendicular to the wall is smaller;
-the finished Story 2335 profile has a minimum of about **0.171 mm**.
+Boxes tile on the 7 mm grid with the same global circular-arc wave on every
+wall: **3.5 mm per cycle**, **0.4 mm amplitude**, and **0.25 mm nominal mating
+gap** across a shared seam. The wave is uninterrupted along each wall; no
+periodic dents or local T-junction recesses are added. Normal clearance is
+smaller than the across-seam gap; `nested_clearance()` derives its conservative
+bound from the arc slope.
 
-Bin wall runs keep their original ends. Short straight flanks meet at a tip
-pulled **0.20 mm radially** back from the nominal grid corner, then a **0.25 mm
-morphological opening** rounds the finished tip. This fixed bin-tip radius is
-separate from the existing fillets used by other parts. The four-bin junction
-has a **0.617 mm diagonal opening**, not a zero gap. Using the same 1.3 mm-radius
-disk measurement, uncovered area falls from **2.064 to 1.310 mm²**.
+Wall runs stop `CORNER_INSET` = **1.0 mm** before the nominal corner. A chord
+joins their ends, eased by the existing **0.6 mm** outline rounding. This
+set-back corner leaves an opening where four bins meet and avoids the sharp
+posts that needed dents in neighbouring walls. The cavity remains the finished
+exterior eroded by the declared wall thickness. Preview rings follow that same
+finished exterior and cavity; side clips follow the original eroded wall face.
 
-At every interior nominal 7 mm node, a long bin wall moves inward by a smooth
-cosine relief: **0.30 mm maximum over ±1.20 mm**. Nodes are derived from the
-current nominal edges, so mixed sizes and quarter-turns share the same lattice.
-This leaves space for a smaller bin's corner at a T-junction. Off-grid spacer
-outlines explicitly keep their old corners, waveform and phase, without these
-bin-only recesses.
-
-The cavity is the finished exterior eroded by the declared wall thickness.
-Preview rings use that same finished outline and cavity. Side-connector arms,
-caps and notches clear the inward envelope of both node parities, so one clip
-still works at whole-wave positions. Bumps follow each bin's actual eroded face;
-the inside-size report also accounts for relief when it exceeds the old fit
-allowance. Ordinary bins on half-cell offsets are reported as incompatible,
-even in a Space with fine snapping. Regenerate adjoining bins and side clips
-together.
+**Direct repair, 2026-10-31:** Andrew reported rough waves and mismatching bin
+edges after the corner-tightening work. Story 2335 added 0.30 mm inward relief
+at interior 7 mm nodes, changed connector faces to clear that relief, and
+restricted fine-grid placement. Those changes and Story 2300's pointed corner
+posts were backed out together, restoring the geometry from `05ae617`.
+Finished-outline preview sampling is retained. Smooth, matching walls take
+priority over the smaller corner opening. Regenerate bins and side clips made
+with the corner-tightening profile as a set; existing exports do not update.
 
 ### Lock detent
 
@@ -1966,7 +1961,7 @@ these numbers look arbitrary and are not.
 | Wall | **0.8** | independent of the floor |
 | Base thickness | **0.8** default, **0.4** minimum | shown under Advanced in Build your bin |
 | Flat wall band | **0–1.0**, default 0 | height above the floor, not a fill depth |
-| Bin corner tip | **0.25** radius | 0.20 radial pullback; wall runs retain `CORNER_INSET` = 1.0 |
+| Corner fillet | **0.6** | walls stop `CORNER_INSET` = 1.0 short of the nominal corner |
 | **Connector tolerance** | **0.02** | **locked** by a physical print |
 | **Connector length** | **12.0** | **locked** |
 | **Connector height** | **9.6** | **locked**; cap 1.2, arms 1.0 thick |

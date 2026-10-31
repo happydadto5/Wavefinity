@@ -10,16 +10,15 @@ and an internal ``boundary`` tag ("" or "edge") tell them apart.  Drawer
 coordinates: x runs left to right, y runs from the front (0) to the back, z
 is height.  The Layout view draws the front at the bottom.
 
-The signed global wave and bin relief are compatible with quarter turns.
+The signed global circular-arc wave is compatible with quarter turns.
 The drawer's ``bin_axis = "y"`` runs every bin's X front-to-back; exchanging
-axes preserves the common 7 mm nominal edge lattice and its junction relief.
+axes preserves the shared wave phase.
 
 Placements
 ----------
 * On the grid: ``gx``/``gy`` in 7 mm units from the grid's front-left corner.
-  Fine snapping (``snap = 3.5``) remains available for spacers. Ordinary bins
-  need whole 7 mm edges: a half-unit shift preserves the wave but misses the
-  T-node relief, so the layout reports it as incompatible.
+  A drawer that snaps to 3.5 mm (``snap = 3.5``) allows half units: the wave
+  repeats every 3.5 mm, so a bin shifted half a unit along a seam still nests.
 * Stacked: ``on`` names the one placement it stands on (``"B3:0"``) and
   ``ox``/``oy`` are its offset in 7 mm units from that placement's front-left
   corner (missing means 0, which is what older same-footprint stacks carry).
