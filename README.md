@@ -1342,10 +1342,16 @@ periodic dents or local T-junction recesses are added. Normal clearance is
 smaller than the across-seam gap; `nested_clearance()` derives its conservative
 bound from the arc slope.
 
-Wall runs stop `CORNER_INSET` = **1.0 mm** before the nominal corner. A chord
-joins their ends, eased by the existing **0.6 mm** outline rounding. This
-set-back corner leaves an opening where four bins meet and avoids the sharp
-posts that needed dents in neighbouring walls. The cavity remains the finished
+Wall runs stop `CORNER_INSET` = **1.0 mm** before the nominal corner. At the
+default corner fillet the two runs' own waves are continued through the corner
+and joined by a tangent fillet of `CORNER_TIP_RADIUS` = **0.25 mm** (Story
+2425). The continuation keeps the seam's offset to every unchanged receiving
+wall, so no dents are needed. Each corner is checked against those walls (to
+`T_JUNCTION_CLEARANCE` = 0.164 mm) and the diagonal bin's corner; if a check
+fails the tip radius grows, and the earlier **0.6 mm** outline rounding of a
+chord corner remains the fallback and the behaviour of any other corner fillet
+setting. The opening where four bins meet is smaller than the chord's, but its
+size is unverified. The cavity remains the finished
 exterior eroded by the declared wall thickness. Preview rings follow that same
 finished exterior and cavity; side clips follow the original eroded wall face.
 

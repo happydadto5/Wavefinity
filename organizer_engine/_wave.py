@@ -18,6 +18,8 @@ from ._specs import (
     DEFAULT_WALL,
     DEFAULT_CORNER_FILLET,
     CORNER_INSET,
+    CORNER_TIP_RADIUS,
+    T_JUNCTION_CLEARANCE,
     LOCK_PROTRUSION,
     LOCK_FLAT,
     LOCK_CHAMFER,
@@ -59,9 +61,23 @@ def wave_value(coordinate: float) -> float:
                    - (radius - WAVE_AMPLITUDE))
 
 
+def wave_slope(coordinate: float) -> float:
+    """Derivative of :func:`wave_value`, from the same arc construction."""
+    quarter = WAVE_LENGTH / 4.0
+    radius = (quarter * quarter + WAVE_AMPLITUDE ** 2) / (2.0 * WAVE_AMPLITUDE)
+    phase = coordinate % WAVE_LENGTH
+    sign = 1.0 if phase < 2.0 * quarter else -1.0
+    local = phase % (2.0 * quarter) - quarter
+    return -sign * local / math.sqrt(max(1e-12, radius * radius - local * local))
+
+
 def wall_wave_value(coordinate: float, run_axis: str) -> float:
     """Global seam displacement; the signed X/Y pair survives quarter-turns."""
     return wave_value(coordinate) * (-1.0 if run_axis == "x" else 1.0)
+
+
+def wall_wave_slope(coordinate: float, run_axis: str) -> float:
+    return wave_slope(coordinate) * (-1.0 if run_axis == "x" else 1.0)
 
 
 def wave_cycles(straight_length: float) -> float:
@@ -188,6 +204,237 @@ def _rounded(polygon: Polygon, radius: float) -> Polygon:
     return result
 
 
+# --------------------------------------------------------------------------- #
+# clearance-envelope corners (Story 2425)
+# --------------------------------------------------------------------------- #
+# Each wall run ends CORNER_INSET short of the nominal corner. Continuing both
+# runs' own wave functions through the corner gives the farthest tangent-
+# continuous reach the neighbours' unchanged walls allow: the continuations are
+# the walls themselves, so they keep the seam's offset to every receiving wall.
+# They cross near the nominal corner; a fillet tangent to both, at the tip
+# radius, rejoins each run exactly. When a fillet cannot fit or a clearance
+# fails, the radius grows (the tip sets back) and the fit repeats.
+_CORNER_SIGNS = ((1.0, -1.0), (1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0))
+_CORNER_REACH = 1.0                 # continued waves run this far past the corner
+_CORNER_STEP = 1.0 / 64.0           # sampling pitch of a continued wave
+_CORNER_SCAN = 0.04                 # coarse pitch used to bracket the fillet
+_CORNER_RADIUS_STEPS = (1.0, 1.5, 2.25, 3.4, 5.0)   # x CORNER_TIP_RADIUS
+_CORNER_ARC_STEP = math.radians(5.0)
+_CORNER_RECEIVER_SPAN = 3.0
+# T_JUNCTION_CLEARANCE is the rounded form of the unchanged wall's own bound
+# (nested_clearance); the slack covers that rounding and polyline sampling.
+_CLEARANCE_SLACK = 1e-3
+
+
+def _wave_phase(coordinate: float) -> float:
+    return round(coordinate % WAVE_LENGTH, 9)
+
+
+def _corner_point(axis: str, argument: float, sign: float, t: float):
+    """Point ``t`` along a run, from its end at ``t = 0`` through the corner.
+
+    Corner-relative; ``argument`` is the wave argument of the nominal corner.
+    """
+    along = sign * (t - CORNER_INSET)
+    value = wall_wave_value(argument + along, axis)
+    return (along, value) if axis == "x" else (value, along)
+
+
+def _corner_normal(axis: str, argument: float, sign: float, cross: float, t: float):
+    """Unit normal of that run pointing into the bin's material."""
+    along = sign * (t - CORNER_INSET)
+    slope = wall_wave_slope(argument + along, axis)
+    scale = -cross / math.sqrt(1.0 + slope * slope)
+    return (-slope * scale, scale) if axis == "x" else (scale, -slope * scale)
+
+
+def _distinct(points) -> tuple:
+    kept: list = []
+    for point in points:
+        if not kept or math.hypot(point[0] - kept[-1][0], point[1] - kept[-1][1]) > 1e-9:
+            kept.append((float(point[0]), float(point[1])))
+    return tuple(kept)
+
+
+@lru_cache(maxsize=256)
+def _corner_paths(corner: int, arg_x: float, arg_y: float) -> tuple:
+    """Finished transitions of one corner, tip radius growing along the tuple.
+
+    Corner ``corner`` is the ``_wall_points`` order (0 = lower right, counter-
+    clockwise); coordinates are relative to its nominal corner. ``arg_x`` /
+    ``arg_y`` are the wave arguments there on the X-running and Y-running
+    walls. Every path starts at the arriving run's end and finishes at the
+    departing run's start, both on the unchanged wave, with a shared tangent
+    at each. An entry is ``None`` where no fillet of that radius fits.
+    """
+    sx, sy = _CORNER_SIGNS[corner]
+    first, second = ("x", "y") if corner % 2 == 0 else ("y", "x")
+    argument = {"x": arg_x, "y": arg_y}
+    sign = {"x": sx, "y": sy}
+    cross = {"x": sy, "y": sx}
+    span = CORNER_INSET + _CORNER_REACH
+    ts = [float(t) for t in np.linspace(0.0, span, int(math.ceil(span / _CORNER_STEP)) + 1)]
+
+    def point(axis, t):
+        return _corner_point(axis, argument[axis], sign[axis], t)
+
+    def normal(axis, t):
+        return _corner_normal(axis, argument[axis], sign[axis], cross[axis], t)
+
+    out_curve = [point(second, t) for t in ts]
+    out_line = LineString(out_curve)
+    out_steps = np.diff(np.asarray(out_curve), axis=0)
+    out_length = np.concatenate(([0.0], np.cumsum(np.hypot(out_steps[:, 0], out_steps[:, 1]))))
+
+    def centre(t, radius):
+        x, y = point(first, t)
+        nx, ny = normal(first, t)
+        return x + radius * nx, y + radius * ny
+
+    def gap(t, radius):
+        return out_line.distance(Point(*centre(t, radius))) - radius
+
+    def fillet(radius):
+        # Slide a circle of this radius along the arriving wall's inside until
+        # it also touches the departing wall's continuation: the first contact
+        # is the tangent fillet. Touching at the run end already means the
+        # fillet would have to begin on the wall itself, so it does not fit.
+        if gap(0.0, radius) <= 0.0:
+            return None
+        low = 0.0
+        high = None
+        for t in np.linspace(0.0, span, int(span / _CORNER_SCAN) + 1)[1:]:
+            if gap(float(t), radius) <= 0.0:
+                high = float(t)
+                break
+            low = float(t)
+        if high is None:
+            return None
+        for _ in range(40):
+            middle = 0.5 * (low + high)
+            if gap(middle, radius) > 0.0:
+                low = middle
+            else:
+                high = middle
+        t_root = 0.5 * (low + high)
+        cx, cy = centre(t_root, radius)
+        start = point(first, t_root)
+        along_out = out_line.project(Point(cx, cy))
+        end = out_line.interpolate(along_out).coords[0]
+        if abs(math.hypot(end[0] - cx, end[1] - cy) - radius) > 1e-4:
+            return None
+        angle = math.atan2(start[1] - cy, start[0] - cx)
+        sweep = (math.atan2(end[1] - cy, end[0] - cx) - angle) % (2.0 * math.pi)
+        if not 0.0 < sweep < math.pi:
+            return None
+        count = max(3, int(math.ceil(sweep / _CORNER_ARC_STEP)))
+        arc = [
+            (cx + radius * math.cos(angle + sweep * index / count),
+             cy + radius * math.sin(angle + sweep * index / count))
+            for index in range(1, count)
+        ]
+        head = [point(first, t) for t in ts if t < t_root - 1e-9]
+        tail = [out_curve[index] for index in range(len(out_curve) - 1, -1, -1)
+                if out_length[index] < along_out - 1e-9]
+        return _distinct(head + [start] + arc + [tuple(end)] + tail)
+
+    return tuple(fillet(CORNER_TIP_RADIUS * factor) for factor in _CORNER_RADIUS_STEPS)
+
+
+def _corner_receivers(corner: int, arg_x: float, arg_y: float) -> tuple:
+    """Unchanged receiving walls one mating gap outside a corner, as regions.
+
+    A neighbour's wall is this bin's own wall curve, displaced by the mating
+    gap, and it continues past the corner (the T junction where a corner faces
+    the middle of an uninterrupted wall). The region beyond each curve holds
+    whatever that neighbour is, so staying clear of it covers any neighbour
+    size. Both wall directions and, through ``corner``, every quarter-turn
+    and wave lean are covered.
+    """
+    sx, sy = _CORNER_SIGNS[corner]
+    gap = WAVE_MATING_GAP
+    far = gap + 2.0
+    span = _CORNER_RECEIVER_SPAN
+    steps = [float(s) for s in np.linspace(-span, span, int(round(2.0 * span / _CORNER_STEP)) + 1)]
+    along_x = [(s, sy * gap + wall_wave_value(arg_x + s, "x")) for s in steps]
+    along_y = [(sx * gap + wall_wave_value(arg_y + s, "y"), s) for s in steps]
+    return (
+        Polygon(along_x + [(span, sy * far), (-span, sy * far)]),
+        Polygon(along_y + [(sx * far, span), (sx * far, -span)]),
+    )
+
+
+def _opposing_corner(corner: int, arg_x: float, arg_y: float):
+    """Farthest-reaching finished corner of the bin diagonally across the seam.
+
+    Four bins meeting at a point: the diagonal neighbour's nearest corner sits
+    one mating gap away on each axis. Taking its largest-reach transition makes
+    the check independent of how far that bin has to retreat itself.
+    """
+    sx, sy = _CORNER_SIGNS[corner]
+    gap = WAVE_MATING_GAP
+    paths = _corner_paths(
+        (corner + 2) % 4, _wave_phase(arg_x + sx * gap), _wave_phase(arg_y + sy * gap),
+    )
+    for path in paths:
+        if path is not None:
+            return [(x + sx * gap, y + sy * gap) for x, y in path]
+    return None
+
+
+@lru_cache(maxsize=256)
+def _corner_ladder(corner: int, arg_x: float, arg_y: float) -> tuple:
+    """``_corner_paths`` entries that stay inside the clearance envelope."""
+    limit = T_JUNCTION_CLEARANCE - _CLEARANCE_SLACK
+    obstacles = list(_corner_receivers(corner, arg_x, arg_y))
+    opposing = _opposing_corner(corner, arg_x, arg_y)
+    if opposing is not None and len(opposing) > 1:
+        obstacles.append(LineString(opposing))
+    ladder = []
+    for path in _corner_paths(corner, arg_x, arg_y):
+        keep = path is not None and len(path) > 2
+        if keep:
+            line = LineString(path)
+            keep = all(line.distance(obstacle) >= limit for obstacle in obstacles)
+        ladder.append(path if keep else None)
+    return tuple(ladder)
+
+
+def _clearance_outline(
+    points: list[tuple[float, float]], half_x: float, half_y: float,
+    tx: float, ty: float, phase_x: float, phase_y: float,
+) -> Polygon | None:
+    """Wall runs (as ``_wall_points`` sampled them) joined by finished corners.
+
+    The corners of one bin share a ladder rung, so a retreat is symmetric;
+    ``None`` when no rung clears every corner, leaving the caller on the
+    opened baseline outline.
+    """
+    count_x = _sample_count(2.0 * tx)
+    count_y = _sample_count(2.0 * ty)
+    cuts = (0, count_x, count_x + count_y, 2 * count_x + count_y, 2 * count_x + 2 * count_y)
+    if len(points) != cuts[-1]:
+        return None
+    runs = [points[a:b] for a, b in zip(cuts[:-1], cuts[1:])]
+    for rung in range(len(_CORNER_RADIUS_STEPS)):
+        ring: list[tuple[float, float]] = []
+        for corner, (sx, sy) in enumerate(_CORNER_SIGNS):
+            path = _corner_ladder(
+                corner,
+                _wave_phase(sx * half_x + phase_x),
+                _wave_phase(sy * half_y + phase_y),
+            )[rung]
+            if path is None:
+                break
+            ring += runs[corner]
+            ring += [(sx * half_x + x, sy * half_y + y) for x, y in path[1:-1]]
+        else:
+            outline = Polygon(ring)
+            if outline.is_valid:
+                return outline
+    return None
+
+
 def preview_rings(
     spec: BoxSpec, points_per_cycle: float = 7.0
 ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
@@ -206,6 +453,7 @@ def preview_rings(
     return outer, cavity
 
 
+@lru_cache(maxsize=128)
 def wavy_rect_outer(
     half_x: float, half_y: float, corner_fillet: float = DEFAULT_CORNER_FILLET,
     phase_x: float = 0.0, phase_y: float = 0.0,
@@ -222,14 +470,28 @@ def wavy_rect_outer(
     free region - must pass its centre's own offset from the lattice (see
     ``_wall_points``) so the wave still matches a neighbour's along every
     seam once it is actually placed.
+
+    Story 2425: at the default corner fillet the corners are the clearance-
+    envelope construction above. ``_rounded``'s 0.6 mm opening is still applied
+    to the run-and-chord outline first; it stays the outline whenever no
+    corner rung fits the envelope, and for any other corner fillet setting.
+    The finished outline is the one outline every consumer receives, and the
+    cavity erodes it unchanged.
     """
     tx, ty = half_x - CORNER_INSET, half_y - CORNER_INSET
-    polygon = Polygon(_wall_points(half_x, half_y, tx, ty, phase_x=phase_x, phase_y=phase_y))
+    points = _wall_points(half_x, half_y, tx, ty, phase_x=phase_x, phase_y=phase_y)
+    polygon = Polygon(points)
     if not polygon.is_valid:
         polygon = polygon.buffer(0)
     if not isinstance(polygon, Polygon) or not polygon.is_valid:
         raise RuntimeError("wavy box outline is not a valid single polygon")
-    return _rounded(polygon, corner_fillet)
+    opened = _rounded(polygon, corner_fillet)
+    if abs(corner_fillet - DEFAULT_CORNER_FILLET) < 1e-9 and tx > 0.0 and ty > 0.0:
+        finished = _clearance_outline(points, half_x, half_y, tx, ty, phase_x, phase_y)
+        # A finished corner only ever reaches outward of the chord it replaces.
+        if finished is not None and finished.buffer(0.01).contains(opened):
+            return finished
+    return opened
 
 
 def wavy_outer_polygon(spec: BoxSpec) -> Polygon:
@@ -372,10 +634,11 @@ def mating_clearance(
     Two bins that share a wall measure ``nested_clearance()`` whatever their
     sizes, because that wall is one global wave and the two outlines are the
     same curve offset by ``WAVE_MATING_GAP``.  Two that meet only at a corner
-    measure more: a corner chord cuts *inward* from the wave envelope, so a
-    corner can only ever add clearance.  That is why the corner flats - which
-    join the four rotationally matching wall runs - are a
-    corner transitions rather than a separate mating phase.
+    measure more: a finished corner is the two wall waves continued to a
+    rounded tip, never past the unchanged receiving wall's own offset, so a
+    corner never measures less than the wall seam.  The corners are
+    transitions between the four rotationally matching wall runs rather than
+    a separate mating phase.
 
     Raises if the two outlines actually intersect.  A collision is a fault in
     the sizes or the placement, not a clearance worth reporting.

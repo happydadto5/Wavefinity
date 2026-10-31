@@ -81,6 +81,10 @@ BASE_PRESETS = (
 )
 DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner
+# Story 2425: the exposed convex tip rounding of a finished corner, and the
+# least clearance a finished corner may keep from an unchanged receiving wall.
+CORNER_TIP_RADIUS = 0.25
+T_JUNCTION_CLEARANCE = 0.164
 # Locked in after the physical tolerance print: these are no longer tuning
 # knobs, they are the connector's specification.
 LOCKED_TOLERANCE = 0.02       # chosen from the printed 5-clip fit plate
