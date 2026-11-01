@@ -28,6 +28,7 @@ async function maybePromptSurfaceObjectHeight() {
   return new Promise(resolve => {
     let busy = false;
     let heightPending = false;
+    let heightSave = Promise.resolve();
     const finish = value => {
       input.onchange = null;
       noAsk.onchange = null;
@@ -50,7 +51,7 @@ async function maybePromptSurfaceObjectHeight() {
     // triggering operation with no Object height, skip flag or preference change.
     const onCancel = event => { event.preventDefault(); if (!busy) finish(false); };
     $("#surface-object-height-cancel").onclick = () => { if (!busy) finish(false); };
-    input.onchange = async () => {
+    const saveHeight = async () => {
       if (busy) { heightPending = true; return; }
       const height = Number(input.value);
       if (!input.value.trim() || !Number.isFinite(height) || height <= 0) {
@@ -77,11 +78,16 @@ async function maybePromptSurfaceObjectHeight() {
         error.hidden = false;
       } finally {
         busy = false;
-        if (heightPending) { heightPending = false; void input.onchange?.(); }
+        if (heightPending) { heightPending = false; await saveHeight(); }
       }
     };
+    input.onchange = () => {
+      if (busy) { heightPending = true; return; }
+      heightSave = saveHeight();
+    };
     $("#surface-object-height-continue").onclick = async () => {
-      if (busy) return;
+      await heightSave;
+      if (busy || !error.hidden) return;
       busy = true;
       try {
         if (!(await persistPreference())) throw new Error("Surface setting was not saved.");

@@ -677,13 +677,14 @@ function persistCabinetAutosave(record) {
     if (structuralEditorRecord !== record || record.kind !== "storage_drawers") return true;
     while (structuralEditorRecord === record && (record.savedRevision || 0) !== (record.revision || 0)) {
       const form = record.form;
+      const revision = record.revision;
       let result = form.read();
       if (!result.ok && result.pending && form.whenValidationSettled) {
         await form.whenValidationSettled(30000);
         result = form.read();
       }
+      if (revision !== record.revision) continue;
       if (!result.ok) { setStructuralStatus(result.message || "Fix the cabinet settings first.", { error: true }); return false; }
-      const revision = record.revision;
       const draft = result.spaceDraft;
       record.autosaving = true;
       try {

@@ -184,10 +184,13 @@ SP.flushSetupAutosave = () => {
     SP.setupAutosaveTimer = null;
     const run = async () => {
       while (SP.isUpdate && SP.editing && SP.setupSavedRevision !== SP.setupAutosaveRevision) {
+        const revision = SP.setupAutosaveRevision;
         const values = SP.setupKind === "storage_drawers"
           ? await SP.readSetupValues() : SP.readOrdinarySetupValues({ focus: false });
+        // Validation can await a server response while the user keeps editing.
+        // Re-read the latest draft before committing or reporting an error.
+        if (revision !== SP.setupAutosaveRevision) continue;
         if (!values) return false;
-        const revision = SP.setupAutosaveRevision;
         try {
           const { kind, name, x, y, z, extra = {} } = values;
           if (kind === "storage_drawers") {
