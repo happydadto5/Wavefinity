@@ -99,7 +99,9 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-batch-actions .button { min-width: 0; padding: 7px 6px; line-height: 1.25; }
 /* The drawer canvas and its floating controls. The staging rail (Unplaced
    bins) sits immediately beside the physical Space. */
-.canvas-wrap[data-canvas="drawer"].active { display: flex; }
+/* Drawer mode hides the workspace toolbar, so this wrap would otherwise fall
+   into the auto first row of .workspace and fill only the top of the pane. */
+.canvas-wrap[data-canvas="drawer"].active { display: flex; grid-row: 2; }
 .canvas-wrap[data-canvas="drawer"] #drawer-canvas { flex: 1 1 0; width: auto; min-width: 0; height: 100%; }
 .dl-staging {
   flex: 0 0 188px; width: 188px; display: flex; flex-direction: column; gap: 6px; padding: 10px 8px;
