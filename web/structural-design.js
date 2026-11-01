@@ -153,7 +153,7 @@ function mountStructuralEditor(kind, key) {
   const status = structuralEl("p", "structural-status"); status.hidden = true;
   status.setAttribute("role", "status");
   const trimNote = structuralEl("p", "dl-note",
-    "Production preview of the trim. It follows the Surface size ? edit the Surface to change it.");
+    "Production preview of the trim. It follows the Surface size — edit the Surface to change it.");
   trimNote.hidden = kind !== "base_trim";
   if (kind === "base_trim") formHost.hidden = true;
   wrap.append(formHost, status, trimNote);
