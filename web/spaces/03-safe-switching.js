@@ -38,6 +38,8 @@ SP.leaveDrawerLayoutSafely = async ({ noDeferredPreview = false } = {}) => {
 // Save (the structural editor stays mounted and dirty). Structural Save itself
 // never calls this - it commits straight through the cabinet / Space owners.
 SP.confirmLeaveStructuralEditor = async () => {
+  if (typeof structuralTargetKind === "function" && structuralTargetKind() === "box")
+    return flushStorageBoxAutosave();
   if (typeof structuralEditorDirty !== "function" || !structuralEditorDirty()) return true;
   const what = structuralTargetKind() === "box" ? "case" : "cabinet";
   const choice = await appConfirm({

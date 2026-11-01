@@ -4,8 +4,7 @@
  * JS with epoch-suffixed IDs so it can live in the Design panel without
  * colliding with the setup dialog's static IDs.
  *
- * The form owns the unsaved draft (Fix 103 R2). It never persists anything:
- * Save Changes lives in the structural editor controller.
+ * The structural editor automatically saves changes to the Space.
  *
  * API: window.StorageBoxForm.mount({ host, initialSpace, callbacks })
  *   -> { read(), draft(), fill(space), destroy(), isDirty(), markPristine(),
@@ -262,8 +261,7 @@
     syncVisibility();
 
     // ---- Draft ----
-    // The draft always carries normalized sizes; it is what the provisional
-    // preview and Save Changes both consume.
+    // The current form values carry normalized sizes for preview and autosave.
     function read() {
       const { x, y, z } = getInterior();
       if (!(x > 0 && y > 0 && z > 0)) {
@@ -311,10 +309,9 @@
       input.addEventListener("input", onChange, { signal: events.signal });
       input.addEventListener("change", onChange, { signal: events.signal });
     }
-    // Width/Depth/Height raise onChange from setInterior (after normalizing);
-    // a raw "input" event alone only keeps the unit readout honest.
+    // Typed dimensions autosave normalized values without rewriting the field.
     for (const input of [xInput, yInput, zInput]) {
-      input.addEventListener("input", showReadouts, { signal: events.signal });
+      input.addEventListener("input", () => { showReadouts(); onChange(); }, { signal: events.signal });
     }
 
     function fill(space) {

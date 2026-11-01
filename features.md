@@ -219,7 +219,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 
 ### Ownership
 
-- The Storage Box case is a Space-owned structural output.
+- The Storage Box case is a Space-owned structural output. Its design edits save automatically.
 - **Save Storage Box** saves the case from the Space header.
 - **Export print files** opens the case, placed Not Printed bins, and required Space connectors together in the slicer after file and printer-fit checks. Unplaced or already-Printed bins remain on their existing Inventory paths.
 - It is not an ordinary Designer Inventory row.

@@ -6,8 +6,7 @@
  * 2D view is the Space canvas in view-only mode.
  *
  * Ownership (Fix 103 R2/R3/R6):
- *   - the mounted form owns the unsaved draft Space; nothing here persists
- *     until Save Changes;
+ *   - the cabinet form owns an unsaved draft; Storage Box edits autosave;
  *   - one debounced, latest-wins preview scheduler feeds the single
  *     state.structuralPreview slot; every response is checked against
  *     { request, activeSpaceId, targetKind, formMountSerial, draftKey };
@@ -77,7 +76,9 @@ function structuralLabel(kind = structuralTargetKind()) {
 // The one structural dirty predicate (R6). The ordinary designHasChanges()
 // deliberately reports false for a structural target.
 function structuralEditorDirty() {
-  const form = structuralEditorRecord?.form;
+  const record = structuralEditorRecord;
+  if (record?.kind === "box") return false;
+  const form = record?.form;
   return Boolean(form && form.isDirty && form.isDirty());
 }
 
@@ -135,7 +136,7 @@ function syncStructuralEditor({ force = false } = {}) {
   }
   const key = structuralSpaceKey();
   const record = structuralEditorRecord;
-  if (record && !force && record.kind === kind && record.spaceKey === key) {
+  if (record && !force && record.kind === kind && (record.spaceKey === key || (kind === "box" && record.autosaving))) {
     host.hidden = false;
     return;
   }
@@ -171,6 +172,7 @@ function mountStructuralEditor(kind, key) {
     "Production preview of the trim. It follows the Surface size — edit the Surface to change it.");
   trimNote.hidden = kind !== "base_trim";
   if (kind === "base_trim") { actions.hidden = true; formHost.hidden = true; }
+  if (kind === "box") actions.hidden = true;
   wrap.append(formHost, dirtyNote, status, trimNote, actions);
   host.append(wrap);
   const record = {
@@ -229,8 +231,59 @@ function mountStructuralEditor(kind, key) {
 function onStructuralDraftChange() {
   const record = structuralEditorRecord;
   if (!record || !record.form) return; // still mounting; mount schedules its own preview
+  if (record.kind === "box") queueStorageBoxAutosave(record);
   updateStructuralActions();
   scheduleStructuralPreview();
+}
+
+let storageBoxAutosaveTimer = null;
+let storageBoxAutosaveChain = Promise.resolve(true);
+
+function queueStorageBoxAutosave(record) {
+  clearTimeout(storageBoxAutosaveTimer);
+  storageBoxAutosaveTimer = setTimeout(() => {
+    storageBoxAutosaveTimer = null;
+    void persistStorageBoxAutosave(record);
+  }, 350);
+}
+
+function persistStorageBoxAutosave(record) {
+  const run = async () => {
+    if (structuralEditorRecord !== record || record.kind !== "box") return true;
+    const draft = structuralDraftResult();
+    if (!draft.ok) {
+      record.form.setError?.(draft.message);
+      return false;
+    }
+    const space = draft.space;
+    if (JSON.stringify([space.x, space.y, space.z, space.storage_box]) ===
+        JSON.stringify([state.activeSpace.x, state.activeSpace.y, state.activeSpace.z, state.activeSpace.storage_box])) return true;
+    record.autosaving = true;
+    try {
+      await SP.commitSpaceUpdate({
+        kind: space.kind, name: space.name, x: space.x, y: space.y, z: space.z,
+        trimSize: null, extra: { storage_box: space.storage_box },
+      }, { structural: true });
+      if (structuralEditorRecord === record) record.spaceKey = structuralSpaceKey();
+      return true;
+    } catch (error) {
+      if (!DL.isStaleSpaceError(error)) toast(`Could not autosave this Storage Box: ${friendlyError(error)}`, true, 6000);
+      return false;
+    } finally {
+      record.autosaving = false;
+    }
+  };
+  const pending = storageBoxAutosaveChain.then(run, run);
+  storageBoxAutosaveChain = pending.catch(() => false);
+  return pending;
+}
+
+async function flushStorageBoxAutosave() {
+  const record = structuralEditorRecord;
+  if (record?.kind !== "box") return true;
+  clearTimeout(storageBoxAutosaveTimer);
+  storageBoxAutosaveTimer = null;
+  return persistStorageBoxAutosave(record);
 }
 
 function structuralHighlightDrawer(owner, { ensure = false } = {}) {
