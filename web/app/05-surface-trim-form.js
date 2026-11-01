@@ -403,7 +403,7 @@ function stackMode() {
 }
 
 const LID_DEFAULTS = {
-  enabled: false, stackable: false, thickness: "thin",
+  enabled: false, stackable: true, thickness: "thin",
   label_enabled: false, label_style: "flush", label_orientation: "horizontal",
   label_text: "", division_labels: [], handle_type: "knob",
   handle_size: "medium", handle_position: "middle", fit: "standard",

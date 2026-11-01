@@ -337,7 +337,7 @@ class LidSpec:
     """Ordinary-bin lid intent. Storage Box owns its separate lid system."""
 
     enabled: bool = False
-    stackable: bool = False
+    stackable: bool | None = None
     thickness: str = "thin"
     label_enabled: bool = False
     label_style: str = "flush"
@@ -353,6 +353,8 @@ class LidSpec:
     label_depth_mm: float | None = None
 
     def __post_init__(self) -> None:
+        if self.stackable is None:
+            object.__setattr__(self, "stackable", self.enabled)
         choices = (
             (self.fit, LID_FITS, "lid fit"),
             (self.thickness, LID_THICKNESSES, "lid thickness"),

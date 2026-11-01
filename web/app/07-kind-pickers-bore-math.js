@@ -240,8 +240,11 @@ async function addModifier(kind) {
     if (seed.lid) {
       state.design.box.lid = { ...seed.lid, enabled: true };
       delete state.design.box.stack;
-    } else {
+    } else if (seed.stack?.mode === "direct") {
       state.design.box.stack = { mode: "direct" };
+    } else {
+      state.design.box.lid = { ...LID_DEFAULTS, enabled: true };
+      delete state.design.box.stack;
     }
   } else if (kind === "inside_handles") {
     const rules = state.catalog?.lift_grabbers || {};
