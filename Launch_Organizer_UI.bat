@@ -47,7 +47,7 @@ if errorlevel 1 goto :failed
 rem Fix 119 B2: best-effort, fire-and-forget request that the NN Poller is running.
 rem Not waited on and its result is ignored; Wavefinity launches whether NN is
 rem missing, broken, already running, or slow.
-if exist "%~dp0Start_Wavefinity_Dispatch_Runner.bat" start "" /b "%~dp0Start_Wavefinity_Dispatch_Runner.bat" >nul 2>&1
+if exist "%~dp0Start_Wavefinity_Dispatch_Runner.bat" start "" "%SystemRoot%\System32\wscript.exe" "%~dp0Start_Wavefinity_Dispatch_Runner_Hidden.vbs"
 
 rem Run the long-lived local server without attaching it to this command
 rem window.  A later launch may replace it without leaving a paused window.
