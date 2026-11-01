@@ -1742,7 +1742,8 @@ body.relocating > :not(dialog) { pointer-events: none; }
   .workspace { height: 720px; height: min(720px, max(360px, 78vh)); height: min(720px, max(360px, 78svh)); }
 }
 @media (max-width: 620px) {
-  .app-header { align-items: flex-start; padding: 12px; }
+  .app-header { align-items: flex-start; padding: 12px; flex-wrap: wrap; row-gap: 10px; }
+  .brand-group { flex-wrap: wrap; }
   .header-actions { gap: 5px; }
   .connection { width: 100%; text-align: right; }
   .section-body, .output-panel { padding-left: 13px; padding-right: 13px; }
