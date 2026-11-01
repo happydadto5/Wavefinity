@@ -188,7 +188,8 @@ SP.wire = () => {
   // Usable inside width/depth correct like a bin's: leaving the field (Enter
   // leaves it too) snaps the value to the nearest unit and shows that value.
   // SP.snap is the same rounding and clamp the saved Storage Box size uses.
-  ["portable-x", "portable-y"].forEach(id => {
+  // Drawer and Storage Box are the two types with Usable inside width/depth.
+  ["drawer-x", "drawer-y", "portable-x", "portable-y"].forEach(id => {
     const input = document.getElementById(id);
     if (!input) return;
     input.addEventListener("blur", () => {
