@@ -77,12 +77,9 @@ SP.cancelInlineEdit = () => {
 // Cancel instead, and none of the onboarding chrome.
 SP.setFormMode = edit => {
   $("#space-form").classList.toggle("editing", edit);
-  const typeLine = $("#space-form-type");
-  if (typeLine) typeLine.hidden = edit;
   $("#space-back").hidden = edit;
   $("#space-create").hidden = edit;
   $("#space-cancel-edit").hidden = !edit;
-  $("#space-form-title").parentElement.hidden = edit;
 };
 
 SP.setupFormSnapshot = null;
@@ -117,10 +114,9 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   SP.setupValidationStarted = false;
   SP.dialog().classList.toggle("storage-drawers-config", kind === "storage_drawers" && !update);
   const typeLabel = SP_KINDS[kind]?.label || kind;
-  const typeLine = document.getElementById("space-form-type");
-  if (typeLine) {
-    typeLine.textContent = "Type: " + typeLabel;
-    typeLine.hidden = update;
+  const title = document.getElementById("space-form-title");
+  if (title) {
+    title.textContent = "Configure " + typeLabel;
   }
   SP.populateSurfaceTrim();
   SP.populatePegboardStandards();
