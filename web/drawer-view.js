@@ -386,14 +386,18 @@ DV.render = () => {
   // rims evaluate (Fix 1091 + Fix 1098 option A): drawers enforce the 2 mm
   // running clearance as a hard cap — safe max = usable drawer height − 2 mm;
   // boxes compare against the raw interior.
+  // Fix 2490: a Storage Box shows no message unless a bin is over its height;
+  // then it shows one bold red line instead of the standing rim explanation.
   const heightLegend = $("#dl-height-legend");
   if (heightLegend) {
     const showRims = DL.isStorageBox() || DL.isStorageDrawers();
-    heightLegend.hidden = !showRims;
-    if (showRims) {
-      heightLegend.textContent = DL.isStorageDrawers()
-        ? "Yellow rim: the bin stack is below the safe height (drawer inside height minus 2 mm running clearance) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam"
-        : "Yellow rim: the bin stack is shorter than the inside height · Red rim: the bin stack is taller than the inside height — the lid will not close";
+    const showLegend = DL.isStorageBox() ? DV.stackOverHeight : showRims;
+    heightLegend.hidden = !showLegend;
+    heightLegend.classList.toggle("over-height", showLegend && DL.isStorageBox());
+    if (showLegend) {
+      heightLegend.textContent = DL.isStorageBox()
+        ? "Red bins exceed total storage bin height!"
+        : "Yellow rim: the bin stack is below the safe height (drawer inside height minus 2 mm running clearance) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam";
     }
   }
 };
@@ -517,6 +521,9 @@ DV.paintScene = (ctx, drawer, cam) => {
   const grid = DL.grid(drawer);
   const step = grid.step;
   const entries = DV.entries(drawer, grid);
+  // Fix 2490: set below when any placed bin stack is over the Storage Box height,
+  // so the height legend shows only in that case.
+  DV.stackOverHeight = false;
   const { W, D, H, eye } = cam;
   const rimH = cam.rimH ?? H;
   const shape = points => {
@@ -702,7 +709,7 @@ DV.paintScene = (ctx, drawer, cam) => {
       const stackTop = Math.max(0, ...entry.layers.map(layer => Number(layer.z1) || 0));
       let rim = null;
       if (threshold > 0) {
-        if (stackTop > threshold + 1e-6) rim = "#d43d2f";
+        if (stackTop > threshold + 1e-6) { rim = "#d43d2f"; DV.stackOverHeight = true; }
         else if (stackTop < threshold - 1e-6) rim = "#e0a100";
       }
       if (rim) {
