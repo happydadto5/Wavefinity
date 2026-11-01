@@ -69,3 +69,5 @@ SP.closePrinterSettings = () => {
   if (dialog?.open) dialog.close();
 };
 
+document.getElementById("designer-settings-open")?.addEventListener("click", SP.openPrinterSettings);
+

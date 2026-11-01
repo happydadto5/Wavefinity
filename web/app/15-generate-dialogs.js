@@ -471,15 +471,15 @@ function updatePrimaryPrintButtonLabel() {
     : !state.slicer?.available
       ? "Bambu Studio is not installed - click 'Change slicer' to locate executable"
       : `Send the bin to ${state.slicer.name || "the slicer"}`;
-  $("#slicer-picker-button").hidden = Boolean(state.runtime.hosted);
+  $("#settings-slicer-picker").hidden = Boolean(state.runtime.hosted);
+  $("#print-dialog-slicer-picker").hidden = Boolean(state.runtime.hosted);
 }
 
 function updateSlicerUI() {
   updatePrimaryPrintButtonLabel();
 }
 
-async function browseSlicer() {
-  const button = $("#slicer-picker-button");
+async function browseSlicer(button) {
   if (button) button.disabled = true;
   try {
     const result = await api("/api/browse-slicer-path", { current: state.slicer?.path });

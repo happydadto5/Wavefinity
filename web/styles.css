@@ -36,6 +36,8 @@ button { color: inherit; }
 
 
 .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.designer-settings-button { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; }
+.designer-settings-button svg { flex: none; }
 .connection { font-size: 12px; color: #b6d2d0; margin-right: 8px; background: none; border: none; padding: 0; cursor: pointer; font-family: inherit; }
 .connection:hover { color: white; }
 .connection.ready { display: none; }
@@ -934,20 +936,6 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
 .print-choice-row { display: flex; gap: 4px; width: 100%; }
 .print-choice-row .print-button { flex: 1 1 0; min-width: 0; margin: 0; padding: 7px 4px; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 5px; text-align: center; }
 .print-choice-row .print-button[hidden] { display: none; }
-.print-button-wrap #slicer-picker-button {
-  align-self: flex-end;
-  background: transparent;
-  border: 1px solid var(--line, rgba(128, 128, 128, 0.5));
-  color: inherit;
-  border-radius: 5px;
-  padding: 3px 7px;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.25;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.print-button-wrap #slicer-picker-button:hover { background: rgba(128, 128, 128, 0.15); }
 .generate-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: nowrap; }
 .generate-actions .button {
   flex: 1 1 0;

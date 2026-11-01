@@ -898,7 +898,8 @@ function wireControls() {
   $("#generate-bin")?.addEventListener("click", () => generateParts("bin"));
   $("#generate-connector")?.addEventListener("click", () => generateParts("connector"));
   wireGenerationDialog();
-  $("#slicer-picker-button").addEventListener("click", browseSlicer);
+  $("#settings-slicer-picker").addEventListener("click", event => browseSlicer(event.currentTarget));
+  $("#print-dialog-slicer-picker").addEventListener("click", event => browseSlicer(event.currentTarget));
   wireSceneInteraction($("#preview-3d"), state.camera, renderPreview3D);
   wireSupportLayoutDialog();
   wireLayoutInteraction();
