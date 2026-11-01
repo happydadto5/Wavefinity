@@ -567,7 +567,7 @@ def drawer_routes(
                         "kind": "spacer",
                         "boundary": "edge",
                         # Inventory x/y/z are physical mm, never Wavefinity unit counts.
-                        "name": "Flexible (unvalidated) Spacer" if gen.get("flexible") else "Rigid Spacer",
+                        "name": "Flexible Spacer" if gen.get("flexible") else "Rigid Spacer",
                         "x": gen["w"], "y": gen["d"], "z": gen["h"],
                         "qty": 1,
                         "file": gen["file"],
@@ -623,7 +623,7 @@ def drawer_routes(
                     "id": new_id,
                     "kind": "spacer",
                     "boundary": "edge",
-                    "name": "Flexible (unvalidated) Spacer" if gen.get("flexible") else "Rigid Spacer",
+                    "name": "Flexible Spacer" if gen.get("flexible") else "Rigid Spacer",
                     # Inventory x/y/z are physical mm, never Wavefinity unit counts.
                     "x": gen["w"], "y": gen["d"], "z": gen["h"],
                     "qty": 1,
@@ -724,7 +724,7 @@ def drawer_routes(
                         "id": new_id,
                         "kind": "spacer",
                         "boundary": "edge",
-                        "name": "Flexible (unvalidated) Spacer" if gen.get("flexible") else "Rigid Spacer",
+                        "name": "Flexible Spacer" if gen.get("flexible") else "Rigid Spacer",
                         "x": gen["w"],
                         "y": gen["d"],
                         "z": gen["h"],

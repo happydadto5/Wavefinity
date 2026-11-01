@@ -875,7 +875,7 @@ DV.spacerCandidateLabelInfo = c => {
   const p = (c.placements || [])[0] || {};
   const side = String(p.side || String(c.id).split("-")[0] || "spacer");
   const name = `${side.charAt(0).toUpperCase() + side.slice(1)} spacer (planned)`;
-  const typeLabel = c.resolved_type === "flexible" ? "Flexible (unvalidated)" : "Rigid";
+  const typeLabel = c.resolved_type === "flexible" ? "Flexible" : "Rigid";
   const detailLine = `${typeLabel} · prints ${fmt(c.printed_w)} × ${fmt(c.printed_d)} mm`
     + (c.will_fallback && c.fallback_reason ? ` · ${c.fallback_reason}` : "");
   return { name, detailLine };

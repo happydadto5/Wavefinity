@@ -169,12 +169,12 @@ DP.build = () => {
     <details id="dl-spacers" class="dl-section dl-spacers" aria-label="Spacers" open>
       <summary>Spacers <span id="dl-sp-hint" class="dl-sp-hint" hidden></span></summary>
       <div class="section-body">
-        <p class="dl-note">Spacers are filler parts that brace your bins against the drawer walls so nothing slides around. Flexible (unvalidated) spacers print 2mm oversized to wedge in snugly — print them in PLA or PETG. "Unvalidated" means the wedging force hasn't been tested on real printed parts yet.</p>
+        <p class="dl-note">Spacers are filler parts that brace your bins against the drawer walls so nothing slides around. Flexible spacers print 2mm oversized to wedge in snugly — print them in PLA or PETG.</p>
         <div class="field-grid two">
-          <label>Spacer type<select id="dl-sp-type"><option value="rigid">Rigid</option><option value="flexible">Flexible (unvalidated)</option></select></label>
+          <label>Spacer type<select id="dl-sp-type"><option value="rigid">Rigid</option><option value="flexible">Flexible</option></select></label>
           <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
         </div>
-        <label class="checkbox-row"><span>Auto height (half the tallest bin)</span><input id="dl-sp-auto-height" type="checkbox" checked></label>
+        <label class="checkbox-row"><span>Auto height (the full height of the tallest bin)</span><input id="dl-sp-auto-height" type="checkbox" checked></label>
         <fieldset class="dl-sp-walls">
           <legend>Walls</legend>
           <label class="checkbox-row"><span>Left</span><input id="dl-sp-wall-left" type="checkbox" checked></label>
@@ -859,7 +859,7 @@ DP.openSpacerPrintDialog = () => {
     const guidance = document.createElement("p");
     guidance.id = "spacer-print-guidance";
     guidance.className = "dl-note";
-    guidance.textContent = "Print Flexible (unvalidated) spacers in PLA or PETG (2mm oversized to wedge in). Rigid spacers print in any material.";
+    guidance.textContent = "Print Flexible spacers in PLA or PETG (2mm oversized to wedge in). Rigid spacers print in any material.";
     container.before(guidance);
   }
   container.innerHTML = `
@@ -869,7 +869,7 @@ DP.openSpacerPrintDialog = () => {
         <tr data-group="${index}">
           <td><input type="checkbox" data-sp-check aria-label="Include ${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm ${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible" : "Rigid"} spacer" ${g.toPrint > 0 ? "checked" : ""}></td>
           <td>${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm</td>
-          <td>${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible (unvalidated)" : "Rigid"}</td>
+          <td>${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible" : "Rigid"}</td>
           <td>${g.qty}</td>
           <td>${g.printed}</td>
           <td><input type="number" data-sp-qty min="1" max="${g.qty}" value="${Math.max(1, g.toPrint || g.qty)}" aria-label="Quantity to print for ${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm ${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible" : "Rigid"} spacer" ${g.toPrint > 0 ? "" : "disabled"}></td>
@@ -1062,7 +1062,7 @@ DP.renderSpacerPlanTruth = () => {
       const p = (c.placements || [])[0] || {};
       const side = String(p.side || String(c.id).split("-")[0] || "spacer");
       const sideLabel = side.charAt(0).toUpperCase() + side.slice(1);
-      const typeLabel = c.resolved_type === "flexible" ? "Flexible (unvalidated)" : "Rigid";
+      const typeLabel = c.resolved_type === "flexible" ? "Flexible" : "Rigid";
       const reason = c.will_fallback && c.fallback_reason ? ` — ${escapeHtml(c.fallback_reason)}` : "";
       const checked = DL.spacerSelected && DL.spacerSelected.has(c.id) ? " checked" : "";
       return `<label class="checkbox-row"><span>${escapeHtml(sideLabel)} spacer · gap ${fmt(c.measured_gap)} mm → `
@@ -1073,8 +1073,8 @@ DP.renderSpacerPlanTruth = () => {
 };
 
 // Fix 1053: client-side mirror of the backend auto-height expression in
-// organizer_drawer/_spacers.py plan_spacers (half the tallest non-spacer
-// bin placed in this drawer; Python round() is banker's rounding, clamped
+// organizer_drawer/_spacers.py plan_spacers (the full height of the tallest
+// non-spacer bin placed in this drawer; Python round() is banker's rounding, clamped
 // to the 6 mm minimum and the drawer height; 15 mm when nothing is placed).
 // Same inputs the backend receives: the layout drawer dict it is sent in
 // the /api/drawer/spacers payload, DL.bins, and DL.isSpacer (kind ===
@@ -1125,7 +1125,7 @@ DP.spacerAutoHeight = () => {
       if (one && !DL.isSpacer(one)) tallest = Math.max(tallest, Number(one.z) || 0);
     }
   }
-  const auto = tallest > 0 ? roundHalfEven(tallest / 2) : 15;
+  const auto = tallest > 0 ? roundHalfEven(tallest) : 15;
   return Math.min(Number(drawer.height), Math.max(6, auto));
 };
 

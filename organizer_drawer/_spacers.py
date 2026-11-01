@@ -148,9 +148,9 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
     placed_spacer_count = sum(
         1 for placement in drawer.get("placements") or []
         if (by_id.get(placement.get("bin")) or {}).get("kind") in SPACER_KINDS)
-    # Fix 088 S88-2: Auto height is the default - half the tallest bin's
-    # height, clamped like a manual height. A manual height is honoured only
-    # when Auto is off.
+    # Fix 088 S88-2: Auto height is the default - the full height of the
+    # tallest bin, clamped like a manual height. A manual height is honoured
+    # only when Auto is off.
     if options.get("height_auto", True):
         # Fix 090: "tallest bin" means the tallest non-spacer bin actually
         # placed in THIS drawer - not the whole Space inventory (which also
@@ -161,7 +161,7 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
                 one = by_id.get(placement.get("bin"))
                 if one and one.get("kind") not in SPACER_KINDS:
                     tallest = max(tallest, float(one.get("z") or 0.0))
-        auto_height = round(tallest / 2) if tallest > 0 else DEFAULT_SPACER_HEIGHT
+        auto_height = round(tallest) if tallest > 0 else DEFAULT_SPACER_HEIGHT
         height = min(drawer["height"], max(MIN_SPACER_HEIGHT, auto_height))
     else:
         height = min(drawer["height"], max(MIN_SPACER_HEIGHT, float(options.get("height") or DEFAULT_SPACER_HEIGHT)))
@@ -615,13 +615,10 @@ def spacer_filename(side: str, w: float, d: float, height: float, flexible: bool
     """Deterministic from the real, unsnapped geometry - two decimals so
     distinct gaps (12.1 vs 12.9 mm) never collide, and Flexible/Rigid never
     share a name merely because their envelope came out the same size."""
-    # Fix 1042 (acceptance gate): while the mechanical acceptance record is
-    # PENDING, a flexible filename carries the non-performance-bearing
-    # qualifier "Unvalidated". The "Spacer Flex " prefix is kept on purpose:
-    # the Print Spacers UI detects flex from filenames with ^Spacer Flex ,
-    # and legacy bare "Spacer Flex ..." files must keep classifying as
-    # flexible (they are unvalidated too). Do not shorten or reorder.
-    variant = "Flex Unvalidated" if flexible else "Rigid"
+    # The "Spacer Flex " prefix is kept on purpose: the Print Spacers UI
+    # detects flex from filenames with ^Spacer Flex , and legacy "Spacer Flex
+    # ..." files must keep classifying as flexible. Do not shorten or reorder.
+    variant = "Flex" if flexible else "Rigid"
     return f"Spacer {variant} {side.capitalize()} {w:.2f}x{d:.2f}x{height:.2f}.3mf"
 
 

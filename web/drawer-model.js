@@ -68,7 +68,7 @@ DL.emit = () => DL.listeners.forEach(fn => fn());
 DL.defaultSettings = () => ({
   autosave: true,
   // Fix 088: per-wall spacer toggles (no front wall by product decision) and
-  // Auto height (half the tallest bin) - both default on.
+  // Auto height (the full height of the tallest bin) - both default on.
   spacers: { flexible: true, height: 15, height_auto: true, walls: { left: true, back: true, right: true } },
   surface: { ask_object_height: true },
   // Fix 061 F6: per-Space choice to refresh a bin's saved files after an edit
@@ -264,18 +264,7 @@ DL.prune = () => {
 DL.drawer = () => DL.layout.drawers.find(one => one.id === DL.layout.active) || DL.layout.drawers[0];
 DL.bin = id => DL.bins.find(one => one.id === id);
 DL.key = p => `${p.bin}:${p.copy ?? 0}`;
-DL.label = one => {
-  const base = one.name || `${fmt(one.x)} × ${fmt(one.y)} mm`;
-  // Fix 1042 (acceptance gate): spacer bins saved before the gate carry the
-  // bare product name "Flexible Spacer". Qualify it at display time - the
-  // same honesty rule as the Print Spacers table (Change 19). Uses the same
-  // flexible detection (flag, else the ^Spacer Flex filename detector).
-  if (one.kind === "spacer" && base === "Flexible Spacer"
-      && (one.flexible ?? /^Spacer Flex /.test(String(one.file || "")))) {
-    return "Flexible (unvalidated) Spacer";
-  }
-  return base;
-};
+DL.label = one => one.name || `${fmt(one.x)} × ${fmt(one.y)} mm`;
 DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
 // The user-facing Wavefinity unit is always 7 mm - see the "7 mm size grid"
 // section of README.md. The one place this conversion belongs.
