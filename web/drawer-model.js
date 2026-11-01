@@ -264,7 +264,10 @@ DL.prune = () => {
 DL.drawer = () => DL.layout.drawers.find(one => one.id === DL.layout.active) || DL.layout.drawers[0];
 DL.bin = id => DL.bins.find(one => one.id === id);
 DL.key = p => `${p.bin}:${p.copy ?? 0}`;
-DL.label = one => one.name || `${fmt(one.x)} × ${fmt(one.y)} mm`;
+// Spacer rows saved before the "unvalidated" qualifier was dropped still store
+// it in their name; show them without it. Display only - the stored name is kept.
+DL.legacySpacerName = name => String(name || "").replace(/\s*\(?\bunvalidated\b\)?/gi, "").replace(/\s{2,}/g, " ").trim();
+DL.label = one => (DL.isSpacer(one) ? DL.legacySpacerName(one.name) : one.name) || `${fmt(one.x)} × ${fmt(one.y)} mm`;
 DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
 // The user-facing Wavefinity unit is always 7 mm - see the "7 mm size grid"
 // section of README.md. The one place this conversion belongs.
