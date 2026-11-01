@@ -108,7 +108,6 @@ DP.build = () => {
     <section class="control-section open dl-section" aria-label="Inventory">
       <div class="section-body">
         <div id="dl-stats" class="dl-stats"></div>
-        <button type="button" id="dl-new-bin" class="button primary">New Bin</button>
         <div class="dl-inv-tools">
           <label class="dl-search-label"><span>Search</span><input id="dl-inv-search" type="search" placeholder="Name or size" aria-label="Search the inventory"></label>
           <label>Filter<select id="dl-inv-show" aria-label="Filter bins">
@@ -328,15 +327,6 @@ DP.wire = () => {
     DL.printSelectedBins(DP.printSelectionPayload(), true));
   $("#dl-batch-print-complete").addEventListener("click", () =>
     DL.printCompleteSpace());
-  // Empty-state buttons (canvas overlay and Inventory list) share these.
-  const emptyAction = event => {
-    const act = event.target.closest("[data-empty-act]")?.dataset.emptyAct;
-    if (act === "design") DP.designFirstBin();
-  };
-  $("#dl-inv-list").addEventListener("click", emptyAction);
-  $("#dl-new-bin").addEventListener("click", () => DP.newBinFromSpace());
-  $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", emptyAction);
-
   $("#dl-sp-auto-height").addEventListener("change", event => {
     DL.change(() => { DL.layout.settings.spacers.height_auto = event.target.checked; });
     $("#dl-sp-height").disabled = event.target.checked;
@@ -838,10 +828,6 @@ DP.deleteSelected = async () => {
   DP.renderInventory(true);
 };
 
-// The one "go design a bin" jump used by both empty states.
-DP.designFirstBin = () => {
-  DP.newBinFromSpace();
-};
 DP.newBinFromSpace = async () => {
   const request = ++DP.modeRequest;
   const spaceContext = DL.spaceContext();
@@ -924,12 +910,6 @@ DP.update = () => {
     if (list) list.innerHTML = '<p class="dl-note">Inventory unavailable. Select Space to retry loading.</p>';
     const stats = $("#dl-stats");
     if (stats) stats.textContent = "";
-    const overlay = $("#dl-empty-state");
-    if (overlay) {
-      overlay.hidden = false;
-      overlay.dataset.state = "unavailable";
-      overlay.innerHTML = "<strong>Inventory unavailable</strong><p>Select Space to retry loading.</p>";
-    }
     const canvas = $("#drawer-canvas");
     if (canvas) canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     return;
@@ -940,7 +920,6 @@ DP.update = () => {
   DP.renderSurfaceFill();
   DP.renderInventory();
   DP.renderSave();
-  DV.renderEmptyState();
   DV.renderStaging();
   DV.render();
   if (typeof SP !== "undefined" && SP.updateCabinetWorkspace) SP.updateCabinetWorkspace();
@@ -1386,7 +1365,7 @@ DP.renderInventory = (force = false) => {
   const bins = DP.filteredBins();
   if (!DL.bins.length) {
     list.innerHTML = `<div class="dl-empty">${DL.loaded
-      ? `No bins in this Space inventory yet.<br><button type="button" class="button primary dl-small" data-empty-act="design">Design first bin</button>`
+      ? "No bins in this Space inventory yet."
       : "Loading the inventory…"}</div>`;
     return;
   }

@@ -1222,26 +1222,6 @@ DV.wire = () => {
 
 };
 
-// First-run guidance on the canvas, driven only by inventory/placement state.
-DV.renderEmptyState = () => {
-  const box = $("#dl-empty-state");
-  if (!box || !DL.layout || !DL.loaded) return;
-  const mode = !DL.bins.length ? "none" : !DL.layout.drawers.some(one => one.placements.length) ? "unplaced" : "";
-  if (box.dataset.state === mode) return;
-  box.dataset.state = mode;
-  box.hidden = !mode;
-  if (mode === "none") {
-    box.innerHTML = `<strong>No bins yet</strong>
-      <p>Design your first bin. It saves as you go and waits in Unplaced bins until you drag it into the Space.</p>
-      <div class="button-row">
-        <button type="button" class="button primary" data-empty-act="design">Design first bin</button>
-      </div>`;
-  } else if (mode === "unplaced") {
-    box.innerHTML = `<strong>Ready to arrange</strong>
-      <p>Drag a bin from Unplaced bins into the Space.</p>`;
-  }
-};
-
 // The staging rail: every ordinary Inventory row with no placement, in
 // Inventory order. Derived from Inventory each time - never persisted, and
 // never a coordinate.
@@ -1305,16 +1285,17 @@ DV.buildOverlay = () => {
       </div>
     </div>
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
-    <div id="dl-empty-state" class="dl-empty-state" hidden></div>
     <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
     <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden>Yellow rim: the bin stack is below the safe height (drawer inside height minus 2 mm running clearance) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam</div>`);
   // The staging rail sits immediately beside the physical Space, before the canvas.
   wrap.insertAdjacentHTML("afterbegin", `
     <aside id="dl-staging" class="dl-staging" aria-label="Unplaced bins">
       <div class="dl-staging-head"><strong>Unplaced bins</strong><span class="dl-staging-count count-badge"></span></div>
+      <button type="button" class="button primary dl-small" data-staging-new-bin>New Bin</button>
       <div class="dl-staging-list"></div>
     </aside>`);
   const rail = $("#dl-staging");
+  rail.querySelector("[data-staging-new-bin]").addEventListener("click", () => DP.newBinFromSpace());
   rail.addEventListener("click", event => {
     const id = event.target.closest("[data-staged-bin]")?.dataset.stagedBin;
     if (id) { DL.selectRow(id); DV.revealRow(id); }
