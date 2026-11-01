@@ -450,6 +450,8 @@ button { color: inherit; }
 
 .app-shell { display: grid; grid-template-columns: minmax(420px, min(var(--sidebar-width), calc(100vw - 448px))) 8px minmax(420px, 1fr); height: calc(100vh - 79px); }
 .controls { background: #eef2f3; overflow: auto; min-width: 0; min-height: 0; padding-bottom: 24px; }
+/* Focus and scrollIntoView stop short of the pinned bin save bar below. */
+.controls, html { scroll-padding-bottom: 120px; }
 .sidebar-resizer { position: relative; z-index: 4; cursor: col-resize; background: transparent; touch-action: none; }
 .sidebar-resizer::after { content: ""; position: absolute; inset: 0 3px; background: var(--line); transition: background .15s, inset .15s; }
 .sidebar-resizer:hover::after, .sidebar-resizer:focus::after, .sidebar-resizer.dragging::after { inset: 0 2px; background: var(--blue); }
@@ -959,6 +961,27 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
   align-items: center;
   justify-content: center;
   min-height: 28px;
+}
+/* Compact bottom bar: Print and Save stay pinned while the long bin form scrolls.
+   Sticky keeps it in flow, so nothing is hidden when the form is scrolled to its end. */
+.bin-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px 8px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: rgba(235,241,242,.97);
+  border-top: 1px solid var(--line-dark);
+  box-shadow: 0 -8px 20px rgba(30,51,61,.12);
+  backdrop-filter: blur(8px);
+}
+.bin-save-bar .print-button-wrap { flex: 3 1 240px; min-width: 0; margin: 0; }
+.bin-save-bar .generate-actions { flex: 1 1 120px; min-width: 0; margin: 0; }
+@media (max-width: 620px) {
+  .bin-save-bar { padding-left: 13px; padding-right: 13px; }
 }
 
 .workspace { min-width: 0; min-height: 0; position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; background: #f8faf9; }
@@ -1970,6 +1993,7 @@ body.structural-design-active #ai-help-open,
 body.structural-design-active #designer-delete-bin,
 
 body.structural-design-active .output-panel,
+body.structural-design-active .bin-save-bar,
 body.structural-design-active #space-head-edit { display: none !important; }
 /* The 2D view of a structural target is the Space canvas, view only. */
 body.structural-design-active #sd-workspace-host,
