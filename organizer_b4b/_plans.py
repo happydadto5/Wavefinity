@@ -23,6 +23,7 @@ from ._constants import (
     B4B_HANDLE_WALL_CLEAR,
     B4B_HANDLE_BOTTOM_MARGIN,
     B4B_HANDLE_RIM_DROP,
+    B4B_FRONT_ROOT_SEPARATION,
     B4B_HANDLE_STOP_ANGLE,
     B4B_HANDLE_DETENT,
     B4B_HANDLE_DETENT_BUMP,
@@ -627,9 +628,30 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
         _wall_extreme_y(layout, -half, half, -1.0),
     )
     axis_y = front_crest - (dims.eye_radius + B4B_HANDLE_WALL_CLEAR)
-    axis_z = b4b_rim_z_from_eff(eff) - B4B_HANDLE_RIM_DROP
-    available_drop = axis_z - B4B_HANDLE_BOTTOM_MARGIN - dims.band / 2.0
-    drop = min(dims.target_drop, available_drop)
+    rim_z = b4b_rim_z_from_eff(eff)
+    old_axis_z = rim_z - B4B_HANDLE_RIM_DROP
+    drop = min(
+        dims.target_drop,
+        old_axis_z - B4B_HANDLE_BOTTOM_MARGIN - dims.band / 2.0,
+    )
+    # Centre the mounting root on the wall, retaining the existing bail and
+    # its clearance above the bottom on short cases.
+    lowest_axis = B4B_HANDLE_BOTTOM_MARGIN + dims.band / 2.0 + drop
+    axis_z = min(old_axis_z, max(
+        lowest_axis, (rim_z + dims.root_below - dims.root_above) / 2.0
+    ))
+
+    # Where a latch shares the root's horizontal envelope, keep the same
+    # clear wall between them by moving the mounting down toward the bottom.
+    hardware = b4b_hardware_plan(box)
+    x_gap = min(
+        abs(lc - hc) - (hardware.latch_root_width + dims.root_width) / 2.0
+        for lc in hardware.latch_centers_x for hc in (-half, half)
+    )
+    if x_gap + _EPS < B4B_FRONT_ROOT_SEPARATION:
+        latch_bottom = hardware.latch_root_top_z - profile.latch_root_height
+        clear_axis = latch_bottom - B4B_FRONT_ROOT_SEPARATION - dims.root_above
+        axis_z = max(lowest_axis, min(axis_z, clear_axis))
 
     root_out = _root_outward(dims.root_depth, eff.wall_depth)
     root_face_y = front_crest - root_out
