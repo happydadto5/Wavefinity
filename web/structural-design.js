@@ -386,7 +386,7 @@ async function refreshStructuralPreview() {
     const now = structuralDraftResult();
     return now.ok && structuralDraftKey(identity.kind, now.space) === identity.key;
   };
-  setStructuralPreviewState("Building preview…");
+  setStructuralPreviewState(state.structuralPreview?.meshes?.length ? "Updating preview" : "Building preview...");
   try {
     const hosted = Boolean(state.runtime.hosted);
     const profile = typeof PrinterProfile !== "undefined" ? PrinterProfile.current() : null;

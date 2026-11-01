@@ -1077,7 +1077,7 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
 .side-opening-wall-checks .checkbox-row { margin: 0; font-weight: 500; }
 .preview-hint { text-align: right; color: var(--muted); font-size: 11px; }
 .preview-hint span { display: block; }
-#preview-state { color: var(--teal-dark); font-weight: 700; margin-bottom: 2px; }
+#preview-state { color: var(--teal-dark); font-size: 32px; font-weight: 700; margin-bottom: 2px; }
 #preview-state.status-ok { color: #1f6b45; }
 #preview-state.status-error { color: var(--danger); }
 .canvas-wrap { position: relative; min-height: 0; display: none; overflow: hidden; background: radial-gradient(circle at 52% 42%, #fff 0, #f7f9f8 55%, #edf2f1 100%); }

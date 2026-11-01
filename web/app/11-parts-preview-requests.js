@@ -625,7 +625,7 @@ async function refreshPreview({ persistResume = true } = {}) {
   if (typeof SP !== "undefined" && SP.renderSpaceInfo) {
     SP.renderSpaceInfo();
   }
-  $("#preview-state").textContent = "Building preview…";
+  $("#preview-state").textContent = state.preview ? "Updating preview" : "Building preview...";
   $("#preview-state").classList.remove("status-ok", "status-error");
   setError();
   setDesignInvalidOverlay();
