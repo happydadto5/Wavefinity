@@ -65,8 +65,11 @@ SP.refreshSetupOutside = () => {
   const label = document.getElementById("portable-outside-label");
   const value = document.getElementById("portable-outside-readout");
   const fitWarn = document.getElementById("portable-printer-fit");
+  // The readout box holds only the Finished outside row, so it shows only
+  // while that row does.
+  const readout = document.getElementById("portable-readout");
   if (!label || !value) return;
-  const hideOutside = () => { label.hidden = true; value.hidden = true; value.textContent = ""; };
+  const hideOutside = () => { label.hidden = true; value.hidden = true; value.textContent = ""; if (readout) readout.hidden = true; };
   const hideFit = () => { if (fitWarn) { fitWarn.hidden = true; fitWarn.textContent = ""; } };
   const token = ++SP.setupOutsideToken;
   clearTimeout(SP.setupOutsideTimer);
@@ -89,7 +92,7 @@ SP.refreshSetupOutside = () => {
       const size = result.summary?.assembled_envelope_mm;
       if (!Array.isArray(size) || size.length < 3) { hideOutside(); hideFit(); return; }
       value.textContent = `${size.map(n => fmt(Number(n))).join(" × ")} mm`;
-      label.hidden = false; value.hidden = false;
+      label.hidden = false; value.hidden = false; if (readout) readout.hidden = false;
       // Fix 111 N3: nearby nonblocking printer-size warning, like Storage
       // Drawers - visible at the size input, creation stays allowed.
       const fitError = result.summary?.first_fit_error;

@@ -96,6 +96,16 @@ SP.captureOrdinarySetupSnapshot = () => {
   return JSON.stringify(rows);
 };
 
+// Local folder line: a live path that names the Space as it is typed. Hosted
+// shows the folder picked next instead, and Storage Drawers names its Space
+// in its own form, so both keep their plain sentence.
+SP.updateSavedAsMessage = () => {
+  const help = document.getElementById("space-folder-help");
+  if (!help || help.hidden || state.runtime.hosted || SP.setupKind === "storage_drawers") return;
+  const name = document.getElementById("space-name").value.trim();
+  help.textContent = "This space will be saved as \\Documents\\Wavefinity\\" + (name || "(Name space first)");
+};
+
 SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   if (update) {
     if (!SP.mountInlineEdit()) return;
@@ -165,6 +175,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
     } else {
       folderHelp.hidden = false;
       folderHelp.textContent = "Wavefinity will save this Space under Documents\\Wavefinity using the Space name.";
+      SP.updateSavedAsMessage();
     }
   }
   if (kind === 'drawer') {

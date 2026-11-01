@@ -185,6 +185,23 @@ SP.wire = () => {
     const input = document.getElementById(id);
     if (input) input.addEventListener("input", SP.updateReadouts);
   });
+  // Usable inside width/depth correct like a bin's: leaving the field (Enter
+  // leaves it too) snaps the value to the nearest unit and shows that value.
+  // SP.snap is the same rounding and clamp the saved Storage Box size uses.
+  ["portable-x", "portable-y"].forEach(id => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.addEventListener("blur", () => {
+      const raw = Number(input.value);
+      if (!(raw > 0)) return;
+      input.value = fmt(SP.snap(raw));
+      SP.updateReadouts();
+    });
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") input.blur();
+    });
+  });
+  document.getElementById("space-name")?.addEventListener("input", SP.updateSavedAsMessage);
   ["portable-lid-type", "portable-latch-count", "portable-hinge-count", "portable-handle", "portable-stacking", "portable-wall", "portable-base", "portable-lid-snugness", "portable-label-location", "portable-front-label-style"].forEach(id =>
     document.getElementById(id)?.addEventListener("change", SP.updateReadouts));
   ["portable-label-text"].forEach(id => document.getElementById(id)?.addEventListener("input", SP.updateReadouts));
@@ -199,7 +216,6 @@ SP.wire = () => {
 };
 
 SP.updateReadouts = () => {
-    const unit = state.catalog?.base_unit || 7;
     const kind = SP.setupKind;
     if (kind === "drawer") {
         const x = Number(document.getElementById("drawer-x").value);
@@ -230,17 +246,6 @@ SP.updateReadouts = () => {
             outside.textContent = `${fmt(resolved.outerX)} × ${fmt(resolved.outerY)} mm`;
         }
     } else if (kind === "portable") {
-        const x = Number(document.getElementById("portable-x").value);
-        const y = Number(document.getElementById("portable-y").value);
-        const z = Number(document.getElementById("portable-z").value);
-        if (x > 0 && y > 0 && z > 0) {
-            document.getElementById("portable-readout").hidden = false;
-            const rx = SP.snap(x);
-            const ry = SP.snap(y);
-            document.getElementById("portable-size-readout").textContent = `${rx/unit} × ${ry/unit} units (${rx} × ${ry} mm)`;
-        } else {
-            document.getElementById("portable-readout").hidden = true;
-        }
         SP.refreshSetupOutside();
     } else if (kind === "pegboard") {
         const mode = document.getElementById("pegboard-size-mode")?.value || "physical";
