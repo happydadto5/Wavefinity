@@ -614,6 +614,10 @@ DL.binNumberLabel = one => {
 DL.badgeLabel = one => DL.isSpacer(one)
   ? `S${DL.bins.filter(DL.isSpacer).findIndex(item => item.id === one.id) + 1}`
   : String(DL.binNumber(one) || "");
+// A named ordinary bin shows its name alone, so its number swatch stays empty
+// (the colour still shows); an unnamed bin keeps its number as the identifier.
+DL.hasName = one => Boolean(String(one?.name || "").trim());
+DL.swatchLabel = one => DL.isOrdinary(one) && DL.hasName(one) ? "" : DL.badgeLabel(one);
 
 // The staging rail's membership, derived and never persisted: every ordinary
 // Inventory row with no placement, in Inventory order.

@@ -1408,7 +1408,7 @@ DP.renderInventory = (force = false) => {
     const statusTracked = !spacer && ["bin", "b4b", "manual"].includes(one.kind);
     const printed = one.status === "printed";
     const picked = !spacer && DP.printSelected.has(one.id);
-    const swatch = `<span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${fmt(one.z)} mm tall">${DL.badgeLabel(one)}</span>`;
+    const swatch = `<span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${fmt(one.z)} mm tall">${DL.swatchLabel(one)}</span>`;
     const check = !spacer
       ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.binNumberLabel(one))} ${escapeHtml(DL.label(one))}"${picked ? " checked" : ""}>`
       : `<span class="dl-print-placeholder" aria-hidden="true"></span>`;

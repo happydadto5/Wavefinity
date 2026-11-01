@@ -849,7 +849,7 @@ DV.paintScene = (ctx, drawer, cam) => {
 DV.binLabelInfo = (one, stackCount = 1) => {
   const isEdgeSpacer = one.kind === "spacer" && one.boundary === "edge";
   const rawName = String(one.name || "").trim();
-  const name = DL.isSpacer(one) ? "Spacer" : `${DL.binNumberLabel(one)}${rawName ? ` · ${rawName}` : ""}`;
+  const name = DL.isSpacer(one) ? "Spacer" : DL.hasName(one) ? rawName : DL.binNumberLabel(one);
   const wMm = fmt(one.x);
   const lMm = fmt(one.y);
   const wUnits = DL.mmToUnits ? DL.mmToUnits(one.x) : fmt(Number(one.x) / DL.UNIT);
@@ -1243,7 +1243,7 @@ DV.renderStaging = () => {
     const color = DV.binColor(one, range);
     const picked = one.id === DL.selectedRow;
     return `<div class="dl-staged${picked ? " selected" : ""}" data-staged-bin="${escapeHtml(one.id)}" draggable="true" tabindex="0" title="Drag into the Space">
-      <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}">${DL.badgeLabel(one)}</span>
+      <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}">${DL.swatchLabel(one)}</span>
       <span class="dl-bin-main"><strong>${escapeHtml(DL.label(one))}</strong>
         <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · Unplaced · ${escapeHtml(DL.statusLabel(one))}</small></span>
     </div>`;
