@@ -1987,3 +1987,8 @@ body:not(.structural-design-active) .structural-2d-badge { display: none; }
 /* Fix 1010: the primary with/without Connectors actions own bin output;
    duplicate generate buttons stay in the DOM for JS references but are not shown. */
 #generate-all, #generate-bin { display: none; }
+
+.structural-saving { display: inline-flex; align-items: center; gap: 8px; }
+.structural-saving[hidden] { display: none; }
+.structural-saving-spinner { width: 16px; height: 16px; flex: 0 0 16px; border: 2px solid rgba(20,108,112,.25); border-top-color: var(--teal); border-radius: 50%; animation: preview-wait-spin .8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .structural-saving-spinner { animation: none; border-color: var(--teal); } }

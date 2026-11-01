@@ -34,13 +34,19 @@
     // structuralBusyLabel when shown (Change 5); it starts hidden.
     // (round 2, GPT G2M-0429: hard-coded "Printing — …" copy was false when
     // Save Cabinet or cabinet-only Print holds the busy flag.)
+    const saving = el("span", "structural-saving", "");
+    saving.setAttribute("role", "status");
+    const spinner = el("span", "structural-saving-spinner", "");
+    spinner.setAttribute("aria-hidden", "true");
+    saving.append(spinner, "Saving");
+    saving.hidden = true;
     const busyNote = el("p", "sd-help", "");
     busyNote.hidden = true;
     save.addEventListener("click", () => callbacks.saveCabinet?.());
     print.addEventListener("click", event => callbacks.printCabinet?.(event));
     printBoth.addEventListener("click", event => callbacks.printCabinetAndBins?.(event));
     const guide = el("a", "sd-guide-link", "Assembly & print guide"); guide.href = GUIDE_URL; guide.target = "_blank"; guide.rel = "noopener";
-    structural.append(status, fit, printerRow, save, print, printBoth, busyNote, guide);
+    structural.append(status, fit, printerRow, save, print, printBoth, saving, busyNote, guide);
     // Damaged known cabinet settings: Inventory and designs stay usable, cabinet
     // output stays off, and one button repairs only the cabinet definition.
     const recovery = el("section", "sd-recovery", ""); recovery.hidden = true;
@@ -124,6 +130,7 @@
       // the existing side-effect owner - so the second click cannot silently
       // do nothing: the buttons are disabled for the whole operation.
       const structuralBusy = Boolean(current.structuralBusy);
+      saving.hidden = !structuralBusy;
       save.disabled = structuralBusy;
       print.disabled = structuralBusy;
       printBoth.disabled = structuralBusy;

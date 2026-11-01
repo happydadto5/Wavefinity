@@ -167,41 +167,41 @@ SP.runStructural = async (mode, event) => {
   const kind = SP.structuralKind();
   if (kind === "storage_drawers") return SP.runCabinetStructural(mode);
   if (!kind || SP.structuralBusy) return;
-  // A dirty structural Design draft must be settled before output is
-  // manufactured from the accepted Space: Save Changes, Discard, or the
-  // output stays blocked while the user keeps editing.
-  if (!(await SP.confirmLeaveStructuralEditor())) return;
   const label = SP.structuralLabel(kind);
-  const hosted = Boolean(state.runtime.hosted);
-  if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
-  // Hosted Wavefinity has no local slicer: Print is disabled there (Save stays
-  // available) and never quietly becomes a Save.
-  if (mode === "print" && hosted) {
-    toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000);
-    return;
-  }
-  const printing = mode === "print";
-  if (printing && !state.slicer?.available) {
-    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
-    return;
-  }
-  // Fix 056 D: hidden maintainer shortcut restored at its new owner - local
-  // Base Trim Print only. Ctrl+Shift+click sends the existing production
-  // joint-fit sample instead of the full Base Trim; Storage Box Print has no
-  // special behavior for the same chord.
-  const jointTest = printing && kind === "base_trim" && Boolean(event?.ctrlKey && event?.shiftKey);
-  // Built from the Space definition alone, so the Designer's autosave is not involved.
-  const context = DL.spaceContext();
-  const space = clone(state.activeSpace);
-  const payload = {
-    space, output: state.output,
-    // Base Trim's bed is the one global printer profile; hosted supplies it.
-    ...(kind === "base_trim" && hosted ? { printer_profile: PrinterProfile.current() } : {}),
-    ...(jointTest ? { joint_test_sample: true } : {}),
-  };
   SP.structuralBusy = true;
   SP.renderSpaceInfo();
   try {
+    // A dirty structural Design draft must be settled before output is
+    // manufactured from the accepted Space: Save Changes, Discard, or the
+    // output stays blocked while the user keeps editing.
+    if (!(await SP.confirmLeaveStructuralEditor())) return;
+    const hosted = Boolean(state.runtime.hosted);
+    if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
+    // Hosted Wavefinity has no local slicer: Print is disabled there (Save stays
+    // available) and never quietly becomes a Save.
+    if (mode === "print" && hosted) {
+      toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000);
+      return;
+    }
+    const printing = mode === "print";
+    if (printing && !state.slicer?.available) {
+      toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
+      return;
+    }
+    // Fix 056 D: hidden maintainer shortcut restored at its new owner - local
+    // Base Trim Print only. Ctrl+Shift+click sends the existing production
+    // joint-fit sample instead of the full Base Trim; Storage Box Print has no
+    // special behavior for the same chord.
+    const jointTest = printing && kind === "base_trim" && Boolean(event?.ctrlKey && event?.shiftKey);
+    // Built from the Space definition alone, so the Designer's autosave is not involved.
+    const context = DL.spaceContext();
+    const space = clone(state.activeSpace);
+    const payload = {
+      space, output: state.output,
+      // Base Trim's bed is the one global printer profile; hosted supplies it.
+      ...(kind === "base_trim" && hosted ? { printer_profile: PrinterProfile.current() } : {}),
+      ...(jointTest ? { joint_test_sample: true } : {}),
+    };
     if (printing) {
       const result = await apiSideEffect("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
       DL.requireSpaceContext(context);
@@ -237,19 +237,19 @@ SP.saveStructural = () => SP.structuralKind() === "base_trim"
   ? SP.saveBaseTrim() : SP.runStructural("save");
 SP.printStorageBox = async () => {
   if (SP.structuralBusy || SP.structuralKind() !== "storage_box") return;
-  // A dirty structural Design draft must be settled before output is
-  // manufactured from the accepted Space: Save Changes, Discard, or the
-  // output stays blocked while the user keeps editing.
-  if (!(await SP.confirmLeaveStructuralEditor())) return;
-  if (state.runtime.hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
-  if (!state.slicer?.available) {
-    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
-    return;
-  }
-  const context = DL.spaceContext();
   SP.structuralBusy = true;
   SP.renderSpaceInfo();
   try {
+    // A dirty structural Design draft must be settled before output is
+    // manufactured from the accepted Space: Save Changes, Discard, or the
+    // output stays blocked while the user keeps editing.
+    if (!(await SP.confirmLeaveStructuralEditor())) return;
+    if (state.runtime.hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
+    if (!state.slicer?.available) {
+      toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
+      return;
+    }
+    const context = DL.spaceContext();
     DL.requireSpaceContext(context);
     if (typeof flushSpaceDesignAutosave === "function" &&
         !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
@@ -306,6 +306,7 @@ SP.renderStructuralActions = () => {
     summary.textContent = text;
   }
   if (kind === "base_trim") SP.refreshBaseTrimSummary();
+  document.getElementById("space-structural-saving").hidden = !SP.structuralBusy;
   save.disabled = SP.structuralBusy;
   print.disabled = SP.structuralBusy || hosted;
   print.title = hosted ? (kind === "base_trim" ? SP.HOSTED_SURFACE_PRINT_TOOLTIP : SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP) : "";

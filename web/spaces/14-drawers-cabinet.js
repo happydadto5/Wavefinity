@@ -456,25 +456,25 @@ SP.hostedCabinetStatus = async (signature, orientations = null, expected = null)
 // and one slicer handoff. Hosted stays unavailable: it has no local slicer.
 SP.printCabinetAndBins = async event => {
   if (SP.structuralBusy) return;
-  // A dirty structural Design draft must be settled before output is
-  // manufactured from the accepted Space: Save Changes, Discard, or the
-  // output stays blocked while the user keeps editing.
-  if (!(await SP.confirmLeaveStructuralEditor())) return;
-  const hosted = Boolean(state.runtime.hosted);
-  if (hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
-  if (!state.slicer?.available) {
-    toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
-    return;
-  }
-  const context = DL.spaceContext();
-  const savedName = state.activeSpace?.name || "the cabinet";
-  const savedWhere = state.output;
-  let wroteFiles = false;
-  const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\\\/]/).pop()))].join("\n");
+  let savedName, savedWhere, wroteFiles = false;
   SP.structuralBusy = true;
   SP.structuralBusyLabel = "Preparing cabinet and bins…";
   SP.renderSpaceInfo();
   try {
+    // A dirty structural Design draft must be settled before output is
+    // manufactured from the accepted Space: Save Changes, Discard, or the
+    // output stays blocked while the user keeps editing.
+    if (!(await SP.confirmLeaveStructuralEditor())) return;
+    const hosted = Boolean(state.runtime.hosted);
+    if (hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
+    if (!state.slicer?.available) {
+      toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
+      return;
+    }
+    const context = DL.spaceContext();
+    savedName = state.activeSpace?.name || "the cabinet";
+    savedWhere = state.output;
+    const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\\\/]/).pop()))].join("\n");
     DL.requireSpaceContext(context);
     if (typeof flushSpaceDesignAutosave === "function" &&
         !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
@@ -514,31 +514,31 @@ SP.printCabinetAndBins = async event => {
 };
 SP.runCabinetStructural = async mode => {
   if (SP.structuralBusy) return;
-  // A dirty structural Design draft must be settled before output is
-  // manufactured from the accepted Space: Save Changes, Discard, or the
-  // output stays blocked while the user keeps editing.
-  if (!(await SP.confirmLeaveStructuralEditor())) return;
-  const hosted = Boolean(state.runtime.hosted);
-  if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
-  if (mode === "print" && hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
-  if (mode === "print" && !state.slicer?.available) {
-    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
-    return;
-  }
-  const context = DL.spaceContext();
-  const payload = {
-    space: clone(state.activeSpace),
-    ...(hosted ? { printer_profile: PrinterProfile.current() } : { output: state.output, space_id: state.activeSpaceId }),
-  };
-  // Remembered now, so a late completion can say exactly what it did and to whom.
-  const savedName = state.activeSpace?.name || "the cabinet";
-  const savedWhere = hosted ? (state.browserFolder?.name || "your chosen folder") : state.output;
-  let wroteFiles = false;
-  const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\/]/).pop()))].join("\n");
+  let savedName, savedWhere, wroteFiles = false;
   SP.structuralBusy = true;
   SP.structuralBusyLabel = mode === "save" ? "Saving cabinet…" : "Printing cabinet…";
   SP.renderSpaceInfo();
   try {
+    // A dirty structural Design draft must be settled before output is
+    // manufactured from the accepted Space: Save Changes, Discard, or the
+    // output stays blocked while the user keeps editing.
+    if (!(await SP.confirmLeaveStructuralEditor())) return;
+    const hosted = Boolean(state.runtime.hosted);
+    if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
+    if (mode === "print" && hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
+    if (mode === "print" && !state.slicer?.available) {
+      toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
+      return;
+    }
+    const context = DL.spaceContext();
+    const payload = {
+      space: clone(state.activeSpace),
+      ...(hosted ? { printer_profile: PrinterProfile.current() } : { output: state.output, space_id: state.activeSpaceId }),
+    };
+    // Remembered now, so a late completion can say exactly what it did and to whom.
+    savedName = state.activeSpace?.name || "the cabinet";
+    savedWhere = hosted ? (state.browserFolder?.name || "your chosen folder") : state.output;
+    const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\/]/).pop()))].join("\n");
     let saved;
     if (mode === "print") {
       const result = await apiSideEffect("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
