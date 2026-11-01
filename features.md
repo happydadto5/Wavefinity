@@ -1147,12 +1147,7 @@ The visible action set changes to match the current design.
 
 ## 13.3 Print choices
 
-The main print workflow explicitly supports:
-
-- **Print with Connectors**.
-- **Print without Connectors**.
-
-This prevents connector generation from being an invisible print-side choice.
+**Print Individual Bin** opens a print step with an **Include connectors** choice shown each time. It starts on, remembers the choice during the session, and shows when connectors are unavailable. Hosted users save the selected files for printing.
 
 ## 13.4 Bambu Studio handoff
 

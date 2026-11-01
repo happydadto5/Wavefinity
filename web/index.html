@@ -473,8 +473,7 @@
       <div id="bin-save-bar" class="bin-save-bar" role="region" aria-label="Print and save bin">
         <div class="print-button-wrap">
           <div class="print-choice-row">
-            <button id="print-with-connectors" class="button primary print-button">Print with Connectors</button>
-            <button id="print-without-connectors" class="button secondary print-button">Print without Connectors</button>
+            <button id="print-individual-bin" class="button primary print-button">Print Individual Bin</button>
           </div>
           <button type="button" id="slicer-picker-button" class="slicer-picker-button" title="Choose the slicer app Wavefinity sends print files to.">Change slicer</button>
         </div>
@@ -794,6 +793,16 @@
       <button id="draft-switch-discard" type="button" class="button danger">Discard change</button>
       <button id="draft-switch-add" type="button" class="button primary" hidden>Add as new</button>
     </div>
+  </dialog>
+  <dialog id="individual-bin-print-dialog" class="support-layout-dialog" aria-labelledby="individual-bin-print-title">
+    <h2 id="individual-bin-print-title">Print Individual Bin</h2>
+    <p id="individual-bin-print-message"></p>
+    <label class="checkbox-row"><span>Include connectors</span><input id="individual-bin-include-connectors" type="checkbox"></label>
+    <p id="individual-bin-connectors-unavailable" hidden>Connectors are unavailable for this bin.</p>
+    <form method="dialog" class="button-row">
+      <button value="cancel" class="button secondary">Cancel</button>
+      <button value="print" class="button primary">Print Individual Bin</button>
+    </form>
   </dialog>
   <dialog id="app-confirm-dialog" class="support-layout-dialog" aria-labelledby="app-confirm-title">
     <h2 id="app-confirm-title"></h2>

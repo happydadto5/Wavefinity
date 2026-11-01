@@ -294,7 +294,7 @@ async function printModel(target = "bin", initiatingButton = null) {
   if (state.runtime.hosted) return generateParts(target === "all" ? "all" : "bin");
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
-    toast("A slicer prepares 3D-print files for your printer. Use Change Slicer below the print buttons to choose one.", true, 8000);
+    toast("A slicer prepares 3D-print files for your printer. Use Change slicer below Print Individual Bin to choose one.", true, 8000);
     return;
   }
   if (typedSpaceOrdinaryBin() &&
@@ -303,9 +303,9 @@ async function printModel(target = "bin", initiatingButton = null) {
     ? state.designInventoryId : null;
   const designSpaceContext = designRowId ? DL.spaceContext() : null;
   if (!beginDesignMutation()) return;
-  const button = initiatingButton || $("#print-without-connectors");
+  const button = initiatingButton || $("#print-individual-bin");
   const old = button.textContent;
-  const printButtons = [$("#print-with-connectors"), $("#print-without-connectors")].filter(Boolean);
+  const printButtons = [$("#print-individual-bin")].filter(Boolean);
   printButtons.forEach(one => { one.disabled = true; });
   const slicerName = state.slicer?.name || "the slicer";
   button.textContent = `Sending to ${slicerName}…`;
@@ -433,37 +433,45 @@ function connectorsUnavailable() {
   return b4bEnabled() || baseTrimEnabled() || Boolean(state.design?.box?.lid?.enabled);
 }
 
+let includeIndividualBinConnectors = true;
+
 function syncPrintChoiceAvailability() {
-  const withButton = $("#print-with-connectors");
-  if (withButton) withButton.hidden = connectorsUnavailable();
+  const option = $("#individual-bin-include-connectors");
+  const unavailable = connectorsUnavailable();
+  option.disabled = unavailable;
+  option.checked = !unavailable && includeIndividualBinConnectors;
+  $("#individual-bin-connectors-unavailable").hidden = !unavailable;
+}
+
+function chooseIndividualBinPrint(button) {
+  const dialog = $("#individual-bin-print-dialog");
+  if (dialog.open) return;
+  syncPrintChoiceAvailability();
+  $("#individual-bin-print-message").textContent = state.runtime.hosted
+    ? "Choose what to save for printing."
+    : "Choose what to send to the slicer.";
+  dialog.returnValue = "cancel";
+  dialog.addEventListener("close", () => {
+    if (dialog.returnValue !== "print") return;
+    const option = $("#individual-bin-include-connectors");
+    if (!option.disabled) includeIndividualBinConnectors = option.checked;
+    printModel(option.checked ? "all" : "bin", button);
+  }, { once: true });
+  dialog.showModal();
 }
 
 function updatePrimaryPrintButtonLabel() {
-  const withButton = $("#print-with-connectors");
-  const withoutButton = $("#print-without-connectors");
+  const button = $("#print-individual-bin");
+  if (!button) return;
   const wrap = $(".print-button-wrap");
-  if (!withButton || !withoutButton) return;
   if (wrap) wrap.hidden = false;
-  syncPrintChoiceAvailability();
-  withoutButton.hidden = false;
-  if (state.runtime.hosted) {
-    withButton.textContent = "Save with Connectors";
-    withButton.title = "Save the bin and its connector files into your selected folder";
-    withoutButton.textContent = "Save without Connectors";
-    withoutButton.title = "Save only the bin into your selected folder";
-    $("#slicer-picker-button").hidden = true;
-    return;
-  }
-  const name = state.slicer?.name || "the slicer";
-  const missing = !state.slicer?.available;
-  withButton.textContent = "Print with Connectors";
-  withoutButton.textContent = "Print without Connectors";
-  withButton.title = missing
-    ? "Bambu Studio is not installed - click 'Change slicer' to locate executable"
-    : `Send the bin and its connectors to ${name}`;
-  withoutButton.title = missing
-    ? "Bambu Studio is not installed - click 'Change slicer' to locate executable"
-    : `Send only the bin to ${name}`;
+  button.textContent = "Print Individual Bin";
+  button.title = state.runtime.hosted
+    ? "Choose files to save for printing"
+    : !state.slicer?.available
+      ? "Bambu Studio is not installed - click 'Change slicer' to locate executable"
+      : `Send the bin to ${state.slicer.name || "the slicer"}`;
+  $("#slicer-picker-button").hidden = Boolean(state.runtime.hosted);
 }
 
 function updateSlicerUI() {

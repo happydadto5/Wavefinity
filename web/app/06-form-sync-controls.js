@@ -893,8 +893,7 @@ function wireControls() {
     }
   });
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
-  $("#print-with-connectors").addEventListener("click", event => printModel("all", event.currentTarget));
-  $("#print-without-connectors").addEventListener("click", event => printModel("bin", event.currentTarget));
+  $("#print-individual-bin").addEventListener("click", event => chooseIndividualBinPrint(event.currentTarget));
   $("#generate-all")?.addEventListener("click", () => generateParts("all"));
   $("#generate-bin")?.addEventListener("click", () => generateParts("bin"));
   $("#generate-connector")?.addEventListener("click", () => generateParts("connector"));

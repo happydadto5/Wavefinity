@@ -210,7 +210,7 @@ function updateGenerateAvailability() {
   }
   syncConnectorActionLabels();
   updatePrimaryPrintButtonLabel();
-  for (const printButton of [$("#print-with-connectors"), $("#print-without-connectors")]) {
+  for (const printButton of [$("#print-individual-bin")]) {
     if (!printButton) continue;
     printButton.disabled = state.designMutationBusy || !state.canGenerate;
     if (!state.canGenerate) printButton.title = "Resolve the highlighted issue before printing";
