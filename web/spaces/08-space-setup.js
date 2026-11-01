@@ -80,6 +80,7 @@ SP.setFormMode = edit => {
   $("#space-back").hidden = edit;
   $("#space-create").hidden = edit;
   $("#space-cancel-edit").hidden = !edit;
+  $("#space-form-title").parentElement.hidden = edit;
 };
 
 SP.setupFormSnapshot = null;

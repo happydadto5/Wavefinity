@@ -1530,12 +1530,6 @@ body.relocating > :not(dialog) { pointer-events: none; }
 .space-kind:has(input:checked) { border-color: var(--teal); background: var(--teal-soft); }
 .space-kind input { margin-top: 2px; accent-color: var(--teal); }
 .space-kind strong { display: block; font-size: 13.5px; color: var(--ink); }
-.space-form-type {
-  margin: -2px 0 12px;
-  color: var(--muted);
-  font-size: 12.5px;
-}
-
 .space-dimension-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(120px, 150px));
