@@ -294,7 +294,7 @@ async function printModel(target = "bin", initiatingButton = null) {
   if (state.runtime.hosted) return generateParts(target === "all" ? "all" : "bin");
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
-    toast("A slicer prepares 3D-print files for your printer. Use Change slicer below Print Individual Bin to choose one.", true, 8000);
+    toast("A slicer prepares 3D-print files for your printer. Use Settings > Change slicer to choose one.", true, 8000);
     return;
   }
   if (typedSpaceOrdinaryBin() &&
