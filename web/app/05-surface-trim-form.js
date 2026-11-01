@@ -27,8 +27,10 @@ async function maybePromptSurfaceObjectHeight() {
   error.hidden = true;
   return new Promise(resolve => {
     let busy = false;
+    let heightPending = false;
     const finish = value => {
-      $("#surface-object-height-save").onclick = null;
+      input.onchange = null;
+      noAsk.onchange = null;
       $("#surface-object-height-continue").onclick = null;
       $("#surface-object-height-cancel").onclick = null;
       dialog.removeEventListener("cancel", onCancel);
@@ -36,17 +38,20 @@ async function maybePromptSurfaceObjectHeight() {
       resolve(value);
     };
     const persistPreference = async () => {
-      if (!noAsk.checked) return true;
       DL.requireSpaceContext(context);
-      DL.change(() => { DL.layout.settings.surface.ask_object_height = false; });
+      DL.change(() => { DL.layout.settings.surface.ask_object_height = !noAsk.checked; });
       return DL.save();
+    };
+    noAsk.onchange = async () => {
+      try { if (!(await persistPreference())) throw new Error("Surface setting was not saved."); }
+      catch (cause) { error.textContent = cause.message; error.hidden = false; }
     };
     // Escape and the visible Cancel button are one path: close and abort the
     // triggering operation with no Object height, skip flag or preference change.
     const onCancel = event => { event.preventDefault(); if (!busy) finish(false); };
     $("#surface-object-height-cancel").onclick = () => { if (!busy) finish(false); };
-    $("#surface-object-height-save").onclick = async () => {
-      if (busy) return;
+    input.onchange = async () => {
+      if (busy) { heightPending = true; return; }
       const height = Number(input.value);
       if (!input.value.trim() || !Number.isFinite(height) || height <= 0) {
         error.textContent = "Enter a positive Object height, or continue without one.";
@@ -66,11 +71,14 @@ async function maybePromptSurfaceObjectHeight() {
         state.design.layout.object_height_mm = height;
         $("#surface-object-height").value = height;
         changedDesign(before);
-        finish(true);
+        error.hidden = true;
       } catch (cause) {
         error.textContent = cause.message;
         error.hidden = false;
-      } finally { busy = false; }
+      } finally {
+        busy = false;
+        if (heightPending) { heightPending = false; void input.onchange?.(); }
+      }
     };
     $("#surface-object-height-continue").onclick = async () => {
       if (busy) return;

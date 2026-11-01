@@ -162,7 +162,7 @@ Bins designed in a Surface Space can use Surface-specific base controls:
 
 ### Object planning and stacking
 
-- The Object-height prompt offers **Save Object height**, **Continue without one**, or **Cancel** (same as Escape: nothing is set or saved).
+- The Object-height prompt saves a valid height when it changes; **Continue** proceeds and **Cancel** stops the current operation. The ?Don?t ask again? preference saves when changed.
 - **Object planning** in the Surface layout controls holds the per-Space "Ask for missing Object height" setting (still available after "Don't ask again for this Space") and a quiet **N placed bins missing Object height** count.
 - Stacking respects installed objects: a known object that reaches above the next stack seating plane (direct or lid stacking) blocks the stack. An unknown Object height still allows the stack with the advisory **Contents clearance not verified — Object height is not set for <bin>.**
 - A group of placed bins with no shared edge against the Base Trim gets an advisory that it may slide within the open Surface. This is never a blocker, and edge contact is not a claim that anything is anchored or secured.
@@ -363,7 +363,7 @@ Each Inventory bin still keeps its own exact editable design.
 
 ## 3.4 Autosave and resume
 
-- Editable Space designs autosave.
+- Editable Space designs, Space setup, and valid cabinet and case settings autosave through their normal checks.
 - Reopening a Space can restore the last design state.
 - Switching bins or leaving Design preserves the latest valid visible edit.
 - If a bin already has generated files and is edited, Wavefinity can ask whether those files should be regenerated, with an option to remember the behavior.

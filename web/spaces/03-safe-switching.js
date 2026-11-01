@@ -40,25 +40,14 @@ SP.leaveDrawerLayoutSafely = async ({ noDeferredPreview = false } = {}) => {
 SP.confirmLeaveStructuralEditor = async () => {
   if (typeof structuralTargetKind === "function" && structuralTargetKind() === "box")
     return flushStorageBoxAutosave();
-  if (typeof structuralEditorDirty !== "function" || !structuralEditorDirty()) return true;
-  const what = structuralTargetKind() === "box" ? "case" : "cabinet";
-  const choice = await appConfirm({
-    title: "Save Changes?",
-    message: `You changed this ${what}'s settings and have not saved them.`,
-    primaryLabel: "Save Changes",
-    secondaryLabel: "Discard",
-    secondaryDanger: true,
-    cancelLabel: "Keep Editing",
-  });
-  if (choice === "primary") return structuralSaveChanges();
-  if (choice === "secondary") return structuralDiscardDraft();
-  return false;
+  return typeof flushCabinetAutosave === "function" ? flushCabinetAutosave() : true;
 };
 
 // Every Space/folder identity exit settles a structural draft first, then the
 // Drawer layout. (The cabinet mutation controller keeps calling
 // SP.leaveDrawerLayoutSafely directly.)
 SP.leaveSpaceSafely = async options => {
+  if (SP.editing && !(await SP.flushSetupAutosave())) return false;
   if (!(await SP.confirmLeaveStructuralEditor())) return false;
   return SP.leaveDrawerLayoutSafely(options);
 };

@@ -64,8 +64,8 @@ SP.editSpace = () => {
     SP.showSetup(state.activeSpace.kind === "box" ? "portable" : state.activeSpace.kind, state.activeSpace, { update: true });
 };
 
-SP.newSpace = () => {
-    if (!state.activeSpace) return;
+SP.newSpace = async () => {
+    if (!state.activeSpace || (SP.editing && !(await SP.flushSetupAutosave()))) return;
 
     const template = clone(state.activeSpace);
     if (template.kind === "box") template.kind = "portable";
@@ -170,25 +170,51 @@ SP.confirmPrintedAutoBases = async trimSize => {
     });
 };
 
-SP.updateSpace = async () => {
-    const values = await SP.readSetupValues();
-    if (!values) return;
-    const { kind, name, x, y, z, trimSize, extra = {} } = values;
-    if (kind === "storage_drawers") {
-        // Edit goes through the serialized cabinet mutation, which checks every
-        // current placement before Inventory or metadata is committed.
-        const updated = await SP.mutateCabinet("reconfigure", {
-          space: { kind, name, x, y, z, storage_drawers: extra.storage_drawers },
-        });
-        // Only an adopted result closes the form and reports success.
-        if (!updated) return;
-        SP.storageDrawersForm?.markPristine?.();
-        SP.cancelInlineEdit();
-        toast("Space updated.");
-        return;
-    }
-    return SP.commitSpaceUpdate(values);
+SP.setupAutosaveRevision = 0;
+SP.setupSavedRevision = 0;
+SP.setupAutosaveChain = Promise.resolve(true);
+SP.queueSetupAutosave = () => {
+    if (!SP.isUpdate || !SP.editing) return;
+    SP.setupAutosaveRevision += 1;
+    clearTimeout(SP.setupAutosaveTimer);
+    SP.setupAutosaveTimer = setTimeout(() => { SP.setupAutosaveTimer = null; void SP.flushSetupAutosave(); }, 350);
 };
+SP.flushSetupAutosave = () => {
+    clearTimeout(SP.setupAutosaveTimer);
+    SP.setupAutosaveTimer = null;
+    const run = async () => {
+      while (SP.isUpdate && SP.editing && SP.setupSavedRevision !== SP.setupAutosaveRevision) {
+        const values = SP.setupKind === "storage_drawers"
+          ? await SP.readSetupValues() : SP.readOrdinarySetupValues({ focus: false });
+        if (!values) return false;
+        const revision = SP.setupAutosaveRevision;
+        try {
+          const { kind, name, x, y, z, extra = {} } = values;
+          if (kind === "storage_drawers") {
+            const updated = await SP.mutateCabinet("reconfigure", {
+              space: { kind, name, x, y, z, storage_drawers: extra.storage_drawers },
+            });
+            if (!updated) return false;
+            if (revision === SP.setupAutosaveRevision) SP.storageDrawersForm?.markPristine?.();
+          } else {
+            const updated = await SP.commitSpaceUpdate(values, { structural: true });
+            if (updated === false) return false;
+          }
+          SP.setupSavedRevision = revision;
+          if (revision === SP.setupAutosaveRevision) SP.setupFormSnapshot = SP.captureOrdinarySetupSnapshot();
+          SP.renderSpaceInfo();
+        } catch (error) {
+          SP.fail(friendlyError(error));
+          return false;
+        }
+      }
+      return true;
+    };
+    const pending = SP.setupAutosaveChain.then(run, run);
+    SP.setupAutosaveChain = pending.catch(() => false);
+    return pending;
+};
+SP.updateSpace = () => SP.flushSetupAutosave();
 
 // The ordinary (non-cabinet) Space update, shared by the setup form and the
 // structural Storage Box editor (Fix 103). `structural` skips the setup-form
@@ -201,7 +227,7 @@ SP.commitSpaceUpdate = async (values, { structural = false } = {}) => {
     // Fix 095: the one confirmation happens before anything is committed; Cancel
     // leaves the Surface and its Inventory exactly as they were.
     if (kind === "surface" && typeof DL !== "undefined" && DL.loaded) {
-        if (!(await SP.confirmPrintedAutoBases(trimSize))) return;
+        if (!(await SP.confirmPrintedAutoBases(trimSize))) return false;
         requireCurrent();
     }
     if ((kind === "surface" || kind === "portable") && typeof DL !== "undefined" && DL.loaded && !(await DL.save())) {

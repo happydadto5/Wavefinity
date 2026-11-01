@@ -3,7 +3,7 @@
 SP.wire = () => {
   wireInfoButtons();
   $("#space-cancel-edit")?.addEventListener("click", async () => {
-    if (await SP.confirmDiscardSetup()) SP.cancelInlineEdit();
+    if (await SP.flushSetupAutosave()) SP.cancelInlineEdit();
   });
   document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-type-cards-close, #space-tutorial-close")
     .forEach(el => el?.addEventListener("click", SP.close));
@@ -79,13 +79,13 @@ SP.wire = () => {
     spaceForm.addEventListener("submit", event => event.preventDefault());
     spaceForm.addEventListener("input", SP.refreshSetupError);
     spaceForm.addEventListener("change", SP.refreshSetupError);
+    spaceForm.addEventListener("input", SP.queueSetupAutosave);
+    spaceForm.addEventListener("change", SP.queueSetupAutosave);
   }
 
   document.getElementById("space-create")
     ?.addEventListener("click", () => SP.run(SP.create));
 
-  document.getElementById("space-save-changes")
-    ?.addEventListener("click", () => SP.run(SP.updateSpace));
   const colOpen = document.getElementById("space-collision-open");
   if (colOpen) colOpen.addEventListener("click", () => SP.run(async () => {
     // The collision prompt can be reached by a Space that still needs its

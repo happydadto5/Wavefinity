@@ -90,14 +90,7 @@ function setStructuralStatus(message, { error = false } = {}) {
   record.status.classList.toggle("field-error", Boolean(error));
 }
 
-function updateStructuralActions() {
-  const record = structuralEditorRecord;
-  if (!record?.save) return;
-  const dirty = structuralEditorDirty();
-  record.save.disabled = record.saving || !dirty;
-  record.cancel.disabled = record.saving || !dirty;
-  record.dirtyNote.hidden = !dirty;
-}
+function updateStructuralActions() {}
 
 function unmountStructuralEditor({ clearPreview = true } = {}) {
   clearTimeout(structuralPreviewTimer);
@@ -136,7 +129,7 @@ function syncStructuralEditor({ force = false } = {}) {
   }
   const key = structuralSpaceKey();
   const record = structuralEditorRecord;
-  if (record && !force && record.kind === kind && (record.spaceKey === key || (kind === "box" && record.autosaving))) {
+  if (record && !force && record.kind === kind && (record.spaceKey === key || record.autosaving)) {
     host.hidden = false;
     return;
   }
@@ -157,32 +150,20 @@ function mountStructuralEditor(kind, key) {
   const wrap = structuralEl("div", "structural-editor");
   wrap.append(structuralEl("h3", "structural-editor-title", `${structuralLabel(kind)} design`));
   const formHost = structuralEl("div", "structural-form-host");
-  const dirtyNote = structuralEl("p", "structural-dirty-note", "Unsaved changes. The preview shows them; Save Changes keeps them.");
-  dirtyNote.hidden = true;
   const status = structuralEl("p", "structural-status"); status.hidden = true;
   status.setAttribute("role", "status");
-  const actions = structuralEl("div", "button-row equal structural-actions");
-  const save = structuralEl("button", "button primary", "Save Changes"); save.type = "button"; save.disabled = true;
-  const cancel = structuralEl("button", "button secondary", "Cancel"); cancel.type = "button"; cancel.disabled = true;
-  actions.append(save, cancel);
-  // Fix 111 (F3): the Base Trim has no editable draft — the preview is the
-  // production trim derived from the Surface. Nothing to save or cancel here;
-  // Save/Print live in the Space structural panel.
   const trimNote = structuralEl("p", "dl-note",
-    "Production preview of the trim. It follows the Surface size — edit the Surface to change it.");
+    "Production preview of the trim. It follows the Surface size ? edit the Surface to change it.");
   trimNote.hidden = kind !== "base_trim";
-  if (kind === "base_trim") { actions.hidden = true; formHost.hidden = true; }
-  if (kind === "box") actions.hidden = true;
-  wrap.append(formHost, dirtyNote, status, trimNote, actions);
+  if (kind === "base_trim") formHost.hidden = true;
+  wrap.append(formHost, status, trimNote);
   host.append(wrap);
   const record = {
     kind, spaceKey: key, spaceId: state.activeSpaceId || null,
-    serial: ++state.structuralMountSerial, wrap, formHost, status, save, cancel, dirtyNote,
+    serial: ++state.structuralMountSerial, wrap, formHost, status,
     form: null, saving: false,
   };
   structuralEditorRecord = record;
-  save.addEventListener("click", () => { void structuralSaveChanges(); });
-  cancel.addEventListener("click", () => { void structuralDiscardDraft(); });
   try {
     if (kind === "base_trim") {
       // Fix 111 (F3): preview-only target — the trim is derived from the
@@ -232,6 +213,7 @@ function onStructuralDraftChange() {
   const record = structuralEditorRecord;
   if (!record || !record.form) return; // still mounting; mount schedules its own preview
   if (record.kind === "box") queueStorageBoxAutosave(record);
+  if (record.kind === "storage_drawers") { record.revision = (record.revision || 0) + 1; queueCabinetAutosave(record); }
   updateStructuralActions();
   scheduleStructuralPreview();
 }
@@ -682,23 +664,18 @@ function activateStructural2D() {
 
 // ---------------------------------------------------------------- Save / Cancel
 
-// Save Changes is the only persistence boundary (R1/R2). It commits through
-// the existing cabinet / Space mutation owners and bypasses the leave prompt.
-async function structuralSaveChanges() {
-  const record = structuralEditorRecord;
-  if (!record?.form || record.saving) return false;
-  const kind = record.kind;
-  record.saving = true;
-  // Fix 1104 (Astra AD-003): freeze every form/drag mutation owner BEFORE the
-  // draft snapshot is taken. Controls stay visibly disabled until the save
-  // settles; a save failure re-enables the untouched draft (see finally).
-  // The Storage Box form gains the same setDisabled API in Change 5.
-  cancelStructuralDimensionDrag();
-  record.form.setDisabled?.(true);
-  updateStructuralActions();
-  setStructuralStatus("Saving…");
-  try {
-    if (kind === "storage_drawers") {
+// Keep the mounted form alive while adoption updates the accepted Space. This
+// preserves raw, even incomplete, input made during the checked mutation.
+let cabinetAutosaveTimer = null;
+let cabinetAutosaveChain = Promise.resolve(true);
+function queueCabinetAutosave(record) {
+  clearTimeout(cabinetAutosaveTimer);
+  cabinetAutosaveTimer = setTimeout(() => { cabinetAutosaveTimer = null; void persistCabinetAutosave(record); }, 350);
+}
+function persistCabinetAutosave(record) {
+  const run = async () => {
+    if (structuralEditorRecord !== record || record.kind !== "storage_drawers") return true;
+    while (structuralEditorRecord === record && (record.savedRevision || 0) !== (record.revision || 0)) {
       const form = record.form;
       let result = form.read();
       if (!result.ok && result.pending && form.whenValidationSettled) {
@@ -706,47 +683,36 @@ async function structuralSaveChanges() {
         result = form.read();
       }
       if (!result.ok) { setStructuralStatus(result.message || "Fix the cabinet settings first.", { error: true }); return false; }
+      const revision = record.revision;
       const draft = result.spaceDraft;
-      // The existing serialized cabinet mutation checks every placement before
-      // anything is committed; a conflict throws and leaves the draft dirty.
-      const updated = await SP.mutateCabinet("reconfigure", {
-        space: { kind: "storage_drawers", name: draft.name, x: draft.x, y: draft.y, z: draft.z, storage_drawers: draft.storage_drawers },
-      });
-      if (!updated) { setStructuralStatus("The cabinet changed before it could be saved. Try again.", { error: true }); return false; }
-    } else {
-      const draft = structuralDraftResult();
-      if (!draft.ok) { setStructuralStatus(draft.message, { error: true }); return false; }
-      const space = state.activeSpace;
-      await SP.commitSpaceUpdate({
-        kind: space.kind, name: space.name, x: draft.space.x, y: draft.space.y, z: draft.space.z,
-        trimSize: null, extra: { storage_box: draft.space.storage_box },
-      }, { structural: true });
+      record.autosaving = true;
+      try {
+        const updated = await SP.mutateCabinet("reconfigure", {
+          space: { kind: "storage_drawers", name: draft.name, x: draft.x, y: draft.y, z: draft.z, storage_drawers: draft.storage_drawers },
+        });
+        if (!updated) { setStructuralStatus("The cabinet changed before it could be saved.", { error: true }); return false; }
+        record.spaceKey = structuralSpaceKey();
+        record.savedRevision = revision;
+        if (record.revision === revision) form.markPristine?.();
+        setStructuralStatus("");
+      } catch (error) {
+        if (!DL.isStaleSpaceError(error)) setStructuralStatus(friendlyError(error), { error: true });
+        return false;
+      } finally { record.autosaving = false; }
     }
-    // Accepted: rebuild the editor from the accepted Space so it is pristine,
-    // keeping the active drawer and the highlight.
-    // (A cabinet Save already remounted it when the accepted Space was adopted.)
-    if (structuralEditorRecord === record) syncStructuralEditor({ force: true });
-    setStructuralStatus("");
-    toast("Space updated.");
     return true;
-  } catch (error) {
-    if (!(typeof DL !== "undefined" && DL.isStaleSpaceError?.(error))) {
-      setStructuralStatus(friendlyError(error), { error: true });
-      toast(friendlyError(error), true, 6000);
-    }
-    return false;
-  } finally {
-    record.saving = false;
-    // Fix 1104: unfreeze only while this record is still the live editor. After
-    // a successful save the editor was rebuilt from the accepted Space (this
-    // record's form is destroyed and the fresh form mounts enabled); after a
-    // failure the draft is untouched and editing simply resumes.
-    if (structuralEditorRecord === record) {
-      record.form.setDisabled?.(false);
-      updateStructuralActions();
-    }
-  }
+  };
+  const pending = cabinetAutosaveChain.then(run, run);
+  cabinetAutosaveChain = pending.catch(() => false);
+  return pending;
 }
+async function flushCabinetAutosave() {
+  clearTimeout(cabinetAutosaveTimer);
+  cabinetAutosaveTimer = null;
+  const record = structuralEditorRecord;
+  return record?.kind === "storage_drawers" ? persistCabinetAutosave(record) : true;
+}
+async function structuralSaveChanges() { return flushCabinetAutosave(); }
 
 // Add Drawer / Delete Drawer in full structural Design (Correction 1 C2). The
 // form only asks; the existing cabinet mutation authority (SP.cabinetAdd /
@@ -761,7 +727,11 @@ async function structuralCabinetMutation(kind, drawerId = null) {
   try {
     // Save may remount the editor; read the live record again afterwards.
     if (!(await SP.confirmLeaveStructuralEditor())) return false;
-    const adopted = kind === "add" ? await SP.cabinetAdd() : await SP.cabinetDelete(drawerId);
+    const live = structuralEditorRecord;
+    live?.form?.setDisabled?.(true);
+    let adopted;
+    try { adopted = kind === "add" ? await SP.cabinetAdd() : await SP.cabinetDelete(drawerId); }
+    finally { if (structuralEditorRecord === live) live?.form?.setDisabled?.(false); }
     if (adopted && structuralEditorRecord && structuralTargetKind() === "storage_drawers") {
       // Adoption normally rebuilt it already (SP.renderSpaceInfo); make sure.
       if (structuralEditorRecord.spaceKey !== structuralSpaceKey()) syncStructuralEditor({ force: true });

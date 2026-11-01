@@ -81,7 +81,6 @@ SP.setFormMode = edit => {
   if (typeLine) typeLine.hidden = edit;
   $("#space-back").hidden = edit;
   $("#space-create").hidden = edit;
-  $("#space-save-changes").hidden = !edit;
   $("#space-cancel-edit").hidden = !edit;
   $("#space-form-title").parentElement.hidden = edit;
 };
@@ -211,6 +210,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   }
   SP.updateReadouts();
   SP.setupFormSnapshot = SP.captureOrdinarySetupSnapshot();
+  if (update) { clearTimeout(SP.setupAutosaveTimer); SP.setupAutosaveRevision = 0; SP.setupSavedRevision = 0; }
   if (update) {
     if (SP.renderSpaceInfo) SP.renderSpaceInfo();
     $("#space-name").focus();

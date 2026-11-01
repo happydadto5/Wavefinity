@@ -29,7 +29,7 @@ SP.storageDrawersSummaryText = space => {
 SP.destroyStorageDrawersForm = () => {
   SP.storageDrawersForm?.destroy();
   SP.storageDrawersForm = null;
-  for (const id of ["space-create", "space-save-changes"]) {
+  for (const id of ["space-create"]) {
     const button = document.getElementById(id);
     if (button) button.disabled = false;
   }
@@ -66,7 +66,7 @@ SP.requestClose = async () => {
 
 SP.mountStorageDrawersForm = (prefill, update) => {
   SP.destroyStorageDrawersForm();
-  const primaryButton = document.getElementById(update ? "space-save-changes" : "space-create");
+  const primaryButton = update ? null : document.getElementById("space-create");
   if (primaryButton) primaryButton.disabled = true;
   const host = document.getElementById("space-fields-storage_drawers");
   try {
@@ -101,6 +101,7 @@ SP.mountStorageDrawersForm = (prefill, update) => {
     callbacks: {
       identity: () => update ? (state.activeSpaceId || state.activeSpace?.name) : createToken,
       openPrinterSettings: () => SP.openPrinterSettings(),
+      onChange: () => { if (update) SP.queueSetupAutosave(); },
       requestSummary: ({ space, printer_profile }) => api("/api/space/storage-drawers-summary", {
         space, ...(state.runtime.hosted ? { printer_profile } : {}),
       }, { timeoutMs: 15000 }),
