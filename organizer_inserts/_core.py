@@ -351,6 +351,12 @@ def snapped_zone(
     if overhang:
         bounds = Zone(bounds.x0 - overhang, bounds.y0 - overhang,
                       bounds.x1 + overhang, bounds.y1 + overhang)
+    if mode != "cartridge":
+        # Rounding must not turn a size that fits into an oversized one.
+        if zone.width <= bounds.width + 1e-9:
+            width = min(width, bounds.width)
+        if zone.depth <= bounds.depth + 1e-9:
+            depth = min(depth, bounds.depth)
     if width > bounds.width + 1e-9 or depth > bounds.depth + 1e-9:
         raise ValueError(
             f"{width:g} x {depth:g} mm does not fit in the "
