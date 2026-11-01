@@ -945,9 +945,10 @@ def design_from_dict(
         x = max(GRID_PITCH, round((x - allowance) / GRID_PITCH) * GRID_PITCH)
         y = max(GRID_PITCH, round((y - allowance) / GRID_PITCH) * GRID_PITCH)
     raw_wall = float(raw.get("wall", DEFAULT_WALL))
-    if not math.isfinite(raw_wall) or not MIN_WALL <= raw_wall <= MAX_WALL:
+    max_wall = 3.0 if b4b.enabled else MAX_WALL
+    if not math.isfinite(raw_wall) or not MIN_WALL <= raw_wall <= max_wall:
         raise ValueError(
-            f"wall thickness must be between {MIN_WALL:g} and {MAX_WALL:g} mm"
+            f"wall thickness must be between {MIN_WALL:g} and {max_wall:g} mm"
         )
     standard_walls = (
         bool(raw["standard_walls"])

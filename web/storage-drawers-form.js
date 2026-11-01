@@ -31,8 +31,12 @@
   // now rejects. Keep in sync with STORAGE_DRAWER_DRAWER_WALL_MIN_MM in
   // organizer_storage/drawers.py.
   const STORAGE_DRAWER_WALL_MIN_MM = 1.4;
+  const DRAWER_MATERIAL_CHOICES = [
+    [0.8, "Super thin / light duty"], [1.2, "Thin"], [1.6, "Standard"],
+    [2.0, "Strong"], [2.4, "Extra strong / maximum"],
+  ];
   const materialChoices = (catalog, kind, current, minMm = 0) => {
-    const rows = (catalog?.b4b_rules?.[kind] || []).filter(row => {
+    const rows = DRAWER_MATERIAL_CHOICES.filter(row => {
       const raw = Array.isArray(row) ? row[0] : (row.value ?? row.mm);
       return Number(raw) >= minMm;
     });
@@ -208,7 +212,7 @@
     const material = el("div", "sd-subgroup"); material.append(el("strong", "sd-subhead", "Material")); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
     material.append(matA, matB);
     // Fix 1101 (Opus H4): per-key UI floor. Only drawer_wall_mm is floored;
-    // cabinet/base/top keep the full shared catalogs.
+    // Cabinet/base/top keep the full drawer material list.
     const MATERIAL_MIN_MM = { drawer_wall_mm: STORAGE_DRAWER_WALL_MIN_MM };
     const materialFields = {};
     for (const [key, title, row, kind] of [
@@ -220,7 +224,7 @@
         // Legacy saved drawer wall below the floor: repair to the smallest
         // published catalog choice at/above the floor. The sub-floor value is
         // never re-added as a selectable "Current setting".
-        const published = (catalog?.b4b_rules?.[kind] || [])
+        const published = DRAWER_MATERIAL_CHOICES
           .map(r => Number(Array.isArray(r) ? r[0] : (r.value ?? r.mm)))
           .filter(mm => Number.isFinite(mm) && mm >= floor);
         block[key] = published.length ? Math.min(...published) : floor;

@@ -205,8 +205,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 
 ### Material
 
-- Storage Box-specific wall thickness choices.
-- Storage Box-specific base thickness choices.
+- Wall and base thickness each offer 1.2 mm Very thin, 1.6 mm Thin, 2.0 mm Standard (default), 2.4 mm Strong, and 3.0 mm Extra strong. Saved values are retained.
 - Lid geometry follows the effective case material rules.
 
 ### Storage Box interiors

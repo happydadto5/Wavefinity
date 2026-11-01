@@ -276,9 +276,8 @@ B4B_HW_M2_MAX_FIELD_Z = 64.0
 # A B4B is a carrying case, not a bin with hardware bolted on.  Below this the
 # hardware would be the product, so B4B is refused rather than grown.
 # See organizer_engine.product_rules for B4B_MIN_FIELD_XY / B4B_LATCHED_MIN_HEIGHT.
-# B4B wall floor and default. 0.8 mm is the deliberate Super thin / light duty
-# option; 1.6 mm is the default/recommended Storage Box wall. The child field
-# stays authoritative, so the extra material grows outward and costs no capacity.
+# B4B wall floor preserves legacy cases; new Storage Boxes default to 2.0 mm.
+# The child field stays authoritative, so extra material grows outward.
 B4B_MIN_WALL = 0.8
 
 # --- hardware reinforcement ------------------------------------------------ #

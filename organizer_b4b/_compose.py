@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from functools import lru_cache
 import trimesh
-from organizer_engine import B4BSpec, BoxSpec
+from organizer_engine import B4BSpec, BoxSpec, MAX_WALL
 from organizer_geometry import translated, union
 
 from ._layout import b4b_effective_box, b4b_mating_polygon
@@ -34,6 +34,7 @@ def b4b_divider_work_box(box: BoxSpec) -> BoxSpec:
     return replace(
         eff,
         z=eff.base_thickness + eff.z,
+        wall=min(eff.wall, MAX_WALL),
         b4b=B4BSpec(),
     )
 

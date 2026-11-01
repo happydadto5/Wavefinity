@@ -5,7 +5,7 @@ import copy
 import math
 import uuid
 
-from organizer_engine import BASE_UNIT, B4B_MATERIAL_PRESETS, B4B_DEFAULT_WALL, B4B_DEFAULT_BASE
+from organizer_engine import BASE_UNIT
 from organizer_engine.product_rules import DRAWER_LAYER_MAX_USABLE_HEIGHT_MM, ORDINARY_BIN_MIN_HEIGHT_MM, STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM, STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM
 
 STORAGE_DRAWERS_KIND = "storage_drawers"
@@ -111,9 +111,9 @@ def storage_drawers_defaults(drawer_count: int = 3) -> dict:
         "drawer_fit_mm": 0.40, "drawer_handles": True, "drawer_handle_size": "auto",
         "stacking": False, "unit_label_enabled": False, "unit_label_text": "",
         "drawer_labels_enabled": False, "drawer_label_style": "inlaid",
-        "cabinet_wall_mm": B4B_DEFAULT_WALL, "cabinet_base_mm": B4B_DEFAULT_BASE,
+        "cabinet_wall_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM, "cabinet_base_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM,
         "cabinet_top_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM,
-        "drawer_wall_mm": B4B_DEFAULT_WALL, "drawer_base_mm": B4B_DEFAULT_BASE,
+        "drawer_wall_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM, "drawer_base_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM,
     }
 
 

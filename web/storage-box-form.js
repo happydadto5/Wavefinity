@@ -56,8 +56,8 @@
       secure_lid: true, latch_count: "auto", hinge_count: "2", lid_headroom_mm: 1,
       label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
       stacking: false, handle: false,
-      wall_mm: Number(rules.default_wall_mm ?? 1.6),
-      base_mm: Number(rules.default_base_mm ?? 1.6),
+      wall_mm: Number(rules.default_wall_mm ?? 2.0),
+      base_mm: Number(rules.default_base_mm ?? 2.0),
     };
   }
 
