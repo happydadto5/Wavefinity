@@ -1,4 +1,4 @@
-#space-form-title { font-size: calc(var(--type-dialog-title) * 1.5); }
+:root {
   color-scheme: light;
   --ink: #17252d;
   --muted: #66757d;
