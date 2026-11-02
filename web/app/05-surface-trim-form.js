@@ -408,6 +408,7 @@ const LID_DEFAULTS = {
   label_text: "", division_labels: [], handle_enabled: false, handle_type: "knob",
   knob_shape: "mushroom",
   handle_size: "medium", handle_position: "middle", fit: "standard",
+  flip_enabled: false,
 };
 
 // Everything that changes the resolved lid rise for the current bin. The three
@@ -668,6 +669,9 @@ function syncLidForm() {
   $("#lid-knob-shape").value = lid.knob_shape || "mushroom";
   $("#lid-handle-size").value = lid.handle_size;
   $("#lid-handle-position").value = lid.handle_position;
+  // Flip lid is opt-in and independent of the handle: offered on stackable and
+  // plain lids alike.
+  $("#lid-flip-enabled").checked = Boolean(lid.flip_enabled);
   $("#lid-label-enabled").value = String(Boolean(lid.label_enabled));
   $("#lid-label-orientation").value = lid.label_orientation;
   $("#lid-label-style").value = lid.label_style;
@@ -688,6 +692,8 @@ function syncLidForm() {
   // back and forth never erases them.
   $("#lid-group-lid").hidden = !hasLid;
   $("#lid-group-handle").hidden = !handled;
+  $("#lid-group-flip").hidden = !hasLid;
+  $("#lid-flip-note").hidden = !(hasLid && lid.flip_enabled);
   const handleOn = handled && Boolean(lid.handle_enabled);
   $("#lid-handle-type-row").hidden = !handled;
   $("#lid-knob-shape-row").hidden = !(handleOn && lid.handle_type === "knob");
@@ -874,6 +880,8 @@ function readStackForm(design) {
     knob_shape: $("#lid-knob-shape").value || remembered.knob_shape || "mushroom",
     handle_size: $("#lid-handle-size").value || remembered.handle_size,
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
+    flip_enabled: $("#lid-flip-enabled")
+      ? $("#lid-flip-enabled").checked : Boolean(remembered.flip_enabled),
     // Written explicitly on every save, so a missing value only ever means an
     // older file.
     fit: $("#lid-fit")?.value || remembered.fit || "standard",

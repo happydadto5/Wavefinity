@@ -797,6 +797,21 @@ Handle position:
 
 If a requested handle cannot physically fit, Wavefinity rejects it rather than silently shrinking it.
 
+### Flip lid
+
+An optional checkbox, off by default, for stackable and non-stackable lids alike. It does not depend on the handle: a flip lid may still carry a Knob or Pull to lift it by.
+
+When on, the lid and bin gain a hinge along the back inside edge (the back is always the hinge side; there is no side choice):
+
+- The pin is a strand of standard 1.75 mm filament that you thread through the hinge. It is the only part that is not printed. The channel through the knuckles is 2.15 mm across (0.2 mm printable clearance each side).
+- The hinge is inside the bin. Knuckles alternate lid / bin / lid along the back, all below the rim, and the bin's outside size, its other three walls and its base do not change. The hinge takes a shallow strip along the back interior, at the top of the back wall; nothing else inside is changed.
+- The lid's back edge is carried by the hinge instead of resting on the back wall, so the back wall's top is left open beside the lid. The other three sides seat exactly as a normal lid does, and closed the lid top is level as usual, so a stackable flip lid still takes a bin on top.
+- Open, the lid swings back past vertical (to at least 105 degrees) and stays open by itself, leaving the bin's opening clear.
+- The lid plug is trimmed so that, through the whole swing, it stays at least the selected Lid fit (Tight / Standard / Loose) away from the wavy walls; closed, it seats with the nominal fit.
+- A flip lid has no snap-fit lock bumps; holding the lid shut is a separate feature.
+
+Saved designs from before this option load with it off. A bin too small to hinge (very narrow or shallow) is rejected with a message rather than silently shrunk.
+
 ### Lid label
 
 Lid labels support:
@@ -815,6 +830,7 @@ A Divider can supply one lid label per compartment when that layout is being use
 - Raised lid labels are restricted where stacking would make them incompatible.
 - Lid/stack geometry can require stronger walls and/or thicker base geometry.
 - Closed-height calculations include raised lettering and handles.
+- Flip lid adds no height: the hinge sits below the lid top and the rim.
 
 ---
 

@@ -351,6 +351,9 @@ class LidSpec:
     handle_size: str = "medium"
     handle_position: str = "middle"
     fit: str = "standard"
+    # A back-edge interior hinge (filament pin) in place of a loose lid. Opt-in,
+    # independent of stackable, handle and label.
+    flip_enabled: bool = False
     # None is the legacy "no saved value" signal: an old inlaid label was
     # 0.4 mm and an old raised label 0.6 mm. Canonical saves always write it.
     label_depth_mm: float | None = None
@@ -419,6 +422,12 @@ def lid_stackable(box: "BoxSpec") -> bool:
 def lid_has_handle(box: "BoxSpec") -> bool:
     spec = lid_spec(box)
     return spec.enabled and not spec.stackable and spec.handle_enabled
+
+
+def lid_has_flip(box: "BoxSpec") -> bool:
+    """Whether the lid is the hinged Flip lid (stackable and plain alike)."""
+    spec = lid_spec(box)
+    return spec.enabled and spec.flip_enabled
 
 
 def direct_stack_enabled(box: "BoxSpec") -> bool:

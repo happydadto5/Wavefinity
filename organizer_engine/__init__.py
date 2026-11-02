@@ -138,6 +138,7 @@ from ._specs import (
     lid_enabled,
     lid_stackable,
     lid_has_handle,
+    lid_has_flip,
     direct_stack_enabled,
     vertical_stack_enabled,
     B4BSpec,

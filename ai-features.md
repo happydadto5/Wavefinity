@@ -371,6 +371,7 @@ When a lid is present, current prompt metadata supplies:
 - legal lid thickness choices;
 - legal lid-fit choices;
 - handle on/off (off by default on a non-stackable lid; stackable lids have no handle), Knob or Pull, knob shapes Mushroom (default) or Dome, Small/Medium/Large sizes and Left/Right/Front/Back/Middle positions;
+- Flip lid on/off (`flip_enabled`, off by default, allowed on stackable and non-stackable lids, independent of the handle): a hinge along the back inside edge, pinned with a strand of 1.75 mm filament; the back is always the hinge side;
 - label choices and relief values;
 - stacking compatibility.
 
@@ -381,7 +382,8 @@ General rules:
 - handled lid is non-stackable;
 - Wavefinity may require stronger wall/base values;
 - stackable lids allow inlaid, not raised, lid text; a Divider can provide one lid label per compartment;
-- a handle that does not fit is rejected rather than silently shrunk.
+- a handle that does not fit is rejected rather than silently shrunk;
+- a flip lid keeps the bin's outside size, takes a shallow strip along the back interior, has no snap-fit lock bumps, and is rejected when the bin is too narrow or shallow to hinge.
 
 ## Inside Grip
 
