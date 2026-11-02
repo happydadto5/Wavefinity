@@ -279,6 +279,7 @@ function placedRowData() {
     };
   });
   for (const kind of BOX_MODIFIER_KINDS) {
+    if (kind === "lid_stacking") continue;
     if (!modifierIsActive(kind) && state.modifierEditing !== kind) continue;
     rows.push({
       type: "modifier", kind,

@@ -678,6 +678,11 @@ function wireControls() {
     syncPegboardMountForm();
     changedDesign();
   }));
+  $("#lid-option-toggle").addEventListener("click", () => {
+    const panel = $("#lid-option-panel");
+    panel.hidden = !panel.hidden;
+    $("#lid-option-toggle").setAttribute("aria-expanded", String(!panel.hidden));
+  });
   ["#lid-configuration", "#lid-thickness", "#lid-fit", "#lid-handle-type", "#lid-knob-shape", "#lid-handle-size",
    "#lid-handle-position", "#lid-label-enabled", "#lid-label-orientation", "#lid-label-style",
    "#lid-label-depth", "#lid-flip-enabled", "#lid-snap-enabled"]

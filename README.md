@@ -49,14 +49,13 @@ everything whose meaning it can change.
 rows: a Storage Box Space saves or prints its own case (settings live on the
 Space and are edited in **Edit Space**), and a Surface Space saves or prints its
 own Base Trim, both from the Space header controls. Lid & Stacking is
-a bin-level option. The selected wall/base values are shown and saved; they are
+always available in the bin Specification area. The selected wall/base values are shown and saved; they are
 never silent generation-only overrides.
 
 **Lid & Stacking** offers three ordinary-bin **Stacking Methods**: **Stackable
 bin on bin** stacks directly with no lid, **Stackable bin on lid** closes the bin
 and keeps a flat seat for the next bin, and **Lid with handle — non-stackable**
-adds a knob or pull but does not stack. Remove the Lid & Stacking option to go
-back to no lid and no stacking. Controls follow the method: bin on bin shows no
+adds a knob or pull but does not stack. The Specification row shows the lid state and opens these controls in place. Controls follow the method: bin on bin shows no
 lid controls; bin on lid shows Lid thickness, Lid fit and the label controls;
 lid with handle also shows Handle type, size and position and full label
 choices. Choices you set under one method are remembered when you switch away

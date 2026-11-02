@@ -732,13 +732,13 @@ Do not treat it as a current advertised feature unless it is deliberately restor
 
 # 7. Box modifiers
 
-These appear in the same Parts & Options workflow but modify the bin shell rather than behaving like ordinary interior parts.
+These modify the bin shell rather than behaving like ordinary interior parts. Lid & Stacking is in Specification; the other modifiers appear in Parts & Options.
 
 ---
 
 ## 7.1 Lid & Stacking
 
-One Lid & Stacking option can be active on a bin.
+Lid & Stacking is always available in the bin Specification area. Its row shows No lid, Stackable lid, or Non-stackable lid; Add / Configure opens the existing controls in place.
 
 ### Stacking Method
 

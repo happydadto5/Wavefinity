@@ -608,7 +608,7 @@ function edgeMountAvailable(design = state.design) {
 
 function placedPartCount() {
   return (state.design?.layout?.features?.length || 0) +
-    [...BOX_MODIFIER_KINDS].filter(kind => modifierIsActive(kind)).length;
+    [...BOX_MODIFIER_KINDS].filter(kind => kind !== "lid_stacking" && modifierIsActive(kind)).length;
 }
 
 function iconFor(kind) {
@@ -671,7 +671,7 @@ function renderCatalog() {
 
   const palette = $("#support-palette");
   palette.innerHTML = state.catalog.parts
-    .filter(part => part.palette_visible !== false)
+    .filter(part => part.palette_visible !== false && part.kind !== "lid_stacking")
     .map(part => `
     <button class="support-choice" data-kind="${part.kind}" aria-label="${escapeHtml(part.title)}: ${escapeHtml(part.description)}" title="${escapeHtml(part.title)} — ${escapeHtml(part.description)}">
       <span class="support-choice-icon">

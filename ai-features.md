@@ -360,6 +360,8 @@ These alter the ordinary bin shell rather than acting like independent interior 
 
 ## Lid & Stacking
 
+The bin Specification area always shows Lid & Stacking as No lid, Stackable lid, or Non-stackable lid. Add / Configure opens its controls in place.
+
 Current user-facing configurations:
 
 - **Stackable bin on bin**

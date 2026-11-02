@@ -663,11 +663,11 @@ function clearLidThicknessReport() {
 }
 
 function syncLidForm() {
-  const active = lidPartActive();
   const lid = lidState();
   const config = lidConfiguration();
   populateLidChoices();
-  $("#lid-option-panel").hidden = !active;
+  $("#lid-state").textContent = ({ stackable_bin: "No lid", stackable_lid: "Stackable lid", handled_lid: "Non-stackable lid" })[config];
+  $("#lid-specification").classList.toggle("quiet", config === "stackable_bin");
   $("#lid-configuration").value = config;
   $("#lid-thickness").value = lid.thickness;
   renderLidThicknessOptions();
@@ -736,7 +736,7 @@ function syncLidForm() {
   }
   const note = $("#lid-option-note");
   note.textContent = config === "stackable_bin"
-    ? "No lid. This bin stacks directly onto another bin with the same footprint and compatible stacking geometry. Remove Lid & Stacking to go back to no lid and no stacking."
+    ? "No lid. When selected, this bin stacks directly onto another bin with the same footprint and compatible stacking geometry."
     : config === "stackable_lid"
       ? "Handle and raised lettering are unavailable because the next bin needs a flat seating surface."
       : "One removable lid with a handle. This bin is not stackable.";
@@ -836,7 +836,7 @@ function applyStackVisibility() {
 
 function readStackForm(design) {
   design.box = design.box || {};
-  if (!lidPartActive(design)) {
+  if (!lidPartActive(design) && $("#lid-configuration")?.value === "stackable_bin") {
     delete design.box.stack;
     delete design.box.lid;
     return;

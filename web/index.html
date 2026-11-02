@@ -119,6 +119,77 @@
                 <select id="wall-thickness"><option value="standard">0.8 mm — Default</option></select>
               </label>
             </div>
+            <div class="lid-specification" id="lid-specification">
+              <div class="lid-specification-row"><span>Lid &amp; Stacking: <strong id="lid-state">No lid</strong></span><button type="button" id="lid-option-toggle" class="button secondary dl-small" aria-expanded="false" aria-controls="lid-option-panel">Add / Configure</button></div>
+              <div id="lid-option-panel" hidden>
+                <label>Stacking Method
+                  <select id="lid-configuration">
+                    <option value="stackable_bin">Stackable bin on bin</option>
+                    <option value="stackable_lid">Stackable bin on lid</option>
+                    <option value="handled_lid">Lid with handle — non-stackable</option>
+                  </select>
+                </label>
+                <div id="lid-group-lid" class="b4b-card lid-option-group" hidden>
+                  <h4 class="b4b-card-title">Lid</h4>
+                  <div class="field-grid three">
+                    <label>Lid thickness<select id="lid-thickness">
+                      <option value="thin">Thin</option><option value="medium">Medium</option><option value="thick">Thick</option>
+                    </select></label>
+                    <label id="lid-fit-row" title="Sliding clearance between the lid plug and the bin mouth.">Lid fit<select id="lid-fit">
+                      <option value="standard">Standard</option>
+                    </select></label>
+                  </div>
+                </div>
+                <div id="lid-group-flip" class="b4b-card lid-option-group" hidden>
+                  <h4 class="b4b-card-title">Retention</h4>
+                  <label class="checkbox-row"><span>Snap fit</span><input id="lid-snap-enabled" type="checkbox"></label>
+                  <p id="lid-snap-note" class="inline-help" hidden></p>
+                  <label id="lid-flip-row" class="checkbox-row" title="A hinge along the back inside edge. The pin is a strand of 1.75 mm filament you thread through it."><span>Flip lid</span><input id="lid-flip-enabled" type="checkbox"></label>
+                  <p id="lid-flip-note" class="inline-help" hidden>Hinged on the back edge, inside the bin. Thread a strand of 1.75 mm filament through the hinge as its pin.</p>
+                </div>
+                <div id="lid-group-handle" class="b4b-card lid-option-group" hidden>
+                  <h4 class="b4b-card-title">Handle</h4>
+                  <div class="field-grid three">
+                    <label id="lid-handle-type-row">Handle<select id="lid-handle-type">
+                      <option value="none" selected>None</option><option value="knob">Knob</option><option value="pull">Pull</option>
+                    </select></label>
+                    <label id="lid-knob-shape-row">Knob shape<select id="lid-knob-shape">
+                      <option value="mushroom">Mushroom</option><option value="dome">Dome</option>
+                    </select></label>
+                    <label id="lid-handle-size-row">Handle size<select id="lid-handle-size">
+                      <option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option>
+                    </select></label>
+                    <label id="lid-handle-position-row">Handle position<select id="lid-handle-position">
+                      <option value="left">Left</option><option value="right">Right</option><option value="front">Front</option><option value="back">Back</option><option value="middle">Middle</option>
+                    </select></label>
+                  </div>
+                </div>
+                <div id="lid-group-label" class="b4b-card lid-option-group" hidden>
+                  <h4 class="b4b-card-title">Label</h4>
+                  <div class="field-grid three">
+                    <label>Enabled<select id="lid-label-enabled">
+                      <option value="false">Off</option><option value="true">On</option>
+                    </select></label>
+                  </div>
+                  <div id="lid-label-details" hidden>
+                    <label id="lid-label-text-row" hidden>Text<input id="lid-label-text" type="text" maxlength="80" placeholder="e.g. SCREWS"></label>
+                    <div id="lid-division-labels" hidden></div>
+                    <div class="field-grid three">
+                      <label id="lid-label-orientation-row">Orientation<select id="lid-label-orientation">
+                        <option value="horizontal">Horizontal</option><option value="vertical">Vertical</option>
+                      </select></label>
+                      <label id="lid-label-style-row" title="Letters are recessed into the surface.">Style<select id="lid-label-style">
+                        <option value="flush">Inlaid</option><option value="raised">Raised</option>
+                      </select></label>
+                      <label id="lid-label-depth-row"><span id="lid-label-depth-name">Inlay depth</span><select id="lid-label-depth">
+                        <option value="0.4">Default 0.4 mm</option>
+                      </select></label>
+                    </div>
+                  </div>
+                </div>
+                <p id="lid-option-note" class="inline-help"></p>
+              </div>
+            </div>
             <div id="surface-bin-controls" class="surface-bin-controls" hidden>
               <div class="setting-group"><span class="setting-group-label">Base</span>
                 <div class="field-grid two">
@@ -153,76 +224,6 @@
             <div class="active-option-actions">
               <button type="button" id="active-option-delete" class="button danger dl-small">Delete</button>
               <button type="button" id="active-option-save" class="button primary dl-small">Done</button>
-            </div>
-          </div>
-          <div id="lid-option" class="lid-option-card" hidden>
-            <div id="lid-option-panel">
-              <label>Stacking Method
-                <select id="lid-configuration">
-                  <option value="stackable_bin">Stackable bin on bin</option>
-                  <option value="stackable_lid">Stackable bin on lid</option>
-                  <option value="handled_lid">Lid with handle — non-stackable</option>
-                </select>
-              </label>
-              <div id="lid-group-lid" class="b4b-card lid-option-group" hidden>
-                <h4 class="b4b-card-title">Lid</h4>
-                <div class="field-grid three">
-                  <label>Lid thickness<select id="lid-thickness">
-                    <option value="thin">Thin</option><option value="medium">Medium</option><option value="thick">Thick</option>
-                  </select></label>
-                  <label id="lid-fit-row" title="Sliding clearance between the lid plug and the bin mouth.">Lid fit<select id="lid-fit">
-                    <option value="standard">Standard</option>
-                  </select></label>
-                </div>
-              </div>
-              <div id="lid-group-flip" class="b4b-card lid-option-group" hidden>
-                <h4 class="b4b-card-title">Retention</h4>
-                <label class="checkbox-row"><span>Snap fit</span><input id="lid-snap-enabled" type="checkbox"></label>
-                <p id="lid-snap-note" class="inline-help" hidden></p>
-                <label id="lid-flip-row" class="checkbox-row" title="A hinge along the back inside edge. The pin is a strand of 1.75 mm filament you thread through it."><span>Flip lid</span><input id="lid-flip-enabled" type="checkbox"></label>
-                <p id="lid-flip-note" class="inline-help" hidden>Hinged on the back edge, inside the bin. Thread a strand of 1.75 mm filament through the hinge as its pin.</p>
-              </div>
-              <div id="lid-group-handle" class="b4b-card lid-option-group" hidden>
-                <h4 class="b4b-card-title">Handle</h4>
-                <div class="field-grid three">
-                  <label id="lid-handle-type-row">Handle<select id="lid-handle-type">
-                    <option value="none" selected>None</option><option value="knob">Knob</option><option value="pull">Pull</option>
-                  </select></label>
-                  <label id="lid-knob-shape-row">Knob shape<select id="lid-knob-shape">
-                    <option value="mushroom">Mushroom</option><option value="dome">Dome</option>
-                  </select></label>
-                  <label id="lid-handle-size-row">Handle size<select id="lid-handle-size">
-                    <option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option>
-                  </select></label>
-                  <label id="lid-handle-position-row">Handle position<select id="lid-handle-position">
-                    <option value="left">Left</option><option value="right">Right</option><option value="front">Front</option><option value="back">Back</option><option value="middle">Middle</option>
-                  </select></label>
-                </div>
-              </div>
-              <div id="lid-group-label" class="b4b-card lid-option-group" hidden>
-                <h4 class="b4b-card-title">Label</h4>
-                <div class="field-grid three">
-                  <label>Enabled<select id="lid-label-enabled">
-                    <option value="false">Off</option><option value="true">On</option>
-                  </select></label>
-                </div>
-                <div id="lid-label-details" hidden>
-                  <label id="lid-label-text-row" hidden>Text<input id="lid-label-text" type="text" maxlength="80" placeholder="e.g. SCREWS"></label>
-                  <div id="lid-division-labels" hidden></div>
-                  <div class="field-grid three">
-                    <label id="lid-label-orientation-row">Orientation<select id="lid-label-orientation">
-                      <option value="horizontal">Horizontal</option><option value="vertical">Vertical</option>
-                    </select></label>
-                    <label id="lid-label-style-row" title="Letters are recessed into the surface.">Style<select id="lid-label-style">
-                      <option value="flush">Inlaid</option><option value="raised">Raised</option>
-                    </select></label>
-                    <label id="lid-label-depth-row"><span id="lid-label-depth-name">Inlay depth</span><select id="lid-label-depth">
-                      <option value="0.4">Default 0.4 mm</option>
-                    </select></label>
-                  </div>
-                </div>
-              </div>
-              <p id="lid-option-note" class="inline-help"></p>
             </div>
           </div>
           <div id="inside-handles-option" class="lid-option-card" hidden>
