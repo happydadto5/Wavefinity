@@ -1206,6 +1206,11 @@ dialog:not([open]) { display: none; }
 .support-layout-dialog h2 { margin: 0 0 7px; font-size: var(--type-dialog-title); }
 .support-layout-dialog p { margin: 0 0 16px; color: var(--muted); }
 #draft-switch-dialog { width: min(440px, calc(100vw - 32px)); }
+.suggestions-dialog { width: min(520px, calc(100vw - 32px)); }
+.suggestions-dialog label { display: grid; gap: 5px; margin: 12px 0; font-weight: 600; }
+.suggestions-dialog input, .suggestions-dialog select, .suggestions-dialog textarea { width: 100%; box-sizing: border-box; font: inherit; font-weight: 400; }
+.suggestions-dialog textarea { resize: vertical; }
+.suggestions-dialog #suggestions-status { color: var(--danger); }
 .ai-help-dialog { width: min(840px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; }
 .ai-help-dialog .ai-help-field { display: grid; gap: 5px; margin: 0 0 10px; color: var(--ink); font-weight: 600; }
 .ai-help-dialog textarea { width: 100%; box-sizing: border-box; font: inherit; font-weight: 400; resize: vertical; }

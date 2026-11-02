@@ -316,7 +316,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import quote, unquote, urlparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from photo_nest import photo_outline_from_data
 from bambu_handoff import (
     _validate_settings_safe,
@@ -2959,6 +2959,13 @@ if not HOSTED:
         POST_ROUTES["/api/space/storage-drawers-mutate"])
 
 
+# Anonymous submissions are serialized so concurrent requests cannot exceed the caps.
+SUGGESTION_LOCK = threading.Lock()
+SUGGESTION_SOURCES: dict[str, float] = {}
+SUGGESTION_CREATED: list[float] = []
+SUGGESTION_BODY_LIMIT = 16_384
+
+
 class WavefinityHandler(BaseHTTPRequestHandler):
     server_version = "Wavefinity/1"
 
@@ -3076,8 +3083,80 @@ class WavefinityHandler(BaseHTTPRequestHandler):
         relative = "index.html" if path in {"", "/"} else unquote(path.lstrip("/"))
         self._send_static_file(WEB_ROOT, relative)
 
+    def _post_suggestion(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "-1"))
+        except ValueError:
+            length = -1
+        if length < 0 or length > SUGGESTION_BODY_LIMIT or self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            self._send_json({"error": "Request is too large or invalid."}, HTTPStatus.BAD_REQUEST)
+            return
+        origin = self.headers.get("Origin")
+        host = self.headers.get("Host", "")
+        if origin and origin not in {f"http://{host}", f"https://{host}"}:
+            self.close_connection = True
+            self._send_json({"error": "Cross-origin requests are not allowed."}, HTTPStatus.FORBIDDEN)
+            return
+        if self.headers.get("Content-Type", "").split(";", 1)[0] != "application/json":
+            self.close_connection = True
+            self._send_json({"error": "Please submit the form again."}, HTTPStatus.BAD_REQUEST)
+            return
+        raw = self.rfile.read(length)
+        with SUGGESTION_LOCK:
+            now = time.monotonic()
+            SUGGESTION_CREATED[:] = [t for t in SUGGESTION_CREATED if now - t < 86400]
+            for source, last in list(SUGGESTION_SOURCES.items()):
+                if now - last >= 60:
+                    del SUGGESTION_SOURCES[source]
+            source = self.client_address[0]
+            if (source in SUGGESTION_SOURCES or
+                    sum(now - t < 3600 for t in SUGGESTION_CREATED) >= 20 or
+                    len(SUGGESTION_CREATED) >= 100):
+                self._send_json({"error": "Too many suggestions right now - please try again later."}, HTTPStatus.TOO_MANY_REQUESTS)
+                return
+            SUGGESTION_SOURCES[source] = now
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError()
+                kind, title, description = (payload.get(k) for k in ("kind", "title", "description"))
+                if (kind not in ("bug", "suggestion") or
+                        not isinstance(title, str) or not title.strip() or len(title) > 200 or
+                        not isinstance(description, str) or not description.strip() or len(description) > 8000):
+                    raise ValueError()
+            except (ValueError, UnicodeDecodeError):
+                self._send_json({"error": "Please choose a kind and provide a title and description."}, HTTPStatus.BAD_REQUEST)
+                return
+            token = os.environ.get("WAVEFINITY_GITHUB_TOKEN")
+            if not token:
+                self._send_json({"error": "Suggestions are unavailable right now."}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            issue = {"title": f"[{kind.capitalize()}] {title}", "body": description, "labels": [kind]}
+            request = Request(
+                "https://api.github.com/repos/happydadto5/Wavefinity/issues",
+                data=json.dumps(issue).encode("utf-8"), method="POST",
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+                         "Content-Type": "application/json", "User-Agent": "Wavefinity-suggestions",
+                         "X-GitHub-Api-Version": "2022-11-28"},
+            )
+            # Reserve the slot before the call: a timeout may still create an issue.
+            SUGGESTION_CREATED.append(time.monotonic())
+            try:
+                with urlopen(request, timeout=15) as response:
+                    created = json.load(response)
+                number = created["number"]
+                if not isinstance(number, int) or number < 1:
+                    raise ValueError()
+                self._send_json({"number": number, "url": f"https://github.com/happydadto5/Wavefinity/issues/{number}"})
+            except Exception:
+                self._send_json({"error": "Could not create the issue. Please try again later."}, HTTPStatus.BAD_GATEWAY)
+
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/suggestions":
+            self._post_suggestion()
+            return
         route = POST_ROUTES.get(path)
         if route is None:
             self._send_error(ValueError("unknown API route"), HTTPStatus.NOT_FOUND)
