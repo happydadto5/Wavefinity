@@ -27,7 +27,7 @@ import math
 from dataclasses import replace
 
 import trimesh
-from shapely import affinity
+from shapely.ops import unary_union
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 
 from organizer_engine import (
@@ -63,6 +63,7 @@ from organizer_features.lid_hinge import (
     body_hinge_parts,
     hinge_layout,
     lid_hinge_parts,
+    plate_hinge_cutter,
 )
 from organizer_geometry import (
     _align_ring,
@@ -116,20 +117,8 @@ LID_LABEL_MARGIN = 2.0
 LID_LABEL_MIN_CAP = 2.5
 LID_LABEL_MIN_BACKING = 0.4   # lid left under an inlaid label pocket
 
-# Flip lid: the plug below the rim is trimmed so it clears the walls through the
-# whole swing.  Three depths of the plug are followed along their own arcs about
-# the pin axis, at these angles (degrees).  A point near the pin travels the most
-# per degree, so the steps stay small through the range where it is still below
-# the rim; the clearance between two steps differs from the sampled one by a few
-# hundredths of a millimetre at most (the wall is smooth at that scale).
-FLIP_SWEEP_LAYERS = (1.0 / 3.0, 2.0 / 3.0, 1.0)       # of STACK_PLUG_DEPTH
-FLIP_SWEEP_ANGLES = (
-    0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0,
-    20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 33.0, 36.0, 39.0, 42.0, 45.0, 48.0,
-    51.0, 54.0, 57.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0,
-)
-FLIP_SWEEP_SNAP = 0.02        # slivers narrower than this are not plug
-FLIP_MIN_PLUG_DEPTH = 4.0     # front-to-back room the trimmed plug must keep
+# Continuous analytic arc envelopes replace depth and angular spot samples.
+FLIP_MIN_PLUG_DEPTH = 4.0
 
 _EPS = 1e-6
 _PROFILE_EPS = 0.02
@@ -277,10 +266,11 @@ def _lid_hinge(eff: BoxSpec) -> LidHinge | None:
     rise = stack_lid_rise(eff)
     seat = STACK_SEAT_DEPTH if lid_stackable(eff) else 0.0
     key = (eff.half_x, eff.half_y, eff.wall_depth, eff.corner_fillet, eff.wall,
-           eff.z, rise, seat)
+           eff.z, eff.base_thickness, rise, seat)
     hinge = _FLIP_HINGES.get(key)
     if hinge is None:
-        hinge = hinge_layout(wavy_cavity_polygon(eff), eff.z, rise, seat)
+        hinge = hinge_layout(wavy_cavity_polygon(eff), eff.z, rise, seat,
+                             STACK_PLUG_DEPTH, eff.base_thickness)
         if len(_FLIP_HINGES) > 32:
             _FLIP_HINGES.clear()
         _FLIP_HINGES[key] = hinge
@@ -308,18 +298,25 @@ _FLIP_PLUGS: dict = {}
 
 
 def _swept_plug_polygon(eff: BoxSpec, hinge: LidHinge) -> Polygon:
-    """Flip lid plug outline: trimmed so it clears the walls through the swing.
+    """Trim every below-rim swing arc against the normal-eroded wall path.
 
-    The plug reaches STACK_PLUG_DEPTH below the rim and the walls are wavy on
-    all four sides, so while the lid turns about the pin a plug point leaves the
-    wall phase it started against and can run into a bulge.  Each layer of the
-    plug is followed along its own arc about the pin axis, for exactly the part
-    of the arc where that layer is still below the rim, and whatever would come
-    closer than the selected fit to the built cavity wall is removed.  The
-    cavity is the one the plug is already eroded from (``_plug_polygon``), and
-    the X of a point never changes in the swing, so the test is a shear of that
-    eroded outline in Y.  Closed, the plug keeps its nominal fit: only material
-    the swing would have driven into a wall goes.
+    Put q = axis_y - y, d = axis_depth and h = d - plug_depth_at_point.
+    During opening y' = axis_y - q*cos(t) + h*sin(t),
+    z' = axis_z + q*sin(t) + h*cos(t). Below the rim, z' <= axis_z+d.
+    For ALL depths in [0, STACK_PLUG_DEPTH], the complete Y interval is
+      [axis_y-sqrt(q*q+A*A), axis_y-sqrt(q*q-B*B)]
+    where A=max(0, STACK_PLUG_DEPTH-d), and
+    B*B=d*d-max(0, d-STACK_PLUG_DEPTH)**2. The first bound is the
+    bottom point's stationary position; the second is the rim crossing at
+    the depth nearest the axis. Both are reached before vertical. X never
+    changes. Keeping that entire interval inside the eroded polygon proves
+    minimum fit clearance for every point, depth and opening angle.
+
+    Pull each sampled boundary edge back through those two analytic bounds.
+    The forward inverse is convex and the backward inverse concave: straight
+    chords lie OUTSIDE their curves. Subtracting these edge bands therefore
+    conservatively includes every crossing, including between wall vertices.
+    No depth/angle sampling or smoothing can restore unsafe plug material.
     """
     fit = lid_fit_mm(eff)
     key = (eff.half_x, eff.half_y, eff.wall_depth, eff.corner_fillet, eff.wall, fit,
@@ -327,35 +324,26 @@ def _swept_plug_polygon(eff: BoxSpec, hinge: LidHinge) -> Polygon:
     cached = _FLIP_PLUGS.get(key)
     if cached is not None:
         return cached
-
-    allowed = _plug_polygon(eff, fit)                    # cavity eroded by the fit
-    min_x, min_y, max_x, max_y = allowed.bounds
-    pad = 1.0
-    plug = allowed.intersection(shapely_box(min_x - pad, min_y - pad, max_x + pad, hinge.plug_back_y))
-    for layer in FLIP_SWEEP_LAYERS:
-        height = hinge.axis_depth - STACK_PLUG_DEPTH * layer     # above the axis
-        # Past vertical (up to where the lid comes to rest) no layer is still
-        # below the rim: the plug stops short of the pin by more than the axis
-        # sits below the rim, so the range ends at 90 degrees.
-        for degrees in FLIP_SWEEP_ANGLES:
-            theta = math.radians(degrees)
-            cos, sin = math.cos(theta), math.sin(theta)
-            # Still below the rim at this angle: behind this line (u > threshold).
-            edge_y = hinge.axis_y + (height * cos - hinge.axis_depth) / sin
-            zone = plug.intersection(
-                shapely_box(min_x - pad, edge_y, max_x + pad, max_y + pad)
-            )
-            if zone.is_empty:
-                continue
-            # y -> cos*y + shift is where that layer's column lands; keep a
-            # column only where the landing is still inside the eroded outline.
-            shift = hinge.axis_y * (1.0 - cos) + height * sin
-            reach = affinity.affine_transform(allowed, [1.0, 0.0, 0.0, 1.0 / cos, 0.0, -shift / cos])
-            lost = zone.difference(reach)
-            if not lost.is_empty:
-                plug = plug.difference(lost)
-    # Opening only ever removes material, so the clearance is never given back.
-    plug = plug.buffer(-FLIP_SWEEP_SNAP).buffer(FLIP_SWEEP_SNAP)
+    allowed = _clip_back(_plug_polygon(eff, fit), hinge.plug_back_y)
+    forward_sq = max(0.0, STACK_PLUG_DEPTH - hinge.axis_depth) ** 2
+    backward_sq = (hinge.axis_depth ** 2
+                   - max(0.0, hinge.axis_depth - STACK_PLUG_DEPTH) ** 2)
+    bands = []
+    for ring in (allowed.exterior, *allowed.interiors):
+        points = list(ring.coords)
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            q0, q1 = hinge.axis_y - y0, hinge.axis_y - y1
+            for sign, squared in ((-1.0, forward_sq), (1.0, backward_sq)):
+                if squared <= _EPS:
+                    continue
+                # q is at least rail_radius + gap + link skin, safely greater
+                # than the complete 3 mm plug depth for the inverse root.
+                end0 = hinge.axis_y - math.sqrt(q0*q0 + sign*squared)
+                end1 = hinge.axis_y - math.sqrt(q1*q1 + sign*squared)
+                band = Polygon([(x0, y0), (x1, y1), (x1, end1), (x0, end0)])
+                if band.area > 0.0:
+                    bands.append(band)
+    plug = allowed.difference(unary_union(bands)) if bands else allowed
     if isinstance(plug, MultiPolygon):
         plug = max(plug.geoms, key=lambda one: one.area)
     if (plug.is_empty or not isinstance(plug, Polygon)
@@ -604,8 +592,11 @@ def stack_body_adders(eff: BoxSpec) -> list[trimesh.Trimesh]:
     """What the body gains: the stepped base's snap bead, a flip lid's knuckles."""
     hinge = _lid_hinge(eff)
     if hinge is not None:
-        # Interior only: below the rim, fused to the back wall's inside.
-        return body_hinge_parts(hinge, wavy_cavity_polygon(eff), eff.base_thickness)
+        rail = union(body_hinge_parts(hinge, wavy_cavity_polygon(eff),
+                                      wavy_outer_polygon(eff), eff.base_thickness))
+        if lid_stackable(eff):
+            rail = difference([rail, _lid_stack_seat(eff)])
+        return [rail]
     if not direct_stack_enabled(eff):
         return []
     return _snap_beads(eff, stack_step_depth(eff))
@@ -736,6 +727,15 @@ def _lid_text_parts(
     return parts
 
 
+def _lid_stack_seat(eff: BoxSpec) -> trimesh.Trimesh:
+    """One unchanged recess cutter shared by the flip rail and moving plate."""
+    seat = _extrude_polygon(
+        _plug_polygon(eff).buffer(STACK_FIT), STACK_SEAT_DEPTH + 1.0
+    )
+    seat.apply_translation((0.0, 0.0, eff.z + stack_lid_rise(eff) - STACK_SEAT_DEPTH))
+    return seat
+
+
 def make_lid_parts(
     box: BoxSpec,
     label_regions: list[tuple[str, tuple[float, float, float, float]]] | None = None,
@@ -751,18 +751,20 @@ def make_lid_parts(
     # its plug is the swept-clearance profile; without it nothing below changes.
     hinge = _lid_hinge(eff)
     plug_outline = _lid_plug_polygon(eff) if hinge is None else _swept_plug_polygon(eff, hinge)
-    outer = _lid_top_polygon(eff, hinge)
+    outer = wavy_outer_polygon(eff) if hinge is not None else _lid_top_polygon(eff, hinge)
 
     # Flush seat: the plate is the bin full outer outline from the rim up, so
     # its underside bears on the whole rim top and the exterior meets the wall
     # with no step.  The plug below it keeps its own running clearance, and the
     # lid lock bumps keep their own interference, both independent of the
     # plate.  Nothing here is a preview-only offset.
-    # (A flip lid is the exception at the back edge: the plate ends at the
-    # hinge, which carries it, and it takes no lock bumps - a bump rubbing its
-    # notch would hold against the swing the plug is trimmed to clear.)
+    # A flip plate has the concentric rail nose removed from its rear edge.
+    # Its matching fixed rail bears on the back rim and shares this top height.
+    # It has no lock bumps to resist the swing.
     plate = _extrude_polygon(outer, rise)
     plate.apply_translation((0.0, 0.0, rim))
+    if hinge is not None:
+        plate = difference([plate, plate_hinge_cutter(hinge, eff.half_x)])
 
     plug = _extrude_polygon(plug_outline, STACK_PLUG_DEPTH)
     plug.apply_translation((0.0, 0.0, rim - STACK_PLUG_DEPTH))
@@ -773,28 +775,27 @@ def make_lid_parts(
     if lid_stackable(eff):
         # Recess accepting the next stackable-lid bin stepped base. It keeps
         # the direct-foot fit, whatever the lid own plug fit is.
-        seat = _extrude_polygon(
-            _plug_polygon(eff).buffer(STACK_FIT), STACK_SEAT_DEPTH + 1.0
-        )
-        seat.apply_translation((0.0, 0.0, rim + rise - STACK_SEAT_DEPTH))
-        lid = difference([lid, seat])
+        lid = difference([lid, _lid_stack_seat(eff)])
     elif lid_has_handle(eff):
         handle = _lid_handle_mesh(eff)
         handle.apply_translation((0.0, 0.0, rim + rise))
         lid = union([lid, handle])
 
     if hinge is not None:
-        # The lid's knuckles hang below the recess floor / lid top, off the
-        # plate's back edge, so the flush closed surface and the stack seat are
-        # as they were.
+        # Links pass under the circular rail nose; every moving knuckle and
+        # link remains below the top / stacking recess floor.
         lid = union([lid, *lid_hinge_parts(hinge)])
 
     regions = label_regions or []
     if lid_spec(eff).label_enabled and not regions:
-        safe = _plug_polygon(eff) if lid_stackable(eff) else outer
+        safe = _plug_polygon(eff) if lid_stackable(eff) else _lid_top_polygon(eff, hinge)
         if hinge is not None and lid_stackable(eff):
             safe = _clip_back(safe, hinge.plate_back_y)
         regions = [(lid_spec(eff).label_text, tuple(float(v) for v in safe.bounds))]
+    if hinge is not None:
+        # Divider-provided label regions must also end on the moving plate.
+        regions = [(text, (x0, y0, x1, min(y1, hinge.plate_back_y)))
+                   for text, (x0, y0, x1, y1) in regions]
     regions = _regions_avoiding_handle(eff, regions)
     label_surface = rim + rise - (STACK_SEAT_DEPTH if lid_stackable(eff) else 0.0)
     labels = _lid_text_parts(eff, label_surface, regions)

@@ -383,7 +383,7 @@ General rules:
 - Wavefinity may require stronger wall/base values;
 - stackable lids allow inlaid, not raised, lid text; a Divider can provide one lid label per compartment;
 - a handle that does not fit is rejected rather than silently shrunk;
-- a flip lid keeps the bin's outside size, takes a shallow strip along the back interior, has no snap-fit lock bumps, and is rejected when the bin is too narrow or shallow to hinge.
+- a flip lid keeps the bin walls, base and closed outside size; a fixed wavy-backed rail and moving plate share the usual flush lid top and stacking recess. Their rounded running joint and links under the rail clear the swing; thin lids lower the pin to retain material below the seat. Continuous below-rim arc clearance may increase the closed plug gap beyond the selected fit minimum. It has no snap-fit lock bumps and is rejected when the bin is too narrow, shallow or short to hinge.
 
 ## Inside Grip
 
