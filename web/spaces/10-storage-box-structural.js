@@ -337,7 +337,34 @@ SP.renderStructuralActions = () => {
       ? "Printing is unavailable on hosted Wavefinity: there is no local slicer here."
       : "";
   }
+};
+
+// Story 2519: a Storage Box holds one full interior bin or ordinary bins, never
+// both. The mode follows the contents and is never stored: "empty" (no ordinary
+// rows), "full_interior" (a placed ordinary row whose size is the fit that
+// insideBinFitForStorageBox computes), or "ordinary" (ordinary rows, none of
+// them the full interior bin).
+SP.storageBoxBinContents = () => {
+  if (SP.structuralKind() !== "storage_box" || typeof DL === "undefined" || !DL.layout) return "empty";
+  const rows = DL.bins.filter(DL.isOrdinary);
+  if (!rows.length) return "empty";
+  const fit = insideBinFitForStorageBox(state.activeSpace, freshDesignForCurrentFolder());
+  const full = !fit.error && rows.some(one =>
+    DL.isPlaced(one.id) && one.x === fit.x && one.y === fit.y && one.z === fit.z);
+  return full ? "full_interior" : "ordinary";
+};
+
+// Presence of the three Storage Box actions, re-derived on every Space render and
+// content change. Make full interior bin is offered only for an empty box; New Bin
+// and Duplicate Bin go away while a full interior bin is present.
+SP.syncStorageBoxBinActions = () => {
+  const contents = SP.storageBoxBinContents();
   const makeInsideBin = document.getElementById("space-make-inside-bin");
-  if (makeInsideBin) makeInsideBin.hidden = kind !== "storage_box";
+  if (makeInsideBin) makeInsideBin.hidden = SP.structuralKind() !== "storage_box" || contents !== "empty";
+  const fullInterior = contents === "full_interior";
+  const newBin = document.getElementById("designer-new-bin");
+  if (newBin) newBin.hidden = fullInterior;
+  const duplicate = document.getElementById("designer-duplicate");
+  if (duplicate) duplicate.hidden = fullInterior;
 };
 

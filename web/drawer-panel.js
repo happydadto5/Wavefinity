@@ -905,6 +905,8 @@ DP.update = () => {
   if (!DL.active || !DP.built) return;
   const panel = $("#drawer-panel");
   if (panel) panel.inert = !DL.layout;
+  // Story 2519: Storage Box bin actions follow the bin contents on every change.
+  if (typeof SP !== "undefined" && SP.syncStorageBoxBinActions) SP.syncStorageBoxBinActions();
   if (!DL.layout) {
     const list = $("#dl-inv-list");
     if (list) list.innerHTML = '<p class="dl-note">Inventory unavailable. Select Space to retry loading.</p>';

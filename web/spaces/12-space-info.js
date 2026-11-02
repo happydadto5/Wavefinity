@@ -2,6 +2,8 @@
 
 SP.renderSpaceInfo = () => {
     const isSpace = state.folderMode === "space" && state.activeSpace;
+    // Story 2519: the Storage Box action presence follows the contents on every render.
+    SP.syncStorageBoxBinActions();
     const saveEl = document.getElementById("save-location-row");
     if (saveEl) saveEl.hidden = Boolean(isSpace);
 
