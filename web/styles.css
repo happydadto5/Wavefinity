@@ -1998,8 +1998,10 @@ body.structural-design-active .bin-save-bar,
 body.structural-design-active #space-head-edit { display: none !important; }
 /* The 2D view of a structural target is the Space canvas, view only. */
 body.structural-design-active #sd-workspace-host,
-body.structural-design-active #dl-staging,
 body.structural-design-active .canvas-wrap[data-canvas="drawer"] .dl-hint { display: none !important; }
+/* Fix 2485: the always-there New Bin button stays in Unplaced bins during
+   structural Design; only the staged bin list hides here, as before. */
+body.structural-design-active #dl-staging .dl-staging-list { display: none !important; }
 #structural-editor-host[hidden] { display: none; }
 .structural-editor { display: grid; gap: 10px; padding: 10px 12px 14px; }
 .structural-editor-title { margin: 0; font-size: 14px; }
