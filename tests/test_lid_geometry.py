@@ -280,6 +280,18 @@ class PersistenceAndPlanningTests(unittest.TestCase):
         record = app.inventory_bin_record(raised, Layout())
         self.assertAlmostEqual(float(record["z"]), st.stack_closed_height(raised), places=3)
 
+    def test_handle_off_raised_label_lid_counts_the_label_relief(self):
+        plain = lid_box(label_enabled=False)
+        raised = lid_box(label_enabled=True, label_style="raised", label_text="A", label_depth_mm=0.8)
+        self.assertFalse(lid_has_handle(raised))
+        self.assertEqual(st.lid_handle_height(raised), 0.0)
+        self.assertGreater(st.lid_label_height(raised), 0.0)
+        self.assertAlmostEqual(st.lid_above_top_height(raised), st.lid_label_height(raised), places=3)
+        self.assertAlmostEqual(st.stack_closed_height(raised) - st.stack_closed_height(plain),
+                               st.lid_label_height(raised), places=3)
+        record = app.inventory_bin_record(raised, Layout())
+        self.assertAlmostEqual(float(record["z"]), st.stack_closed_height(raised), places=3)
+
 
 
 

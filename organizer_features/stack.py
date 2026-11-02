@@ -502,8 +502,8 @@ def lid_handle_height(box: BoxSpec) -> float:
 def lid_label_height(box: BoxSpec) -> float:
     """Height Raised lid lettering stands above the lid top (0 when none)."""
     spec = lid_spec(box)
-    if not (lid_has_handle(box) and spec.label_enabled and spec.label_style == "raised"
-            and _lid_has_lettering(spec)):
+    if not (spec.enabled and not spec.stackable and spec.label_enabled
+            and spec.label_style == "raised" and _lid_has_lettering(spec)):
         return 0.0
     return lid_label_relief_mm(spec)
 
