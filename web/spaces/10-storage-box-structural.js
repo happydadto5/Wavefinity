@@ -145,8 +145,8 @@ SP.structuralKind = () => {
 SP.structuralLabel = kind => kind === "storage_box" ? "Storage Box" : kind === "storage_drawers" ? "Cabinet" : "Base Trim";
 SP.structuralInfo = { key: "", data: null, error: "" };
 SP.structuralBusy = false;
-SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP = "Export downloads the Storage Box print files.";
-SP.HOSTED_SURFACE_PRINT_TOOLTIP = "Printing needs local Wavefinity. Use Save Base Trim to put its files in your folder.";
+SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP = "Printing needs local Wavefinity and a slicer. Use Export to get the files.";
+SP.HOSTED_SURFACE_PRINT_TOOLTIP = "Printing needs local Wavefinity and a slicer. Use Export to get the files.";
 
 // The derived outside/capacity summary of a Storage Box, from the server.
 SP.refreshStructuralSummary = async () => {
@@ -232,8 +232,9 @@ SP.runStructural = async (mode, event) => {
 };
 SP.saveStructural = () => {
   if (SP.structuralKind() === "base_trim") return SP.saveBaseTrim();
+  if (SP.structuralKind() === "storage_box") return SP.printStorageBox("export");
 };
-SP.printStorageBox = async () => {
+SP.printStorageBox = async (mode = "print") => {
   if (SP.structuralBusy || SP.structuralKind() !== "storage_box") return;
   SP.structuralBusy = true;
   SP.renderSpaceInfo();
@@ -242,19 +243,25 @@ SP.printStorageBox = async () => {
     // manufactured from the accepted Space: Save Changes, Discard, or the
     // output stays blocked while the user keeps editing.
     if (!(await SP.confirmLeaveStructuralEditor())) return;
-    if (state.runtime.hosted) {
+    if (mode === "print" && state.runtime.hosted) {
+      toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000);
+      return;
+    }
+    if (mode === "export") {
       const context = DL.spaceContext();
       const result = await apiSideEffect("/api/space/structural-generate", {
         space: clone(state.activeSpace), output: state.output,
       });
       DL.requireSpaceContext(context);
       if (!result.files?.length) throw new Error("The server did not return any print files.");
-      for (const file of result.files) {
-        const response = await fetch(file.url);
-        if (!response.ok) throw new Error(`Could not download ${file.name}.`);
-        await WFFileSystem.writeBlob(null, file.name, await response.blob());
+      if (state.runtime.hosted) {
+        for (const file of result.files) {
+          const response = await fetch(file.url);
+          if (!response.ok) throw new Error(`Could not download ${file.name}.`);
+          await WFFileSystem.writeBlob(null, file.name, await response.blob());
+        }
       }
-      toast("Storage Box print files downloaded.", false, 7000);
+      toast(state.runtime.hosted ? "Storage Box files downloaded." : `Storage Box files saved to ${result.output || state.output}.`, false, 7000);
       return;
     }
     if (!state.slicer?.available) {
@@ -304,14 +311,13 @@ SP.renderStructuralActions = () => {
   // The cabinet's Save/Print live in its workspace panel.
   box.hidden = !kind || kind === "storage_drawers";
   if (!kind || kind === "storage_drawers") return;
-  const label = SP.structuralLabel(kind);
   const save = document.getElementById("space-structural-save");
   const print = document.getElementById("space-structural-print");
   const hosted = Boolean(state.runtime.hosted);
-  save.hidden = kind !== "base_trim";
-  save.textContent = `Save ${label}`;
-  print.textContent = kind === "storage_box" ? "Export print files"
-    : kind === "base_trim" ? "Export print files" : `Print ${label}`;
+  save.hidden = false;
+  save.textContent = "Export";
+  save.title = "Create files for you to save.";
+  print.textContent = "Print";
   const summary = document.getElementById("space-structural-summary");
   if (summary) {
     const text = kind === "base_trim" ? SP.baseTrimSummaryText() : "";
@@ -321,13 +327,13 @@ SP.renderStructuralActions = () => {
   if (kind === "base_trim") SP.refreshBaseTrimSummary();
   document.getElementById("space-structural-saving").hidden = !SP.structuralBusy;
   save.disabled = SP.structuralBusy;
-  print.disabled = SP.structuralBusy || (hosted && kind === "base_trim");
+  print.disabled = SP.structuralBusy;
   print.title = hosted ? (kind === "base_trim" ? SP.HOSTED_SURFACE_PRINT_TOOLTIP : SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP) : "";
-  // Fix 096 F9: visible reason beside the disabled Print button, not only a tooltip.
+  // Show the hosted printing limitation beside the action.
   const printReason = document.getElementById("space-structural-print-reason");
   if (printReason) {
-    printReason.hidden = !hosted || kind === "storage_box";
-    printReason.textContent = hosted && kind !== "storage_box"
+    printReason.hidden = !hosted;
+    printReason.textContent = hosted
       ? "Printing is unavailable on hosted Wavefinity: there is no local slicer here."
       : "";
   }

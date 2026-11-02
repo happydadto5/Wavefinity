@@ -284,7 +284,10 @@ async function printModel(target = "bin", initiatingButton = null) {
     return;
   }
   if (relocationBlocksWrites()) return;
-  if (state.runtime.hosted) return generateParts(target === "all" ? "all" : "bin");
+  if (state.runtime.hosted) {
+    toast("Printing needs local Wavefinity and a slicer. Use Export to get the files.", true, 6000);
+    return;
+  }
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
     toast("A slicer prepares 3D-print files for your printer. Use Settings > Change slicer to choose one.", true, 8000);
@@ -440,15 +443,20 @@ function chooseIndividualBinPrint(button) {
   const dialog = $("#individual-bin-print-dialog");
   if (dialog.open) return;
   syncPrintChoiceAvailability();
-  $("#individual-bin-print-message").textContent = state.runtime.hosted
-    ? "Choose what to save for printing."
+  const exporting = button.id === "export-individual-bin";
+  dialog.querySelector('[value="export"]').hidden = !exporting;
+  dialog.querySelector('[value="print"]').hidden = exporting;
+  $("#individual-bin-print-message").textContent = exporting
+    ? "Choose what to include in the files."
     : "Choose what to send to the slicer.";
   dialog.returnValue = "cancel";
   dialog.addEventListener("close", () => {
-    if (dialog.returnValue !== "print") return;
+    if (!["export", "print"].includes(dialog.returnValue)) return;
     const option = $("#individual-bin-include-connectors");
     if (!option.disabled) includeIndividualBinConnectors = option.checked;
-    printModel(option.checked ? "all" : "bin", button);
+    const target = option.checked ? "all" : "bin";
+    if (dialog.returnValue === "export") generateParts(target);
+    else printModel(target, button);
   }, { once: true });
   dialog.showModal();
 }
@@ -458,9 +466,9 @@ function updatePrimaryPrintButtonLabel() {
   if (!button) return;
   const wrap = $(".print-button-wrap");
   if (wrap) wrap.hidden = false;
-  button.textContent = "Print Individual Bin";
+  button.textContent = "Print";
   button.title = state.runtime.hosted
-    ? "Choose files to save for printing"
+    ? "Printing needs local Wavefinity and a slicer"
     : !state.slicer?.available
       ? "Bambu Studio is not installed - click 'Change slicer' to locate executable"
       : `Send the bin to ${state.slicer.name || "the slicer"}`;

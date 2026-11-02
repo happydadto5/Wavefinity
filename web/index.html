@@ -51,13 +51,13 @@
               <button id="space-head-edit" class="button secondary dl-small major-action" type="button">Edit Space</button>
               <button id="space-head-show" class="button secondary dl-small" type="button">Show Folder</button>
               <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
-              <button id="space-pegboard-hooks" class="button secondary dl-small" type="button" title="Save a plate of printable hooks that fit this Pegboard." hidden>Print Pegboard Hooks</button>
+              <button id="space-pegboard-hooks" class="button secondary dl-small" type="button" title="Save a plate of printable hooks that fit this Pegboard." hidden>Export Pegboard Hooks</button>
             </div>
             <div id="space-structural" class="space-structural" hidden>
               <p id="space-structural-summary" class="ink space-structural-summary" role="status" hidden></p>
               <div class="button-row">
-                <button id="space-structural-save" class="button secondary dl-small" type="button">Save Base Trim</button>
-                <button id="space-structural-print" class="button secondary dl-small" type="button">Export print files</button>
+                <button id="space-structural-save" class="button secondary dl-small" type="button">Export</button>
+                <button id="space-structural-print" class="button secondary dl-small" type="button">Print</button>
                 <span id="space-structural-saving" class="structural-saving" role="status" hidden><span class="structural-saving-spinner" aria-hidden="true"></span>Saving</span>
                 <button id="space-make-inside-bin" class="button secondary dl-small" type="button" hidden>Make full interior bin</button>
               </div>
@@ -485,7 +485,8 @@
       <div id="bin-save-bar" class="bin-save-bar" role="region" aria-label="Print bin">
         <div class="print-button-wrap">
           <div class="print-choice-row">
-            <button id="print-individual-bin" class="button primary print-button">Print Individual Bin</button>
+            <button id="export-individual-bin" class="button secondary print-button">Export</button>
+            <button id="print-individual-bin" class="button primary print-button">Print</button>
           </div>
         </div>
       </div>
@@ -816,14 +817,15 @@
     </div>
   </dialog>
   <dialog id="individual-bin-print-dialog" class="support-layout-dialog" aria-labelledby="individual-bin-print-title">
-    <h2 id="individual-bin-print-title">Print Individual Bin</h2>
+    <h2 id="individual-bin-print-title">Bin output</h2>
     <p id="individual-bin-print-message"></p>
     <label class="checkbox-row"><span>Include connectors</span><input id="individual-bin-include-connectors" type="checkbox"></label>
     <button type="button" id="print-dialog-slicer-picker" class="button secondary" title="Choose the slicer app Wavefinity sends print files to.">Change slicer</button>
     <p id="individual-bin-connectors-unavailable" hidden>Connectors are unavailable for this bin.</p>
     <form method="dialog" class="button-row">
       <button value="cancel" class="button secondary">Cancel</button>
-      <button value="print" class="button primary">Print Individual Bin</button>
+      <button value="export" class="button secondary">Export</button>
+      <button value="print" class="button primary">Print</button>
     </form>
   </dialog>
   <dialog id="app-confirm-dialog" class="support-layout-dialog" aria-labelledby="app-confirm-title">

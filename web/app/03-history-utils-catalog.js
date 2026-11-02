@@ -195,10 +195,10 @@ function pinDraftAxis(axis) {
 
 function updateGenerateAvailability() {
   updatePrimaryPrintButtonLabel();
-  for (const printButton of [$("#print-individual-bin")]) {
+  for (const printButton of [$("#print-individual-bin"), $("#export-individual-bin")]) {
     if (!printButton) continue;
     printButton.disabled = state.designMutationBusy || !state.canGenerate;
-    if (!state.canGenerate) printButton.title = "Resolve the highlighted issue before printing";
+    if (!state.canGenerate) printButton.title = "Resolve the highlighted issue before creating files";
   }
 }
 
