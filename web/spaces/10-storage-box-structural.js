@@ -344,13 +344,20 @@ SP.renderStructuralActions = () => {
 // rows), "full_interior" (a placed ordinary row whose size is the fit that
 // insideBinFitForStorageBox computes), or "ordinary" (ordinary rows, none of
 // them the full interior bin).
+// Classification uses the saved bin body, not its lid/handle print envelope.
+SP.binMatchesInteriorFit = (one, fit) => {
+  const design = DL.layout?.design_specs?.[one.id];
+  const body = design?.box || design;
+  return !fit.error && ["x", "y", "z"].every(axis =>
+    Number(body?.[axis] ?? one[axis]) === Number(fit[axis]));
+};
 SP.storageBoxBinContents = () => {
   if (SP.structuralKind() !== "storage_box" || typeof DL === "undefined" || !DL.layout) return "empty";
   const rows = DL.bins.filter(DL.isOrdinary);
   if (!rows.length) return "empty";
   const fit = insideBinFitForStorageBox(state.activeSpace, freshDesignForCurrentFolder());
   const full = !fit.error && rows.some(one =>
-    DL.isPlaced(one.id) && one.x === fit.x && one.y === fit.y && one.z === fit.z);
+    DL.isPlaced(one.id) && SP.binMatchesInteriorFit(one, fit));
   return full ? "full_interior" : "ordinary";
 };
 
@@ -361,7 +368,7 @@ SP.drawerBinContents = () => {
   if (!rows.length) return "empty";
   const limits = cabinetActiveLimits();
   const fit = insideBinFitForStorageBox({ ...limits, z: Math.floor(limits.z - 2) }, freshDesignForCurrentFolder());
-  return !fit.error && rows.some(one => one.x === fit.x && one.y === fit.y && one.z === fit.z)
+  return rows.some(one => SP.binMatchesInteriorFit(one, fit))
     ? "full_interior" : "ordinary";
 };
 
