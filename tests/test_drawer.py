@@ -495,16 +495,16 @@ class SpacerRedesignTests(unittest.TestCase):
                         dist = ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
                         self.assertGreater(dist, 1e-9, (side, contact, phase, a, b))
 
-    def test_flexible_filenames_carry_the_unvalidated_qualifier(self):
+    def test_flexible_filenames_use_the_flex_variant(self):
         from organizer_drawer._spacers import spacer_filename
 
         self.assertEqual(spacer_filename("back", 27.0, 28.0, 20.0, True),
-                         "Spacer Flex Unvalidated Back 27.00x28.00x20.00.3mf")
+                         "Spacer Flex Back 27.00x28.00x20.00.3mf")
         self.assertEqual(spacer_filename("back", 27.0, 28.0, 20.0, False),
                          "Spacer Rigid Back 27.00x28.00x20.00.3mf")
         _d, plan, made = self._plan_and_generate(2 * 8 + 1 + 25.0, 2 * 8 + 1 + 5.0, gx=0)
         by_side = {g["side"]: g for g in made["generated"]}
-        self.assertTrue(by_side["right"]["file"].startswith("Spacer Flex Unvalidated "))
+        self.assertTrue(by_side["right"]["file"].startswith("Spacer Flex Right "))
         self.assertTrue(re.match(r"^Spacer Flex ", by_side["right"]["file"]))  # Print Spacers detector
         # A fallback rigid part is never mislabelled.
         self.assertTrue(by_side["back"]["file"].startswith("Spacer Rigid "))
@@ -526,7 +526,7 @@ class SpacerRedesignTests(unittest.TestCase):
                 "plan_signature": planned["plan_signature"],
             })
             names = {b["file"].split(" ")[1]: b["name"] for b in made["bins"] if b["kind"] == "spacer"}
-            self.assertEqual(names["Flex"], "Flexible (unvalidated) Spacer")
+            self.assertEqual(names["Flex"], "Flexible Spacer")
             self.assertEqual(names["Rigid"], "Rigid Spacer")
 
 
@@ -1073,7 +1073,7 @@ def test_fix1053_auto_height_gate_mirrors_backend_grid_gate():
             "placements": [{"bin": "tall1053", "gx": 0, "gy": 0}]}
     assert drawer_grid(normalise_drawer(room))["cols"] > 0
     got = plan_spacers(room, [tall], {"height_auto": True})
-    assert got["resolved_height"] == 25, got["resolved_height"]  # round(50/2)
+    assert got["resolved_height"] == 50, got["resolved_height"]  # full height of the 50 mm bin
     # Pegboard-small, implicit holes (G2M-0271): no explicit hole counts and
     # width 20 mm below one 25.4 mm Standard pitch. The backend clamps
     # pegboard cols to max(1, ...), so the gate is OPEN and the tall placed
@@ -1084,7 +1084,7 @@ def test_fix1053_auto_height_gate_mirrors_backend_grid_gate():
            "placements": [{"bin": "tallpeg1053", "gx": 0, "gy": 0}]}
     assert drawer_grid(normalise_drawer(peg))["cols"] == 1
     got = plan_spacers(peg, [peg_tall], {"height_auto": True})
-    assert got["resolved_height"] == 25, got["resolved_height"]  # round(50/2)
+    assert got["resolved_height"] == 50, got["resolved_height"]  # full height of the 50 mm bin
     # Snap-4 gate parity (G2M-0275): a standard snap:4 drawer with usable
     # width 4.0 mm (width 5 - clearance 1) in [4, 8) mm. The backend grid
     # step is the drawer snap (4 mm), so cols == 1, the gate is OPEN, and
@@ -1096,7 +1096,7 @@ def test_fix1053_auto_height_gate_mirrors_backend_grid_gate():
              "placements": [{"bin": "tallsnap1053", "gx": 0, "gy": 0}]}
     assert drawer_grid(normalise_drawer(snap4))["cols"] == 1
     got = plan_spacers(snap4, [snap_tall], {"height_auto": True})
-    assert got["resolved_height"] == 25, got["resolved_height"]  # round(50/2)
+    assert got["resolved_height"] == 50, got["resolved_height"]  # full height of the 50 mm bin
 
 
 class StorageBoxHeightCapTests(unittest.TestCase):
