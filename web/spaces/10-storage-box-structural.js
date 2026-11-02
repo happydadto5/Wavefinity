@@ -354,6 +354,17 @@ SP.storageBoxBinContents = () => {
   return full ? "full_interior" : "ordinary";
 };
 
+SP.drawerBinContents = () => {
+  if (!DL.active || !DL.layout || !DL.isStorageDrawers()) return "empty";
+  const drawer = DL.drawer();
+  const rows = (drawer.placements || []).map(p => DL.bin(p.bin)).filter(one => one && DL.isOrdinary(one));
+  if (!rows.length) return "empty";
+  const limits = cabinetActiveLimits();
+  const fit = insideBinFitForStorageBox({ ...limits, z: Math.floor(limits.z - 2) }, freshDesignForCurrentFolder());
+  return !fit.error && rows.some(one => one.x === fit.x && one.y === fit.y && one.z === fit.z)
+    ? "full_interior" : "ordinary";
+};
+
 // Presence of the three Storage Box actions, re-derived on every Space render and
 // content change. Make full interior bin is offered only for an empty box; New Bin
 // and Duplicate Bin go away while a full interior bin is present.
@@ -361,9 +372,15 @@ SP.syncStorageBoxBinActions = () => {
   const contents = SP.storageBoxBinContents();
   const makeInsideBin = document.getElementById("space-make-inside-bin");
   if (makeInsideBin) makeInsideBin.hidden = SP.structuralKind() !== "storage_box" || contents !== "empty";
-  const fullInterior = contents === "full_interior";
+  const isDrawer = DL.active && DL.layout && DL.isStorageDrawers();
+  const drawerContents = isDrawer ? SP.drawerBinContents() : "empty";
+  const drawerAction = document.getElementById("designer-make-drawer-bin");
+  if (drawerAction) drawerAction.hidden = !isDrawer || drawerContents !== "empty";
+  const fullInterior = contents === "full_interior" || (isDrawer && drawerContents === "full_interior");
   const newBin = document.getElementById("designer-new-bin");
   if (newBin) newBin.hidden = fullInterior;
+  const stagingNew = document.querySelector("[data-staging-new-bin]");
+  if (stagingNew) stagingNew.hidden = isDrawer && drawerContents === "full_interior";
   const duplicate = document.getElementById("designer-duplicate");
   if (duplicate) duplicate.hidden = fullInterior;
 };

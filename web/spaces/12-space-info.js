@@ -135,6 +135,19 @@ const wireInfoButtons = (prefix = "space-head") => {
     if (btnSave) btnSave.addEventListener("click", SP.saveStructural);
     const btnPrint = document.getElementById("space-structural-print");
     if (btnPrint) btnPrint.addEventListener("click", SP.printStructural);
+    const drawerBin = document.getElementById("designer-make-drawer-bin");
+    if (drawerBin && prefix === "space-head") drawerBin.addEventListener("click", async () => {
+      const context = DL.spaceContext(), drawerId = DL.layout?.active;
+      if (!DL.isStorageDrawers() || SP.drawerBinContents() !== "empty") return;
+      const confirmed = await appConfirmAction({
+        title: "Create one full-size inside bin?",
+        message: "This creates one bin sized to fill the drawer's available interior, so other bins cannot be placed beside it.",
+        actionLabel: "Continue", cancelLabel: "Cancel",
+      });
+      if (!confirmed || !DL.spaceContextCurrent(context) || DL.layout?.active !== drawerId ||
+          SP.drawerBinContents() !== "empty") return;
+      await designerMakeInsideBin();
+    });
     const btnMakeInsideBin = document.getElementById("space-make-inside-bin");
     if (btnMakeInsideBin) btnMakeInsideBin.addEventListener("click", async () => {
       const context = DL.spaceContext();

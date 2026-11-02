@@ -94,9 +94,11 @@ async function designerMakeInsideBin() {
       !(await SP.confirmLeaveStructuralEditor())) return;
   if (!(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   const candidate = freshDesignForCurrentFolder();
-  const fit = insideBinFitForStorageBox(state.activeSpace, candidate);
+  const limits = state.activeSpace?.kind === "storage_drawers" ? cabinetActiveLimits() : null;
+  const interior = limits ? { ...limits, z: Math.floor(limits.z - 2) } : state.activeSpace;
+  const fit = insideBinFitForStorageBox(interior, candidate);
   if (fit.error) {
-    toast(fit.error, true, 6000);
+    toast(limits ? fit.error.replace("Storage Box", "drawer") : fit.error, true, 6000);
     return;
   }
   if (!beginDesignMutation()) return;
