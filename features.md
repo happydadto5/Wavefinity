@@ -770,10 +770,16 @@ Fit changes the lid plug clearance without changing the accepted direct-stack fi
 
 ### Handle
 
-Handled lids support:
+A handle is optional and off by default on a non-stackable lid; the Handle control starts at **None**. Stackable lids never have a handle.
 
-- Knob.
+When on, the handle is one of:
+
+- Knob, in two shapes:
+  - Mushroom (default shape): a stem with a wider cap the fingers can get under. The cap underside flares out gradually (under 45 degrees from vertical), so it prints in the lid's normal orientation without supports.
+  - Dome: the low, minimal bump.
 - Pull.
+
+Saved designs from before this option load with the handle off.
 
 Handle size:
 

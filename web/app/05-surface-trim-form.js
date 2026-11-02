@@ -405,7 +405,8 @@ function stackMode() {
 const LID_DEFAULTS = {
   enabled: false, stackable: true, thickness: "thin",
   label_enabled: false, label_style: "flush", label_orientation: "horizontal",
-  label_text: "", division_labels: [], handle_type: "knob",
+  label_text: "", division_labels: [], handle_enabled: false, handle_type: "knob",
+  knob_shape: "mushroom",
   handle_size: "medium", handle_position: "middle", fit: "standard",
 };
 
@@ -662,7 +663,9 @@ function syncLidForm() {
   $("#lid-thickness").value = lid.thickness;
   renderLidThicknessOptions();
   if ($("#lid-fit")) $("#lid-fit").value = lid.fit || "standard";
-  $("#lid-handle-type").value = lid.handle_type;
+  // None is the off state; a handle is opt-in.
+  $("#lid-handle-type").value = lid.handle_enabled ? lid.handle_type : "none";
+  $("#lid-knob-shape").value = lid.knob_shape || "mushroom";
   $("#lid-handle-size").value = lid.handle_size;
   $("#lid-handle-position").value = lid.handle_position;
   $("#lid-label-enabled").value = String(Boolean(lid.label_enabled));
@@ -685,8 +688,11 @@ function syncLidForm() {
   // back and forth never erases them.
   $("#lid-group-lid").hidden = !hasLid;
   $("#lid-group-handle").hidden = !handled;
-  ["#lid-handle-type-row", "#lid-handle-size-row", "#lid-handle-position-row"].forEach(selector => {
-    $(selector).hidden = !handled;
+  const handleOn = handled && Boolean(lid.handle_enabled);
+  $("#lid-handle-type-row").hidden = !handled;
+  $("#lid-knob-shape-row").hidden = !(handleOn && lid.handle_type === "knob");
+  ["#lid-handle-size-row", "#lid-handle-position-row"].forEach(selector => {
+    $(selector).hidden = !handleOn;
   });
   $("#lid-group-label").hidden = !hasLid;
   const labelOn = hasLid && lid.label_enabled;
@@ -870,7 +876,10 @@ function readStackForm(design) {
     label_orientation: $("#lid-label-orientation").value,
     label_text: $("#lid-label-text").value,
     division_labels: divisionLabels,
-    handle_type: $("#lid-handle-type").value || remembered.handle_type,
+    handle_enabled: ($("#lid-handle-type").value || "none") !== "none",
+    handle_type: ["knob", "pull"].includes($("#lid-handle-type").value)
+      ? $("#lid-handle-type").value : remembered.handle_type,
+    knob_shape: $("#lid-knob-shape").value || remembered.knob_shape || "mushroom",
     handle_size: $("#lid-handle-size").value || remembered.handle_size,
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
     // Written explicitly on every save, so a missing value only ever means an

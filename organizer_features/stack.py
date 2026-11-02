@@ -484,7 +484,7 @@ def _lid_handle_mesh(box: BoxSpec) -> trimesh.Trimesh:
     spec = lid_spec(box)
     outer = wavy_outer_polygon(stack_effective_box(box))
     return resolve_lid_handle(outer.bounds, spec.handle_type, spec.handle_size,
-                              spec.handle_position)
+                              spec.handle_position, spec.knob_shape)
 
 
 def _lid_has_lettering(spec) -> bool:

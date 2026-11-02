@@ -678,7 +678,7 @@ function wireControls() {
     syncPegboardMountForm();
     changedDesign();
   }));
-  ["#lid-configuration", "#lid-thickness", "#lid-fit", "#lid-handle-type", "#lid-handle-size",
+  ["#lid-configuration", "#lid-thickness", "#lid-fit", "#lid-handle-type", "#lid-knob-shape", "#lid-handle-size",
    "#lid-handle-position", "#lid-label-enabled", "#lid-label-orientation", "#lid-label-style",
    "#lid-label-depth"]
     .forEach(selector => $(selector).addEventListener("change", () => {

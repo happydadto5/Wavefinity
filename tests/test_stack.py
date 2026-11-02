@@ -217,6 +217,15 @@ class LidContractTests(unittest.TestCase):
 
 
 
+    def test_plain_lid_has_no_handle_until_turned_on(self):
+        from organizer_engine import lid_has_handle
+        box = BoxSpec(x=48, y=32, z=40, lid=LidSpec(enabled=True, stackable=False))
+        self.assertFalse(lid_has_handle(box))
+        on = BoxSpec(x=48, y=32, z=40, lid=LidSpec(enabled=True, stackable=False, handle_enabled=True))
+        self.assertTrue(lid_has_handle(on))
+        saved = design_to_dict(box, Layout())
+        self.assertFalse(saved["box"]["lid"]["handle_enabled"])
+
     def test_lid_disables_side_connectors(self):
         design = design_to_dict(
             BoxSpec(x=48, y=32, z=40, lid=LidSpec(enabled=True)), Layout(),

@@ -360,7 +360,7 @@ When a lid is present, current prompt metadata supplies:
 
 - legal lid thickness choices;
 - legal lid-fit choices;
-- handle types/sizes/positions;
+- handle on/off (off by default), handle types, knob shapes (mushroom, dome), sizes and positions;
 - label choices and relief values;
 - stacking compatibility.
 

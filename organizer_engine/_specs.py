@@ -318,6 +318,7 @@ LID_THICKNESSES = ("thin", "medium", "thick")
 LID_LABEL_STYLES = ("flush", "raised")
 LID_LABEL_ORIENTATIONS = ("horizontal", "vertical")
 LID_HANDLE_TYPES = ("knob", "pull")
+LID_KNOB_SHAPES = ("mushroom", "dome")
 LID_HANDLE_SIZES = ("small", "medium", "large")
 LID_HANDLE_POSITIONS = ("left", "right", "front", "back", "middle")
 # Removable-lid plug clearance per side. Only the lid's own bottom plug uses
@@ -344,7 +345,9 @@ class LidSpec:
     label_orientation: str = "horizontal"
     label_text: str = ""
     division_labels: tuple[str, ...] = ()
+    handle_enabled: bool = False      # a handle is opt-in
     handle_type: str = "knob"
+    knob_shape: str = "mushroom"
     handle_size: str = "medium"
     handle_position: str = "middle"
     fit: str = "standard"
@@ -361,6 +364,7 @@ class LidSpec:
             (self.label_style, LID_LABEL_STYLES, "lid label style"),
             (self.label_orientation, LID_LABEL_ORIENTATIONS, "lid label orientation"),
             (self.handle_type, LID_HANDLE_TYPES, "lid handle type"),
+            (self.knob_shape, LID_KNOB_SHAPES, "lid knob shape"),
             (self.handle_size, LID_HANDLE_SIZES, "lid handle size"),
             (self.handle_position, LID_HANDLE_POSITIONS, "lid handle position"),
         )
@@ -414,7 +418,7 @@ def lid_stackable(box: "BoxSpec") -> bool:
 
 def lid_has_handle(box: "BoxSpec") -> bool:
     spec = lid_spec(box)
-    return spec.enabled and not spec.stackable
+    return spec.enabled and not spec.stackable and spec.handle_enabled
 
 
 def direct_stack_enabled(box: "BoxSpec") -> bool:

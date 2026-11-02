@@ -1,4 +1,4 @@
-"""Ordinary-lid handles: a rounded Knob and an arched Pull.
+"""Ordinary-lid handles: a Knob (grippable Mushroom or low Dome) and an arched Pull.
 
 One resolver builds the actual handle mesh for a lid.  The label keep-out
 rectangle, the reported handle height and the closed-height envelope are all
@@ -8,8 +8,9 @@ what is printed.
 The handle is built with its lid-top plane at ``z = 0`` and its lowest point
 ``LID_HANDLE_ROOT_EMBED`` below that plane, so every root overlaps real lid
 material by a positive margin before the union.  Both forms are support
-conscious when the lid prints plug-down: nothing undercuts, the Knob is a dome
-that blends into the lid through a concave fillet, and the Pull is a teardrop
+conscious when the lid prints plug-down: nothing undercuts, the Dome knob blends
+into the lid through a concave fillet, the Mushroom knob is a stem under a cap
+whose underside flares out at no more than 45 degrees from vertical, and the Pull is a teardrop
 section swept over a half-ellipse with vertical legs that flare into the lid.
 """
 
@@ -31,6 +32,14 @@ LID_KNOB_DIAMETER_LIMITS = (6.0, 28.0)      # printable / grippable envelope
 LID_KNOB_HEIGHT_RATIO = 0.55
 LID_KNOB_HEIGHT_LIMITS = (4.0, 16.0)
 LID_KNOB_BLEND_MAX = 1.5                     # base fillet radius
+
+LID_MUSHROOM_DIAMETER_LIMITS = (6.0, 24.0)   # cap; keeps the height inside LID_KNOB_HEIGHT_LIMITS
+LID_MUSHROOM_STEM_RATIO = 1.0 / 3.0          # stem diameter, of the cap diameter
+LID_MUSHROOM_STEM_MIN_RADIUS = 1.5
+LID_MUSHROOM_STEM_HEIGHT = 3.0               # finger room under the cap
+LID_MUSHROOM_FLARE_RUN = 1.1                 # flare height per mm of flare reach (< 45 degrees)
+LID_MUSHROOM_RIM = 1.2                       # vertical cap edge
+LID_MUSHROOM_CROWN_RATIO = 0.09              # domed top rise, of the cap diameter
 
 LID_PULL_SCALE = {"small": 0.30, "medium": 0.45, "large": 0.60}
 LID_PULL_CLEARANCE = {"small": 6.0, "medium": 8.0, "large": 10.0}
@@ -84,6 +93,47 @@ def _revolved_knob(diameter: float, height: float) -> trimesh.Trimesh:
         phi = (math.pi / 2.0) * i / steps
         profile.append((radius * math.cos(phi), blend + rise * math.sin(phi)))
     profile.append((0.0, height))
+    return _revolve(profile)
+
+
+def _mushroom_stem_radius(diameter: float) -> float:
+    return max(diameter / 2.0 * LID_MUSHROOM_STEM_RATIO, LID_MUSHROOM_STEM_MIN_RADIUS)
+
+
+def _revolved_mushroom(diameter: float) -> trimesh.Trimesh:
+    """A stem under a wider cap; the cap underside flares out gradually.
+
+    The underside rises 1.1 mm for every mm it reaches outward (under 45
+    degrees from vertical), so it prints without supports, and fingers can
+    get under the cap around the stem.
+    """
+    radius = diameter / 2.0
+    stem = _mushroom_stem_radius(diameter)
+    blend = min(1.0, LID_MUSHROOM_STEM_HEIGHT * 0.3)
+    stem_top = LID_MUSHROOM_STEM_HEIGHT
+    flare_top = stem_top + (radius - stem) * LID_MUSHROOM_FLARE_RUN
+    rim_top = flare_top + LID_MUSHROOM_RIM
+    crown = diameter * LID_MUSHROOM_CROWN_RATIO
+    profile = [(0.0, -LID_HANDLE_ROOT_EMBED),
+               (stem + blend, -LID_HANDLE_ROOT_EMBED),
+               (stem + blend, 0.0)]
+    steps = 8
+    for i in range(1, steps + 1):                       # concave fillet into the lid
+        theta = -math.pi / 2.0 - (math.pi / 2.0) * i / steps
+        profile.append((stem + blend + blend * math.cos(theta), blend + blend * math.sin(theta)))
+    profile.append((stem, stem_top))
+    profile.append((radius, flare_top))                 # straight, gradual underside
+    profile.append((radius, rim_top))
+    steps = 12
+    for i in range(1, steps):                           # gently domed top
+        phi = (math.pi / 2.0) * i / steps
+        profile.append((radius * math.cos(phi), rim_top + crown * math.sin(phi)))
+    profile.append((0.0, rim_top + crown))
+    return _revolve(profile)
+
+
+def _revolve(profile: list) -> trimesh.Trimesh:
+    """Revolve an (r, z) profile, bottom centre to top centre, into a closed solid."""
     vertices: list = []
     faces: list = []
     rings: list[list[int]] = []
@@ -177,24 +227,33 @@ def _swept_arch(half_width: float, top_height: float, radius: float) -> trimesh.
 
 @lru_cache(maxsize=256)
 def _resolved(outer_bounds: tuple[float, float, float, float],
-              handle_type: str, size: str, position: str) -> trimesh.Trimesh:
+              handle_type: str, size: str, position: str,
+              knob_shape: str = "mushroom") -> trimesh.Trimesh:
     min_x, min_y, max_x, max_y = outer_bounds
     span_x = max_x - min_x - 2.0 * LID_HANDLE_EDGE_MARGIN
     span_y = max_y - min_y - 2.0 * LID_HANDLE_EDGE_MARGIN
-    label = "Knob" if handle_type == "knob" else "Pull"
+    if handle_type == "knob":
+        label = "Mushroom knob" if knob_shape == "mushroom" else "Dome knob"
+    else:
+        label = "Pull"
     advice = "choose a smaller handle size or a larger lid/bin"
     if min(span_x, span_y) <= 0.0:
         raise ValueError(f"the {label} handle does not fit this lid; {advice}")
     cx, cy = _position_offset(position, span_x, span_y)
     if handle_type == "knob":
-        diameter = _clamp(min(span_x, span_y) * LID_KNOB_SCALE[size], LID_KNOB_DIAMETER_LIMITS)
+        mushroom = knob_shape == "mushroom"
+        diameter = _clamp(min(span_x, span_y) * LID_KNOB_SCALE[size],
+                          LID_MUSHROOM_DIAMETER_LIMITS if mushroom else LID_KNOB_DIAMETER_LIMITS)
         if diameter > min(span_x, span_y) + _EPS:
             raise ValueError(
-                f"a {size} Knob needs about {diameter:.0f} mm of flat lid but only "
+                f"a {size} {label} needs about {diameter:.0f} mm of flat lid but only "
                 f"{min(span_x, span_y):.1f} mm is free; {advice}"
             )
-        height = _clamp(diameter * LID_KNOB_HEIGHT_RATIO, LID_KNOB_HEIGHT_LIMITS)
-        mesh = _revolved_knob(diameter, height)
+        if mushroom:
+            mesh = _revolved_mushroom(diameter)
+        else:
+            height = _clamp(diameter * LID_KNOB_HEIGHT_RATIO, LID_KNOB_HEIGHT_LIMITS)
+            mesh = _revolved_knob(diameter, height)
         mesh.apply_translation((cx, cy, 0.0))
         return mesh
     run_x = position in ("front", "back") or (position == "middle" and span_x >= span_y)
@@ -218,10 +277,11 @@ def _resolved(outer_bounds: tuple[float, float, float, float],
     return mesh
 
 
-def resolve_lid_handle(outer_bounds, handle_type: str, size: str, position: str) -> trimesh.Trimesh:
+def resolve_lid_handle(outer_bounds, handle_type: str, size: str, position: str,
+                       knob_shape: str = "mushroom") -> trimesh.Trimesh:
     """The handle mesh, lid-top plane at ``z = 0`` (a fresh copy each call)."""
     key = tuple(round(float(v), 6) for v in outer_bounds)
-    return _resolved(key, handle_type, size, position).copy()
+    return _resolved(key, handle_type, size, position, knob_shape).copy()
 
 
 def handle_height(mesh: trimesh.Trimesh) -> float:

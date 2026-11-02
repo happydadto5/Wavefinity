@@ -19,7 +19,7 @@ import organizer_features.lid_handle as handles
 import organizer_features.stack as st
 from organizer_drawer import stack_part_height
 from organizer_engine import (
-    BoxSpec, LID_FIT_MM, LidSpec, StackSpec, wavy_cavity_polygon, wavy_outer_polygon,
+    BoxSpec, LID_FIT_MM, LidSpec, StackSpec, lid_has_handle, wavy_cavity_polygon, wavy_outer_polygon,
 )
 from organizer_geometry import intersection
 from organizer_inserts import Layout
@@ -133,11 +133,12 @@ class HandleTests(unittest.TestCase):
     SIZES = ("small", "medium", "large")
 
     def test_handles_are_one_connected_watertight_lid_with_positive_root_overlap(self):
-        for handle_type in ("knob", "pull"):
+        for handle_type, shape in (("knob", "mushroom"), ("knob", "dome"), ("pull", "mushroom")):
             for size in self.SIZES:
                 for position in ("middle", "left", "front"):
-                    with self.subTest(handle=handle_type, size=size, position=position):
-                        box = lid_box(handle_type=handle_type, handle_size=size, handle_position=position)
+                    with self.subTest(handle=handle_type, shape=shape, size=size, position=position):
+                        box = lid_box(handle_enabled=True, handle_type=handle_type, knob_shape=shape,
+                                      handle_size=size, handle_position=position)
                         eff = st.stack_effective_box(box)
                         lid, _ = st.make_lid_parts(box)
                         self.assertTrue(lid.is_watertight)
@@ -190,7 +191,7 @@ class HandleTests(unittest.TestCase):
     def test_knob_mesh_is_unchanged_by_the_pull_redesign(self):
         for size, (faces, vertices, bounds) in self.KNOB_BASELINE.items():
             with self.subTest(size=size):
-                mesh = handles.resolve_lid_handle(self.OUTER_BOUNDS, "knob", size, "middle")
+                mesh = handles.resolve_lid_handle(self.OUTER_BOUNDS, "knob", size, "middle", "dome")
                 self.assertEqual(len(mesh.faces), faces)
                 self.assertEqual(len(mesh.vertices), vertices)
                 np.testing.assert_allclose(mesh.bounds, np.asarray(bounds), atol=1e-6)
@@ -200,6 +201,55 @@ class HandleTests(unittest.TestCase):
 
 
 
+
+
+class OptionalHandleTests(unittest.TestCase):
+    def test_plain_lid_has_no_handle_by_default(self):
+        box = lid_box()
+        self.assertFalse(box.lid.handle_enabled)
+        self.assertFalse(lid_has_handle(box))
+
+    def test_stackable_lid_never_has_a_handle(self):
+        self.assertFalse(lid_has_handle(lid_box(stackable=True, handle_enabled=True)))
+
+    def test_mushroom_underside_is_printable_and_inside_the_envelope(self):
+        for size in HandleTests.SIZES:
+            with self.subTest(size=size):
+                mesh = handles.resolve_lid_handle(HandleTests.OUTER_BOUNDS, "knob", size, "middle", "mushroom")
+                self.assertTrue(mesh.is_watertight)
+                top = handles.handle_height(mesh)
+                self.assertLessEqual(top, handles.LID_KNOB_HEIGHT_LIMITS[1] + 1e-6)
+                extent = mesh.bounds[1][0] - mesh.bounds[0][0]
+                self.assertLessEqual(extent, handles.LID_MUSHROOM_DIAMETER_LIMITS[1] + 1e-6)
+                stem = handles._mushroom_stem_radius(extent)
+                self.assertLess(stem * 2.0, extent)
+                # Cap underside: at most 1 mm outward per mm of rise.
+                self.assertGreaterEqual(handles.LID_MUSHROOM_FLARE_RUN, 1.0)
+
+    def test_oversize_knob_on_a_small_lid_is_refused_naming_the_shape(self):
+        for shape, name in (("mushroom", "Mushroom knob"), ("dome", "Dome knob")):
+            with self.subTest(shape=shape):
+                with self.assertRaisesRegex(ValueError, name):
+                    handles.resolve_lid_handle((0.0, 0.0, 12.0, 12.0), "knob", "large", "middle", shape)
+
+    def test_handle_state_round_trips_and_legacy_saves_load_off(self):
+        box = lid_box(handle_enabled=True, handle_type="knob", knob_shape="dome",
+                      handle_size="large", handle_position="left")
+        saved = app.design_to_dict(box, Layout())
+        self.assertTrue(saved["box"]["lid"]["handle_enabled"])
+        again = app.design_from_dict(saved)[0].lid
+        self.assertEqual((again.handle_enabled, again.handle_type, again.knob_shape,
+                          again.handle_size, again.handle_position),
+                         (True, "knob", "dome", "large", "left"))
+        del saved["box"]["lid"]["handle_enabled"]
+        del saved["box"]["lid"]["knob_shape"]
+        legacy = app.design_from_dict(saved)[0].lid
+        self.assertFalse(legacy.handle_enabled)
+        self.assertEqual(legacy.knob_shape, "mushroom")
+
+    def test_unknown_knob_shape_is_rejected(self):
+        with self.assertRaises(ValueError):
+            LidSpec(enabled=True, stackable=False, knob_shape="cube")
 
 
 class PersistenceAndPlanningTests(unittest.TestCase):
@@ -219,13 +269,13 @@ class PersistenceAndPlanningTests(unittest.TestCase):
 
     def test_inventory_z_is_the_closed_envelope_once_and_requested_z_is_untouched(self):
         for handle_type, size in (("knob", "small"), ("pull", "large")):
-            box = lid_box(handle_type=handle_type, handle_size=size)
+            box = lid_box(handle_enabled=True, handle_type=handle_type, handle_size=size)
             record = app.inventory_bin_record(box, Layout())
             self.assertEqual(record["stack"], "none")
             self.assertAlmostEqual(float(record["z"]), st.stack_closed_height(box), places=3)
             self.assertAlmostEqual(stack_part_height(record), st.stack_closed_height(box), places=3)
             self.assertEqual(app.design_to_dict(box, Layout())["box"]["z"], 50)
-        raised = lid_box(handle_type="knob", handle_size="small", label_enabled=True,
+        raised = lid_box(handle_enabled=True, handle_type="knob", handle_size="small", label_enabled=True,
                          label_style="raised", label_text="A", label_depth_mm=0.8)
         record = app.inventory_bin_record(raised, Layout())
         self.assertAlmostEqual(float(record["z"]), st.stack_closed_height(raised), places=3)

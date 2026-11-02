@@ -656,7 +656,9 @@ def design_to_dict(
             "label_orientation": lid.label_orientation,
             "label_text": lid.label_text,
             "division_labels": list(lid.division_labels),
+            "handle_enabled": bool(lid.handle_enabled),
             "handle_type": lid.handle_type,
+            "knob_shape": lid.knob_shape,
             "handle_size": lid.handle_size,
             "handle_position": lid.handle_position,
             # Written explicitly so a missing value only ever means a legacy file.
@@ -793,7 +795,10 @@ def design_from_dict(
             label_orientation=str(lid_raw.get("label_orientation", "horizontal")),
             label_text=str(lid_raw.get("label_text", "")),
             division_labels=tuple(str(value or "") for value in raw_labels),
+            # A missing handle_enabled is an older file: the forced knob was never a choice.
+            handle_enabled=bool(lid_raw.get("handle_enabled", False)),
             handle_type=str(lid_raw.get("handle_type", "knob")),
+            knob_shape=str(lid_raw.get("knob_shape", "mushroom")),
             handle_size=str(lid_raw.get("handle_size", "medium")),
             handle_position=str(lid_raw.get("handle_position", "middle")),
             # A missing fit is an older file: Standard, the exact old plug fit.
