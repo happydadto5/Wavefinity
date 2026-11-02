@@ -1637,12 +1637,17 @@ class WebApplicationTests(unittest.TestCase):
         # Showing a fresh starter does not create an Inventory row.
         self.assertIn("Showing a fresh starter does not create an Inventory row", fresh)
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
-        first = panel[panel.index("DP.designFirstBin = "):]
-        self.assertIn("DP.newBinFromSpace()", first[:first.index("};")])
-        self.assertNotIn("markWorking", first[:first.index("};")])
+        view = (root / "drawer-view.js").read_text(encoding="utf-8")
+        # The always-there New Bin button in Unplaced bins starts the design;
+        # the retired "No bins yet" dialog and its designFirstBin trigger are gone.
+        self.assertIn('querySelector("[data-staging-new-bin]").addEventListener("click", () => DP.newBinFromSpace())', view)
+        self.assertNotIn("DP.designFirstBin", panel + view)
+        self.assertNotIn("No bins yet", panel + view)
+        self.assertNotIn("renderEmptyState", panel + view)
         transition = panel[panel.index("DP.newBinFromSpace = "):]
         transition = transition[:transition.index("};")]
         self.assertIn('DP.setMode("design")', transition)
+        self.assertNotIn("markWorking", transition)
         # The Surface first-run edge handoff is gone: Base Trim is a Space Action.
         self.assertNotIn("surfaceEdgeSucceeded", app)
         self.assertNotIn("DP.startBinNow", panel)

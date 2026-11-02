@@ -551,9 +551,9 @@ visible; there is no tutorial or first-run card. A one-drawer Drawer Space's
 name, width, depth and usable height belong to the Space: the Space header shows
 them read-only with **Edit Space** (the Space Edit form), and an edit
 there updates the loaded layout through the normal Drawer save path. An empty
-Space view or Inventory points to **Design first bin** (or adding an existing
-bin), and spacer/connector actions stay disabled until there is something to
-work on.
+Space view points to the **New Bin** button in **Unplaced bins** (or adding an
+existing bin), and spacer/connector actions stay disabled until there is
+something to work on.
 
 **The four Space types** are exactly **Drawer**, **Storage Box**, **Surface** and
 **Pegboard**. A Storage Box's internal kind is `portable` (a legacy `box` kind
