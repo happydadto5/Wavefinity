@@ -666,6 +666,7 @@ def design_to_dict(
             "label_depth_mm": lid_label_relief_mm(lid),
             # Written explicitly; a missing value only ever means an older file.
             "flip_enabled": bool(lid.flip_enabled),
+            "snap_enabled": bool(lid.snap_enabled),
         }
     grabbers = getattr(box, "lift_grabbers", None) or LiftGrabberSpec()
     if grabbers.enabled:
@@ -807,6 +808,7 @@ def design_from_dict(
             fit=str(lid_raw.get("fit", "standard")),
             # A missing flip_enabled is an older file: a loose lid, no hinge.
             flip_enabled=bool(lid_raw.get("flip_enabled", False)),
+            snap_enabled=bool(lid_raw.get("snap_enabled", False)),
             # A missing depth is an older file: 0.4 mm inlaid, 0.6 mm raised.
             label_depth_mm=(None if lid_raw.get("label_depth_mm") in (None, "")
                             else float(lid_raw["label_depth_mm"])),

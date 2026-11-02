@@ -680,7 +680,7 @@ function wireControls() {
   }));
   ["#lid-configuration", "#lid-thickness", "#lid-fit", "#lid-handle-type", "#lid-knob-shape", "#lid-handle-size",
    "#lid-handle-position", "#lid-label-enabled", "#lid-label-orientation", "#lid-label-style",
-   "#lid-label-depth", "#lid-flip-enabled"]
+   "#lid-label-depth", "#lid-flip-enabled", "#lid-snap-enabled"]
     .forEach(selector => $(selector).addEventListener("change", () => {
       const previous = clone(state.design);
       readStackForm(state.design);

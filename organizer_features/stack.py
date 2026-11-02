@@ -770,7 +770,8 @@ def make_lid_parts(
     plug.apply_translation((0.0, 0.0, rim - STACK_PLUG_DEPTH))
 
     bumps = [] if hinge is not None else _lid_lock_bumps(eff, rim)
-    lid = union([plate, plug, *bumps])
+    from organizer_features.lid_snap import snap_fingers
+    lid = union([plate, plug, *bumps, *snap_fingers(eff)])
 
     if lid_stackable(eff):
         # Recess accepting the next stackable-lid bin stepped base. It keeps
@@ -892,6 +893,11 @@ def stack_summary(box: BoxSpec) -> dict:
     if lid_has_flip(box):
         summary["lid_flip"] = True
         summary["lid_flip_hinge"] = _flip_summary(eff)
+    if lid_enabled(box) and lid_spec(eff).snap_enabled:
+        from organizer_features.lid_snap import snap_status, snap_fingers
+        summary["lid_snap_note"] = snap_status(eff) or (
+            "Light retention on the existing connector ridges. Pull upward to remove."
+            if snap_fingers(eff) else "No reachable connector ridges; snap fit adds nothing on this bin.")
     return summary
 
 

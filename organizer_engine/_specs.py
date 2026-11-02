@@ -354,6 +354,7 @@ class LidSpec:
     # A back-edge interior hinge (filament pin) in place of a loose lid. Opt-in,
     # independent of stackable, handle and label.
     flip_enabled: bool = False
+    snap_enabled: bool = False
     # None is the legacy "no saved value" signal: an old inlaid label was
     # 0.4 mm and an old raised label 0.6 mm. Canonical saves always write it.
     label_depth_mm: float | None = None

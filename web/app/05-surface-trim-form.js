@@ -409,6 +409,7 @@ const LID_DEFAULTS = {
   knob_shape: "mushroom",
   handle_size: "medium", handle_position: "middle", fit: "standard",
   flip_enabled: false,
+  snap_enabled: false,
 };
 
 // Everything that changes the resolved lid rise for the current bin. The three
@@ -416,7 +417,8 @@ const LID_DEFAULTS = {
 function lidThicknessKey(design = state.design) {
   const box = design?.box || {};
   return JSON.stringify([box.x, box.y, box.wall, box.corner_fillet, box.flat_inside,
-    Boolean(box.lid?.enabled), Boolean(box.lid?.stackable), (box.stack?.mode || "none")]);
+    Boolean(box.lid?.enabled), Boolean(box.lid?.stackable), (box.stack?.mode || "none"),
+    box.z, Boolean(box.lid?.snap_enabled), Boolean(box.lid?.flip_enabled)]);
 }
 
 // Inlay depth / Raised height as shown: an explicit saved value wins; an older
@@ -625,12 +627,18 @@ function noteLidThicknessEdit() {
   if (key === state.lidThicknessFormKey) return;
   state.lidThicknessFormKey = key;
   state.lidThicknessEpoch += 1;
+  $("#lid-snap-note").hidden = true;
   renderLidThicknessOptions();
 }
 
 // A landed preview brings back the measurement-first labels only when it was
 // requested at the current epoch; an older response leaves the plain names.
 function applyLidThicknessReport(result, epochAtRequest) {
+  if (epochAtRequest === state.lidThicknessEpoch) {
+    const note = $("#lid-snap-note");
+    note.textContent = result.stack?.lid_snap_note || "";
+    note.hidden = !note.textContent;
+  }
   state.lidThicknessReport = result.stack?.lid_thickness_mm
     ? { key: lidThicknessKey(result.design), epoch: epochAtRequest,
         values: result.stack.lid_thickness_mm } : null;
@@ -672,6 +680,7 @@ function syncLidForm() {
   // Flip lid is opt-in and independent of the handle: offered on stackable and
   // plain lids alike.
   $("#lid-flip-enabled").checked = Boolean(lid.flip_enabled);
+  $("#lid-snap-enabled").checked = Boolean(lid.snap_enabled);
   $("#lid-label-enabled").value = String(Boolean(lid.label_enabled));
   $("#lid-label-orientation").value = lid.label_orientation;
   $("#lid-label-style").value = lid.label_style;
@@ -882,6 +891,7 @@ function readStackForm(design) {
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
     flip_enabled: $("#lid-flip-enabled")
       ? $("#lid-flip-enabled").checked : Boolean(remembered.flip_enabled),
+    snap_enabled: $("#lid-snap-enabled").checked,
     // Written explicitly on every save, so a missing value only ever means an
     // older file.
     fit: $("#lid-fit")?.value || remembered.fit || "standard",

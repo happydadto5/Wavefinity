@@ -1399,3 +1399,7 @@ Authoritative implementation details live in the owning code, including areas su
 - browser UI/state logic under `web/`.
 
 When this file disagrees with the current accepted code, fix the document.
+
+### Optional lid snap fit
+
+Snap fit is off by default and saved as `box.lid.snap_enabled`. On a loose stackable or handled lid, individual fingers mate with the existing connector ridges; the bin ridges are unchanged. The lid lifts off with an upward pull. Flip lids get no fingers. Bins with less than 5.5 mm interior depth, or no exposed reachable ridges, get no snap geometry; the preview explains why. Turning it off preserves the existing lid geometry.

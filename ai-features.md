@@ -618,3 +618,7 @@ Update this file whenever a fix changes anything an outside AI could reasonably 
 - changed AI recommend-only restriction.
 
 If a change is implementation-only and does not affect what the outside AI may legally choose or return, this file does not need a cosmetic update.
+
+### Optional lid snap fit
+
+Snap fit is off by default and saved as `box.lid.snap_enabled`. On a loose stackable or handled lid, individual fingers mate with the existing connector ridges; the bin ridges are unchanged. The lid lifts off with an upward pull. Flip lids get no fingers. Bins with less than 5.5 mm interior depth, or no exposed reachable ridges, get no snap geometry; the preview explains why. Turning it off preserves the existing lid geometry.
