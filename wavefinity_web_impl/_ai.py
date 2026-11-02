@@ -143,9 +143,7 @@ def _ai_generic_fields(part: dict[str, Any], starter: dict[str, Any],
             "null_means": ("Auto: as many as fit the zone" if auto else
                            "not allowed for Steps: give the number of steps (default 3)"),
             "example": starter["count"],
-            **({"note": "Dividers are normally set with options.count_x / options.count_y; leave count null."}
-               if kind == "divider" else
-               {"note": "Posts may instead use options.count_x / options.count_y for a grid."}
+            **({"note": "Use top-level count and along for Posts; do not use options.count_x / options.count_y."}
                if kind == "post" else {}),
         }
     if "along" in caps:
