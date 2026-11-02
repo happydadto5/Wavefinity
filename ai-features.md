@@ -6,7 +6,7 @@
 >
 > **Authority rule:** The **request-specific prompt embedded by the running Wavefinity app wins** over this file whenever they differ. The prompt contains the exact current design, Space constraints, request/fingerprint, legal machine-readable values, and response contract needed for that request.
 >
-> **Maintenance rule:** Any Wavefinity fix that adds, removes, renames, or materially changes a user-facing feature, option, legal choice, compatibility rule, or design field that an outside AI could use must update this file in the same fix.
+> **Maintenance rule:** Any change that adds, removes, or alters a design option must update this file in the same change. The embedded prompt and this reference must never disagree; if they do, the change is not finished.
 >
 > For the broader human product catalog, see `features.md`.
 
@@ -66,7 +66,7 @@ Wavefinity may be used without a typed Space or inside one of these typed Spaces
 
 ## Hard object-height cap
 
-Drawer and Storage Box are a hard vertical ceiling: the full physical envelope of a Bore-held object, including its width/profile and tilt, must remain below the Space's own height. Surface and Pegboard have no such cap, and neither does an ordinary Design with no active Space. The generated prompt always states which applies and, when capped, the exact height. This is a legality rule enforced by Wavefinity's own candidate check, not merely a style preference. Manual Design shows an advisory warning rather than blocking generation.
+Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling: the full physical envelope of a Bore-held object, including its width/profile and tilt, must remain below the Space's own height. Surface and Pegboard have no such cap, and neither does an ordinary Design with no active Space. The generated prompt always states which applies and, when capped, the exact height. This is a legality rule enforced by Wavefinity's own candidate check, not merely a style preference. Manual Design shows an advisory warning rather than blocking generation.
 
 ## Drawer
 
@@ -81,13 +81,15 @@ Drawer and Storage Box are a hard vertical ceiling: the full physical envelope o
 - Surface bin base behavior may be Space-controlled.
 - Preserve any fields the generated prompt marks as Space-controlled.
 - No hard object-height cap.
+- Surface setup chooses maximum width and length and a Base Trim size; the usable field resolves to whole 7 mm units. Surface bins can use Auto base height (matching the trim edge) or Custom, a lightweight base, and a planning-only object height. The Space owns its Base Trim, which may be split to fit the printer.
 
 ## Storage Box
 
 - Ordinary bins may be designed to fit inside a Storage Box Space.
 - The AI result is still an ordinary bin, not the Storage Box case itself.
-- Save, Generate and Print in a Storage Box Space require the generated bin or closed design to fit the interior height, including its foot, handle and raised lettering. Unverifiable height blocks generation. Lid snugness does not add capacity; designs without a Space are unaffected.
+- Generating or printing a bin in a Storage Box Space requires the bin or closed design to fit the interior height, including its foot, handle and raised lettering. Unverifiable height blocks generation. Lid snugness does not add capacity; designs without a Space are unaffected.
 - Hard object-height cap: the Storage Box Space's own height.
+- The case is configured in its Space: outside width and length, usable inside height, Latched Lid or Lid Only and lid snugness, stacking on/off, carrying handle on/off, and no label or a front label in Flat or Wavy style. Wall and base each offer 1.2 mm Very thin, 1.6 mm Thin, 2.0 mm Standard (default), 2.4 mm Strong and 3.0 mm Extra strong. These are case settings, not bin fields.
 
 ## Storage Drawers
 
@@ -95,6 +97,7 @@ Drawer and Storage Box are a hard vertical ceiling: the full physical envelope o
 - Returned bins must fit inside that one drawer.
 - The AI result is still an ordinary bin. It must not invent or return cabinet structure (drawer count, frame, rails or cabinet settings).
 - Hard object-height cap: the selected drawer's usable height.
+- The Space owns the cabinet: grid-aware width/depth, drawer count and usable heights, drawer fit (Tight, Standard, Loose), cabinet and drawer material, handles, labels and stacking. Changing drawer fit affects the entire cabinet.
 
 ## Pegboard
 
@@ -103,6 +106,13 @@ Drawer and Storage Box are a hard vertical ceiling: the full physical envelope o
 - Preserve the current mount data exactly unless the generated prompt explicitly says otherwise.
 - The returned bin must satisfy the current board/minimum-size rules supplied in the generated prompt.
 - No hard object-height cap.
+- Choose Standard Pegboard or IKEA SKÅDIS, and specify physical board width/height or hole/slot counts. Cleat counts X and Y may be Auto or explicit.
+
+## Spacers and placement
+
+Spacers brace placed bins; they are Space filler, not AI-designed bins. Choose Rigid or Flexible (default; 2 mm oversized), manual height (at least 6 mm) or Auto height (default: full height of the tallest placed bin, rounded and bounded by the Space height; 15 mm fallback when none is placed). Left, Back and Right walls default on; there is no front-wall spacer. Plan and select candidates, place or refresh them, and choose quantities to print.
+
+Bins can stack when their modes, footprints and wall geometry match. Direct stacking requires the same footprint. A stackable lid can also carry multiple compatible smaller lid-stack bins on the 7 mm grid if each fits fully and they do not overlap.
 
 ---
 
@@ -277,7 +287,7 @@ Wavefinity enforces compatibility with nearby shell features.
 
 ## Label
 
-Centered lettering on the base or rim. (User-facing name; the internal feature
+Lettering on the base or rim. (User-facing name; the internal feature
 kind remains `text` and the words option key remains `options.text`.)
 
 Current Label Types:
@@ -360,17 +370,17 @@ When a lid is present, current prompt metadata supplies:
 
 - legal lid thickness choices;
 - legal lid-fit choices;
-- handle on/off (off by default), handle types, knob shapes (mushroom, dome), sizes and positions;
+- handle on/off (off by default on a non-stackable lid; stackable lids have no handle), Knob or Pull, knob shapes Mushroom (default) or Dome, Small/Medium/Large sizes and Left/Right/Front/Back/Middle positions;
 - label choices and relief values;
 - stacking compatibility.
 
 General rules:
 
 - direct bin-on-bin stacking uses no lid;
-- stackable lid keeps a seat/recess for another bin;
+- stackable lid keeps a seat/recess for another bin; compatible smaller lid-stack bins may also share it when they fit on the grid without overlap;
 - handled lid is non-stackable;
 - Wavefinity may require stronger wall/base values;
-- raised lid text cannot interfere with stacking contact;
+- stackable lids allow inlaid, not raised, lid text; a Divider can provide one lid label per compartment;
 - a handle that does not fit is rejected rather than silently shrunk.
 
 ## Inside Grip

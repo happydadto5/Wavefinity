@@ -2,6 +2,8 @@
 
 All authoritative developer and AI coding instructions are centralized in [README.md](README.md). All AI assistants (OpenAI, Anthropic, Google) follow those shared guidelines.
 
+AI Design uses [ai-features.md](ai-features.md) as its reference. Any change that adds, removes, or alters a design option must update that reference in the same change. The embedded prompt and the reference must never disagree; if they do, the change is not finished.
+
 ## Quick Summary
 - **Communication:** Operate in "caveman mode". Keep messages simple, plain, and short. User is not a programmer — avoid code jargon. Give a general sense of progress by showing steps in layman's terms.
 - **Workflow:** For a Help Code Fix/correction, fetch the current coder protocol and assignment from `happydadto5/Wavefinity-Help-Code`. For work explicitly not a Help Code task, follow the generic repository workflow in `README.md`.
