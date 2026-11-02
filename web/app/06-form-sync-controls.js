@@ -894,9 +894,6 @@ function wireControls() {
   });
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
   $("#print-individual-bin").addEventListener("click", event => chooseIndividualBinPrint(event.currentTarget));
-  $("#generate-all")?.addEventListener("click", () => generateParts("all"));
-  $("#generate-bin")?.addEventListener("click", () => generateParts("bin"));
-  $("#generate-connector")?.addEventListener("click", () => generateParts("connector"));
   wireGenerationDialog();
   $("#print-dialog-slicer-picker").addEventListener("click", event => browseSlicer(event.currentTarget));
   wireSceneInteraction($("#preview-3d"), state.camera, renderPreview3D);

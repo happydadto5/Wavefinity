@@ -877,7 +877,6 @@ function syncConnectorHeightControls() {
   const settingsEl = $("#connector-settings");
   if (settingsEl) settingsEl.hidden = !different;
   autoAdjustConnectorFields();
-  syncConnectorActionLabels();
 }
 
 function syncConnectorSectionVisibility() {
@@ -888,8 +887,6 @@ function syncConnectorSectionVisibility() {
     $("#connector-bin-heights").hidden = true;
     $("#connector-settings").hidden = true;
     renderConnectorReadout();
-    $("#generate-all").hidden = true;
-    $("#generate-connector").hidden = true;
     syncPrintChoiceAvailability();
     return;
   }
@@ -906,24 +903,7 @@ function syncConnectorSectionVisibility() {
     syncConnectorHeightControls();
   }
   renderConnectorReadout();
-  $("#generate-all").hidden = lidLocked;
   syncPrintChoiceAvailability();
-  $("#generate-bin").hidden = false;
-  $("#generate-connector").hidden = lidLocked;
-  syncConnectorActionLabels();
-}
-
-function syncConnectorActionLabels() {
-  const allButton = $("#generate-all");
-  const connectorButton = $("#generate-connector");
-  if (!allButton && !connectorButton) return;
-  if (allButton) {
-    allButton.textContent = "Save Bin + Side Connector";
-  }
-  if (connectorButton) {
-    connectorButton.textContent = "Save Side Connector";
-    connectorButton.title = "Save the Side connector for the current bin";
-  }
 }
 
 function renderConnectorReadout(plan = null) {

@@ -194,21 +194,6 @@ function pinDraftAxis(axis) {
 // modifier-conflict guard only; that is live edit validation, not undo.
 
 function updateGenerateAvailability() {
-  const binButton = $("#generate-bin");
-  if (binButton) {
-    binButton.disabled = state.designMutationBusy || !state.canGenerate;
-    binButton.title = state.canGenerate ? "Save the current bin files" : "Resolve the highlighted issue before saving";
-  }
-  const allButton = $("#generate-all");
-  if (allButton) {
-    allButton.disabled = state.designMutationBusy || !state.canGenerate;
-    allButton.title = state.canGenerate ? "Save bin and connector files" : "Resolve the highlighted issue before saving";
-  }
-  const connectorButton = $("#generate-connector");
-  if (connectorButton) {
-    connectorButton.disabled = state.designMutationBusy;
-  }
-  syncConnectorActionLabels();
   updatePrimaryPrintButtonLabel();
   for (const printButton of [$("#print-individual-bin")]) {
     if (!printButton) continue;

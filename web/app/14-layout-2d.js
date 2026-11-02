@@ -1125,7 +1125,7 @@ function showBinNameRequiredDialog(title, message) {
   }
 }
 
-function showFilenameConflictDialog(names, renameHint = "Please label the bin with a different name, then save again.") {
+function showFilenameConflictDialog(names, renameHint = "Please label the bin with a different name, then try printing or exporting again.") {
   const list = names.join(", ");
   showBinNameRequiredDialog(
     "This name is already used",

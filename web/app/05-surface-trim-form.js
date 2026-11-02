@@ -790,20 +790,12 @@ function applyStackVisibility() {
   const hasLid = Boolean(state.design?.box?.lid?.enabled);
   const note = $("#stack-note");
   if (!note) return;
-  const connectorLocked = hasLid;
   const connectorSection = document.querySelector('.control-section[data-section="connector"]');
   // Fix 111 N10: one eligibility contract - a lid locks ordinary side
   // connectors everywhere. The section stays visible with a compact reason
   // (rendered by renderConnectorReadout); only the actions hide.
   if (connectorSection) connectorSection.hidden = b4b || baseTrimEnabled();
-  ["#generate-all", "#generate-connector"].forEach(selector => {
-    const element = $(selector);
-    if (element) element.hidden = b4b || baseTrimEnabled() || connectorLocked;
-  });
   syncPrintChoiceAvailability();
-  if (!baseTrimEnabled()) {
-    $("#generate-bin").textContent = hasLid ? "Save Bin + Lid" : "Save Bin";
-  }
   const info = state.preview?.stack;
   if (b4b || (mode === "none" && !hasLid)) {
     note.hidden = true;

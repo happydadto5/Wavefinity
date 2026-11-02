@@ -130,7 +130,7 @@ SP.queueResumeCheckpoint = (design, pending) => {
   const target = SP._captureResumeTarget();
   if (!target) return;
   const key = `${pending ? 1 : 0}:${JSON.stringify(design)}`;
-  if (SP._resume.savedKey.get(target.spaceId) === key) return;
+  if (!SP._resume.inFlight && !SP._resume.latest && SP._resume.savedKey.get(target.spaceId) === key) return;
   if (SP._resume.latest?.target.spaceId === target.spaceId && SP._resume.latest.key === key) return;
   SP._rejectSupersededWaiters();
   SP._resume.latest = { target, design: clone(design), pending: Boolean(pending), key, waiters: [] };

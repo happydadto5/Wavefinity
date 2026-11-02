@@ -29,21 +29,6 @@ function isStructuralDesign(design) {
 let spaceAutosaveTimer = null;
 let spaceAutosaveChain = Promise.resolve();
 
-// Rows whose saved files went stale during editing. A row is queued once at
-// the generated -> In Space transition; the focus-exit gate resolves it.
-//
-// Row IDs such as "B1" only mean something inside one Space, so every entry
-// carries the identity of the Space that produced it (folder + Space ID, taken
-// from the validated save context). An entry is only ever resolved, prompted,
-// or regenerated while that same Space is active. An entry waits if its Space
-// is left while the question is open.
-const staleFileRefreshQueue = new Map();
-let staleFileRefreshGate = null;
-
-const staleFileRefreshKey = entry => JSON.stringify([entry.output, entry.spaceId, entry.rowId]);
-const staleFileRefreshEntryCurrent = entry =>
-  typeof DL !== "undefined" && entry.output === DL.folder() && entry.spaceId === (state.activeSpaceId || null);
-
 // Wavefinity-owned superseded output for one Inventory row, from the
 // server-tracked layout.stale_files map. The browser owns the hosted folder,
 // so a re-save may only replace names the server recorded as this row's own
@@ -55,62 +40,11 @@ function staleFileNamesForRow(rowId) {
   return Array.isArray(names) ? names.filter(name => typeof name === "string" && name) : [];
 }
 
-function queueStaleFileRefresh(context, rowId, wasPrinted = false) {
-  const entry = { output: context.output, spaceId: context.spaceId, rowId, wasPrinted };
-  staleFileRefreshQueue.set(staleFileRefreshKey(entry), entry);
-}
-
-function discardStaleFileRefreshRows(ids) {
-  const removed = new Set(ids);
-  for (const [key, entry] of staleFileRefreshQueue) if (removed.has(entry.rowId) && staleFileRefreshEntryCurrent(entry)) staleFileRefreshQueue.delete(key);
-}
-
-// Called only at a focus exit, after the design-source autosave has settled.
-function settleStaleFileRefresh({ materialize = false } = {}) {
-  if (staleFileRefreshGate) return staleFileRefreshGate;
-  const run = async () => {
-    if (!state.designInventoryId) return true;
-    const context = DL.spaceContext();
-    const entry = [...staleFileRefreshQueue.values()].find(one =>
-      staleFileRefreshEntryCurrent(one) && one.rowId === state.designInventoryId);
-    if (!entry) return true;
-    const key = staleFileRefreshKey(entry);
-    const row = DL.bin(entry.rowId);
-    if (!row || String(row.file || "").trim()) { staleFileRefreshQueue.delete(key); return true; }
-    if (!entry.approved && DL.layout?.settings?.auto_update_changed_files !== true) {
-      const choice = await appConfirm({
-        title: "Update saved files?",
-        message: `${DL.label(row)} ${entry.wasPrinted ? "was saved and printed" : "has saved files"}. Update the saved files to match your changes?`,
-        primaryLabel: "Update Saved Files", cancelLabel: "Not Now",
-        checkboxLabel: "Automatically update saved files after future edits in this Space. Once enabled, future eligible edits update those files automatically.",
-      });
-      if (!DL.spaceContextCurrent(context)) return false;
-      if (choice !== "primary") { staleFileRefreshQueue.delete(key); return !materialize; }
-      if (appConfirm.checked) {
-        DL.change(() => { DL.layout.settings.auto_update_changed_files = true; });
-        if (!(await DL.save()) || !DL.spaceContextCurrent(context)) return false;
-      }
-    }
-    if (materialize) { entry.approved = true; return true; }
-    try {
-      if (!(await designerGenerateInventoryRow(entry.rowId, context, { skipFlush: true }))) return false;
-      if (!DL.spaceContextCurrent(context)) return false;
-      staleFileRefreshQueue.delete(key);
-      return true;
-    } catch (error) {
-      if (!DL.isStaleSpaceError(error)) toast(`Could not update saved files: ${error.message}`, true, 6000);
-      return false;
-    }
-  };
-  staleFileRefreshGate = run().finally(() => { staleFileRefreshGate = null; });
-  return staleFileRefreshGate;
-}
-
 // Change Location quiescence: true while a Designer file refresh or a queued
 // autosave could still write to the current Space root.
 function designerWriteActive({ includeTimer = true } = {}) {
   return Boolean(
-    isGenerating || state.designMutationBusy || staleFileRefreshGate ||
+    isGenerating || state.designMutationBusy ||
     (includeTimer && spaceAutosaveTimer),
   );
 }
@@ -156,7 +90,6 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
     if (!force && JSON.stringify(design) === JSON.stringify(state.cleanDesign)) return true;
     const rowId = state.designInventoryId;
     const previousClean = state.cleanDesign;
-    const wasPrinted = DL.bin(rowId)?.status === "printed";
     const data = await DL.inventoryCall("/api/drawer/design-source/save", {
       design, row_id: rowId || undefined,
     }, { context, sideEffect: true });
@@ -168,7 +101,6 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
     } catch (error) {
       toast(`This bin was saved, but the Space's remembered settings were not: ${error.message}`, true, 6000);
     }
-    if (data.files_became_stale) queueStaleFileRefresh(context, data.row_id, wasPrinted);
     if (state.designInventoryId !== rowId) {
       return true;
     }
@@ -227,7 +159,7 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false,
     } finally {
       finishDesignMutation();
     }
-    return saved && await settleStaleFileRefresh({ materialize });
+    return saved;
   } finally {
     if (visible && deferDraftPreview && !noDeferredPreview && state.design !== originalDesign &&
         fullPreviewStarts === ownerAtStart) refreshPreview();
@@ -812,7 +744,9 @@ async function aiInstallCandidate(candidate, session, mode) {
       invalidatePendingPreview();
       fullPreviewStarts += 1;
       adoptPreviewResult({ ...candidate.preview, design: clone(state.design) });
-      if (typedSpaceOrdinaryBin()) await persistSpaceDesignSource(null, true);
+      if (typedSpaceOrdinaryBin()) persistSpaceDesignSource(null, true).catch(error => {
+        if (!DL.isStaleSpaceError(error)) toast(`Could not autosave this bin: ${error.message}`, true, 6000);
+      });
       return true;
     } catch (error) {
       if (error instanceof AiHelpError) throw error;

@@ -2013,7 +2013,6 @@ body:not(.structural-design-active) .structural-2d-badge { display: none; }
 
 /* Fix 1010: the primary with/without Connectors actions own bin output;
    duplicate generate buttons stay in the DOM for JS references but are not shown. */
-#generate-all, #generate-bin { display: none; }
 
 .structural-saving { display: inline-flex; align-items: center; gap: 8px; }
 .structural-saving[hidden] { display: none; }

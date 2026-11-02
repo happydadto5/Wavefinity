@@ -276,13 +276,6 @@ async function generateParts(target) {
   }
 }
 
-async function generate(path, selector) {
-  if (path && path.includes("connector")) {
-    return generateParts("connector");
-  }
-  return generateParts("bin");
-}
-
 async function printModel(target = "bin", initiatingButton = null) {
   // Ordinary output entry points defensively reject structural ownership:
   // a Storage Box or Storage Drawers target has its own Save/Print chrome.
@@ -428,7 +421,7 @@ async function printModel(target = "bin", initiatingButton = null) {
 }
 
 // Connectors are physically unavailable for a B4B, a Base Trim or a lidded
-// bin - the same rule that hides Save Bin + Connectors.
+// bin.
 function connectorsUnavailable() {
   return b4bEnabled() || baseTrimEnabled() || Boolean(state.design?.box?.lid?.enabled);
 }
@@ -584,7 +577,7 @@ async function saveGeneratedFiles(result, policy = {}) {
       }
     } else if (foreign.length) {
       const hint = policy.kind === "structural"
-        ? "Give the Space a different name, then save again."
+        ? "Give the Space a different name, then try exporting again."
         : undefined;
       showFilenameConflictDialog(foreign.map(file => file.name), hint);
       throw new Error(policy.kind === "structural"

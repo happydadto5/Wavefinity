@@ -55,7 +55,7 @@
             <div id="space-structural" class="space-structural" hidden>
               <p id="space-structural-summary" class="ink space-structural-summary" role="status" hidden></p>
               <div class="button-row">
-                <button id="space-structural-save" class="button secondary dl-small" type="button">Save Storage Box</button>
+                <button id="space-structural-save" class="button secondary dl-small" type="button">Save Base Trim</button>
                 <button id="space-structural-print" class="button secondary dl-small" type="button">Export print files</button>
                 <span id="space-structural-saving" class="structural-saving" role="status" hidden><span class="structural-saving-spinner" aria-hidden="true"></span>Saving</span>
                 <button id="space-make-inside-bin" class="button secondary dl-small" type="button" hidden>Make full interior bin</button>
@@ -481,16 +481,11 @@
       </section>
       <!-- Bin print and save actions are pinned to the bottom of the controls
            column so they stay reachable however long the form above is. -->
-      <div id="bin-save-bar" class="bin-save-bar" role="region" aria-label="Print and save bin">
+      <div id="bin-save-bar" class="bin-save-bar" role="region" aria-label="Print bin">
         <div class="print-button-wrap">
           <div class="print-choice-row">
             <button id="print-individual-bin" class="button primary print-button">Print Individual Bin</button>
           </div>
-        </div>
-        <div class="button-row equal generate-actions">
-          <button id="generate-all" class="button secondary">Save Bin + Connectors</button>
-          <button id="generate-bin" class="button secondary">Save Bin</button>
-          <button id="generate-connector" class="button secondary">Save Connectors</button>
         </div>
       </div>
       <!-- Fix 103 (Section C): structural editor host. Hidden unless a
