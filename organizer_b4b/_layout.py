@@ -5,16 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from functools import lru_cache
 import math
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Point, Polygon
 from organizer_engine import (
     CORNER_INSET,
     GRID_PITCH,
+    SAMPLES_PER_MM,
     WAVE_MATING_GAP,
     BoxSpec,
     _rounded,
     _wall_points,
     wall_wave_value,
 )
+from organizer_engine._wave import wall_wave_slope
 from organizer_engine.product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD_XY
 
 from ._constants import (
@@ -85,6 +87,88 @@ class B4BLayout:
         return self.outer_half_y + wall_wave_value(x, "x")
 
 
+def _outer_rounded_outline(half_x: float, half_y: float, radius: float) -> Polygon:
+    """Join unchanged wave runs with circular, outside-only corner arcs."""
+    corners = []
+    for sx, sy in ((1, -1), (1, 1), (-1, 1), (-1, -1)):
+        # Locate a circle tangent to both waves. The circle centre travels
+        # along the inward normal to the horizontal wave; its first contact
+        # with the vertical wave is the corner transition.
+        reach = 2.0 * radius + 3.0
+        count = max(2, math.ceil(reach * 128))
+        vertical = LineString([
+            (sx * half_x + wall_wave_value(sy * (half_y - reach * i / count), "y"),
+             sy * (half_y - reach * i / count))
+            for i in range(count + 1)
+        ])
+
+        def circle(distance: float):
+            x = sx * (half_x - distance)
+            y = sy * half_y + wall_wave_value(x, "x")
+            slope = wall_wave_slope(x, "x")
+            scale = radius / math.sqrt(1.0 + slope * slope)
+            return (x, y), (x + sy * slope * scale, y - sy * scale)
+
+        def gap(distance: float) -> float:
+            return vertical.distance(Point(*circle(distance)[1])) - radius
+
+        previous = reach
+        for i in range(1, count + 1):
+            current = reach * (1.0 - i / count)
+            if gap(current) <= 0.0:
+                break
+            previous = current
+        else:
+            raise RuntimeError("Storage Box corner cannot join its wall waves")
+        for _ in range(40):
+            middle = (previous + current) / 2.0
+            if gap(middle) > 0.0:
+                previous = middle
+            else:
+                current = middle
+        horizontal_point, centre = circle((previous + current) / 2.0)
+        vertical_point = tuple(vertical.interpolate(vertical.project(Point(*centre))).coords[0])
+        corners.append((horizontal_point, vertical_point, centre))
+
+    def arc(start, end, centre):
+        a = math.atan2(start[1] - centre[1], start[0] - centre[0])
+        b = math.atan2(end[1] - centre[1], end[0] - centre[0])
+        sweep = (b - a) % (2.0 * math.pi)
+        steps = max(2, math.ceil(sweep / math.radians(2.0)))
+        return [(centre[0] + radius * math.cos(a + sweep * i / steps),
+                 centre[1] + radius * math.sin(a + sweep * i / steps))
+                for i in range(1, steps)]
+
+    def run(start, end, axis, face):
+        along = 0 if axis == "x" else 1
+        lo, hi = start[along], end[along]
+        steps = max(1, math.ceil(abs(hi - lo) * SAMPLES_PER_MM))
+        points = []
+        for i in range(steps + 1):
+            value = lo + (hi - lo) * i / steps
+            across = face + wall_wave_value(value, axis)
+            points.append((value, across) if axis == "x" else (across, value))
+        # Retain the exact projected tangent at either end.
+        points[0], points[-1] = start, end
+        return points
+
+    ring = []
+    # Four runs and the next corner, counter-clockwise from the front wall.
+    for index, (axis, face) in enumerate((("x", -half_y), ("y", half_x),
+                                          ("x", half_y), ("y", -half_x))):
+        before = corners[(index - 1) % 4]
+        after = corners[index]
+        start = before[0] if axis == "x" else before[1]
+        end = after[0] if axis == "x" else after[1]
+        next_end = after[1] if axis == "x" else after[0]
+        ring.extend(run(start, end, axis, face))
+        ring.extend(arc(end, next_end, after[2]))
+    outline = Polygon(ring)
+    if not outline.is_valid or outline.is_empty:
+        raise RuntimeError("Storage Box rounded outer outline is not a valid single polygon")
+    return outline
+
+
 @lru_cache(maxsize=64)
 def b4b_layout(box: BoxSpec) -> B4BLayout:
     """Resolve the exact child field and its outward-built case wall."""
@@ -102,14 +186,7 @@ def b4b_layout(box: BoxSpec) -> B4BLayout:
 
     outer_half_x = inner_half_x + eff.wall_depth
     outer_half_y = inner_half_y + eff.wall_depth
-    outer_tx = outer_half_x - CORNER_INSET
-    outer_ty = outer_half_y - CORNER_INSET
-    outer = Polygon(_wall_points(outer_half_x, outer_half_y, outer_tx, outer_ty))
-    if not outer.is_valid:
-        outer = outer.buffer(0)
-    if not isinstance(outer, Polygon) or not outer.is_valid:
-        raise RuntimeError("Storage Box outer structural outline is not a valid single polygon")
-    outer = _rounded(outer, B4B_WALL_CORNER_FILLET)
+    outer = _outer_rounded_outline(outer_half_x, outer_half_y, min(eff.wall, 3.5))
     if not outer.buffer(_EPS).contains(inner):
         raise RuntimeError("Storage Box outward wall does not contain its inner mating face")
     return B4BLayout(

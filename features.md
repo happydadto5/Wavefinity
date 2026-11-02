@@ -172,7 +172,7 @@ Bins designed in a Surface Space can use Surface-specific base controls:
 
 ## 2.3 Storage Box Space
 
-A Storage Box is a printable outer case designed to contain ordinary Wavefinity bins.
+A Storage Box is a printable outer case designed to contain ordinary Wavefinity bins. Its body and lid have rounded outside corners sized to the case wall, while the inside stays unchanged.
 
 ### Space dimensions
 
