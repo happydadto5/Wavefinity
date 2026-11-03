@@ -342,19 +342,9 @@ function formatDimField(axis) {
   if (!input) return;
   const val = state.design?.box?.[axis];
   if (val == null) return;
-  const key = axis === "x" ? "inside_x" : "inside_y";
-  const previewCurrent =
-    state.previewDesignKey === JSON.stringify(state.design) &&
-    state.preview?.dimensions?.[key] != null;
-  const inside = previewCurrent ? state.preview.dimensions[key] : null;
-  // Keep the size in the field and the wrapping fit details below it.
   const unit = state.catalog?.base_unit || 7;
   const units = Math.round(val / unit);
-  if (document.activeElement !== input) input.value = `${fmt(val)} mm`;
-  const hint = $(`${selector}-hint`);
-  if (hint) hint.textContent = inside == null
-    ? `Inside updating… · ${units} unit${units === 1 ? "" : "s"}`
-    : `${fmt(inside)} mm inside · ${units} unit${units === 1 ? "" : "s"}`;
+  if (document.activeElement !== input) input.value = `${fmt(val)} (${units} unit${units === 1 ? "" : "s"})`;
 }
 
 function formatHeightField() {
@@ -678,14 +668,8 @@ function wireControls() {
     syncPegboardMountForm();
     changedDesign();
   }));
-  $("#lid-option-toggle").addEventListener("click", () => {
-    const panel = $("#lid-option-panel");
-    panel.hidden = !panel.hidden;
-    $("#lid-option-toggle").setAttribute("aria-expanded", String(!panel.hidden));
-  });
-  ["#lid-configuration", "#lid-thickness", "#lid-fit", "#lid-handle-type", "#lid-knob-shape", "#lid-handle-size",
-   "#lid-handle-position", "#lid-label-enabled", "#lid-label-orientation", "#lid-label-style",
-   "#lid-label-depth", "#lid-flip-enabled", "#lid-snap-enabled"]
+  ["#bin-stackable", "#lid-included", "#lid-kind", "#lid-thickness", "#lid-fit", "#lid-handle-type", "#lid-handle-size",
+   "#lid-handle-position", "#lid-label-orientation", "#lid-label-style", "#lid-label-depth"]
     .forEach(selector => $(selector).addEventListener("change", () => {
       const previous = clone(state.design);
       readStackForm(state.design);
@@ -699,7 +683,13 @@ function wireControls() {
     }));
   $("#lid-label-text").addEventListener("input", () => {
     const previous = clone(state.design);
+    state.lidLabelEnabled = Boolean($("#lid-label-text").value.trim());
     readStackForm(state.design);
+    $("#lid-label-details").hidden = !state.lidLabelEnabled;
+    $("#lid-label-orientation-row").hidden = !state.lidLabelEnabled;
+    $("#lid-label-style-row").hidden = !state.lidLabelEnabled || state.design.box.lid.stackable;
+    $("#lid-label-depth-row").hidden = !state.lidLabelEnabled;
+    renderLidLabelEditor();
     seedPartNameFromLabel($("#lid-label-text").value);
     changedDesign(previous);
   });
@@ -751,7 +741,7 @@ function wireControls() {
       const previousDesign = clone(state.design);
       const unit = state.catalog.base_unit;
       const rawVal = number(input.value, state.design.box[axis]);
-      const snapped = snapToUnit(rawVal, unit);
+      const snapped = normalizeBinDimension(axis, rawVal, state.design.box[axis]);
       const prev = state.design.box[axis];
       if (snapped !== prev) markBinAxisManual(axis);
       state.design.box[axis] = snapped;

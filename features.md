@@ -738,20 +738,9 @@ These modify the bin shell rather than behaving like ordinary interior parts. Li
 
 ## 7.1 Lid & Stacking
 
-Lid & Stacking is always available in the bin Specification area. Its row shows No lid, Stackable lid, or Non-stackable lid; Add / Configure opens the existing controls in place.
+The Specification area has **Stackable** (Not Stackable / Stackable) and **Lid** (No Lid / Include Lid) choices. A stackable bin without a lid stacks directly; with a lid it stacks on the lid. Including a lid shows compact lid options. Width and Depth snap to whole 7 mm units on leaving the field and show the unit count; Height stays in millimetres.
 
-### Stacking Method
-
-- **Stackable bin on bin**
-  - Direct bin-on-bin stacking.
-  - No lid.
-- **Stackable bin on lid**
-  - Bin closes with a lid and keeps a top seat/recess for another bin with compatible stacking geometry: one of the same footprint, or one or more smaller lid-stack bins that fit fully inside the lid (partial coverage is allowed).
-- **Lid with handle — non-stackable**
-  - Removable handled lid.
-  - Not stackable.
-
-Removing the option returns the bin to no lid/no stacking.
+The lid kind is Resting fit, Snap Fit, or Hinged Lid. Lid fit is shown only for Snap Fit.
 
 ### Lid thickness
 
@@ -771,14 +760,9 @@ Fit changes the lid plug clearance without changing the accepted direct-stack fi
 
 ### Handle
 
-A handle is optional and off by default on a non-stackable lid; the Handle control starts at **None**. Stackable lids never have a handle.
+A handle is optional and starts at **None**. Stackable lids require a flat seating surface.
 
-When on, the handle is one of:
-
-- Knob, in two shapes:
-  - Mushroom (default shape): a stem with a wider cap the fingers can get under. The cap underside flares out gradually (under 45 degrees from vertical), so it prints in the lid's normal orientation without supports.
-  - Dome: the low, minimal bump.
-- Pull.
+When on, the handle is a Dome knob or Pull. Older Mushroom knobs open as Dome.
 
 Saved designs from before this option load with the handle off.
 
@@ -800,7 +784,7 @@ If a requested handle cannot physically fit, Wavefinity rejects it rather than s
 
 ### Flip lid
 
-An optional checkbox, off by default, for stackable and non-stackable lids alike. It does not depend on the handle: a flip lid may still carry a Knob or Pull to lift it by.
+The Hinged Lid kind is available for stackable and non-stackable lids alike. It does not depend on the handle: a flip lid may still carry a Knob or Pull to lift it by.
 
 When on, the lid and bin gain a hinge along the back inside edge (the back is always the hinge side; there is no side choice):
 
@@ -817,8 +801,7 @@ Saved designs from before this option load with it off. A bin too small to hinge
 
 Lid labels support:
 
-- Off / On.
-- Text.
+- Text; editing non-empty text enables the label and clearing it disables the label. A saved off label remains off until its text is edited.
 - Horizontal / Vertical.
 - Inlaid / Raised.
 - Relief depth/height presets.
@@ -967,7 +950,7 @@ Wavefinity has several distinct label systems. They should remain separate in th
 | --- | --- | --- |
 | **Label** | Ordinary bin base or rim | Base/Rim, Inlaid/Raised, depth/height, letter height, rotation, rim side |
 | **Divider labels** | Individual Divider compartments | No label / On base / Rim level; per-compartment text |
-| **Lid label** | Ordinary-bin lid | On/Off, text, horizontal/vertical, Inlaid/Raised, relief |
+| **Lid label** | Ordinary-bin lid | Text-driven, horizontal/vertical, Inlaid/Raised, relief |
 | **Edge Mount label** | Outside edge of ordinary bin | None / Separate Part / Integrated, text, flip, length, depth/style, projection/thickness |
 | **Storage Box label** | Storage Box case front | No label / front label, Flat/Wavy front-label style |
 

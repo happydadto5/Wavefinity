@@ -90,13 +90,16 @@
             </div>
             <span id="stack-note" class="stack-note" hidden></span>
           </div>
-          <label class="part-name-row"><span id="part-name-label">Bin Name</span>
-            <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
-          </label>
-          <div id="ordinary-size-row" class="field-grid three">
-            <div><label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric" aria-describedby="x-size-hint"></label><span id="x-size-hint" class="dimension-field-hint"></span></div>
-            <div><label><span id="y-size-label">Depth</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric" aria-describedby="y-size-hint"></label><span id="y-size-hint" class="dimension-field-hint"></span></div>
+          <div class="bin-name-mode-row">
+            <label class="part-name-row"><span id="part-name-label">Bin Name</span><input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>
+            <label class="compact-select">Options print mode<select id="mode-select"></select></label>
+          </div>
+          <div id="ordinary-size-row" class="field-grid bin-dimensions-row">
+            <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
+            <label><span id="y-size-label">Depth</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
             <label><span id="z-size-label">Height</span> <span class="unit">mm</span><input id="z" type="text" inputmode="numeric"></label>
+            <label id="base-thickness-setting" class="compact-select">Base thickness<select id="base-thickness"><option value="standard">Standard</option></select></label>
+            <label id="wall-thickness-setting" class="compact-select">Wall thickness<select id="wall-thickness"><option value="standard">0.8 mm ? Default</option></select></label>
           </div>
           <p id="container-inside-hint" class="inline-help" hidden></p>
           <p id="design-first-size-help" class="inline-help" hidden></p>
@@ -108,86 +111,29 @@
             <span id="pegboard-mount-note" class="ink"></span>
           </div>
           <div class="mode-and-bin-options">
-            <label class="compact-select" title="Fused into box prints the interior parts as part of the bin. Removable insert prints all interior parts as a separate drop-in piece, so you can adjust or reprint the interior without reprinting the whole bin.">Options print mode
-              <select id="mode-select"></select>
-            </label>
-            <div id="thickness-grabber-row" class="thickness-grabber-row">
-              <label id="base-thickness-setting" class="inline-select compact-select">Base thickness
-                <select id="base-thickness"><option value="standard">Standard</option></select>
-              </label>
-              <label id="wall-thickness-setting" class="inline-select compact-select">Wall thickness
-                <select id="wall-thickness"><option value="standard">0.8 mm — Default</option></select>
-              </label>
-            </div>
             <div class="lid-specification" id="lid-specification">
-              <div class="lid-specification-row"><span>Lid &amp; Stacking: <strong id="lid-state">No lid</strong></span><button type="button" id="lid-option-toggle" class="button secondary dl-small" aria-expanded="false" aria-controls="lid-option-panel">Add / Configure</button></div>
+              <div class="lid-questions">
+                <label class="compact-select">Stackable<select id="bin-stackable"><option value="false">Not Stackable</option><option value="true">Stackable</option></select></label>
+                <label class="compact-select">Lid<select id="lid-included"><option value="false">No Lid</option><option value="true">Include Lid</option></select></label>
+              </div>
               <div id="lid-option-panel" hidden>
-                <label>Stacking Method
-                  <select id="lid-configuration">
-                    <option value="stackable_bin">Stackable bin on bin</option>
-                    <option value="stackable_lid">Stackable bin on lid</option>
-                    <option value="handled_lid">Lid with handle — non-stackable</option>
-                  </select>
-                </label>
-                <div id="lid-group-lid" class="b4b-card lid-option-group" hidden>
-                  <h4 class="b4b-card-title">Lid</h4>
-                  <div class="field-grid three">
-                    <label>Lid thickness<select id="lid-thickness">
-                      <option value="thin">Thin</option><option value="medium">Medium</option><option value="thick">Thick</option>
-                    </select></label>
-                    <label id="lid-fit-row" title="Sliding clearance between the lid plug and the bin mouth.">Lid fit<select id="lid-fit">
-                      <option value="standard">Standard</option>
-                    </select></label>
+                <label class="compact-select">Lid kind<select id="lid-kind"><option value="resting">Resting fit</option><option value="snap">Snap Fit</option><option value="hinged">Hinged Lid</option></select></label>
+                <label class="compact-select">Lid thickness<select id="lid-thickness"><option value="thin">Thin</option><option value="medium">Medium</option><option value="thick">Thick</option></select></label>
+                <label id="lid-fit-row" class="compact-select">Lid fit<select id="lid-fit"><option value="standard">Standard</option></select></label>
+                <label id="lid-handle-type-row" class="compact-select">Lid with handle<select id="lid-handle-type"><option value="none">None</option><option value="knob">Knob</option><option value="pull">Pull</option></select></label>
+                <label id="lid-handle-size-row" class="compact-select">Handle size<select id="lid-handle-size"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label>
+                <label id="lid-handle-position-row" class="compact-select">Handle position<select id="lid-handle-position"><option value="left">Left</option><option value="right">Right</option><option value="front">Front</option><option value="back">Back</option><option value="middle">Middle</option></select></label>
+                <label id="lid-label-text-row">Label<input id="lid-label-text" type="text" maxlength="80" placeholder="e.g. SCREWS"></label>
+                <div id="lid-label-details" hidden>
+                  <div id="lid-division-labels" hidden></div>
+                  <div class="lid-label-fields">
+                    <label id="lid-label-orientation-row" class="compact-select">Orientation<select id="lid-label-orientation"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label>
+                    <label id="lid-label-style-row" class="compact-select">Style<select id="lid-label-style"><option value="flush">Inlaid</option><option value="raised">Raised</option></select></label>
+                    <label id="lid-label-depth-row" class="compact-select"><span id="lid-label-depth-name">Inlay depth</span><select id="lid-label-depth"><option value="0.4">Default 0.4 mm</option></select></label>
                   </div>
                 </div>
-                <div id="lid-group-flip" class="b4b-card lid-option-group" hidden>
-                  <h4 class="b4b-card-title">Retention</h4>
-                  <label class="checkbox-row"><span>Snap fit</span><input id="lid-snap-enabled" type="checkbox"></label>
-                  <p id="lid-snap-note" class="inline-help" hidden></p>
-                  <label id="lid-flip-row" class="checkbox-row" title="A hinge along the back inside edge. The pin is a strand of 1.75 mm filament you thread through it."><span>Flip lid</span><input id="lid-flip-enabled" type="checkbox"></label>
-                  <p id="lid-flip-note" class="inline-help" hidden>Hinged on the back edge, inside the bin. Thread a strand of 1.75 mm filament through the hinge as its pin.</p>
-                </div>
-                <div id="lid-group-handle" class="b4b-card lid-option-group" hidden>
-                  <h4 class="b4b-card-title">Handle</h4>
-                  <div class="field-grid three">
-                    <label id="lid-handle-type-row">Handle<select id="lid-handle-type">
-                      <option value="none" selected>None</option><option value="knob">Knob</option><option value="pull">Pull</option>
-                    </select></label>
-                    <label id="lid-knob-shape-row">Knob shape<select id="lid-knob-shape">
-                      <option value="mushroom">Mushroom</option><option value="dome">Dome</option>
-                    </select></label>
-                    <label id="lid-handle-size-row">Handle size<select id="lid-handle-size">
-                      <option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option>
-                    </select></label>
-                    <label id="lid-handle-position-row">Handle position<select id="lid-handle-position">
-                      <option value="left">Left</option><option value="right">Right</option><option value="front">Front</option><option value="back">Back</option><option value="middle">Middle</option>
-                    </select></label>
-                  </div>
-                </div>
-                <div id="lid-group-label" class="b4b-card lid-option-group" hidden>
-                  <h4 class="b4b-card-title">Label</h4>
-                  <div class="field-grid three">
-                    <label>Enabled<select id="lid-label-enabled">
-                      <option value="false">Off</option><option value="true">On</option>
-                    </select></label>
-                  </div>
-                  <div id="lid-label-details" hidden>
-                    <label id="lid-label-text-row" hidden>Text<input id="lid-label-text" type="text" maxlength="80" placeholder="e.g. SCREWS"></label>
-                    <div id="lid-division-labels" hidden></div>
-                    <div class="field-grid three">
-                      <label id="lid-label-orientation-row">Orientation<select id="lid-label-orientation">
-                        <option value="horizontal">Horizontal</option><option value="vertical">Vertical</option>
-                      </select></label>
-                      <label id="lid-label-style-row" title="Letters are recessed into the surface.">Style<select id="lid-label-style">
-                        <option value="flush">Inlaid</option><option value="raised">Raised</option>
-                      </select></label>
-                      <label id="lid-label-depth-row"><span id="lid-label-depth-name">Inlay depth</span><select id="lid-label-depth">
-                        <option value="0.4">Default 0.4 mm</option>
-                      </select></label>
-                    </div>
-                  </div>
-                </div>
-                <p id="lid-option-note" class="inline-help"></p>
+                <p id="lid-snap-note" class="inline-help" hidden></p>
+                <p id="lid-flip-note" class="inline-help" hidden>Hinged on the back edge, inside the bin. Thread a strand of 1.75 mm filament through the hinge as its pin.</p>
               </div>
             </div>
             <div id="surface-bin-controls" class="surface-bin-controls" hidden>

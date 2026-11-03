@@ -528,19 +528,10 @@ input[type="number"]::-webkit-inner-spin-button {
 .post-unit-fields .unit { float: none; margin-left: 4px; }
 .field-grid { display: grid; gap: 10px; }
 .field-grid.three { grid-template-columns: repeat(3, 1fr); }
-#ordinary-size-row > div { min-width: 0; }
-.dimension-field-hint {
-  display: block;
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-@media (min-width: 621px) {
-  #ordinary-size-row.field-grid.three { grid-template-columns: 1.2fr 1.2fr 0.6fr; }
-}
+.bin-name-mode-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, 1fr); gap: 10px; align-items: end; }
+#ordinary-size-row.bin-dimensions-row { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.bin-dimensions-row label { min-width: 0; }
+.bin-dimensions-row input, .bin-dimensions-row select { min-width: 0; width: 100%; }
 .field-grid.two { grid-template-columns: repeat(2, 1fr); }
 .surface-bin-help { grid-column: 1 / -1; }
 .field-grid.four { grid-template-columns: repeat(4, 1fr); }
@@ -553,8 +544,6 @@ input[type="number"]::-webkit-inner-spin-button {
 .mode-and-bin-options .inline-select { margin: 0 0 1px; min-width: 90px; }
 .mode-and-bin-options .inline-select select { margin-top: 3px; }
 .lid-specification { flex: 1 0 100%; }
-.lid-specification-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
-.lid-specification.quiet .lid-specification-row { color: var(--muted); }
 .lid-specification #lid-option-panel { margin-top: 10px; }
 .compact-select { display: grid; grid-template-rows: 1.4em auto; align-content: end; line-height: 1.4; }
 .section-heading .heading-select { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
@@ -576,12 +565,6 @@ input[type="number"]::-webkit-inner-spin-button {
 .pegboard-mount-row > strong, .pegboard-mount-row > .muted, .pegboard-mount-row > .ink { grid-column: 1 / -1; }
 .pegboard-mount-row label { font-size: 12px; font-weight: 650; color: var(--muted); }
 .pegboard-mount-row select { margin-top: 4px; }
-/* Base and Walls as one 2-column row so they stay the same width; it wraps to
-   a single column only on very narrow screens. */
-.thickness-grabber-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; flex: 1 1 320px; min-width: 280px; }
-@media (max-width: 420px) {
-  .thickness-grabber-row { grid-template-columns: 1fr; min-width: 0; }
-}
 /* Fix 061 F1: a labelled cluster of related settings outside .draft-fields. */
 .setting-group {
   display: grid; gap: 8px; margin: 0 0 8px; padding: 10px;
@@ -592,8 +575,6 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .surface-bin-controls { flex: 1 1 100%; min-width: 0; }
 .setting-group .surface-bin-help { margin: 0; font-size: 11px; }
-.thickness-grabber-row .inline-select { margin: 0; min-width: 0; }
-.thickness-grabber-row .compact-select select { height: 38px; }
 .measurement { color: var(--teal); margin: 4px 0 15px; font-size: 15px; font-weight: 600; }
 #x-size, #y-size { font-size: 12.5px; padding-left: 8px; padding-right: 8px; }
 .size-help { margin-top: 6px !important; }
@@ -1826,21 +1807,6 @@ body.relocating > :not(dialog) { pointer-events: none; }
   margin-top: 14px;
 }
 
-/* Fix 060 A: Lid & Stacking's Lid/Handle/Label groups reuse the same bordered
-   card look so each concept reads as its own section. */
-#lid-option-panel .lid-option-group {
-  margin-top: 12px;
-}
-#lid-option-panel .lid-option-group .field-grid {
-  margin: 0;
-}
-#lid-option-panel #lid-label-details {
-  margin-top: 10px;
-}
-#lid-option-panel #lid-label-details .field-grid {
-  margin-top: 10px;
-}
-
 /* Fix 058 Correction 1, C1.4D/E/F: Label reads Text -> Plate -> Standoff
    support (Separate only); Screw Mounting reads Pattern -> Hole/access ->
    Position. Each group gets a light divider and small gap from the one
@@ -1941,27 +1907,15 @@ body.relocating > :not(dialog) { pointer-events: none; }
   .support-palette { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-.lid-option-card {
-  margin: 0 0 12px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(42, 132, 142, 0.06);
-}
-
-.lid-option-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.lid-option-heading div { display: grid; gap: 2px; }
-.lid-option-heading span { color: var(--muted); font-size: 0.75rem; }
-#lid-option-panel { display: grid; gap: 10px; margin-top: 10px; }
+.lid-questions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+#lid-option-panel { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 10px; }
+#lid-option-panel > label { flex: 1 1 120px; min-width: 110px; }
+#lid-label-details { flex: 1 1 100%; }
+.lid-label-fields { display: flex; flex-wrap: wrap; gap: 10px; }
+.lid-label-fields > label { flex: 1 1 120px; }
+#lid-option-panel > p { flex: 1 1 100%; }
 #lid-division-labels { display: grid; gap: 6px; }
 #lid-division-labels .division-table { margin-top: 0; }
-.lid-option-card.disabled { opacity: 0.55; }
 
 .required-cue { color: var(--muted); font-size: 11px; font-weight: 450; margin-left: 4px; }
 .space-help { margin: 4px 0 8px; font-size: 12px; color: var(--muted); line-height: 1.45; }
@@ -1992,7 +1946,7 @@ body.relocating > :not(dialog) { pointer-events: none; }
    user can always switch to (or start) an ordinary bin. */
 body.structural-design-active .control-section[data-section="parts-options"],
 body.structural-design-active .control-section[data-section="connector"],
-body.structural-design-active .control-section[data-section="build"] .part-name-row,
+body.structural-design-active .bin-name-mode-row,
 body.structural-design-active #ordinary-size-row,
 body.structural-design-active #design-first-size-help,
 body.structural-design-active #pegboard-mount-row,

@@ -406,7 +406,7 @@ const LID_DEFAULTS = {
   enabled: false, stackable: true, thickness: "thin",
   label_enabled: false, label_style: "flush", label_orientation: "horizontal",
   label_text: "", division_labels: [], handle_enabled: false, handle_type: "knob",
-  knob_shape: "mushroom",
+  knob_shape: "dome",
   handle_size: "medium", handle_position: "middle", fit: "standard",
   flip_enabled: false,
   snap_enabled: false,
@@ -547,7 +547,7 @@ function renderLidLabelEditor() {
   const lid = lidState();
   const divider = lidDivider();
   const enabled = lid.enabled && lid.label_enabled;
-  textRow.hidden = !enabled || Boolean(divider);
+  textRow.hidden = !lid.enabled;
   holder.hidden = !enabled || !divider;
   if (!enabled || !divider) {
     holder.replaceChildren();
@@ -610,7 +610,7 @@ function renderLidThicknessOptions() {
 // the old measurements being presented as current.
 function lidThicknessFormKey() {
   return JSON.stringify([lidThicknessKey(state.design), $("#x-size")?.value,
-    $("#y-size")?.value, $("#wall-thickness")?.value, $("#lid-configuration")?.value]);
+    $("#y-size")?.value, $("#wall-thickness")?.value, $("#bin-stackable")?.value, $("#lid-included")?.value]);
 }
 
 // Programmatic form updates do not represent a user edit. Capture their final
@@ -665,23 +665,17 @@ function clearLidThicknessReport() {
 function syncLidForm() {
   const lid = lidState();
   const config = lidConfiguration();
+  state.lidLabelEnabled = Boolean(lid.label_enabled);
   populateLidChoices();
-  $("#lid-state").textContent = ({ stackable_bin: "No lid", stackable_lid: "Stackable lid", handled_lid: "Non-stackable lid" })[config];
-  $("#lid-specification").classList.toggle("quiet", config === "stackable_bin");
-  $("#lid-configuration").value = config;
+  $("#bin-stackable").value = String((state.design?.box?.stack?.mode === "direct") || (lid.enabled && Boolean(lid.stackable)));
+  $("#lid-included").value = String(lid.enabled);
+  $("#lid-kind").value = lid.flip_enabled ? "hinged" : lid.snap_enabled ? "snap" : "resting";
   $("#lid-thickness").value = lid.thickness;
   renderLidThicknessOptions();
-  if ($("#lid-fit")) $("#lid-fit").value = lid.fit || "standard";
-  // None is the off state; a handle is opt-in.
+  $("#lid-fit").value = lid.fit || "standard";
   $("#lid-handle-type").value = lid.handle_enabled ? lid.handle_type : "none";
-  $("#lid-knob-shape").value = lid.knob_shape || "mushroom";
   $("#lid-handle-size").value = lid.handle_size;
   $("#lid-handle-position").value = lid.handle_position;
-  // Flip lid is opt-in and independent of the handle: offered on stackable and
-  // plain lids alike.
-  $("#lid-flip-enabled").checked = Boolean(lid.flip_enabled);
-  $("#lid-snap-enabled").checked = Boolean(lid.snap_enabled);
-  $("#lid-label-enabled").value = String(Boolean(lid.label_enabled));
   $("#lid-label-orientation").value = lid.label_orientation;
   $("#lid-label-style").value = lid.label_style;
   $("#lid-label-text").value = lid.label_text || "";
@@ -693,23 +687,15 @@ function syncLidForm() {
     }
     depthField.value = String(shown);
   }
-  const hasLid = config !== "stackable_bin";
-  const handled = config === "handled_lid";
-  // Fix 060 A: Lid / Handle / Label now read as separate groups instead of one
-  // mixed grid. Handle is hidden entirely (not just disabled) outside Handled
-  // Lid - its saved values are left untouched so switching configurations
-  // back and forth never erases them.
-  $("#lid-group-lid").hidden = !hasLid;
-  $("#lid-group-handle").hidden = !handled;
-  $("#lid-group-flip").hidden = !hasLid;
+  const hasLid = lid.enabled;
+  const handled = hasLid && !lid.stackable;
+  $("#lid-option-panel").hidden = !hasLid;
+  $("#lid-fit-row").hidden = lid.flip_enabled || !lid.snap_enabled;
   $("#lid-flip-note").hidden = !(hasLid && lid.flip_enabled);
-  const handleOn = handled && Boolean(lid.handle_enabled);
-  $("#lid-handle-type-row").hidden = !handled;
-  $("#lid-knob-shape-row").hidden = !(handleOn && lid.handle_type === "knob");
+  const handleOn = hasLid && Boolean(lid.handle_enabled);
   ["#lid-handle-size-row", "#lid-handle-position-row"].forEach(selector => {
     $(selector).hidden = !handleOn;
   });
-  $("#lid-group-label").hidden = !hasLid;
   const labelOn = hasLid && lid.label_enabled;
   $("#lid-label-details").hidden = !labelOn;
   $("#lid-label-orientation-row").hidden = !labelOn;
@@ -734,12 +720,6 @@ function syncLidForm() {
   if (config === "stackable_lid" && $("#lid-label-style").value === "raised") {
     $("#lid-label-style").value = "flush";
   }
-  const note = $("#lid-option-note");
-  note.textContent = config === "stackable_bin"
-    ? "No lid. When selected, this bin stacks directly onto another bin with the same footprint and compatible stacking geometry."
-    : config === "stackable_lid"
-      ? "Handle and raised lettering are unavailable because the next bin needs a flat seating surface."
-      : "One removable lid with a handle. This bin is not stackable.";
   renderLidLabelEditor();
   applyStackVisibility();
 }
@@ -836,30 +816,22 @@ function applyStackVisibility() {
 
 function readStackForm(design) {
   design.box = design.box || {};
-  if (!lidPartActive(design) && $("#lid-configuration")?.value === "stackable_bin") {
-    delete design.box.stack;
-    delete design.box.lid;
-    return;
-  }
   const previousConfig = lidConfiguration(design);
-  const config = $("#lid-configuration")?.value || previousConfig;
+  const stackable = $("#bin-stackable").value === "true";
+  const hasLid = $("#lid-included").value === "true";
+  const config = hasLid ? (stackable ? "stackable_lid" : "handled_lid") : "stackable_bin";
   const remembered = lidState(design);
-  // Fix 060 Correction 1+2: snapshot the real Lid/Handle/Label values -
-  // including the true (not forced-Flush) label_style - before this call
-  // mutates design.box.lid, so switching to Stackable Bin or Stackable Lid
-  // never erases what Handled Lid had, however many switches happen next.
   if (design.box.lid) state.lidMemory = rememberedLidSnapshot(design);
-  if (config === "stackable_bin") {
-    // No active design.box.lid here: the backend/output and Divider label
-    // locking must see Stackable Bin as having no lid at all.
-    design.box.stack = { mode: "direct" };
+  if (!hasLid) {
+    if (stackable) design.box.stack = { mode: "direct" };
+    else delete design.box.stack;
     delete design.box.lid;
     return;
   }
   delete design.box.stack;
   const divider = lidDivider(design);
   let divisionLabels = Array.isArray(remembered.division_labels) ? [...remembered.division_labels] : [];
-  const labelEnabled = $("#lid-label-enabled").value === "true";
+  const labelEnabled = Boolean(state.lidLabelEnabled);
   if (!labelEnabled) divisionLabels = [];
   if (divider && labelEnabled && !divisionLabels.some(value => String(value || "").trim())) {
     divisionLabels = dividerLabelsForLid(divider);
@@ -886,12 +858,11 @@ function readStackForm(design) {
     handle_enabled: ($("#lid-handle-type").value || "none") !== "none",
     handle_type: ["knob", "pull"].includes($("#lid-handle-type").value)
       ? $("#lid-handle-type").value : remembered.handle_type,
-    knob_shape: $("#lid-knob-shape").value || remembered.knob_shape || "mushroom",
+    knob_shape: "dome",
     handle_size: $("#lid-handle-size").value || remembered.handle_size,
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
-    flip_enabled: $("#lid-flip-enabled")
-      ? $("#lid-flip-enabled").checked : Boolean(remembered.flip_enabled),
-    snap_enabled: $("#lid-snap-enabled").checked,
+    flip_enabled: $("#lid-kind").value === "hinged",
+    snap_enabled: $("#lid-kind").value === "snap",
     // Written explicitly on every save, so a missing value only ever means an
     // older file.
     fit: $("#lid-fit")?.value || remembered.fit || "standard",

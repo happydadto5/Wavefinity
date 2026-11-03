@@ -360,22 +360,9 @@ These alter the ordinary bin shell rather than acting like independent interior 
 
 ## Lid & Stacking
 
-The bin Specification area always shows Lid & Stacking as No lid, Stackable lid, or Non-stackable lid. Add / Configure opens its controls in place.
+The bin Specification area has Stackable (Not Stackable / Stackable) and Lid (No Lid / Include Lid) choices. Width and Depth snap to whole 7 mm units on blur and display the unit count; Height stays in millimetres.
 
-Current user-facing configurations:
-
-- **Stackable bin on bin**
-- **Stackable bin on lid**
-- **Lid with handle — non-stackable**
-
-When a lid is present, current prompt metadata supplies:
-
-- legal lid thickness choices;
-- legal lid-fit choices;
-- handle on/off (off by default on a non-stackable lid; stackable lids have no handle), Knob or Pull, knob shapes Mushroom (default) or Dome, Small/Medium/Large sizes and Left/Right/Front/Back/Middle positions;
-- Flip lid on/off (`flip_enabled`, off by default, allowed on stackable and non-stackable lids, independent of the handle): a hinge along the back inside edge, pinned with a strand of 1.75 mm filament; the back is always the hinge side;
-- label choices and relief values;
-- stacking compatibility.
+Including a lid shows Resting fit, Snap Fit, and Hinged Lid kinds; Lid fit appears only for Snap Fit. Lid thickness, optional Dome knob or Pull handle, and label text are available. Editing non-empty label text enables its options; clearing it disables the label. A saved off label stays off until its text is edited, and division labels retain their editor. Older Mushroom knobs open as Dome.
 
 General rules:
 
