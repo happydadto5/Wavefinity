@@ -24,7 +24,12 @@ from .._layout import (
     b4b_lid_underside_z_from_eff,
     b4b_lid_underside_z,
 )
-from .._plans import B4BHardwarePlan, _ear_wall_anchor_y, b4b_hardware_plan
+from .._plans import (
+    B4BHardwarePlan,
+    _ear_wall_anchor_y,
+    _wall_extreme_y,
+    b4b_hardware_plan,
+)
 
 from ._cutters import (
     _filleted,
@@ -125,7 +130,15 @@ def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
     parts: list[trimesh.Trimesh] = []
     for cx in plan.hinge_centers_x:
         _near_x, mid_x, _far_x = _stack_positions(cx, profile)
-        root_y = layout.rear_wall_y(mid_x) - 0.4
+        # The fitting hangs B4B_LID_FITTING_DROP below the seat plane and the
+        # wall is solid up to that plane, so the drop may only start outboard of
+        # the wall crest over the knuckle's own width: clear by the running gap
+        # plus the root fillet, which fills back toward the wall.
+        crest = _wall_extreme_y(
+            layout, mid_x - profile.mid_member / 2.0,
+            mid_x + profile.mid_member / 2.0, 1.0,
+        )
+        root_y = crest + B4B_RUNNING_GAP + plan.fillet_radius
         tab = Polygon([
             (root_y, underside_z - B4B_LID_FITTING_DROP),
             (root_y, z_hi),
@@ -146,6 +159,16 @@ def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
             ).union(arm),
             plan.fillet_radius,
         )
+        # The fillet where the pivot meets the plate underside bleeds back over
+        # the wall band: keep everything below the seat plane outboard of the
+        # crest.
+        keep_out = Polygon([
+            (crest - 10.0, underside_z - 10.0),
+            (crest + B4B_RUNNING_GAP, underside_z - 10.0),
+            (crest + B4B_RUNNING_GAP, underside_z),
+            (crest - 10.0, underside_z),
+        ])
+        section = section.difference(keep_out)
         parts.append(
             _ear_solid(
                 section=section,
@@ -281,7 +304,12 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
             (near_x, profile.near_ear, False),
             (far_x, profile.far_lug, True),
         ):
-            root_y = layout.front_wall_y(ex) + 0.4
+            # Same rule as the rear knuckle: the drop starts outboard of the
+            # front wall crest over this ear's width, never inside the wall.
+            crest = _wall_extreme_y(
+                layout, ex - thickness / 2.0, ex + thickness / 2.0, -1.0
+            )
+            root_y = crest - B4B_RUNNING_GAP - plan.fillet_radius
             arm_profile = Polygon([
                 (root_y, underside_z - B4B_LID_FITTING_DROP),
                 (root_y, top),
@@ -302,6 +330,12 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
                 ).union(arm),
                 plan.fillet_radius,
             )
+            section = section.difference(Polygon([
+                (crest + 10.0, underside_z - 10.0),
+                (crest - B4B_RUNNING_GAP, underside_z - 10.0),
+                (crest - B4B_RUNNING_GAP, underside_z),
+                (crest + 10.0, underside_z),
+            ]))
             parts.append(
                 _ear_solid(
                     section=section,

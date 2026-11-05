@@ -248,7 +248,10 @@ B4B_HW_M3 = HardwareProfile(
     latch_draw=10.5,
     pivot_standoff=3.45,
     catch_standoff=3.1,
-    hinge_standoff=3.35,
+    # past the knuckle's swept diagonal facets (3.52 mm), not just its 3.32 mm
+    # vertical faces, or the opening lid rubs the wall crest; the 7.0 mm
+    # projection ceiling leaves room for up to 3.68
+    hinge_standoff=3.65,
     strap_thickness=2.4,
     hook_wall=1.6,
     hook_mouth=2.8,
