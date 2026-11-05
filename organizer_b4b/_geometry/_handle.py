@@ -210,7 +210,7 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
             extents=(plan.band * 0.7, 2.0 * depth, 3.0)
         )
         pocket.apply_translation(
-            (cx, plan.axis_y + plan.eye_radius, plan.detent_z)
+            (cx, plan.axis_y + plan.eye_radius, plan.detent_pocket_z)
         )
         pockets.append(pocket)
     # The bail prints with its wall-facing (+Y) side on the bed.  The eye

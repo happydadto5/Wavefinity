@@ -139,8 +139,10 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
         worst = _sweep_intersection_cc(
             bail, body, handle.axis_y, handle.axis_z, angles_deg=angles
         )
+        # The stowed bail is the one hanging at rest, leaning onto the wall.
         stowed = _sweep_intersection_cc(
-            bail, body, handle.axis_y, handle.axis_z, angles_deg=(0.0,)
+            bail, body, handle.axis_y, handle.axis_z,
+            angles_deg=(handle.rest_angle,),
         )
         if stowed > B4B_HANDLE_STOWED_CEIL_CC:
             raise ValueError(

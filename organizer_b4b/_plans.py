@@ -28,6 +28,7 @@ from ._constants import (
     B4B_HANDLE_STOP_ANGLE,
     B4B_HANDLE_DETENT,
     B4B_HANDLE_DETENT_BUMP,
+    B4B_HANDLE_EDGE_CHAMFER,
     _EPS,
 )
 from ._layout import (
@@ -524,7 +525,9 @@ class B4BHandlePlan:
     detent_interference: float
     detent_bump: float
     detent_centers_x: tuple[float, float]
-    detent_z: float
+    detent_z: float            # bump centre height on the wall, at the rest pose
+    detent_pocket_z: float     # pocket centre height in the handle's drawn pose
+    rest_angle: float          # degrees the hanging bail leans onto the wall
     root_width: float
     root_face_y: float
     root_top_z: float
@@ -660,9 +663,20 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
     root_bottom_z = max(1.0, axis_z - dims.root_below)
 
     # Stow detents sit near the lower corners of the folded U, where the arms
-    # are long enough to flex over them at a light finger force.
-    detent_z = axis_z - drop + dims.corner_radius
+    # are long enough to flex over them at a light finger force.  The pockets
+    # are cut where the U is drawn, but the printed bail hangs from its pivot
+    # and leans until the lower edge of its wall face reaches the running gap
+    # to the wall crest, so the bumps are set where the pockets arrive there.
+    detent_pocket_z = axis_z - drop + dims.corner_radius
     detent_cx = half - dims.band / 2.0
+    chamfer = min(B4B_HANDLE_EDGE_CHAMFER, dims.thickness / 2.0 - 1e-3)
+    face_y = dims.thickness / 2.0
+    face_low = drop + dims.band / 2.0 - chamfer
+    reach = front_crest - axis_y - B4B_HANDLE_WALL_CLEAR
+    span = math.hypot(face_y, face_low)
+    rest_angle = max(0.0, math.asin(min(1.0, reach / span)) - math.atan2(face_y, face_low))
+    pocket_drop = axis_z - detent_pocket_z
+    detent_z = axis_z + dims.eye_radius * math.sin(rest_angle) - pocket_drop * math.cos(rest_angle)
 
     screw = _screw_for_stack(
         profile, dims.fork_clear_span, dims.far_lug, "handle pivot"
@@ -687,6 +701,8 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
         detent_bump=B4B_HANDLE_DETENT_BUMP,
         detent_centers_x=(-detent_cx, detent_cx),
         detent_z=detent_z,
+        detent_pocket_z=detent_pocket_z,
+        rest_angle=math.degrees(rest_angle),
         root_width=dims.root_width,
         root_face_y=root_face_y,
         root_top_z=root_top_z,
