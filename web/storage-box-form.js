@@ -54,11 +54,21 @@
     const rules = catalog?.b4b_rules || {};
     return {
       secure_lid: true, latch_count: "auto", hinge_count: "2", lid_headroom_mm: 1,
+      edge_bevel: "default",
       label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
       stacking: false, handle: false,
       wall_mm: Number(rules.default_wall_mm ?? 1.6),
       base_mm: Number(rules.default_base_mm ?? 1.6),
     };
+  }
+
+  // A new design starts on Default; a saved Storage Box with no bevel value
+  // predates the option and has sharp edges.
+  const BEVELS = ["none", "light", "default", "heavy"];
+  function bevelOf(space) {
+    const saved = space?.storage_box;
+    if (!saved) return "default";
+    return BEVELS.includes(saved.edge_bevel) ? saved.edge_bevel : "none";
   }
 
   function mount({ host, initialSpace, callbacks = {} }) {
@@ -68,7 +78,7 @@
     const maxXY = Math.floor(Number(catalog?.max_box_size || 350) / unit) * unit;
     const minField = Number(rules.min_field_mm) || unit;
     const minHeight = Number(rules.min_secure_height_mm) || 1;
-    const box = { ...defaults(catalog), ...(initialSpace?.storage_box || {}) };
+    const box = { ...defaults(catalog), ...(initialSpace?.storage_box || {}), edge_bevel: bevelOf(initialSpace) };
 
     const form = el("div", "storage-box-form");   // one column of areas: size, Lid, Case Options, Label, Material, status
     const events = new AbortController();
@@ -162,7 +172,11 @@
     const matRow = el("div", "space-dimension-row");
     const wallSel = document.createElement("select"); wallSel.id = id("wall");
     const baseSel = document.createElement("select"); baseSel.id = id("base");
-    matRow.append(labeled("Wall thickness", wallSel), labeled("Base/Lid thickness", baseSel));
+    const bevel = select([["none", "No bevel"], ["light", "Light"], ["default", "Default"], ["heavy", "Heavy"]],
+      box.edge_bevel);
+    bevel.id = id("edge-bevel");
+    matRow.append(labeled("Wall thickness", wallSel), labeled("Base/Lid thickness", baseSel),
+      labeled("Edge bevel", bevel));
     matGroup.append(matRow);
     caseWrap.append(matGroup);
 
@@ -284,6 +298,7 @@
             latch_count: latched ? latchCount.value : "auto",
             hinge_count: latched ? hingeCount.value : "2",
             lid_headroom_mm: latched ? Number(snugness.value) : 1,
+            edge_bevel: bevel.value,
             label_enabled: labelOn,
             label_text: labelOn ? labelText.value.trim() : "",
             label_location: labelOn ? labelLoc.value : "top",
@@ -305,7 +320,7 @@
     function onChange() {
       if (callbacks.onChange) callbacks.onChange(read());
     }
-    for (const input of [lidType, snugness, latchCount, hingeCount, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel]) {
+    for (const input of [lidType, snugness, latchCount, hingeCount, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel, bevel]) {
       input.addEventListener("input", onChange, { signal: events.signal });
       input.addEventListener("change", onChange, { signal: events.signal });
     }
@@ -321,6 +336,7 @@
       zInput.value = space?.z || "";
       lidType.value = b.secure_lid ? "latched" : "lid_only";
       snugness.value = String(b.lid_headroom_mm ?? 1);
+      bevel.value = bevelOf(space);
       latchCount.value = b.latch_count || "auto";
       hingeCount.value = String(b.hinge_count) === "1" ? "1" : "2";
       stacking.value = String(!!b.stacking);
@@ -358,7 +374,7 @@
     // cannot be silently superseded by newer input.
     function setDisabled(value) {
       const frozen = !!value;
-      for (const input of [xInput, yInput, zInput, lidType, snugness, latchCount, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel]) {
+      for (const input of [xInput, yInput, zInput, lidType, snugness, latchCount, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel, bevel]) {
         input.disabled = frozen;
       }
     }

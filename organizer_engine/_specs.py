@@ -271,6 +271,10 @@ B4B_LATCH_COUNTS = ("auto", "1", "2")
 B4B_LATCH_STRENGTHS = ("lightweight", "standard")
 # Rear hinge count for a secure lid; two is the default at every size.
 B4B_HINGE_COUNTS = ("1", "2")
+# Edge bevel on the case's outer top/bottom edges and the lid's outer top edge.
+# The size is the 45-degree chamfer leg in millimetres; "none" keeps sharp edges.
+B4B_EDGE_BEVELS = ("none", "light", "default", "heavy")
+B4B_EDGE_BEVEL_MM = {"none": 0.0, "light": 0.3, "default": 0.6, "heavy": 1.0}
 B4B_LABEL_LOCATIONS = ("none", "top", "front")
 # Cosmetic style of the removable front label only; meaningless for the top
 # label or when there is no label at all.
@@ -452,6 +456,8 @@ class B4BSpec:
     latch_strength: str = "standard"   # legacy only; derived from screw family
     hinge_count: str = "2"             # 1 | 2; meaningful only with a secure lid
     lid_headroom_mm: float = 1.0       # UI: Lid snugness
+    edge_bevel: str = "default"        # none | light | default | heavy; a design
+                                        # saved before this existed loads as "none"
     label_enabled: bool = False
     label_text: str = ""
     label_location: str = "top"        # none | top | front
@@ -469,6 +475,10 @@ class B4BSpec:
         if self.hinge_count not in B4B_HINGE_COUNTS:
             raise ValueError(
                 f"hinge count must be one of {', '.join(B4B_HINGE_COUNTS)}"
+            )
+        if self.edge_bevel not in B4B_EDGE_BEVELS:
+            raise ValueError(
+                f"edge bevel must be one of {', '.join(B4B_EDGE_BEVELS)}"
             )
         if self.latch_strength not in B4B_LATCH_STRENGTHS:
             raise ValueError(
@@ -525,6 +535,7 @@ class B4BSpec:
             latch_strength=latch_strength,
             hinge_count=self.hinge_count,
             lid_headroom_mm=self.lid_headroom_mm,
+            edge_bevel=self.edge_bevel,
             label_enabled=self.label_enabled,
             label_text=self.label_text,
             label_location=self.label_location,

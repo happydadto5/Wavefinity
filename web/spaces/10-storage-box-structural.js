@@ -24,8 +24,14 @@ SP.fillMaterialSelect = (id, choices, value) => {
   select.value = String(value);
 };
 
+// The setup dialog has no bevel control (the Design-panel form owns it), so it
+// carries the Space's own value through: Default for a new Storage Box, and
+// None for a saved one that predates the option.
+SP.storageBoxEdgeBevel = "default";
+
 SP.fillStorageBoxForm = box => {
   const one = { ...SP.storageBoxDefaults(), ...(box || {}) };
+  SP.storageBoxEdgeBevel = box ? (box.edge_bevel || "none") : "default";
   const set = (id, value) => { const node = document.getElementById(id); if (node) node.value = String(value); };
   set("portable-lid-type", one.secure_lid === false ? "lid_only" : "latched");
   set("portable-lid-snugness", one.lid_headroom_mm);
@@ -118,6 +124,7 @@ SP.readStorageBoxForm = () => {
     latch_count: latched ? (value("portable-latch-count") || "auto") : "auto",
     hinge_count: latched ? (value("portable-hinge-count") === "1" ? "1" : "2") : "2",
     lid_headroom_mm: parseFloat(value("portable-lid-snugness")) || 1,
+    edge_bevel: SP.storageBoxEdgeBevel,
     label_enabled: labelled,
     label_text: labelled ? String(value("portable-label-text") || "").trim() : "",
     label_location: labelled ? location : "top",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import trimesh
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
 from organizer_engine import (
     CORNER_INSET,
     LOCK_EMBED,
@@ -15,8 +15,11 @@ from organizer_engine import (
     _lift_grabber_bulge_mesh,
     _place_lift_grabber,
 )
+from organizer_engine._specs import B4B_EDGE_BEVEL_MM
 from organizer_geometry import (
     _extrude_polygon,
+    _loft_cavity,
+    _resampled_ring,
     difference,
     intersection as _intersection,
     union,
@@ -155,6 +158,93 @@ def make_b4b_lift_grabbers(box: BoxSpec) -> list[trimesh.Trimesh]:
     ]
 
 
+# --------------------------------------------------------------------------- #
+# edge bevel
+# --------------------------------------------------------------------------- #
+_BEVEL_STEP = 0.1          # ring spacing of a 45 degree chamfer (one thin layer)
+_BEVEL_POINT_SPACING = 0.5  # plan-view spacing of the loft ring points
+
+
+def _bevel_leg(eff: BoxSpec) -> float:
+    """The chosen chamfer leg in mm (0 for No bevel)."""
+    return B4B_EDGE_BEVEL_MM[eff.b4b.edge_bevel]
+
+
+def _circle_spare(outline: Polygon, circles: list[tuple[float, float, float]]) -> float:
+    """Least plan-view room between the outline's edge and the given circles."""
+    if not circles:
+        return float("inf")
+    return min(
+        outline.exterior.distance(Point(cx, cy)) - radius
+        for cx, cy, radius in circles
+    )
+
+
+def _chamfered_extrusion(
+    outline: Polygon, height: float, bottom_leg: float, top_leg: float
+) -> trimesh.Trimesh:
+    """``outline`` extruded to ``height`` with 45 degree chamfers on its bottom
+    and/or top outer edge, lofted through matched inset rings so each chamfer is
+    one flat, support-free face.  Both legs 0 is today's plain extrusion."""
+    if bottom_leg <= 0.0 and top_leg <= 0.0:
+        return _extrude_polygon(outline, height)
+    profile: list[tuple[float, float]] = []      # (z, inset)
+    if bottom_leg > 0.0:
+        steps = max(1, int(np.ceil(bottom_leg / _BEVEL_STEP - 1e-9)))
+        profile.extend(
+            (bottom_leg * i / steps, bottom_leg * (1.0 - i / steps))
+            for i in range(steps)
+        )
+    profile.append((bottom_leg, 0.0))
+    top_start = height - top_leg
+    if top_start > bottom_leg + 1e-9:
+        profile.append((top_start, 0.0))
+    if top_leg > 0.0:
+        steps = max(1, int(np.ceil(top_leg / _BEVEL_STEP - 1e-9)))
+        profile.extend(
+            (top_start + top_leg * i / steps, top_leg * i / steps)
+            for i in range(1, steps + 1)
+        )
+    count = int(min(4000, max(192, outline.exterior.length / _BEVEL_POINT_SPACING)))
+    reference = _resampled_ring(outline, count)
+    rings: list[np.ndarray] = []
+    for _z, inset in profile:
+        if inset <= 0.0:
+            rings.append(reference)
+            continue
+        inner = outline.buffer(-inset)
+        if inner.is_empty or not isinstance(inner, Polygon):
+            raise RuntimeError("Storage Box edge bevel collapsed the outline")
+        edge = inner.exterior
+        rings.append(np.asarray([
+            edge.interpolate(edge.project(Point(x, y))).coords[0]
+            for x, y in reference
+        ], dtype=float))
+    return _loft_cavity(rings, [z for z, _inset in profile])
+
+
+def _body_bevel_legs(eff: BoxSpec, layout: B4BLayout, rim_z: float) -> tuple[float, float]:
+    """(bottom, top) chamfer legs of the case body after the working surfaces
+    have taken what they need.  The top rim is the lid's seat, so at most half
+    its flat land goes; the underside gives up nothing near a stacking recess."""
+    leg = _bevel_leg(eff)
+    if leg <= 0.0:
+        return 0.0, 0.0
+    outer = layout.outer_structural_polygon
+    land = outer.exterior.distance(layout.inner_mating_polygon.exterior)
+    top = min(leg, land / 2.0)
+    bottom = min(leg, land / 2.0)
+    if eff.b4b.stacking and eff.b4b.lid:
+        female_r = B4B_STACK_BOSS_DIAMETER / 2.0 + B4B_STACK_FEMALE_RADIAL_CLEARANCE
+        bottom = min(bottom, _circle_spare(outer, [
+            (cx, cy, female_r) for cx, cy in _stack_locator_centres(eff)
+        ]))
+    top, bottom = max(0.0, top), max(0.0, bottom)
+    if top + bottom >= rim_z:
+        return 0.0, 0.0
+    return bottom, top
+
+
 def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     """Flat-floor child field inside a wall grown outward from its mating face."""
     eff = b4b_effective_box(box)
@@ -163,7 +253,10 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     layout = b4b_layout(box)
 
     rim_z = b4b_rim_z_from_eff(eff)
-    envelope = _extrude_polygon(layout.outer_structural_polygon, rim_z)
+    bottom_leg, top_leg = _body_bevel_legs(eff, layout, rim_z)
+    envelope = _chamfered_extrusion(
+        layout.outer_structural_polygon, rim_z, bottom_leg, top_leg
+    )
     cavity = _extrude_polygon(
         layout.inner_mating_polygon, rim_z - floor_z + 1.0
     )
@@ -248,7 +341,18 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
     # because the wall now rises to exactly that datum and any dip would bury
     # the plate edge in solid body around the whole perimeter.
     skin = b4b_lid_skin_from_eff(eff)
-    plate = _extrude_polygon(layout.outer_structural_polygon, skin)
+    # Only the plate's outer top edge is eased; its underside stays flat on the
+    # seat.  The chamfer takes at most half the plate and stays clear of the
+    # stacking sockets.
+    lid_leg = min(_bevel_leg(eff), skin / 2.0)
+    if eff.b4b.stacking:
+        socket_r = B4B_STACK_BOSS_DIAMETER / 2.0 - B4B_STACK_SOCKET_INTERFERENCE
+        lid_leg = min(lid_leg, _circle_spare(layout.outer_structural_polygon, [
+            (cx, cy, socket_r) for cx, cy in _stack_locator_centres(eff)
+        ]))
+    plate = _chamfered_extrusion(
+        layout.outer_structural_polygon, skin, 0.0, max(0.0, lid_leg)
+    )
     plate.apply_translation((0.0, 0.0, underside_z))
 
     lid = plate

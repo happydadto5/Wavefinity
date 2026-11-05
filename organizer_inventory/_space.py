@@ -16,7 +16,7 @@ from organizer_engine import (
     BASE_UNIT,
     MIN_HEIGHT_ABOVE_BASE,
 )
-from organizer_engine._specs import B4B_HINGE_COUNTS
+from organizer_engine._specs import B4B_EDGE_BEVELS, B4B_HINGE_COUNTS
 from organizer_engine.product_rules import (
     B4B_LATCHED_MIN_HEIGHT,
     B4B_MIN_FIELD_XY,
@@ -92,6 +92,7 @@ def storage_box_defaults() -> dict[str, Any]:
         "hinge_count": "2",
         "latch_strength": "standard",
         "lid_headroom_mm": 1.0,
+        "edge_bevel": "default",
         "label_enabled": False,
         "label_text": "",
         "label_location": "top",
@@ -145,7 +146,7 @@ def normalise_storage_box(raw: Any) -> dict[str, Any]:
         raw = {}
     if not isinstance(raw, dict):
         raise ValueError("storage box settings must be an object")
-    merged = {**storage_box_defaults(), **{
+    merged = {**storage_box_defaults(), "edge_bevel": "none", **{
         key: value for key, value in raw.items() if key in storage_box_defaults()
     }}
     headroom = merged["lid_headroom_mm"]
@@ -171,6 +172,7 @@ def normalise_storage_box(raw: Any) -> dict[str, Any]:
         "hinge_count": _storage_box_choice(merged["hinge_count"], B4B_HINGE_COUNTS, "hinge count"),
         "latch_strength": _storage_box_choice(merged["latch_strength"], B4B_LATCH_STRENGTHS, "latch strength"),
         "lid_headroom_mm": match,
+        "edge_bevel": _storage_box_choice(merged["edge_bevel"], B4B_EDGE_BEVELS, "edge bevel"),
         "label_enabled": _storage_box_flag(merged["label_enabled"], "label"),
         "label_text": label_text,
         "label_location": _storage_box_choice(merged["label_location"], B4B_LABEL_LOCATIONS, "label location"),
