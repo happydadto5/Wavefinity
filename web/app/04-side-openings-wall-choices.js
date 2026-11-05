@@ -483,9 +483,9 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
   const isB4B = Boolean(box?.b4b?.enabled);
   const ordinaryRules = state.catalog?.wall_rules || {};
   const b4bRules = state.catalog?.b4b_rules || {};
-  const stacking = (box?.stack?.mode || "none") === "direct" || Boolean(box?.lid?.enabled && box.lid.stackable);
   const hasLid = Boolean(box?.lid?.enabled);
-  const stackMin = (stacking || hasLid) ? number(state.catalog?.stack_rules?.min_wall_mm, 1.2) : -Infinity;
+  // Only a lid needs the thicker wall; a plain stacking skirt takes any wall.
+  const stackMin = hasLid ? number(state.catalog?.stack_rules?.min_wall_mm, 1.2) : -Infinity;
   const modeMin = isB4B ? b4bMinWall() : stackMin;
   const choices = wallPresetChoices(box).filter(choice => number(choice.value) >= modeMin - 1e-9);
   const defaultWall = isB4B
@@ -493,7 +493,7 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
     : number(ordinaryRules.default_mm, 0.8);
   const wall = number(box?.wall, defaultWall);
   const value = fmt(wall);
-  const standard = !isB4B && box?.standard_walls !== false && !stacking && !hasLid;
+  const standard = !isB4B && box?.standard_walls !== false && !hasLid;
   const ordinaryDefaultValue = fmt(ordinaryRules.default_mm ?? 0.8);
   const numericChoices = isB4B
     ? choices
@@ -503,7 +503,7 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
   const signature = JSON.stringify({ numericChoices, customValue, modeMin, standard });
   if (select.dataset.choices !== signature) {
     select.replaceChildren();
-    if (!stacking && !hasLid && !isB4B) select.add(new Option("0.8 mm — Default", "standard"));
+    if (!hasLid && !isB4B) select.add(new Option("0.8 mm — Default", "standard"));
     select.append(...numericChoices.map(choice => new Option(
       `${number(choice.value).toFixed(1)} mm — ${choice.label}`,
       fmt(choice.value),
@@ -634,7 +634,7 @@ function syncBaseControls() {
 
 function syncWallControls() {
   const isB4B = b4bEnabled();
-  const stacking = stackMode() !== "none" || Boolean(state.design?.box?.lid?.enabled);
+  const stacking = Boolean(state.design?.box?.lid?.enabled);   // only a lid forces a wall
   $("#wall-thickness-setting").hidden = false;
   const choices = wallPresetChoices(state.design?.box);
   const thinnest = choices.length ? number(choices[0].value, 0.4) : 0.4;

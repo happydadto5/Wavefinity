@@ -638,15 +638,16 @@ which suppress Inventory logging entirely.
 - **Bins never turn a quarter turn on their own.** Left walls mate with right,
   and front with back; a bin turned 90 degrees meets its neighbours crest to
   crest, so there is no sideways option.
-- **Stacking.** A bin printed stackable (a snap-on lid, or direct snap) shows
+- **Stacking.** A bin printed stackable (a snap-on lid, or a direct locating skirt) shows
   a ⇅ on its swatch and its style under its name. Drop it on a bin of the same
-  size that stacks the same way and it snaps on top, sides aligned. Anything
+  size that stacks the same way and it seats on top, sides aligned. Anything
   else is refused with the reason: a different size, a different style, a bin
   not printed to stack, or a stack taller than the drawer's max height. Lid and
   direct interfaces are intentionally same-mode only. The Height field is the
-  module contribution: a 50 mm bin adds exactly 50 mm. Its detached physical
-  envelope also includes the exposed interlock (1 mm on a lid, 3 mm for a
-  direct snap), which the drawer clearance check includes. Dragging a bin in a
+  module contribution: a 50 mm lid bin adds exactly 50 mm. Its detached physical
+  envelope also includes the exposed interlock (1 mm on a lid), which the drawer
+  clearance check includes. A direct bin measures exactly its Height; its 3 mm
+  skirt sits inside that, so each bin added adds the Height less 3 mm. Dragging a bin in a
   stack takes it and everything above it; dragging the bottom bin moves the
   whole stack.
 - **Inventory is the primary Space control.** Each ordinary row shows a

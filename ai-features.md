@@ -366,10 +366,10 @@ Including a lid shows Resting fit, Snap Fit, and Hinged Lid kinds; Lid fit appea
 
 General rules:
 
-- direct bin-on-bin stacking uses no lid;
+- direct bin-on-bin stacking uses no lid: a straight 3 mm locating skirt under the base, beveled and support-free, drops into the mouth of a same-size bin below. It only locates (nothing snaps), sits inside the typed Height, and needs no extra wall thickness;
 - stackable lid keeps a seat/recess for another bin; compatible smaller lid-stack bins may also share it when they fit on the grid without overlap;
 - handled lid is non-stackable;
-- Wavefinity may require stronger wall/base values;
+- Wavefinity may require stronger wall/base values (a lid needs the stronger wall; a direct skirt needs only a thicker base);
 - stackable lids allow inlaid, not raised, lid text; a Divider can provide one lid label per compartment;
 - a handle that does not fit is rejected rather than silently shrunk;
 - a flip lid keeps the bin walls, base and closed outside size; a fixed wavy-backed rail and moving plate share the usual flush lid top and stacking recess. Their rounded running joint and links under the rail clear the swing; thin lids lower the pin to retain material below the seat. Continuous below-rim arc clearance may increase the closed plug gap beyond the selected fit minimum. It has no snap-fit lock bumps and is rejected when the bin is too narrow, shallow or short to hinge.

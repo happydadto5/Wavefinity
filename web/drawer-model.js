@@ -274,7 +274,7 @@ DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
 DL.mmToUnits = mm => fmt(mm / 7);
 DL.isSpacer = one => one?.kind === "spacer";
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
-DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct snap", b4b: "Storage Box stacking" })[mode] || "Not stackable";
+DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct stack", b4b: "Storage Box stacking" })[mode] || "Not stackable";
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
 DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
@@ -391,10 +391,10 @@ DL.toUnits = (cell, drawer = DL.drawer()) => DL.isPegboard(drawer) ? cell : cell
 // exposed on the physical envelope of the first/detached part.
 DL.pitch = one => DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.id]?.pitch_mm)
   ? DL.stackMetrics[one.id].pitch_mm
-  : one.stack === "b4b" ? Number(one.z) - (DL.stackSteps.b4b ?? 0) : Number(one.z);
+  : one.stack === "b4b" || one.stack === "direct" ? Number(one.z) - (DL.stackSteps[one.stack] ?? 0) : Number(one.z);
 DL.partHeight = one => DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.id]?.physical_mm)
   ? DL.stackMetrics[one.id].physical_mm
-  : one.stack === "b4b" ? Number(one.z) : Number(one.z) + (DL.stackSteps[one.stack] ?? 0);
+  : one.stack === "b4b" || one.stack === "direct" ? Number(one.z) : Number(one.z) + (DL.stackSteps[one.stack] ?? 0);
 DL.stackHeight = bins => DL.usesStackMetrics()
   ? bins.reduce((sum, one, index) => index
     ? sum - DL.partHeight(bins[index - 1]) + DL.pitch(bins[index - 1]) + DL.partHeight(one)

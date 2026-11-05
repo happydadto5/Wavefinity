@@ -1,4 +1,4 @@
-"""Stackable bins - a snap-in lid, or bins that snap straight into each other.
+"""Stackable bins - a lid that carries the next bin, or a plain locating skirt.
 
 Two same-mode interfaces:
 
@@ -6,19 +6,20 @@ Two same-mode interfaces:
             bin mouth and snaps into a groove just under the rim; its top face
             is recessed, and that recess is the seat the next bin's stepped
             base drops into.
-``direct``  no lid at all - the next bin's stepped base plugs straight into
-            this bin's mouth and snaps into the same groove.
+``direct``  no lid at all - a straight-sided skirt under the bin's base drops
+            into the mouth of the bin below and stops the stack sliding.  It
+            only locates: nothing snaps, clicks or grips, and the receiving
+            mouth stays plain.
 
-Both modes step the bottom of the bin inward, but their 1 mm and 3 mm feet are
-not interchangeable.  Lid bins stack on lid bins and direct bins stack on
-direct bins.  Direct stacking keeps its segmented mouth snap.  Lid retention
-uses separate, lighter lock-bump-style points near the rim.
+Lid bins stack on lid bins and direct bins stack on direct bins.  The lid's
+retention uses lighter lock-bump-style points near the rim.
 
-The height the user types is the *stack module height* - the distance between
-the seating datums of consecutive bins.  The interlocking foot extends the
-detached part's physical envelope by its engagement depth, so a 50 mm module
-adds exactly 50 mm to a stack while honestly reporting a taller detached part.
-In ``lid`` mode the lid contribution remains inside that module height.
+A lid bin's typed height is the *stack module height* - the distance between
+the seating datums of consecutive bins - and its stepped foot extends the
+detached part's physical envelope by the engagement depth.  A direct bin's
+skirt lives inside the typed height: the bin measures exactly what was typed,
+and each bin added to a stack adds the typed height less the skirt depth,
+because the skirt overlaps the top of the bin below.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from dataclasses import replace
 
 import trimesh
 from shapely.ops import unary_union
-from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
+from shapely.geometry import LineString, MultiPolygon, Polygon, box as shapely_box
 
 from organizer_engine import (
     BoxSpec,
@@ -83,25 +84,15 @@ from organizer_geometry import (
 # instead of one - and the bin above would be standing on nothing.
 STACK_LID_SKIN = 2.0      # minimum lid rise above the rim
 STACK_SEAT_DEPTH = 1.0    # lid mode: base step height == lid top recess depth
-STACK_PLUG_DEPTH = 3.0    # how far a plug reaches into the mouth it snaps into
-# The click itself: how far the bead stands past the mouth face it has to
-# squeeze through.  Derive the bead from this rather than the other way round -
-# sizing the bead off the groove left only 0.1 mm of interference, which is a
-# detent you cannot feel, not a snap that holds a stack together.
-STACK_SNAP = 0.30         # bead protrusion past the mouth face
-STACK_BEAD = 0.40         # groove depth: the snap plus seating clearance
-STACK_BEAD_DROP = 1.5     # bead centre below the rim it snaps under
+STACK_PLUG_DEPTH = 3.0    # how far a lid plug reaches into the mouth it closes
+STACK_SKIRT_DEPTH = 3.0   # direct mode: how far the skirt drops into the bin below
+STACK_SKIRT_BEVEL = 1.0   # direct mode: 45 degree lead-in on the skirt's entering edge
+STACK_SKIRT_LAYER = 0.1   # direct mode: step of the 45 degree ramps (one thin print layer)
+STACK_PROFILE_POINTS = 192
 STACK_FIT = 0.25          # clearance per side on every sliding face
 STACK_MIN_FLOOR_SKIN = 0.8   # floor left under the stepped base
-# A groove this deep needs wall behind it.  0.8 mm would leave 0.45 mm, which
-# splits; 1.2 mm leaves 0.85 mm, which holds.
-STACK_MIN_WALL = 1.2
-STACK_SNAP_RAMP = STACK_FIT + STACK_SNAP
-STACK_SNAP_RELEASE = STACK_BEAD
-STACK_PROFILE_POINTS = 192
-STACK_DETENT_MAX_LENGTH = 14.0
-STACK_DETENT_GAP = 6.0
-STACK_CORNER_CLEARANCE = 3.0
+# A lid's retention clips and recess need wall behind them.
+STACK_MIN_WALL = 1.2      # lid bins only; a plain skirt needs no extra wall
 
 # Lid retention borrows the side connector's printable lock profile, but not
 # its physical lock points.  These snaps sit above the connector locks and at
@@ -159,12 +150,28 @@ def stack_step_depth(box: BoxSpec) -> float:
     """How far the bin's own stepped base drops into whatever is below it.
 
     In lid mode it only has to locate in the lid's recess.  In direct mode it
-    is the snap itself, so it reaches far enough to put the bead clear of the
-    rim edge it clicks under.
+    is the skirt, which drops into the mouth of the bin below.
     """
     if direct_stack_enabled(box):
-        return STACK_PLUG_DEPTH
+        return STACK_SKIRT_DEPTH
     return STACK_SEAT_DEPTH if lid_stackable(box) else 0.0
+
+
+def stack_foot_growth(box: BoxSpec) -> float:
+    """How far the body grows past the typed height to hold its stepped foot.
+
+    A lid bin's foot is extra: it extends the detached part.  A direct bin's
+    skirt lives inside the typed height, so it grows nothing.
+    """
+    return 0.0 if direct_stack_enabled(box) else stack_step_depth(box)
+
+
+def _stack_wall_box(box: BoxSpec) -> BoxSpec:
+    """``box`` with the wall its stack hardware needs: a lid's clips and recess
+    want ``STACK_MIN_WALL``; a plain skirt asks nothing of the wall."""
+    if not lid_enabled(box):
+        return box
+    return replace(box, wall=max(box.wall, STACK_MIN_WALL), standard_walls=False)
 
 
 def stack_base_minimum(box: BoxSpec) -> float:
@@ -176,10 +183,7 @@ def stack_base_minimum(box: BoxSpec) -> float:
     """
     if not vertical_stack_enabled(box):
         return DEFAULT_BASE_THICKNESS
-    wall_box = replace(
-        box, wall=max(box.wall, STACK_MIN_WALL), standard_walls=False,
-    )
-    flare = stack_foot_flare_height(wall_box)
+    flare = stack_foot_flare_height(_stack_wall_box(box))
     return stack_step_depth(box) + max(STACK_MIN_FLOOR_SKIN, flare)
 
 
@@ -191,10 +195,9 @@ def normalize_stack_settings(box: BoxSpec) -> BoxSpec:
     """
     if not vertical_stack_enabled(box) and not lid_enabled(box):
         return box
-    changes = {
-        "wall": max(box.wall, STACK_MIN_WALL),
-        "standard_walls": False,
-    }
+    changes: dict = {}
+    if lid_enabled(box):
+        changes.update(wall=max(box.wall, STACK_MIN_WALL), standard_walls=False)
     if vertical_stack_enabled(box):
         changes.update(
             base_thickness=max(box.base_thickness, stack_base_minimum(box)),
@@ -206,16 +209,17 @@ def normalize_stack_settings(box: BoxSpec) -> BoxSpec:
 def stack_effective_box(box: BoxSpec) -> BoxSpec:
     """The BoxSpec the body and its interior parts are actually built from.
 
-    Settings are normalized defensively, then the body is made taller by its
-    engagement depth.  Consecutive bodies are placed one requested module
-    height apart, so the foot overlaps without falsifying the pitch.
+    Settings are normalized defensively, then a lid bin's body is made taller
+    by its engagement depth.  Consecutive bodies are placed one stack pitch
+    apart, so the foot overlaps without falsifying the pitch.  A direct bin's
+    skirt sits inside the typed height, so its body is exactly that tall.
     """
     if not vertical_stack_enabled(box) and not lid_enabled(box):
         return box
     normalized = normalize_stack_settings(box)
     if not vertical_stack_enabled(box):
         return normalized
-    body_z = box.z + stack_step_depth(box) - stack_lid_rise(normalized)
+    body_z = box.z + stack_foot_growth(box) - stack_lid_rise(normalized)
     return replace(normalized, z=body_z)
 
 
@@ -355,16 +359,6 @@ def _swept_plug_polygon(eff: BoxSpec, hinge: LidHinge) -> Polygon:
     return plug
 
 
-def _groove_band(eff: BoxSpec) -> Polygon:
-    """Plan ring the snap groove is cut out of, just inside the wall."""
-    outer = wavy_cavity_polygon(eff).buffer(STACK_BEAD)
-    inner = wavy_cavity_polygon(eff)
-    ring = outer.difference(inner)
-    if ring.is_empty:
-        raise ValueError("this bin's wall is too thin for a stacking groove")
-    return ring
-
-
 def _profile_loft(polygons: list[Polygon], heights: list[float]) -> trimesh.Trimesh:
     """Loft matched wavy outlines into one watertight support-free profile."""
     reference = _resampled_ring(polygons[0], STACK_PROFILE_POINTS)
@@ -383,83 +377,108 @@ def _outline_run(inner: Polygon, outer: Polygon) -> float:
 
 def stack_foot_flare_height(eff: BoxSpec) -> float:
     """Vertical run needed for a <=45 degree foot/lid flare."""
+    if direct_stack_enabled(eff):
+        return _skirt_flare_height(eff)
     run = _outline_run(_plug_polygon(eff), wavy_outer_polygon(eff))
     return math.ceil((run + _EPS) * 100.0) / 100.0
 
 
-def _detent_intervals(lo: float, hi: float) -> list[tuple[float, float]]:
-    """One short detent on a small side, two on a longer side."""
-    span = hi - lo
-    margin = min(STACK_CORNER_CLEARANCE, span * 0.2)
-    usable = span - 2.0 * margin
-    if usable <= 0.0:
-        return []
-    if usable >= 2.0 * STACK_DETENT_MAX_LENGTH + STACK_DETENT_GAP:
-        length = min(STACK_DETENT_MAX_LENGTH, (usable - STACK_DETENT_GAP) / 2.0)
-        return [
-            (lo + margin, lo + margin + length),
-            (hi - margin - length, hi - margin),
-        ]
-    length = min(STACK_DETENT_MAX_LENGTH, usable)
-    centre = (lo + hi) / 2.0
-    return [(centre - length / 2.0, centre + length / 2.0)]
+def _narrowest_mouth(cavity: Polygon, across: str) -> float:
+    """Half-width of the mouth at its wave crests along one axis.
+
+    Probes a band of the straight run clear of the corners, a full wave long
+    wherever the bin is big enough to have one.
+    """
+    min_x, min_y, max_x, max_y = cavity.bounds
+    half_run = (max_y if across == "x" else max_x)
+    reach = max(0.0, half_run - 3.0)
+    count = int(2.0 * reach / 0.25) + 1
+    least = (max_x if across == "x" else max_y)
+    for index in range(count):
+        at = 0.0 if count == 1 else -reach + 2.0 * reach * index / (count - 1)
+        if across == "x":
+            probe = LineString([(min_x - 1.0, at), (max_x + 1.0, at)])
+        else:
+            probe = LineString([(at, min_y - 1.0), (at, max_y + 1.0)])
+        hit = cavity.intersection(probe)
+        if hit.is_empty:
+            continue
+        bx0, by0, bx1, by1 = hit.bounds
+        low, high = (bx0, bx1) if across == "x" else (by0, by1)
+        least = min(least, -low, high)
+    return least
 
 
-def _detent_masks(eff: BoxSpec) -> list[Polygon]:
-    """Symmetric side masks that keep snap material away from corners."""
-    plug = _plug_polygon(eff)
-    outer = wavy_outer_polygon(eff)
-    min_x, min_y, max_x, max_y = plug.bounds
-    out_min_x, out_min_y, out_max_x, out_max_y = outer.bounds
-    overlap = 1.0
-    pad = STACK_FIT + STACK_SNAP + 0.5
-    masks: list[Polygon] = []
-    for x0, x1 in _detent_intervals(min_x, max_x):
-        masks.append(shapely_box(x0, max_y - overlap, x1, out_max_y + pad))
-        masks.append(shapely_box(x0, out_min_y - pad, x1, min_y + overlap))
-    for y0, y1 in _detent_intervals(min_y, max_y):
-        masks.append(shapely_box(max_x - overlap, y0, out_max_x + pad, y1))
-        masks.append(shapely_box(out_min_x - pad, y0, min_x + overlap, y1))
-    return masks
+_SKIRTS: dict = {}
 
 
-def _segmented_profile(
-    solid: trimesh.Trimesh, eff: BoxSpec, z0: float, z1: float,
-) -> list[trimesh.Trimesh]:
-    pieces: list[trimesh.Trimesh] = []
-    for polygon in _detent_masks(eff):
-        mask = _extrude_polygon(polygon, z1 - z0 + 2.0 * _PROFILE_EPS)
-        mask.apply_translation((0.0, 0.0, z0 - _PROFILE_EPS))
-        piece = intersection([solid, mask])
-        if len(piece.faces):
-            pieces.append(piece)
-    return pieces
+def _skirt_polygon(eff: BoxSpec) -> Polygon:
+    """Plan outline of the direct-stack skirt: straight sided, centred.
 
-
-def _snap_beads(eff: BoxSpec, plug_top: float) -> list[trimesh.Trimesh]:
-    """Segmented beads with a printable insertion ramp and supported release."""
-    plug = _plug_polygon(eff)
-    peak = plug_top - STACK_BEAD_DROP
-    bottom = peak - STACK_SNAP_RAMP
-    top = peak + STACK_SNAP_RELEASE
-    bead = _profile_loft(
-        [plug, plug.buffer(STACK_FIT + STACK_SNAP), plug],
-        [bottom, peak, top],
-    )
-    return _segmented_profile(bead, eff, bottom, top)
-
-
-def _snap_grooves(eff: BoxSpec) -> list[trimesh.Trimesh]:
-    """Complementary segmented groove with a <=45 degree printable ceiling."""
+    The mouth it drops into is wavy; a straight skirt can only touch it on the
+    wave crests, so it is sized to the narrowest the mouth ever gets, less the
+    sliding fit.  Intersecting with the fitted mouth keeps the rounded corners
+    inside it too.
+    """
+    key = (eff.half_x, eff.half_y, eff.wall_depth, eff.corner_fillet, eff.wall)
+    cached = _SKIRTS.get(key)
+    if cached is not None:
+        return cached
+    too_small = "this bin is too small to stack - widen it or turn stacking off"
     cavity = wavy_cavity_polygon(eff)
-    peak = eff.z - STACK_BEAD_DROP
-    bottom = peak - STACK_SNAP_RAMP
-    top = peak + STACK_SNAP_RELEASE
-    groove = _profile_loft(
-        [cavity, cavity.buffer(STACK_BEAD), cavity],
-        [bottom, peak, top],
+    half_x = _narrowest_mouth(cavity, "x") - STACK_FIT
+    half_y = _narrowest_mouth(cavity, "y") - STACK_FIT
+    if half_x <= 0.0 or half_y <= 0.0:
+        raise ValueError(too_small)
+    skirt = shapely_box(-half_x, -half_y, half_x, half_y).intersection(
+        cavity.buffer(-STACK_FIT)
     )
-    return _segmented_profile(groove, eff, bottom, top)
+    if (skirt.is_empty or not isinstance(skirt, Polygon)
+            or skirt.buffer(-STACK_SKIRT_BEVEL).is_empty):
+        raise ValueError(too_small)
+    if len(_SKIRTS) > 32:
+        _SKIRTS.clear()
+    _SKIRTS[key] = skirt
+    return skirt
+
+
+def _skirt_flare_height(eff: BoxSpec) -> float:
+    """Rise the base needs to grow from the skirt out to the full wall at
+    45 degrees, in whole print layers."""
+    run = _outline_run(_skirt_polygon(eff), wavy_outer_polygon(eff))
+    return math.ceil(run / STACK_SKIRT_LAYER - _EPS) * STACK_SKIRT_LAYER
+
+
+def _skirt_keep(eff: BoxSpec) -> trimesh.Trimesh:
+    """The solid the base keeps: beveled skirt, then a 45 degree ramp out.
+
+    Stacked one-layer slabs of the distance field around the skirt, so every
+    overhang is exactly 45 degrees and no underside is a flat ceiling.  The
+    ramp slabs are wider than the body outline; the body-sized cutter they are
+    subtracted from trims them.
+    """
+    skirt = _skirt_polygon(eff)
+    step = stack_step_depth(eff)
+    layers = int(round((step + _skirt_flare_height(eff)) / STACK_SKIRT_LAYER))
+    top = layers * STACK_SKIRT_LAYER + 2.0 * _PROFILE_EPS
+    slabs: list[trimesh.Trimesh] = []
+    previous = None
+    for index in range(layers + 1):
+        z = index * STACK_SKIRT_LAYER
+        if z < STACK_SKIRT_BEVEL - _EPS:
+            outline = skirt.buffer(-(STACK_SKIRT_BEVEL - z))
+        elif z <= step + _EPS:
+            outline = skirt
+        else:
+            outline = skirt.buffer(z - step)
+        if previous is not None and outline.equals(previous):
+            continue                       # the slab already standing here reaches up
+        previous = outline
+        base = -2.0 * _PROFILE_EPS if index == 0 else z
+        slab = _extrude_polygon(outline, top - base)
+        slab.apply_translation((0.0, 0.0, base))
+        slabs.append(slab)
+    return union(slabs)
 
 
 def _lid_lock_masks(eff: BoxSpec) -> list[Polygon]:
@@ -569,27 +588,28 @@ def stack_body_cutters(eff: BoxSpec) -> list[trimesh.Trimesh]:
         # The insertion zone stays completely inside the receiver.  Only above
         # its seating datum does the outside grow back to full size.
         outer = wavy_outer_polygon(eff)
-        plug = _plug_polygon(eff)
         flare = stack_foot_flare_height(eff)
         shell = _extrude_polygon(outer, step + flare + 2.0 * _PROFILE_EPS)
         shell.apply_translation((0.0, 0.0, -_PROFILE_EPS))
-        keep = _profile_loft(
-            [plug, plug, outer, outer],
-            [-2.0 * _PROFILE_EPS, step, step + flare, step + flare + 2.0 * _PROFILE_EPS],
-        )
+        if direct_stack_enabled(eff):
+            keep = _skirt_keep(eff)
+        else:
+            plug = _plug_polygon(eff)
+            keep = _profile_loft(
+                [plug, plug, outer, outer],
+                [-2.0 * _PROFILE_EPS, step, step + flare, step + flare + 2.0 * _PROFILE_EPS],
+            )
         cutters.append(difference([shell, keep]))
 
     if lid_enabled(eff):
         # A flip lid carries no lock bumps (see make_lid_parts), so no notches.
         if not lid_has_flip(eff):
             cutters.extend(_lid_lock_notches(eff))
-    elif direct_stack_enabled(eff):
-        cutters.extend(_snap_grooves(eff))
     return cutters
 
 
 def stack_body_adders(eff: BoxSpec) -> list[trimesh.Trimesh]:
-    """What the body gains: the stepped base's snap bead, a flip lid's knuckles."""
+    """What the body gains: a flip lid's knuckles."""
     hinge = _lid_hinge(eff)
     if hinge is not None:
         rail = union(body_hinge_parts(hinge, wavy_cavity_polygon(eff),
@@ -597,9 +617,7 @@ def stack_body_adders(eff: BoxSpec) -> list[trimesh.Trimesh]:
         if lid_stackable(eff):
             rail = difference([rail, _lid_stack_seat(eff)])
         return [rail]
-    if not direct_stack_enabled(eff):
-        return []
-    return _snap_beads(eff, stack_step_depth(eff))
+    return []
 
 
 # --------------------------------------------------------------------------- #
@@ -834,12 +852,16 @@ def stack_closed_height(box: BoxSpec) -> float:
 
 
 def stack_module_height(box: BoxSpec) -> float:
-    """Requested contribution between consecutive stack seating datums."""
-    return box.z
+    """Contribution between consecutive stack seating datums.
+
+    A direct bin's skirt overlaps the top of the bin below, so it adds its
+    typed height less the skirt depth.
+    """
+    return box.z - STACK_SKIRT_DEPTH if direct_stack_enabled(box) else box.z
 
 
 def stack_pitch(box: BoxSpec) -> float:
-    """Height one more bin adds to a stack: exactly the requested module."""
+    """Height one more bin adds to a stack: exactly the module height."""
     return stack_module_height(box)
 
 
@@ -916,12 +938,12 @@ def validate_stack_design(box: BoxSpec) -> None:
     # user would get told about lock bumps on a bin they never made short.
     if vertical_stack_enabled(box):
         floor = stack_base_minimum(box)
-        step = stack_step_depth(box)
-        minimum = (floor - step) + MIN_HEIGHT_ABOVE_BASE + stack_lid_rise(box)
+        minimum = (floor - stack_foot_growth(box)) + MIN_HEIGHT_ABOVE_BASE + stack_lid_rise(box)
         if box.z < minimum - _EPS:
             raise ValueError(
                 f"a stackable bin needs at least {minimum:g} mm of height - "
-                f"the snap and its floor take up the bottom {floor:g} mm"
+                f"the {'skirt' if direct_stack_enabled(box) else 'foot'} and its "
+                f"floor take up the bottom {floor:g} mm"
             )
     eff = stack_effective_box(box)
     if lid_enabled(box):
@@ -949,5 +971,6 @@ def validate_stack_design(box: BoxSpec) -> None:
                     "choose a shallower depth or a thicker lid"
                 )
     elif direct_stack_enabled(box):
-        _groove_band(eff)
+        _skirt_polygon(eff)
+        return
     _plug_polygon(eff)

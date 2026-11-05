@@ -970,7 +970,8 @@ def design_from_dict(
     requested_z = float(raw["z"])
     # Preserve v4 physical geometry exactly: its Z was the detached closed
     # height, which equals the v5 module height plus the engagement depth.
-    if design_version == 4 and (stack.enabled or lid.stackable):
+    # A direct skirt lives inside the typed height, so it has nothing to take off.
+    if design_version == 4 and (stack.enabled or lid.stackable) and stack.mode != "direct":
         requested_z -= stack_step_depth(BoxSpec(stack=stack, lid=lid))
     box = BoxSpec(
         x, y, requested_z,

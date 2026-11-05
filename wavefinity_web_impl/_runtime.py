@@ -22,6 +22,7 @@ from urllib.request import urlopen
 from organizer_engine import (
     BASE_UNIT,
     MAX_WALL,
+    MIN_WALL,
     WALL_STEP,
     BoxSpec,
     LidSpec,
@@ -258,10 +259,11 @@ def _stack_base_min_by_wall() -> dict[str, dict[str, float]]:
     """
     probe = BoxSpec(x=2 * BASE_UNIT, y=6 * BASE_UNIT, z=100.0)
     table: dict[str, dict[str, float]] = {"lid": {}, "direct": {}}
-    steps = round((MAX_WALL - STACK_MIN_WALL) / WALL_STEP)
-    for i in range(steps + 1):
-        wall = round(STACK_MIN_WALL + i * WALL_STEP, 3)
-        for mode in ("lid", "direct"):
+    # A lid wants the lid minimum wall; a plain skirt works with any wall.
+    for mode, lowest in (("lid", STACK_MIN_WALL), ("direct", MIN_WALL)):
+        steps = round((MAX_WALL - lowest) / WALL_STEP)
+        for i in range(steps + 1):
+            wall = round(lowest + i * WALL_STEP, 3)
             box = replace(
                 probe, wall=wall, standard_walls=False,
                 stack=StackSpec(mode="direct") if mode == "direct" else StackSpec(),
@@ -306,7 +308,7 @@ def _interior_work_box(box: BoxSpec) -> BoxSpec:
     """The printable body interior-feature math should size against.
 
     A stackable request's module-height ``box`` is not what gets printed: lid
-    stacking makes the body shorter, direct stacking makes it 3 mm taller.
+    stacking makes the body shorter; direct stacking keeps the typed height.
     preview/export already build against ``stack_effective_box`` - every
     editor path that fits or validates interior geometry has to use the same
     body, or a part can pass Add/Edit/Fit and then fail preview/export.

@@ -68,7 +68,7 @@ def _top_wall(item: dict[str, Any]) -> float:
     wall = item["top"].get("wall")
     if isinstance(wall, (int, float)) and wall > 0:
         return float(wall)
-    return STACK_MIN_WALL if item["top"].get("stack", "none") != "none" else DEFAULT_WALL
+    return STACK_MIN_WALL if item["top"].get("stack", "none") in ("lid", "b4b") else DEFAULT_WALL
 
 
 def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str, Any]], int, int]:

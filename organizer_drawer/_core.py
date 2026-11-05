@@ -245,12 +245,14 @@ def stack_pitch(one: dict[str, Any]) -> float:
     """What a bin adds between consecutive stack seating datums."""
     if one.get("stack") == "b4b":
         return float(one["z"]) - B4B_STACK_RECESS_DEPTH
+    if one.get("stack") == "direct":
+        return float(one["z"]) - STACK_PLUG_DEPTH     # the skirt overlaps the bin below
     return float(one["z"])
 
 
 def stack_part_height(one: dict[str, Any]) -> float:
-    """Detached physical height, including the interlocking foot depth."""
-    if one.get("stack") == "b4b":
+    """Detached physical height, including a lid bin's interlocking foot depth."""
+    if one.get("stack") in ("b4b", "direct"):     # a direct skirt is inside the height
         return float(one["z"])
     return float(one["z"]) + STACK_STEPS.get(one.get("stack", "none"), 0.0)
 

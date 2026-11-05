@@ -242,6 +242,8 @@ function baseTrimEnabled(design = state.design) {
 
 // R76: connector settings are system-wide (desktop preferences file, or
 // browser localStorage when hosted). Only these six fields are remembered.
+// Matches STACK_SKIRT_DEPTH in organizer_features/stack.py; only a pre-preview fallback.
+const STACK_SKIRT_DEPTH_MM = 3;
 const CONNECTOR_SETTINGS_KEY = "wavefinity-connector-settings-v1";
 
 // One shared step for restoring and saving: each field must be legal (the same
@@ -748,9 +750,12 @@ function normalizeStackSettings(design, { restoreDefaults = false, flash = false
   };
   if (mode !== "none" || hasLid) {
     const values = stackRuleValues(mode, box.wall);
-    set("standard_walls", false, "#wall-thickness");
-    if (number(box.wall, values.defaultWall) < values.minWall) {
-      set("wall", values.minWall, "#wall-thickness");
+    // Only a lid needs the thicker wall; a plain stacking skirt takes any wall.
+    if (hasLid) {
+      set("standard_walls", false, "#wall-thickness");
+      if (number(box.wall, values.defaultWall) < values.minWall) {
+        set("wall", values.minWall, "#wall-thickness");
+      }
     }
     // The base minimum depends on the (possibly just-bumped) wall value, so
     // it is resolved again after the wall is settled, never before.
@@ -799,15 +804,19 @@ function applyStackVisibility() {
   const values = stackRuleValues(mode);
   const moduleHeight = info?.mode === mode
     ? info.module_height_mm
-    : state.design?.box?.z;
+    : state.design?.box?.z - (mode === "direct" ? STACK_SKIRT_DEPTH_MM : 0);
   const bits = mode === "none"
     ? [`The handled lid uses at least ${fmt(values.minWall)} mm walls for its retention clips. It does not add stacking geometry.`]
     : [
-        `Stacking requires at least ${fmt(values.minWall)} mm walls and a ${fmt(values.minBase)} mm base.`,
+        hasLid
+          ? `Stacking requires at least ${fmt(values.minWall)} mm walls and a ${fmt(values.minBase)} mm base.`
+          : `Stacking requires a ${fmt(values.minBase)} mm base.`,
         `Stack height contribution: ${fmt(moduleHeight)} mm${mode === "lid" ? " including lid" : ""}.`,
       ];
   if (info?.mode === mode) {
-    bits.push(`Detached closed part: ${fmt(info.closed_height_mm)} mm including the ${fmt(info.engagement_mm)} mm interlock.`);
+    bits.push(mode === "direct"
+      ? `Bin height: ${fmt(info.closed_height_mm)} mm, with the ${fmt(info.engagement_mm)} mm locating skirt inside it.`
+      : `Detached closed part: ${fmt(info.closed_height_mm)} mm including the ${fmt(info.engagement_mm)} mm interlock.`);
     if (info.parts.length > 1) bits.push(`Prints as ${info.parts.join(" + ")}.`);
   }
   note.textContent = bits.join(" ");
