@@ -32,7 +32,7 @@ SP.wire = () => {
   });
   document.getElementById("space-storage-use-existing")?.addEventListener("click", () => SP.applyStorageChange("use_existing"));
   const welcomeDesign = document.getElementById("welcome-design");
-  if (welcomeDesign) welcomeDesign.addEventListener("click", SP.startMemoryOnly);
+  if (welcomeDesign) welcomeDesign.addEventListener("click", SP.startNoSpace);
   const tutorialOpen = document.getElementById("space-tutorial-open");
   if (tutorialOpen) tutorialOpen.addEventListener("click", SP.showTutorial);
   const tutorialBack = document.getElementById("space-tutorial-back");

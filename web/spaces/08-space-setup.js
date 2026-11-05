@@ -275,6 +275,33 @@ SP.startMemoryOnly = () => SP.run(async () => {
   toast("Designing without a saved folder. Your work stays in this session — use 'Save design file' to keep it.", false, 9000);
 });
 
+SP.startNoSpace = async () => {
+  if (state.runtime.hosted) return SP.startMemoryOnly();
+  let fallback = false;
+  await SP.run(async () => {
+    SP.clearSetupContext();
+    if (!(await SP.leaveSpaceSafely())) return;
+    if (!(await SP.resetDrawer({ skipSafeLeave: true }))) return;
+    state.previewRequest += 1;
+    cancelPreviewWait();
+    await SP.flushOutgoingResumeCheckpoint();
+    SP.close();
+    let data;
+    try {
+      data = await api("/api/folder/no-defined-space", {});
+      if (!data.folder) throw new Error("No default folder");
+    } catch (_error) {
+      fallback = true;
+      return;
+    }
+    SP.recent = data.recent || [];
+    if (!(await SP.applyFolder(data.folder, { reset: false, initDesign: false, browserFolder: null }))) return;
+    await loadFreshOrdinaryDesignForCurrentFolder();
+    toast("Designing without a Space. Bins save to the No Defined Space folder.", false, 9000);
+  });
+  if (fallback) await SP.startMemoryOnly();
+};
+
 SP.startUntyped = async () => {
   // Reuse the folder onboarding already chose rather than asking a second
   // time: "I don't know yet" on the type cards is about this folder.

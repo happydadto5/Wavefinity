@@ -53,6 +53,7 @@ import math
 import os
 from pathlib import Path
 import threading
+import tempfile
 from typing import Any, Callable
 import uuid
 import organizer_storage
@@ -1015,6 +1016,35 @@ def space_routes(
         remember(target)
         return reply(target)
 
+    def no_defined_space(_payload):
+        prefs = load_preferences()
+        root = current_space_root(prefs)
+        root.mkdir(parents=True, exist_ok=True)
+        target = root / "No Defined Space"
+        created = False
+        try:
+            try:
+                target.mkdir()
+                created = True
+            except FileExistsError:
+                pass
+            if created:
+                _write_metadata(target, "design", None, True)
+            if not target.is_dir():
+                raise ValueError("the default save folder could not be opened")
+            with tempfile.TemporaryFile(dir=target) as writable_probe:
+                writable_probe.write(b"x")
+            info = describe(target, prefs)
+            if info["folder_mode"] != "design" or info["needs_setup"]:
+                raise ValueError("the default save folder is not a design folder")
+            remember_prepared(target, info)
+            return reply(target)
+        except Exception:
+            if created and not (target / METADATA_FILE).exists():
+                (target / f"{METADATA_FILE}.tmp").unlink(missing_ok=True)
+                target.rmdir()
+            raise
+
     def forget(payload):
         # Removes only the profile shortcut; the folder, its metadata, its
         # inventory and its Space ID are never touched.
@@ -1284,6 +1314,7 @@ def space_routes(
         # Open/remember only - never changes mode or rewrites metadata
         # beyond the technical identity/inventory upgrades in remember().
         "/api/folder/use": open_folder,
+        "/api/folder/no-defined-space": no_defined_space,
         # The explicit "use without a Space type" choice - may write.
         "/api/space/use-untyped": use_folder,
         "/api/space/create": configure,
