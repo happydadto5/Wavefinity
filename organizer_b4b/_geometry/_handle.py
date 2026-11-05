@@ -54,30 +54,34 @@ from ._cutters import (
 # folding front handle
 # --------------------------------------------------------------------------- #
 def _softened_slab(
-    outline: Polygon, thickness: float, chamfer: float, up: float
+    outline: Polygon, thickness: float, chamfer: float
 ) -> trimesh.Trimesh:
-    """The bail's section, with its exposed perimeter edge broken back.
+    """The bail's section, with its perimeter edge broken back on both faces.
 
-    A carried part should not present a square extruded edge to the hand.  The
-    softening is applied to one face only so the other stays a broad flat
-    printing surface, and it is built as short 45-degree treads rather than a
-    single draft so every face remains either vertical or flat - nothing here
-    may introduce a down-facing overhang.
+    A carried part should not present a square extruded edge to the hand on
+    either side, so both faces are softened and the middle of the band keeps
+    its full thickness.  Each bevel is built as short 45-degree treads rather
+    than a single draft so every face remains either vertical or flat: the
+    treads on the bed side are the 45-degree steps a printer bridges without
+    support, and nothing here may introduce any other overhang.
     """
     steps = max(1, B4B_HANDLE_EDGE_STEPS)
     lo, hi = -thickness / 2.0, thickness / 2.0
-    layers = [_extrude_polygon(outline, thickness - chamfer)]
-    layers[0].apply_translation((0.0, 0.0, lo if up > 0 else lo + chamfer))
+    chamfer = min(chamfer, thickness / 2.0 - 1e-3)
+    layers = [_extrude_polygon(outline, thickness - 2.0 * chamfer)]
+    layers[0].apply_translation((0.0, 0.0, lo + chamfer))
+    tread = chamfer / steps
     for i in range(1, steps + 1):
         inset = chamfer * i / steps
         ring = outline.buffer(-inset, join_style=1, quad_segs=12)
         if ring.is_empty or not isinstance(ring, Polygon):
             break
-        tread = chamfer / steps
-        base = (hi - chamfer + (i - 1) * tread) if up > 0 else (lo + chamfer - i * tread)
-        layer = _extrude_polygon(ring, tread + 1e-3)
-        layer.apply_translation((0.0, 0.0, base))
-        layers.append(layer)
+        # each tread overlaps the one before it by a hair, always inward, so
+        # neither outer face is pushed past the thickness
+        for base in (hi - chamfer + (i - 1) * tread - 1e-3, lo + chamfer - i * tread):
+            layer = _extrude_polygon(ring, tread + 1e-3)
+            layer.apply_translation((0.0, 0.0, base))
+            layers.append(layer)
     solid = union(layers) if len(layers) > 1 else layers[0]
     # the stack was built in X/Y/Z; roll it so the outline lands on X/Z and the
     # thickness runs across Y, the way the bail sits on the case
@@ -182,11 +186,7 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
     if plan is None:
         return None
     outline = b4b_handle_outline(plan)
-    # The bail prints with its wall-facing side on the bed, so the exposed side
-    # is the one that gets the edge softening.
-    slab = _softened_slab(
-        outline, plan.thickness, B4B_HANDLE_EDGE_CHAMFER, up=-1.0
-    )
+    slab = _softened_slab(outline, plan.thickness, B4B_HANDLE_EDGE_CHAMFER)
     slab.apply_translation((0.0, plan.axis_y, 0.0))
 
     eyes: list[trimesh.Trimesh] = []
@@ -213,6 +213,19 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
             (cx, plan.axis_y + plan.eye_radius, plan.detent_z)
         )
         pockets.append(pocket)
+    # The bail prints with its wall-facing (+Y) side on the bed.  The eye
+    # barrels stand proud of the band on that side and would hold the whole
+    # part off the plate, so their bed side is cut flush with the band's bed
+    # face; the bore, axis and the eyes' other side are untouched.
+    bed_y = plan.axis_y + plan.thickness / 2.0
+    reach = plan.band + 4.0 * plan.eye_radius
+    bed_clip = trimesh.creation.box(extents=(
+        2.0 * (abs(plan.centers_x[0]) + plan.band + 4.0), reach,
+        4.0 * (plan.eye_radius + plan.band) + 2.0 * plan.drop,
+    ))
+    bed_clip.apply_translation((0.0, bed_y - reach / 2.0, plan.axis_z))
+    eyes = [_intersection([e, bed_clip]) for e in eyes]
+    stops = [_intersection([st, bed_clip]) for st in stops]
     handle = union([slab, *eyes, *stops])
     return _weld(difference([handle, *bores, *pockets]))
 
