@@ -72,9 +72,6 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
         )
         solid = _intersection([root, keeper])
         bottom_z = max(0.6, plan.hinge_root_top_z - profile.hinge_root_height)
-        # The outboard screw-head side, matching _stack_positions's own "out"
-        # convention: only that (non-terminal) ear gets the head pocket.
-        out_x = 1.0 if cx >= 0.0 else -1.0
         for ex, thickness, terminal in (
             (near_x, profile.near_ear, False),
             (far_x, profile.far_lug, True),
@@ -111,20 +108,7 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                     axis_z=plan.hinge_axis_z,
                 ),
             ])
-        # Cut the near ear's head pocket from the FINISHED, unioned group, not
-        # just from that one ear's own solid: the root is built to overlap and
-        # reinforce the ear, and a root that still fills the pocket's Y/Z
-        # region at this X would refill a hole cut only inside the ear.
-        head_cut = _head_recess_cutter(
-            radius=profile.head_pocket_radius,
-            depth=B4B_HEAD_RECESS_DEPTH,
-            x_centre=near_x,
-            thickness=profile.near_ear,
-            axis_y=plan.hinge_axis_y,
-            axis_z=plan.hinge_axis_z,
-            side=int(out_x),
-        )
-        parts.append(difference([solid, cavity, head_cut]))
+        parts.append(difference([solid, cavity]))
     return parts
 
 
