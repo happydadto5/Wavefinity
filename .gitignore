@@ -19,3 +19,6 @@ fixes/
 
 # test run status, regenerable
 test-status.md
+
+# launcher server log, regenerable
+wavefinity_server.log
