@@ -56,8 +56,8 @@
       secure_lid: true, latch_count: "auto", hinge_count: "2", lid_headroom_mm: 1,
       label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
       stacking: false, handle: false,
-      wall_mm: Number(rules.default_wall_mm ?? 2.0),
-      base_mm: Number(rules.default_base_mm ?? 2.0),
+      wall_mm: Number(rules.default_wall_mm ?? 1.6),
+      base_mm: Number(rules.default_base_mm ?? 1.6),
     };
   }
 
@@ -162,7 +162,7 @@
     const matRow = el("div", "space-dimension-row");
     const wallSel = document.createElement("select"); wallSel.id = id("wall");
     const baseSel = document.createElement("select"); baseSel.id = id("base");
-    matRow.append(labeled("Wall thickness", wallSel), labeled("Base thickness", baseSel));
+    matRow.append(labeled("Wall thickness", wallSel), labeled("Base/Lid thickness", baseSel));
     matGroup.append(matRow);
     caseWrap.append(matGroup);
 

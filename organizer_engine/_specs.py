@@ -55,16 +55,17 @@ WALL_PRESETS = (
     (2.4, "Maximum"),
 )
 B4B_MATERIAL_PRESETS = (
-    (1.2, "Very thin"),
-    (1.6, "Thin"),
-    (2.0, "Standard"),
-    (2.4, "Strong"),
-    (3.0, "Extra strong"),
+    (0.8, "Very thin"),
+    (1.2, "Thin"),
+    (1.6, "Default"),
+    (2.0, "Strong"),
+    (2.4, "Very strong"),
+    (3.0, "Heavy duty"),
 )
 B4B_WALL_PRESETS = B4B_MATERIAL_PRESETS
 B4B_BASE_PRESETS = B4B_MATERIAL_PRESETS
-B4B_DEFAULT_WALL = 2.0
-B4B_DEFAULT_BASE = 2.0
+B4B_DEFAULT_WALL = 1.6
+B4B_DEFAULT_BASE = 1.6
 DEFAULT_BASE_THICKNESS = 0.8
 # Base thickness presets, same reasoning as WALL_PRESETS: a short list of
 # choices that print differently, not a free numeric field.  A design saved

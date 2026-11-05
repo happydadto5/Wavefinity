@@ -89,7 +89,7 @@ Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling:
 - The AI result is still an ordinary bin, not the Storage Box case itself.
 - Generating or printing a bin in a Storage Box Space requires the bin or closed design to fit the interior height, including its foot, handle and raised lettering. Unverifiable height blocks generation. Lid snugness does not add capacity; designs without a Space are unaffected.
 - Hard object-height cap: the Storage Box Space's own height.
-- The case is configured in its Space: outside width and length, usable inside height, Latched Lid or Lid Only and lid snugness, stacking on/off, carrying handle on/off, and no label or a front label in Flat or Wavy style. Wall and base each offer 1.2 mm Very thin, 1.6 mm Thin, 2.0 mm Standard (default), 2.4 mm Strong and 3.0 mm Extra strong. These are case settings, not bin fields.
+- The case is configured in its Space: outside width and length, usable inside height, Latched Lid or Lid Only and lid snugness, stacking on/off, carrying handle on/off, and no label or a front label in Flat or Wavy style. Wall and Base/Lid thickness share these choices: 0.8 mm Very thin, 1.2 mm Thin, 1.6 mm Default, 2.0 mm Strong, 2.4 mm Very strong and 3.0 mm Heavy duty. New cases default to 1.6 mm for both. These are case settings, not bin fields.
 
 ## Storage Drawers
 
