@@ -406,6 +406,14 @@ async function refreshStructuralPreview() {
       });
       if (!current()) return;
       if (result.superseded) return; // a newer structural request owns the lane
+      // A case the server could not build comes back as HTTP 200 with no
+      // meshes and the reason in `message`; show that reason, never an
+      // empty scene that reads as "Building preview…" forever.
+      if (result.message || !result.meshes?.length) {
+        throw new Error(result.message || (kind === "base_trim"
+          ? "The Base Trim preview could not build."
+          : "The case preview could not build."));
+      }
     } else {
       // R4: production meshes only on this explicit structural-preview intent.
       const payload = await api("/api/space/structural-design", {

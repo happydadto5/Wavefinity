@@ -157,6 +157,12 @@ def b4b_handle_outline(plan: B4BHandlePlan) -> Polygon:
     trimmed = outline.intersection(keeper)
     if isinstance(trimmed, Polygon) and trimmed.is_valid and not trimmed.is_empty:
         outline = trimmed
+    # The trim can leave a near-zero edge where the taper meets the buffered
+    # arm (2.7e-14 mm on a 63 mm case); extruded, that edge leaves the slab
+    # open and the union refuses it.  Drop such vertices; 1e-6 mm moves nothing.
+    cleaned = outline.simplify(1e-6, preserve_topology=True)
+    if isinstance(cleaned, Polygon) and cleaned.is_valid and not cleaned.is_empty:
+        outline = cleaned
     return outline
 
 
