@@ -510,16 +510,21 @@ def _next_simple_bin_name(bins: list[dict[str, Any]]) -> str:
     return f"Bin {number}"
 
 
-_NUMBERED_BIN_NAME = re.compile(r"bin (\d+)", re.IGNORECASE)
+_TRAILING_NUMBERED_NAME = re.compile(r"^(.*?)(\d+)$")
 
 
 def _duplicate_name(bins: list[dict[str, Any]], source: str) -> str:
-    if _NUMBERED_BIN_NAME.fullmatch(str(source or "").strip()):
-        # "Bin <number>" copies go above the highest such number; gaps are ignored.
-        numbers = [int(match.group(1)) for one in bins
-                   if (match := _NUMBERED_BIN_NAME.fullmatch(str(one.get("name") or "").strip()))]
-        return f"Bin {max(numbers) + 1}"
-    root =re.sub(r" \(\d+\)$", "", str(source or "").strip()).strip()
+    source_name = str(source or "").strip()
+    numbered = _TRAILING_NUMBERED_NAME.fullmatch(source_name)
+    if numbered and not re.search(r" \(\d+\)$", source_name):
+        # Keep the source's text and increment above every matching name.
+        # Gaps are ignored, as with the original "Bin <number>" rule.
+        text, _ = numbered.groups()
+        numbers = [int(match.group(2)) for one in bins
+                   if (match := _TRAILING_NUMBERED_NAME.fullmatch(str(one.get("name") or "").strip()))
+                   and match.group(1).casefold() == text.casefold()]
+        return f"{text}{max(numbers) + 1}"
+    root = re.sub(r" \(\d+\)$", "", source_name).strip()
     if not root or root == "-":
         return _next_simple_bin_name(bins)
     names = {str(one.get("name") or "").casefold() for one in bins}
