@@ -528,6 +528,22 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         latch_centers_x = _root_centres(
             layout, eff.x / 6.0, profile.latch_root_width, latch_count
         )
+        if latch_count == 2 and eff.b4b.handle:
+            # The handle mounts sit at +/- (grip + band) / 2, a span that stops
+            # growing at the grip maximum, while x / 6 keeps moving out with
+            # the walls until the pair runs into the mounts.  Where that would
+            # merge the roots, seat the pair just outboard of the mounts.
+            hdims = b4b_handle_dimensions(box, profile)
+            mount_x = (hdims.target_grip + hdims.band) / 2.0
+            root_pitch = (profile.latch_root_width + hdims.root_width) / 2.0
+            x_gap = abs(abs(latch_centers_x[0]) - mount_x) - root_pitch
+            if x_gap + _EPS < B4B_FRONT_ROOT_SEPARATION:
+                latch_centers_x = _root_centres(
+                    layout,
+                    mount_x + root_pitch + B4B_FRONT_ROOT_SEPARATION + 0.5,
+                    profile.latch_root_width,
+                    latch_count,
+                )
         latch_half = profile.latch_root_width / 2.0
         front_crest = min(
             _wall_extreme_y(layout, cx - latch_half, cx + latch_half, -1.0)
