@@ -89,7 +89,7 @@
     const sizeRow = el("div", "space-dimension-row");
     const sizeInput = (axis, value) => {
       const input = document.createElement("input");
-      input.type = "number"; input.inputMode = "decimal";
+      input.type = "text"; input.inputMode = "numeric";
       input.id = id(axis);
       input.min = String(axis === "z" ? minHeight : minField);
       input.step = axis === "z" ? "1" : String(unit);
@@ -99,11 +99,9 @@
     const xInput = sizeInput("x", initialSpace?.x);
     const yInput = sizeInput("y", initialSpace?.y);
     const zInput = sizeInput("z", initialSpace?.z);
-    const xUnits = el("small", "storage-box-units"), yUnits = el("small", "storage-box-units");
-    const zNote = el("small", "storage-box-units");
-    const xLabel = labeled("Interior Width (mm)", xInput); xLabel.append(xUnits);
-    const yLabel = labeled("Interior Depth (mm)", yInput); yLabel.append(yUnits);
-    const zLabel = labeled("Interior Height (mm)", zInput); zLabel.append(zNote);
+    const xLabel = labeled("Interior Width (mm)", xInput);
+    const yLabel = labeled("Interior Depth (mm)", yInput);
+    const zLabel = labeled("Interior Height (mm)", zInput);
     sizeRow.append(xLabel, yLabel, zLabel);
     sizeGroup.append(sizeRow);
     const outside = el("p", "storage-box-capacity");
@@ -126,7 +124,7 @@
     const latchCount = select([], "1");
     latchCount.id = id("latch-count");
     function syncLatchChoices(preferred = latchCount.value) {
-      const width = Number(xInput.value);
+      const width = parseLeadingNumber(xInput.value);
       const canFitTwo = Number.isFinite(width) && width > 96;
       const legacyChoice = preferred === "auto"
         ? (canFitTwo ? "2" : "1")
@@ -222,32 +220,35 @@
     fillMaterial(baseSel, rules.base_choices, box.base_mm);
 
     // ---- Interior sizing: the one normalization path ----
+    function parseLeadingNumber(value) {
+      const match = String(value ?? "").trim().match(/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/);
+      return match ? Number(match[0]) : NaN;
+    }
+    function formatAxis(axis, value) {
+      if (!(value > 0)) return "";
+      if (axis === "z") return `${value} mm`;
+      const units = Math.round(value / unit);
+      return `${value} (${units} unit${units === 1 ? "" : "s"})`;
+    }
+    function displayAxis(axis, input) {
+      const value = parseLeadingNumber(input.value);
+      if (!Number.isFinite(value)) return;
+      input.value = document.activeElement === input ? String(value) : formatAxis(axis, value);
+    }
     function normalizeAxis(axis, requested, fallback) {
-      const value = Number.isFinite(Number(requested)) && String(requested).trim() !== ""
-        ? Number(requested) : Number(fallback);
+      const parsed = typeof requested === "number" ? requested : parseLeadingNumber(requested);
+      const fallbackValue = typeof fallback === "number" ? fallback : parseLeadingNumber(fallback);
+      const value = Number.isFinite(parsed) ? parsed : fallbackValue;
       if (!Number.isFinite(value)) return NaN;
       if (axis === "z") return Math.max(minHeight, Math.round(value));
       return Math.min(maxXY, Math.max(minField, Math.round(value / unit) * unit));
     }
     const inputFor = axis => (axis === "x" ? xInput : axis === "y" ? yInput : zInput);
-    // mm-only grid note: quiet when the typed value is already on the grid,
-    // otherwise the mm size that will be committed. Never rewrites the field.
-    function gridNote(axis) {
-      const raw = Number(inputFor(axis).value);
-      if (!(raw > 0)) return "";
-      const mm = normalizeAxis(axis, raw, raw);
-      return raw === mm ? `${unit} mm grid` : `Will save as ${mm} mm · ${unit} mm grid`;
-    }
-    function showReadouts() {
-      xUnits.textContent = gridNote("x");
-      yUnits.textContent = gridNote("y");
-      zNote.textContent = Number(zInput.value) > 0 ? "whole mm" : "";
-    }
     function getInterior() {
       return {
-        x: normalizeAxis("x", xInput.value, NaN),
-        y: normalizeAxis("y", yInput.value, NaN),
-        z: normalizeAxis("z", zInput.value, NaN),
+        x: normalizeAxis("x", parseLeadingNumber(xInput.value), NaN),
+        y: normalizeAxis("y", parseLeadingNumber(yInput.value), NaN),
+        z: normalizeAxis("z", parseLeadingNumber(zInput.value), NaN),
       };
     }
     // Typed input, arrow/wheel steps and the 3D handles all land here.
@@ -255,29 +256,33 @@
       const input = inputFor(axis);
       const value = normalizeAxis(axis, requested, input.value);
       if (!Number.isFinite(value)) return NaN;
-      input.value = String(value);
+      input.value = document.activeElement === input ? String(value) : formatAxis(axis, value);
       if (axis === "x") syncLatchChoices();
-      showReadouts();
       if (!silent) onChange();
       return value;
     }
     for (const axis of ["x", "y", "z"]) {
       const input = inputFor(axis);
-      input.addEventListener("change", () => setInterior(axis, input.value), { signal: events.signal });
+      input.addEventListener("focus", () => displayAxis(axis, input), { signal: events.signal });
+      input.addEventListener("blur", () => {
+        setInterior(axis, parseLeadingNumber(input.value));
+        displayAxis(axis, input);
+      }, { signal: events.signal });
+      input.addEventListener("change", () => setInterior(axis, parseLeadingNumber(input.value)), { signal: events.signal });
       input.addEventListener("keydown", event => {
         if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
         event.preventDefault();
         const step = axis === "z" ? 1 : unit;
-        setInterior(axis, Number(input.value || 0) + (event.key === "ArrowUp" ? step : -step));
+        setInterior(axis, parseLeadingNumber(input.value || 0) + (event.key === "ArrowUp" ? step : -step));
       }, { signal: events.signal });
       input.addEventListener("wheel", event => {
         if (document.activeElement !== input) return;
         event.preventDefault();
         const step = axis === "z" ? 1 : unit;
-        setInterior(axis, Number(input.value || 0) + (event.deltaY < 0 ? step : -step));
+        setInterior(axis, parseLeadingNumber(input.value || 0) + (event.deltaY < 0 ? step : -step));
       }, { signal: events.signal, passive: false });
     }
-    showReadouts();
+    for (const axis of ["x", "y", "z"]) displayAxis(axis, inputFor(axis));
 
     // Visibility: latch/snugness only for latched; label text/style only when labeled.
     function syncVisibility() {
@@ -347,14 +352,15 @@
     }
     // Typed dimensions autosave normalized values without rewriting the field.
     for (const input of [xInput, yInput, zInput]) {
-      input.addEventListener("input", () => { showReadouts(); onChange(); }, { signal: events.signal });
+      input.addEventListener("input", onChange, { signal: events.signal });
     }
 
     function fill(space) {
       const b = { ...defaults(catalog), ...(space?.storage_box || {}) };
-      xInput.value = space?.x || "";
-      yInput.value = space?.y || "";
-      zInput.value = space?.z || "";
+      xInput.value = String(space?.x || "");
+      yInput.value = String(space?.y || "");
+      zInput.value = String(space?.z || "");
+      for (const axis of ["x", "y", "z"]) displayAxis(axis, inputFor(axis));
       lidType.value = b.secure_lid ? "latched" : "lid_only";
       snugness.value = String(b.lid_headroom_mm ?? 1);
       bevel.value = bevelOf(space);
@@ -368,7 +374,6 @@
       fillMaterial(wallSel, rules.wall_choices, b.wall_mm);
       fillMaterial(baseSel, rules.base_choices, b.base_mm);
       syncVisibility();
-      showReadouts();
       markPristine();
     }
 
