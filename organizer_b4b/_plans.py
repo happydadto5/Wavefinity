@@ -667,7 +667,7 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
     # and leans until the lower edge of its wall face reaches the running gap
     # to the wall crest, so the bumps are set where the pockets arrive there.
     detent_pocket_z = axis_z - drop + dims.corner_radius
-    detent_cx = half - dims.band / 2.0
+    detent_cx = half
     chamfer = min(B4B_HANDLE_EDGE_CHAMFER, dims.thickness / 2.0 - 1e-3)
     face_y = dims.thickness / 2.0
     face_low = drop + dims.band / 2.0 - chamfer
