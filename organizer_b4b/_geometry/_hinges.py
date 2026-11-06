@@ -11,7 +11,10 @@ from organizer_geometry import (
     intersection as _intersection,
     union,
 )
+from organizer_engine import WAVE_AMPLITUDE
+from shapely.affinity import translate as translate_polygon
 from .._constants import (
+    B4B_SUPPORT_FREE_FLAT,
     B4B_RUNNING_GAP,
     B4B_HW_RELIEF_CLEARANCE,
     B4B_LID_FITTING_DROP,
@@ -31,6 +34,7 @@ from .._plans import (
 )
 
 from ._cutters import (
+    support_free_profile_yz,
     _filleted,
     _cavity_prism,
     _lid_root_profile,
@@ -51,7 +55,7 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
     profile = plan.profile
     parts: list[trimesh.Trimesh] = []
     for cx in plan.hinge_centers_x:
-        _near_x, _mid_x, far_x = _stack_positions(cx, profile)
+        near_x, _mid_x, far_x = _stack_positions(cx, profile)
         half = plan.hinge_root_width / 2.0 + 1.0
         cavity = _cavity_prism(box, cx - half, cx + half)
         root_prof = _root_profile_yz(
@@ -181,6 +185,114 @@ def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
 
 
 # --------------------------------------------------------------------------- #
+# rear piano hinge (Hinge type: Piano): case and lid knuckles take turns on a
+# filament pin behind the back wall.  Nothing is cut from the case: the child
+# field is untouched, and the hinge stands out behind the back instead.
+# --------------------------------------------------------------------------- #
+def _piano_section(points) -> Polygon:
+    from shapely.geometry.polygon import orient
+    return orient(Polygon(points).buffer(0), 1.0)
+
+
+def _piano_prism(section: Polygon, x0: float, x1: float) -> trimesh.Trimesh:
+    from shapely.geometry.polygon import orient
+    # circle/polygon unions leave near-duplicate points that break extrusion
+    section = orient(section.simplify(1e-3).buffer(0), 1.0)
+    solid = _extrude_yz_profile(section, x1 - x0)
+    solid.apply_translation(((x0 + x1) / 2.0, 0.0, 0.0))
+    return solid
+
+
+def _piano_octagon(p) -> Polygon:
+    return translate_polygon(support_free_profile_yz(p.half), p.axis_y, p.axis_z)
+
+
+def _piano_swing(p) -> Polygon:
+    return Point(p.axis_y, p.axis_z).buffer(p.swing_radius, quad_segs=48)
+
+
+def _piano_keeper(box: BoxSpec, p) -> trimesh.Trimesh:
+    """The case's own outline plus the strip behind its back, across the
+    hinge's span: the hinge may stand out behind, never past the sides."""
+    from organizer_geometry import _extrude_polygon
+
+    x0, x1 = p.span
+    behind = Polygon([(x0, p.back_y - 0.05), (x1, p.back_y - 0.05),
+                      (x1, p.back_y + 4.0 * p.half + 10.0),
+                      (x0, p.back_y + 4.0 * p.half + 10.0)])
+    outline = b4b_layout(box).outer_structural_polygon.union(behind)
+    depth = p.top_z + 1.0
+    keeper = _extrude_polygon(outline, depth)
+    keeper.apply_translation((0.0, 0.0, -0.5))
+    return keeper
+
+
+def _piano_bore(p) -> trimesh.Trimesh:
+    """Straight bore, open at both ends for the filament."""
+    x0, x1 = p.span
+    return _piano_prism(Point(p.axis_y, p.axis_z).buffer(p.bore_radius, quad_segs=32),
+                        x0 - 2.0, x1 + 2.0)
+
+
+def _piano_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
+    """Case knuckles, each on a web down to the back wall, and the stop
+    ledges under the lid knuckles.  Trimmed off the child field."""
+    p = plan.piano
+    eff = b4b_effective_box(box)
+    r, f = p.half, B4B_SUPPORT_FREE_FLAT * p.half
+    ay, az = p.axis_y, p.axis_z
+    y_in = p.back_y - (eff.wall_depth + 2.0 * WAVE_AMPLITUDE + 0.5)
+    # The web stays below the lid seat (and the axis), so the lid plate's
+    # swing never meets it.  Its underside carries on the knuckle's lower rear
+    # 45-degree facet forward and down into the wall: printable upright.
+    top = min(p.rim_z, az)
+    low = az + (y_in - ay) - (1.0 + B4B_SUPPORT_FREE_FLAT) * r
+    web = _piano_section([(y_in, top), (y_in, low), (ay + r, az - f), (ay + r, top)])
+    knuckle = _piano_octagon(p).union(web)
+    # Stop ledge: top face on the stop plane, underside rising backward at 45
+    # degrees out of the wall, clear of the lid knuckle's swing.
+    back = ay + r
+    z_back = p.stop_z(back)
+    ledge = _piano_section([
+        (y_in, p.stop_z(y_in)), (back, z_back), (back, z_back - 1.5),
+        (y_in, z_back - 1.5 - (back - y_in)),
+    ]).difference(_piano_swing(p))
+    solids = []
+    for i, (x0, x1) in enumerate(p.knuckles):
+        solids.append(_piano_prism(knuckle if i % 2 == 0 else ledge, x0, x1))
+    parts = _intersection([union(solids), _piano_keeper(box, p)])
+    return [difference([parts, _cavity_prism(box), _piano_bore(p)])]
+
+
+def _piano_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
+    """Lid knuckles: the octagon, an arm out of the plate, and a square heel
+    whose back face lands on the stop ledge."""
+    p = plan.piano
+    r = p.half
+    ay, az = p.axis_y, p.axis_z
+    arm = _piano_section([(p.back_y - 1.0, p.rim_z), (ay, p.rim_z),
+                          (ay, p.top_z), (p.back_y - 1.0, p.top_z)])
+    heel = _piano_section([(ay, az), (ay + r, az), (ay + r, p.top_z), (ay, p.top_z)])
+    section = _piano_octagon(p).union(arm).union(heel)
+    solids = [_piano_prism(section, x0, x1)
+              for i, (x0, x1) in enumerate(p.knuckles) if i % 2 == 1]
+    parts = _intersection([union(solids), _piano_keeper(box, p)])
+    return [difference([parts, _piano_bore(p)])]
+
+
+def make_b4b_hinge_pin(box: BoxSpec) -> trimesh.Trimesh | None:
+    """The filament pin as installed, for previews."""
+    plan = b4b_hardware_plan(box)
+    p = plan.piano
+    if p is None:
+        return None
+    from .._constants import B4B_PIANO_PIN_DIAMETER
+    x0, x1 = p.span
+    return _piano_prism(Point(p.axis_y, p.axis_z).buffer(B4B_PIANO_PIN_DIAMETER / 2.0, quad_segs=32),
+                        x0 + 0.2, x1 - 0.2)
+
+
+# --------------------------------------------------------------------------- #
 # front latch: a thin folding strap pivoted on the lid, hooking a metal catch
 # screw carried in compact body ears.  The screw shank is the wear surface.
 # --------------------------------------------------------------------------- #
@@ -192,7 +304,7 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
     profile = plan.profile
     parts: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
-        _near_x, _mid_x, far_x = _stack_positions(cx, profile)
+        near_x, _mid_x, far_x = _stack_positions(cx, profile)
         half = plan.latch_root_width / 2.0 + 1.0
         cavity = _cavity_prism(box, cx - half, cx + half)
         root_prof = _root_profile_yz(

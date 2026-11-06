@@ -71,11 +71,17 @@ def b4b_summary(box: BoxSpec) -> dict:
             (plan.hinge_centers_x, plan.hinge_root_width),
             (plan.latch_centers_x, plan.latch_root_width),
         ):
+            if not centres:
+                continue
             min_x = min(min_x, min(c - width / 2.0 for c in centres))
             max_x = max(max_x, max(c + width / 2.0 for c in centres))
         min_y = min(min_y, plan.pivot_axis_y - hardware_radius)
-        max_y = max(max_y, plan.hinge_axis_y + hardware_radius)
-        top_z = max(top_z, plan.hinge_axis_z + plan.profile.pivot_radius)
+        if plan.piano is not None:
+            # flush with the lid top; stands out behind the back wall
+            max_y = max(max_y, plan.piano.back_y + plan.piano.projection)
+        else:
+            max_y = max(max_y, plan.hinge_axis_y + hardware_radius)
+            top_z = max(top_z, plan.hinge_axis_z + plan.profile.pivot_radius)
     # The readout has to survive a design the geometry would refuse, because
     # reporting *why* the handle cannot be fitted is most of its job: raising
     # here would leave the UI with no summary at all and therefore nothing to
@@ -126,8 +132,12 @@ def b4b_summary(box: BoxSpec) -> dict:
         summary["hardware_family"] = fam
         summary["hardware"] = {
             "family": fam,
-            "hinge_screw": f"{fam}x{plan.hinge_screw_length_mm}",
-            "hinge_qty": plan.hinge_count,
+            "hinge_type": "piano" if plan.piano is not None else "screw",
+            "hinge_screw": (
+                f"1.75 mm filament x {plan.piano.pin_length_mm:.0f} mm"
+                if plan.piano is not None else f"{fam}x{plan.hinge_screw_length_mm}"
+            ),
+            "hinge_qty": 1 if plan.piano is not None else plan.hinge_count,
             "latch_screw": f"{fam}x{plan.latch_screw_length_mm}",
             "latch_qty": plan.latch_count_resolved,
             "catch_screw": f"{fam}x{plan.catch_screw_length_mm}",
@@ -350,13 +360,19 @@ def b4b_print_object_bounds(box: BoxSpec) -> list[dict]:
         hw = b4b_hardware_plan(box)
         for centres, width in ((hw.hinge_centers_x, hw.hinge_root_width),
                                (hw.latch_centers_x, hw.latch_root_width)):
+            if not centres:
+                continue
             min_x = min(min_x, min(c - width / 2.0 for c in centres))
             max_x = max(max_x, max(c + width / 2.0 for c in centres))
         min_y = min(min_y, hw.pivot_axis_y - hw.profile.pivot_radius)
-        max_y = max(max_y, hw.hinge_axis_y + hw.profile.pivot_radius)
-        hinge_top = hw.hinge_axis_z + hw.profile.pivot_radius
-        body_z = max(body_z, hinge_top)
-        lid_top = max(lid_top, hinge_top)
+        if hw.piano is not None:
+            max_y = max(max_y, hw.piano.back_y + hw.piano.projection)
+            body_z = max(body_z, hw.piano.top_z)
+        else:
+            max_y = max(max_y, hw.hinge_axis_y + hw.profile.pivot_radius)
+            hinge_top = hw.hinge_axis_z + hw.profile.pivot_radius
+            body_z = max(body_z, hinge_top)
+            lid_top = max(lid_top, hinge_top)
     lid_xy = [max_x - min_x, max_y - min_y]
     # The body also carries the bail's pivot forks, which reach one pivot
     # radius past the pivot axis.
@@ -377,6 +393,8 @@ def b4b_print_object_bounds(box: BoxSpec) -> list[dict]:
             if b4b.secure_lid:
                 # The hinge knuckles and latch ears hang a full pivot diameter.
                 lid_z = max(lid_z, 2.0 * hw.profile.pivot_radius)
+                if hw.piano is not None:
+                    lid_z = max(lid_z, 2.0 * hw.piano.half)
             bounds = [*lid_xy, lid_z]
         else:
             try:

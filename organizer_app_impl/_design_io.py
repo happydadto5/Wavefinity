@@ -633,6 +633,7 @@ def design_to_dict(
             "secure_lid": b4b.secure_lid,
             "latch_count": b4b.latch_count,
             "hinge_count": b4b.hinge_count,
+            "hinge_type": b4b.hinge_type,
             "lid_headroom_mm": b4b.lid_headroom_mm,
             "edge_bevel": b4b.edge_bevel,
             "label_enabled": b4b.label_enabled or bool(b4b.label_text.strip()),
@@ -916,6 +917,7 @@ def design_from_dict(
             secure_lid=bool(b4b_raw.get("secure_lid", True)),
             latch_count=str(b4b_raw.get("latch_count", "auto")),
             hinge_count=str(b4b_raw.get("hinge_count", "2")),
+            hinge_type=str(b4b_raw.get("hinge_type", "screw")),
             latch_strength=str(b4b_raw.get("latch_strength", "standard")),
             lid_headroom_mm=float(b4b_raw.get("lid_headroom_mm", 1.0)),
             # A design saved before the bevel existed has sharp edges.

@@ -100,6 +100,9 @@ from ._handle import (
 from ._hinges import (
     _hinge_body_parts,
     _hinge_lid_parts,
+    _piano_body_parts,
+    _piano_lid_parts,
+    make_b4b_hinge_pin,
     _latch_body_parts,
     _latch_lid_parts,
     b4b_latch_lever_profile,

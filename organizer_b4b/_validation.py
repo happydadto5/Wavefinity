@@ -343,9 +343,10 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
     # thickness) - a screw longer than the lug threads only as far as the lug.
     paths: list[tuple[str, float, float, int]] = []
     if b4b.secure_lid:
+        if plan.piano is None:
+            paths.append(("hinge", profile.clear_span, profile.far_lug,
+                          plan.hinge_screw_length_mm))
         paths += [
-            ("hinge", profile.clear_span, profile.far_lug,
-             plan.hinge_screw_length_mm),
             ("latch pivot", profile.clear_span, profile.far_lug,
              plan.latch_screw_length_mm),
             ("catch", profile.clear_span, profile.far_lug,
@@ -451,14 +452,16 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
                 f"(overlap {closed:.3f} cc, allowance {B4B_NOISE_CC:.2f} cc); "
                 f"it must seat on its rim, not jam on its hardware"
             )
-        angles = tuple(-a for a in _sweep_angles(B4B_LID_OPEN_ANGLE) if a > 0.0)
+        # A piano hinge opens to its own stop; the screw ears to 120.
+        limit = plan.piano.stop_angle if plan.piano is not None else B4B_LID_OPEN_ANGLE
+        angles = tuple(-a for a in _sweep_angles(limit) if a > 0.0)
         worst = _sweep_intersection_cc(
             lid, body, plan.hinge_axis_y, plan.hinge_axis_z, angles_deg=angles
         )
         if worst > closed + B4B_NOISE_CC:
             raise ValueError(
                 f"the lid collides with the body while opening to "
-                f"{B4B_LID_OPEN_ANGLE:g} degrees (overlap {worst:.3f} cc vs "
+                f"{limit:g} degrees (overlap {worst:.3f} cc vs "
                 f"{closed:.3f} cc closed); check the hinge placement"
             )
 
@@ -611,11 +614,13 @@ def validate_b4b_design(
         eff = b4b_effective_box(box)
         plan = b4b_hardware_plan(box)
         profile = plan.profile
-        if plan.hinge_count not in (1, 2):
+        if plan.piano is None and plan.hinge_count not in (1, 2):
             raise ValueError(
                 f"a secure Storage Box lid must resolve to one or two hinges; "
                 f"got {plan.hinge_count}"
             )
+        if plan.piano is not None and len(plan.piano.knuckles) < 3:
+            raise ValueError("the rear piano hinge needs at least three knuckles")
         if len(plan.hinge_centers_x) != plan.hinge_count:
             raise ValueError(
                 f"Storage Box hinge plan is inconsistent: hinge_count={plan.hinge_count}, "
@@ -664,6 +669,8 @@ def validate_b4b_design(
             ("hinge", plan.hinge_centers_x, plan.hinge_root_width),
             ("latch", plan.latch_centers_x, plan.latch_root_width),
         ):
+            if not centres:
+                continue
             reach = max(abs(c) for c in centres) + width / 2.0
             limit = layout.outer_half_x - CORNER_INSET - B4B_ROOT_CORNER_CLEARANCE
             if reach > limit + _EPS:
@@ -675,7 +682,7 @@ def validate_b4b_design(
             ("hinge", profile.hinge_root_depth),
             ("latch", profile.latch_root_depth),
         ):
-            if eff.wall_depth > target + _EPS:
+            if eff.wall_depth > target + _EPS or (what == "hinge" and plan.piano):
                 continue
             if _root_outward(target, eff.wall_depth) <= 0.0:
                 raise ValueError(
@@ -684,7 +691,7 @@ def validate_b4b_design(
                     f"the wall setting"
                 )
         ceiling = B4B_HINGE_MAX_PROJECTION[profile.name]
-        if plan.hinge_projection > ceiling + _EPS:
+        if plan.piano is None and plan.hinge_projection > ceiling + _EPS:
             raise ValueError(
                 f"the rear hinge stands {plan.hinge_projection:.2f} mm off the "
                 f"wall (review ceiling {ceiling:g} mm); it would read as "
@@ -701,6 +708,8 @@ def validate_b4b_design(
             ("latch pivot", plan.latch_screw_length_mm),
             ("catch", plan.catch_screw_length_mm),
         ):
+            if what == "hinge" and plan.piano is not None:
+                continue
             if length not in profile.lengths:
                 raise ValueError(
                     f"the {what} screw did not resolve to an allowed "

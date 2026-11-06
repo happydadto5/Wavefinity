@@ -67,6 +67,7 @@ def storage_box_design(space: dict[str, Any]) -> dict[str, Any]:
         secure_lid=settings["secure_lid"],
         latch_count=settings["latch_count"] if settings["secure_lid"] else "auto",
         hinge_count=settings["hinge_count"],
+        hinge_type=settings.get("hinge_type", "screw"),
         latch_strength=settings["latch_strength"],
         lid_headroom_mm=settings["lid_headroom_mm"],
         edge_bevel=settings["edge_bevel"],

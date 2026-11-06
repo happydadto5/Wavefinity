@@ -155,7 +155,6 @@ class HardwareProfile:
         return (self.pilot if terminal else self.clear_bore) / 2.0
 
     @property
-    @property
     def head_bearing_margin(self) -> float:
         """Bearing material around a screw head on the flat outer ear face."""
         radius = min(self.pivot_radius, self.catch_radius)
@@ -301,6 +300,17 @@ B4B_LID_RELIEF_MAX = 1.2
 B4B_HINGE_AXIS_STEP = 0.05       # quantum for any forced rearward move
 # Review ceilings on the actual uniform pivot envelope.
 B4B_HINGE_MAX_PROJECTION = {"M2": 5.75, "M3": 7.0}
+
+# --- rear piano hinge (Hinge type: Piano) ---------------------------------- #
+# One full-width hinge behind the back wall on a strand of 1.75 mm filament.
+# It stands out behind the case instead of cutting into it: the child field
+# is never touched.  The bore is open at both ends for the filament.
+B4B_PIANO_PIN_DIAMETER = 1.75
+B4B_PIANO_PIN_CLEARANCE = 0.2      # radial: a 2.15 mm bore
+B4B_PIANO_SHELL = 1.0              # printed shell round the bore at its thinnest
+B4B_PIANO_KNUCKLE_TARGET = 10.0
+B4B_PIANO_KNUCKLE_MIN = 4.0
+B4B_PIANO_STOP_ANGLE = 105.0       # the lid rests open here on a flat stop
 
 # --- front latches --------------------------------------------------------- #
 # Latch layout and hardware limits.

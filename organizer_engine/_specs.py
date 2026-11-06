@@ -272,6 +272,9 @@ B4B_LATCH_COUNTS = ("0", "1", "2")
 B4B_LATCH_STRENGTHS = ("lightweight", "standard")
 # Rear hinge count for a secure lid; two is the default at every size.
 B4B_HINGE_COUNTS = ("1", "2")
+# Rear hinge kind: screw-pivot ears (the established default) or one
+# full-width piano hinge behind the back wall on a filament pin.
+B4B_HINGE_TYPES = ("screw", "piano")
 # Edge bevel on the case's outer top/bottom edges and the lid's outer top edge.
 # The size is the 45-degree chamfer leg in millimetres; "none" keeps sharp edges.
 B4B_EDGE_BEVELS = ("none", "light", "default", "heavy")
@@ -456,6 +459,7 @@ class B4BSpec:
     latch_count: str = "1"              # 0 | 1 | 2
     latch_strength: str = "standard"   # legacy only; derived from screw family
     hinge_count: str = "2"             # 1 | 2; meaningful only with a secure lid
+    hinge_type: str = "screw"          # screw | piano; meaningful only with a secure lid
     lid_headroom_mm: float = 1.0       # UI: Lid snugness
     edge_bevel: str = "default"        # none | light | default | heavy; a design
                                         # saved before this existed loads as "none"
@@ -472,6 +476,10 @@ class B4BSpec:
         if self.latch_count not in B4B_LATCH_COUNTS and self.latch_count != "auto":
             raise ValueError(
                 f"latch count must be one of {', '.join(B4B_LATCH_COUNTS)}"
+            )
+        if self.hinge_type not in B4B_HINGE_TYPES:
+            raise ValueError(
+                f"hinge type must be one of {', '.join(B4B_HINGE_TYPES)}"
             )
         if self.hinge_count not in B4B_HINGE_COUNTS:
             raise ValueError(
@@ -534,6 +542,7 @@ class B4BSpec:
             latch_count=latch_count,
             latch_strength=latch_strength,
             hinge_count=self.hinge_count,
+            hinge_type=self.hinge_type,
             lid_headroom_mm=self.lid_headroom_mm,
             edge_bevel=self.edge_bevel,
             label_enabled=self.label_enabled,

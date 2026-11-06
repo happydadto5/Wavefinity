@@ -53,6 +53,8 @@ from ._handle import _handle_body_parts, _lid_rear_relief_cutter
 from ._hinges import (
     _hinge_body_parts,
     _hinge_lid_parts,
+    _piano_body_parts,
+    _piano_lid_parts,
     _latch_body_parts,
     _latch_lid_parts,
 )
@@ -268,6 +270,8 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     hardware: list[trimesh.Trimesh] = []
     if plan.hinge_count:
         hardware.extend(_hinge_body_parts(box, plan))
+    if plan.piano is not None:
+        hardware.extend(_piano_body_parts(box, plan))
     if plan.latch_count_resolved:
         hardware.extend(_latch_body_parts(box, plan))
     # The handle is body hardware now: its forks grow out of the front wall, so
@@ -379,6 +383,8 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
     hardware: list[trimesh.Trimesh] = []
     if plan.hinge_count:
         hardware.extend(_hinge_lid_parts(box, plan))
+    if plan.piano is not None:
+        hardware.extend(_piano_lid_parts(box, plan))
     if plan.latch_count_resolved:
         hardware.extend(_latch_lid_parts(box, plan))
     if hardware:

@@ -53,7 +53,7 @@
   function defaults(catalog) {
     const rules = catalog?.b4b_rules || {};
     return {
-      secure_lid: true, latch_count: "1", hinge_count: "2", lid_headroom_mm: 1,
+      secure_lid: true, latch_count: "1", hinge_count: "2", hinge_type: "screw", lid_headroom_mm: 1,
       edge_bevel: "default",
       label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
       stacking: false, handle: false,
@@ -144,8 +144,12 @@
     const hingeCount = select([["2", "2"], ["1", "1"]], String(box.hinge_count) === "1" ? "1" : "2");
     hingeCount.id = id("hinge-count");
     const hingeRow = labeled("Number of hinges", hingeCount);
+    const hingeType = select([["screw", "Screw hinges"], ["piano", "Piano hinge (filament pin)"]],
+      box.hinge_type === "piano" ? "piano" : "screw");
+    hingeType.id = id("hinge-type");
+    const hingeTypeRow = labeled("Hinge type", hingeType);
     const snugnessRow = labeled("Lid snugness", snugness);
-    lidRow.append(labeled("Lid type", lidType), snugnessRow, latchRow, hingeRow);
+    lidRow.append(labeled("Lid type", lidType), snugnessRow, latchRow, hingeTypeRow, hingeRow);
     lidGroup.append(lidRow);
     caseWrap.append(lidGroup);
 
@@ -282,7 +286,9 @@
     function syncVisibility() {
       const latched = lidType.value === "latched";
       latchRow.hidden = !latched;
-      hingeRow.hidden = !latched;
+      hingeTypeRow.hidden = !latched;
+      // a piano hinge runs the full width, so there is no count to choose
+      hingeRow.hidden = !latched || hingeType.value === "piano";
       snugnessRow.hidden = !latched;
       handleRow.hidden = !latched;
       if (!latched) handle.value = "false";
@@ -317,6 +323,7 @@
             secure_lid: latched,
             latch_count: latchCount.value,
             hinge_count: latched ? hingeCount.value : "2",
+            hinge_type: latched ? hingeType.value : "screw",
             lid_headroom_mm: latched ? Number(snugness.value) : 1,
             edge_bevel: bevel.value,
             label_enabled: labelOn,
@@ -340,7 +347,8 @@
     function onChange() {
       if (callbacks.onChange) callbacks.onChange(read());
     }
-    for (const input of [lidType, snugness, latchCount, hingeCount, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel, bevel]) {
+    hingeType.addEventListener("change", syncVisibility, { signal: events.signal });
+    for (const input of [lidType, snugness, latchCount, hingeCount, hingeType, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel, bevel]) {
       input.addEventListener("input", onChange, { signal: events.signal });
       input.addEventListener("change", onChange, { signal: events.signal });
     }
@@ -360,6 +368,7 @@
       bevel.value = bevelOf(space);
       syncLatchChoices(b.latch_count || "1");
       hingeCount.value = String(b.hinge_count) === "1" ? "1" : "2";
+      hingeType.value = b.hinge_type === "piano" ? "piano" : "screw";
       stacking.value = String(!!b.stacking);
       handle.value = String(!!b.handle);
       labelLoc.value = b.label_enabled ? (b.label_location || "top") : "none";

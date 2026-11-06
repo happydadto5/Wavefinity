@@ -52,6 +52,7 @@ from organizer_geometry import (
     union,
 )
 
+from organizer_engine._specs import B4B_LATCH_TWO_ABOVE_FIELD_X
 from ._constants import (
     B4B_WALL_CORNER_FILLET,
     B4B_MIN_FLOOR_SKIN,
@@ -98,7 +99,6 @@ from ._constants import (
     B4B_LID_RELIEF_MAX,
     B4B_HINGE_AXIS_STEP,
     B4B_HINGE_MAX_PROJECTION,
-    B4B_LATCH_TWO_ABOVE_FIELD_X,
     B4B_LATCH_RELEASE_ANGLE,
     B4B_LATCH_OPEN_ANGLE,
     B4B_LATCH_DETENT,

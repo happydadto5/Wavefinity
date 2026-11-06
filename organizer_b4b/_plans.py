@@ -19,6 +19,15 @@ from ._constants import (
     B4B_SWEEP_STEP_DEG,
     B4B_LID_RELIEF_MAX,
     B4B_HINGE_AXIS_STEP,
+    B4B_PIANO_PIN_DIAMETER,
+    B4B_PIANO_PIN_CLEARANCE,
+    B4B_PIANO_SHELL,
+    B4B_PIANO_KNUCKLE_TARGET,
+    B4B_PIANO_KNUCKLE_MIN,
+    B4B_PIANO_STOP_ANGLE,
+    B4B_SUPPORT_FREE_FLAT,
+    _SUPPORT_FREE_CIRCUM,
+    _SUPPORT_FREE_INSCRIBED,
     B4B_HANDLE_WALL_CLEAR,
     B4B_RUNNING_GAP,
     B4B_HANDLE_BOTTOM_MARGIN,
@@ -81,6 +90,7 @@ class B4BHardwarePlan:
     latch_root_top_z: float
     latch_root_face_y: float
     fillet_radius: float = 0.0
+    piano: "B4BPianoHinge | None" = None
 
     # -- derived reporting ------------------------------------------------- #
     @property
@@ -97,6 +107,8 @@ class B4BHardwarePlan:
         describes the diagonal to a facet join and would overstate this by
         about 6%.
         """
+        if self.piano is not None:
+            return self.piano.projection
         return (
             self.hinge_axis_y - self.hinge_rear_crest + self.profile.pivot_radius
         )
@@ -112,7 +124,12 @@ class B4BHardwarePlan:
     def screw_bom(self) -> list[str]:
         lines: list[str] = []
         fam = self.profile.name
-        if self.hinge_count:
+        if self.piano is not None:
+            lines.append(
+                f"1 x {B4B_PIANO_PIN_DIAMETER:g} mm filament, "
+                f"{self.piano.pin_length_mm:.0f} mm long (hinge pin)"
+            )
+        elif self.hinge_count:
             lines.append(
                 f"{self.hinge_count} x {fam}x{self.hinge_screw_length_mm} hinge pins"
             )
@@ -339,6 +356,80 @@ def _solve_hinge_axis(
     )
 
 
+@dataclass(frozen=True)
+class B4BPianoHinge:
+    """Full-width piano hinge behind the back wall (Hinge type: Piano).
+
+    The axis sits one swing radius behind the case's back plane, so the
+    swinging lid knuckles never reach the wall, and one knuckle half-size
+    below the lid top, so the knuckle tops are flush with it.
+    """
+
+    back_y: float               # rear wall crest: the case's own back plane
+    top_z: float                # closed lid top
+    rim_z: float                # lid seat
+    half: float                 # knuckle half-size (support-free octagon)
+    bore_radius: float
+    swing_radius: float         # lid knuckle swing envelope plus running gap
+    stop_angle: float
+    span: tuple[float, float]
+    knuckles: tuple[tuple[float, float], ...]   # even index = case, odd = lid
+
+    @property
+    def axis_y(self) -> float:
+        return self.back_y + self.swing_radius
+
+    @property
+    def axis_z(self) -> float:
+        return self.top_z - self.half
+
+    @property
+    def projection(self) -> float:
+        """How far the knuckle backs stand behind the case's back plane."""
+        return self.swing_radius + self.half
+
+    @property
+    def pin_length_mm(self) -> float:
+        return self.span[1] - self.span[0]
+
+    def stop_z(self, y: float) -> float:
+        """Height of the stop plane at ``y``: where the lid knuckle's back face
+        lies at the stop angle, so the heel lands flat on the case's ledge."""
+        a = math.radians(self.stop_angle)
+        return self.axis_z - (self.half - math.cos(a) * (y - self.axis_y)) / math.sin(a)
+
+
+def b4b_piano_hinge_plan(box: BoxSpec) -> B4BPianoHinge:
+    eff = b4b_effective_box(box)
+    layout = b4b_layout(box)
+    bore_r = B4B_PIANO_PIN_DIAMETER / 2.0 + B4B_PIANO_PIN_CLEARANCE
+    half = (bore_r + B4B_PIANO_SHELL) / _SUPPORT_FREE_INSCRIBED
+    gap = B4B_RUNNING_GAP
+    x0, _y0, x1, _y1 = layout.case_bounds
+    total = x1 - x0
+    n = max(3, int(round((total + gap) / (B4B_PIANO_KNUCKLE_TARGET + gap))))
+    if n % 2 == 0:
+        n += 1
+    length = (total - (n - 1) * gap) / n
+    while length < B4B_PIANO_KNUCKLE_MIN and n > 3:
+        n -= 2
+        length = (total - (n - 1) * gap) / n
+    knuckles = tuple((x0 + i * (length + gap), x0 + i * (length + gap) + length)
+                     for i in range(n))
+    rim = b4b_lid_underside_z_from_eff(eff)
+    return B4BPianoHinge(
+        back_y=layout.outer_half_y + WAVE_AMPLITUDE,
+        top_z=rim + b4b_lid_skin_from_eff(eff),
+        rim_z=rim,
+        half=half,
+        bore_radius=bore_r,
+        swing_radius=_SUPPORT_FREE_CIRCUM * half + gap,
+        stop_angle=B4B_PIANO_STOP_ANGLE,
+        span=(x0, x1),
+        knuckles=knuckles,
+    )
+
+
 def _inactive_plan(profile: HardwareProfile) -> B4BHardwarePlan:
     return B4BHardwarePlan(
         profile=profile,
@@ -382,6 +473,7 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
     wall_depth = eff.wall_depth
 
     # ---- rear hinges: the design's choice (1 or 2), nominally at +/- child_x/4 #
+    piano = b4b_piano_hinge_plan(box) if eff.b4b.hinge_type == "piano" else None
     hinge_count = 2 if eff.b4b.hinge_count == "2" else 1
     hinge_centers_x = _root_centres(
         layout, eff.x / 4.0, profile.hinge_root_width, hinge_count
@@ -406,19 +498,25 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         underside_z - 1.0, hinge_axis_z - reach_down - B4B_HW_CLEARANCE
     )
     hinge_root_bottom_z = max(1.0, hinge_root_top_z - profile.hinge_root_height)
-    hinge_axis_y, lid_relief = _solve_hinge_axis(
-        layout, profile,
-        rear_crest=rear_crest,
-        underside_z=underside_z,
-        skin=skin,
-        axis_z=hinge_axis_z,
-        root_face_y=hinge_root_face_y,
-        root_top_z=hinge_root_top_z,
-        root_bottom_z=hinge_root_bottom_z,
-    )
-    hinge_screw = _screw_for_stack(
-        profile, profile.clear_span, profile.far_lug, "hinge"
-    )
+    if piano is not None:
+        # One full-width piano hinge replaces the screw-pivot ears.
+        hinge_count, hinge_centers_x, lid_relief, hinge_screw = 0, (), 0.0, 0
+        hinge_axis_y, hinge_axis_z = piano.axis_y, piano.axis_z
+        rear_crest = piano.back_y
+    else:
+        hinge_axis_y, lid_relief = _solve_hinge_axis(
+            layout, profile,
+            rear_crest=rear_crest,
+            underside_z=underside_z,
+            skin=skin,
+            axis_z=hinge_axis_z,
+            root_face_y=hinge_root_face_y,
+            root_top_z=hinge_root_top_z,
+            root_bottom_z=hinge_root_bottom_z,
+        )
+        hinge_screw = _screw_for_stack(
+            profile, profile.clear_span, profile.far_lug, "hinge"
+        )
 
     # ---- front latches: use the explicit, validated count ------------------ #
     latch_count = int(eff.b4b.latch_count)
@@ -489,6 +587,7 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         latch_root_top_z=latch_root_top_z,
         latch_root_face_y=latch_root_face_y,
         fillet_radius=fillet,
+        piano=piano,
     )
 
 
