@@ -20,6 +20,7 @@ from organizer_engine import (
     differing_connector_plan,
     wavy_rect_outer,
 )
+from organizer_engine._wave import wall_crest_overshoot
 from organizer_geometry import _extrude_polygon
 from organizer_outputs.slicer import slicer_display_name
 
@@ -302,7 +303,7 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
                     if resolved == "flexible":
                         printed_axis = gap + FLEX_PRELOAD_MM
                     else:
-                        printed_axis = gap - RIGID_SPACER_CLEARANCE_MM
+                        printed_axis = rigid_spacer_span(gap)[1]
                     if side in ("right", "left"):
                         printed_w, printed_d = printed_axis, contact
                     else:
@@ -480,6 +481,20 @@ def _collapse_spikes(poly):
     return Polygon(kept)
 
 
+def rigid_spacer_span(gap: float) -> tuple[float, float]:
+    """``(start, width)`` of a rigid spacer across a gap measured to the bins' grid line.
+
+    The bins' crests stand ``wall_crest_overshoot()`` past that line, so the
+    free run is measured to the crest. The spacer sits centred in it, leaving
+    RIGID_SPACER_CLEARANCE_MM of real play in total; the 0.2 mm floor keeps
+    tiny gaps printable as before.
+    """
+    overshoot = wall_crest_overshoot()
+    free = max(0.0, gap - overshoot)
+    relief = min(RIGID_SPACER_CLEARANCE_MM, max(0.0, free - 0.2))
+    return overshoot + relief / 2.0, free - relief
+
+
 def _serpentine_flexure(
     w, d, side, flexible=True, *, phase_x=0.0, phase_y=0.0,
 ):
@@ -506,10 +521,10 @@ def _serpentine_flexure(
         if resolved_flexible:
             w += FLEX_PRELOAD_MM  # Fix 1042: 2.0mm preload for hand-insertable flex
         if not resolved_flexible:
-            relief = min(RIGID_SPACER_CLEARANCE_MM, max(0.0, w - 0.2))
+            start, width = rigid_spacer_span(w)
             return shape_box(
-                relief / 2.0, 0,
-                w - relief / 2.0, d,
+                start, 0,
+                start + width, d,
             ), False
 
         # Bin-facing wave: preserve the accepted shape construction but phase
@@ -567,10 +582,10 @@ def _serpentine_flexure(
     if resolved_flexible:
         d += FLEX_PRELOAD_MM  # Fix 1042: 2.0mm preload for hand-insertable flex
     if not resolved_flexible:
-        relief = min(RIGID_SPACER_CLEARANCE_MM, max(0.0, d - 0.2))
+        start, width = rigid_spacer_span(d)
         return shape_box(
-            0, relief / 2.0,
-            w, d - relief / 2.0,
+            0, start,
+            w, start + width,
         ), False
 
     bin_profile = wavy_rect_outer(w / 2.0, 10.0, phase_x=phase_x)

@@ -80,6 +80,16 @@ def wall_wave_slope(coordinate: float, run_axis: str) -> float:
     return wave_slope(coordinate) * (-1.0 if run_axis == "x" else 1.0)
 
 
+def wall_crest_overshoot() -> float:
+    """How far a wavy wall's crest stands past its grid line (mm).
+
+    The crest is the wave's maximum outward displacement, at the quarter-cycle
+    phase. ``_wall_points`` builds every outline from this same wave, so the
+    built outline's crests sit exactly this far past their grid line.
+    """
+    return wave_value(WAVE_LENGTH / 4.0)
+
+
 def wave_cycles(straight_length: float) -> float:
     return straight_length / WAVE_LENGTH
 
