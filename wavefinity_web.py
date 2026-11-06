@@ -1549,6 +1549,7 @@ def generate_payload(
             box, layout, output, label, part_name, label_location, scoop,
             auto_timestamp=auto_timestamp,
             keep_log=keep_log and not HOSTED,
+            pegboard_thickness_mm=(payload.get("space") or {}).get("pegboard_thickness_mm", 3.2),
         )
     reply = _generation_reply(result=result, output=output)
     if HOSTED and requested_inventory:
@@ -1783,7 +1784,7 @@ def pegboard_hooks_payload(payload: dict[str, Any]) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=True)
     target = output / f"Pegboard hooks - {standard} x{count}.3mf"
     with GEOMETRY_LOCK:
-        hooks = make_pegboard_hooks(standard, count)
+        hooks = make_pegboard_hooks(standard, count, thickness_mm=payload.get("thickness_mm", 3.2))
         export_object_groups_3mf([(name, [(name, mesh)]) for name, mesh in hooks], target)
     result = {
         "pegboard_hooks": {
@@ -1803,12 +1804,15 @@ def _generate_bin_from_design_spec(output_dir: Path, design_spec: dict[str, Any]
     resolved File cell itself, still at Qty 0.
     """
     box, layout, label, part_name, label_location, scoop = design_from_dict(design_spec)
+    inventory_layout = load_inventory(output_dir).get("layout") or {}
+    space = inventory_layout.get("space") or {}
     with GEOMETRY_LOCK:
         # Fix 096 A1: on-demand batch generation installs as one unit too -
         # a row is recorded Saved only after its whole file set promoted.
         result = generate_organizer_files_transactional(
             box, layout, output_dir, label, part_name, label_location, scoop,
             auto_timestamp=False, keep_log=False,
+            pegboard_thickness_mm=space.get("pegboard_thickness_mm", 3.2),
         )
     return _extract_generated_files(result)
 

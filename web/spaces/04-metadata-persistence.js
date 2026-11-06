@@ -85,6 +85,7 @@ SP.validSpace = raw => {
     if (!standard || !Number.isInteger(holesX) || holesX < 1 || !Number.isInteger(holesY) || holesY < 1) return null;
     Object.assign(space, {
       pegboard_standard: standard.id,
+      pegboard_thickness_mm: Number(raw.pegboard_thickness_mm ?? 3.2),
       pegboard_size_mode: raw.pegboard_size_mode === "holes" ? "holes" : "physical",
       pegboard_holes_x: holesX,
       pegboard_holes_y: holesY,

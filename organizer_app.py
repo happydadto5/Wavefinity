@@ -369,6 +369,7 @@ def generate_organizer_files_transactional(
     scoop: bool = False,
     auto_timestamp: bool = False,
     keep_log: bool = False,
+    pegboard_thickness_mm: float = 3.2,
 ) -> dict[str, object]:
     """Build one ordinary-bin output set as a single install unit.
 
@@ -399,7 +400,7 @@ def generate_organizer_files_transactional(
     try:
         result = generate_organizer_files(
             box, canon_layout, staging, canon_label, part_name, canon_location, scoop,
-            auto_timestamp=False, keep_log=False,
+            auto_timestamp=False, keep_log=False, pegboard_thickness_mm=pegboard_thickness_mm,
         )
         staged = sorted(
             (one for one in staging.iterdir() if one.is_file() and one.suffix.lower() == ".3mf"),
@@ -456,6 +457,7 @@ def generate_organizer_files(
     scoop: bool = False,
     auto_timestamp: bool = False,
     keep_log: bool = False,
+    pegboard_thickness_mm: float = 3.2,
 ) -> dict[str, object]:
     """Export an editor design as fused, fitted-removable, or cartridge parts.
 
@@ -701,7 +703,7 @@ def generate_organizer_files(
             result["edge_mount_label"] = _part_result(label_output, mesh_report("edge_mount_label", printed_body))
             result["edge_mount_label"]["text_objects"] = written
     if box.pegboard.enabled:
-        adapters = make_board_adapters(box)
+        adapters = make_board_adapters(box, pegboard_thickness_mm)
         adapter_output = _resolve_file(pegboard_adapter_filename, box, part_name)
         export_object_groups_3mf(
             [(name, [(name, mesh)]) for name, mesh in adapters], adapter_output

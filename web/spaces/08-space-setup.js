@@ -210,6 +210,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       SP.fillStorageBoxForm(prefillSpace?.storage_box);
   } else if (kind === "pegboard") {
       document.getElementById("pegboard-standard").value = prefillSpace?.pegboard_standard || "standard";
+      document.getElementById("pegboard-thickness").value = String(prefillSpace?.pegboard_thickness_mm ?? 3.2);
       document.getElementById("pegboard-size-mode").value = prefillSpace?.pegboard_size_mode || "physical";
       document.getElementById("pegboard-x").value = prefillSpace?.x || "";
       document.getElementById("pegboard-y").value = prefillSpace?.y || "";
@@ -451,6 +452,7 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
       kind, name, x: resolved.width, y: resolved.height, z: 350, trimSize: null,
       extra: {
         pegboard_standard: resolved.standard.id,
+        pegboard_thickness_mm: Number(document.getElementById("pegboard-thickness").value),
         pegboard_size_mode: resolved.mode,
         pegboard_holes_x: resolved.holesX,
         pegboard_holes_y: resolved.holesY,

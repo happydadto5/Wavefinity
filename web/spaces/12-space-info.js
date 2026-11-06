@@ -89,6 +89,7 @@ SP.printPegboardHooks = async () => {
     const context = DL.spaceContext();
     const payload = {
         standard: state.activeSpace.pegboard_standard,
+        thickness_mm: state.activeSpace.pegboard_thickness_mm ?? 3.2,
         count: 4,
         output: state.output,
     };

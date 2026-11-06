@@ -205,6 +205,7 @@ def normalise_pegboard_space(raw: dict[str, Any]) -> dict[str, Any]:
         "y": resolved["height_mm"],
         "z": PEGBOARD_DEFAULT_DEPTH_MM,
         "pegboard_standard": resolved["standard"],
+        "pegboard_thickness_mm": _positive(raw.get("pegboard_thickness_mm", 3.2), "board thickness"),
         "pegboard_size_mode": resolved["size_mode"],
         "pegboard_holes_x": resolved["holes_x"],
         "pegboard_holes_y": resolved["holes_y"],
@@ -477,22 +478,23 @@ def _cylinder_y(radius: float, length: float, center: tuple[float, float, float]
     return mesh
 
 
-def make_board_adapter(standard_id: Any) -> trimesh.Trimesh:
+def make_board_adapter(standard_id: Any, thickness_mm: Any = 3.2) -> trimesh.Trimesh:
     standard = pegboard_standard(standard_id)
+    extension = max(0.0, _positive(thickness_mm, "board thickness") - 3.2)
     # One universal narrow body IS the cleat. Its top falls 5.5 mm over
     # 5.5 mm projection; only the board-facing (-Y) pegs/tabs vary.
     center = 42.4 if standard.id == "standard" else 8.0
     body = _prism_x(_adapter_body_profile(center), -5.0, 5.0)
     if standard.id == "standard":
-        straight = _cylinder_y(2.65, 8.0, (0.0, -3.65, 17.0))
-        hooked = _cylinder_y(2.65, 8.0, (0.0, -3.65, 42.4))
-        hook = _box((4.8, 3.0, 4.0), (0.0, -7.0, 40.2))
+        straight = _cylinder_y(2.65, 8.0 + extension, (0.0, -3.65 - extension / 2, 17.0))
+        hooked = _cylinder_y(2.65, 8.0 + extension, (0.0, -3.65 - extension / 2, 42.4))
+        hook = _box((4.8, 3.0, 4.0), (0.0, -7.0 - extension, 40.2))
         board_parts = [straight, hooked, hook]
     else:
         # A single vertical SKÅDIS slot holds the tab and its locking hook;
         # adjacent slot rows stagger sideways and cannot take two straight tabs.
-        tab = _box((4.4, 8.0, 12.0), (0.0, -3.65, 8.0))
-        hook = _box((4.4, 3.0, 3.0), (0.0, -7.0, 3.0))
+        tab = _box((4.4, 8.0 + extension, 12.0), (0.0, -3.65 - extension / 2, 8.0))
+        hook = _box((4.4, 3.0, 3.0), (0.0, -7.0 - extension, 3.0))
         board_parts = [tab, hook]
     return union([body, *board_parts])
 
@@ -502,13 +504,13 @@ def adapter_print_transform() -> np.ndarray:
     return trimesh.transformations.rotation_matrix(-math.pi / 2.0, (1.0, 0.0, 0.0))
 
 
-def make_board_adapters(box_spec: Any) -> list[tuple[str, trimesh.Trimesh]]:
+def make_board_adapters(box_spec: Any, thickness_mm: Any = 3.2) -> list[tuple[str, trimesh.Trimesh]]:
     layout = receiver_layout(box_spec)
     if not layout["enabled"]:
         return []
     result = []
     for index, _receiver in enumerate(layout["receivers"], 1):
-        mesh = make_board_adapter(layout["standard"])
+        mesh = make_board_adapter(layout["standard"], thickness_mm)
         # The broad front face rests on the bed; board pegs/tabs rise in +Z.
         mesh.apply_transform(adapter_print_transform())
         mesh.apply_translation((25.0 * ((index - 1) % 5),
@@ -531,7 +533,7 @@ PEGBOARD_HOOK_MIN_ARM_LENGTH = 10.0
 PEGBOARD_HOOK_MAX_ARM_LENGTH = 150.0
 
 
-def _hook_parts(standard_id: Any, arm_length_mm: float) -> dict[str, trimesh.Trimesh]:
+def _hook_parts(standard_id: Any, arm_length_mm: float, thickness_mm: Any = 3.2) -> dict[str, trimesh.Trimesh]:
     """The board adapter plus the root, forward arm and upturn that join it.
 
     Every joint overlaps its neighbour by a real volume (not just a shared
@@ -545,7 +547,7 @@ def _hook_parts(standard_id: Any, arm_length_mm: float) -> dict[str, trimesh.Tri
         raise ValueError(
             f"Hook arm length must be {PEGBOARD_HOOK_MIN_ARM_LENGTH:g}-{PEGBOARD_HOOK_MAX_ARM_LENGTH:g} mm."
         )
-    base = make_board_adapter(standard.id)
+    base = make_board_adapter(standard.id, thickness_mm)
     center = 42.4 if standard.id == "standard" else 8.0
     profile = _adapter_body_profile(center)
     front_y = max(y for y, _z in profile)
@@ -583,12 +585,12 @@ def _hook_parts(standard_id: Any, arm_length_mm: float) -> dict[str, trimesh.Tri
     return {"base": base, "root": root, "arm": arm, "upturn": upturn}
 
 
-def make_pegboard_hook(standard_id: Any, arm_length_mm: float = PEGBOARD_HOOK_DEFAULT_ARM_LENGTH) -> trimesh.Trimesh:
+def make_pegboard_hook(standard_id: Any, arm_length_mm: float = PEGBOARD_HOOK_DEFAULT_ARM_LENGTH, thickness_mm: Any = 3.2) -> trimesh.Trimesh:
     """One printable hook: the unchanged board adapter + root + forward arm + upturn.
 
     Built in adapter coordinates: the board faces -Y, the arm projects toward +Y.
     """
-    return union(list(_hook_parts(standard_id, arm_length_mm).values()))
+    return union(list(_hook_parts(standard_id, arm_length_mm, thickness_mm).values()))
 
 
 def hook_print_transform() -> np.ndarray:
@@ -617,11 +619,12 @@ def make_pegboard_hooks(
     standard_id: Any,
     count: int = PEGBOARD_HOOK_DEFAULT_COUNT,
     arm_length_mm: float = PEGBOARD_HOOK_DEFAULT_ARM_LENGTH,
+    thickness_mm: Any = 3.2,
 ) -> list[tuple[str, trimesh.Trimesh]]:
     """`count` identical hooks, laid out flat on a plate and named pegboard_hook_N."""
     count = pegboard_hook_count(count)
     standard = pegboard_standard(standard_id)
-    template = make_pegboard_hook(standard.id, arm_length_mm)
+    template = make_pegboard_hook(standard.id, arm_length_mm, thickness_mm)
     template.apply_transform(hook_print_transform())
     extent = template.bounds[1] - template.bounds[0]
     gap = 5.0

@@ -66,7 +66,7 @@ Wavefinity currently has five typed Space types.
 | **Surface** | Organize bins on an open shelf/counter/other surface | Maximum outside width/length, trim size | **Base Trim** plus Surface-specific bin base controls |
 | **Storage Box** | Put Wavefinity bins inside a printable carrying/storage case | Outside width/length, usable inside height, case settings | **Storage Box case** with lid/stacking/handle/label/material options |
 | **Storage Drawers** | A printable multi-drawer mini cabinet for Wavefinity bins | Width/depth in millimeters, snapped to the 7 mm grid; drawer count, per-drawer usable height, cabinet/drawer material, fit, handles, labels, stacking | **Cabinet** structural files (frame, drawers, fronts, rails) saved/printed from the cabinet panel |
-| **Pegboard** | Hang Wavefinity bins on a pegboard | Board standard, physical size or hole/slot count | Pegboard receivers/cleats on bins and board-grid-aware placement |
+| **Pegboard** | Hang Wavefinity bins on a pegboard | Board standard, thickness, physical size or hole/slot count | Pegboard receivers/cleats on bins and board-grid-aware placement |
 
 Wavefinity can also be used **without a typed Space**, in which case the user can design ordinary bins in a regular folder without Space placement rules.
 
@@ -249,6 +249,8 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 - Recents show `N drawers · X × Y units each`, never the compatibility height total.
 
 ## 2.4 Pegboard Space
+
+Choose board thickness as 3.2 mm (1/8 in) or 6.35 mm (1/4 in); adapters and printable hooks are sized to clear the back of the board. Older Spaces default to 3.2 mm.
 
 ### Board standards
 

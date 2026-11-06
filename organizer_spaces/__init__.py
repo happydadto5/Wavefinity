@@ -761,7 +761,7 @@ def space_routes(
         for key in ("max_x_mm", "max_y_mm"):
             if key in payload:
                 raw_def[key] = payload[key]
-        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
+        for key in ("pegboard_standard", "pegboard_thickness_mm", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
             if key in payload:
                 raw_def[key] = payload[key]
 
@@ -858,7 +858,7 @@ def space_routes(
         for key in ("max_x_mm", "max_y_mm"):
             if key in payload:
                 raw_def[key] = payload[key]
-        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
+        for key in ("pegboard_standard", "pegboard_thickness_mm", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
             if key in payload:
                 raw_def[key] = payload[key]
 
@@ -910,7 +910,7 @@ def space_routes(
         for key in ("max_x_mm", "max_y_mm"):
             if key in payload:
                 raw_def[key] = payload[key]
-        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
+        for key in ("pegboard_standard", "pegboard_thickness_mm", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box", "storage_drawers"):
             if key in payload:
                 raw_def[key] = payload[key]
 
