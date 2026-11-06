@@ -9,7 +9,7 @@ from organizer_engine import GRID_PITCH, BoxSpec
 from organizer_geometry import translated
 
 from ._constants import (
-    B4B_STACK_RECESS_DEPTH,
+    B4B_STACK_PEG_EXPOSED,
     B4B_LID_SKIRT_MIN_LAP,
     B4B_PRINT_PART_GAP,
 )
@@ -95,7 +95,7 @@ def b4b_summary(box: BoxSpec) -> dict:
         min_x = min(min_x, handle.centers_x[0] - handle.root_width / 2.0)
         max_x = max(max_x, handle.centers_x[1] + handle.root_width / 2.0)
     if b4b.stacking:
-        top_z += B4B_STACK_RECESS_DEPTH
+        top_z += B4B_STACK_PEG_EXPOSED
     summary: dict = {
         "field_mm": [eff.x, eff.y, eff.z],
         "field_units": [round(eff.x / GRID_PITCH), round(eff.y / GRID_PITCH)],

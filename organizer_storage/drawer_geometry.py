@@ -10,7 +10,7 @@ from shapely.geometry import Polygon, box as shape_box
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
-from organizer_b4b import (B4B_STACK_RECESS_DEPTH, B4B_MIN_FLOOR_SKIN,
+from organizer_b4b import (B4B_STACK_RECESS_DEPTH, B4B_STACK_PEG_EXPOSED, B4B_MIN_FLOOR_SKIN,
                            B4B_STACK_SOCKET_DEPTH, B4B_STACK_SOCKET_MIN_SKIN,
                            B4B_STACK_BOSS_DIAMETER, B4B_STACK_FEMALE_RADIAL_CLEARANCE,
                            B4B_STACK_SOCKET_INTERFERENCE, B4B_STACK_BOSS_CHAMFER,
@@ -300,7 +300,7 @@ def _stack_centres(datum):
 
 def _chamfered_stack_peg():
     radius = B4B_STACK_BOSS_DIAMETER/2
-    height = B4B_STACK_RECESS_DEPTH+B4B_STACK_SOCKET_DEPTH
+    height = B4B_STACK_PEG_EXPOSED+B4B_STACK_SOCKET_DEPTH
     chamfer = min(B4B_STACK_BOSS_CHAMFER, radius-0.5, height-0.4)
     profile = np.array([[0,0],[radius,0],[radius,height-chamfer],
                         [radius-chamfer,height],[0,height]], float)
@@ -931,7 +931,7 @@ def _datum_components(space, datum):
                 peg.apply_translation((x, y, datum.outer_z-B4B_STACK_SOCKET_DEPTH))
                 return peg
             diameter = B4B_STACK_BOSS_DIAMETER
-            add(f"stack_peg:{i}", f"Stack Peg {i}", (diameter,diameter,B4B_STACK_RECESS_DEPTH+B4B_STACK_SOCKET_DEPTH), peg_mesh)
+            add(f"stack_peg:{i}", f"Stack Peg {i}", (diameter,diameter,B4B_STACK_PEG_EXPOSED+B4B_STACK_SOCKET_DEPTH), peg_mesh)
     return pieces, warnings
 
 
@@ -947,7 +947,7 @@ def resolve_storage_drawers_plan(space: dict, *, build_meshes: bool = True) -> S
         components.append(StorageDrawerComponent(key, name, mesh, tuple(groups),
                                                  _bounds(actual) if actual is not None else tuple(float(v) for v in bounds),
                                                  orientations, flip_up))
-    stack_projection = B4B_STACK_RECESS_DEPTH if canonical["storage_drawers"]["stacking"] else 0.0
+    stack_projection = B4B_STACK_PEG_EXPOSED if canonical["storage_drawers"]["stacking"] else 0.0
     return StorageDrawersPlan(canonical, (datum.outer_x, datum.outer_y,
                                          datum.outer_z-datum.lowest_z+stack_projection),
                               datum.base, datum.top, datum.frame, datum.pitches,

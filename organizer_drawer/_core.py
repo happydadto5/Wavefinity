@@ -15,7 +15,7 @@ from organizer_app import (
 from organizer_features.stack import stack_summary
 from organizer_engine import BASE_UNIT, MAX_BOX_SIZE, WAVE_AMPLITUDE, WAVE_MATING_GAP
 from organizer_inventory import design_specs, normalise_storage_box
-from organizer_b4b import B4B_STACK_RECESS_DEPTH, b4b_summary
+from organizer_b4b import B4B_STACK_PEG_EXPOSED, b4b_summary
 from organizer_engine.product_rules import DRAWER_HARD_CLEARANCE_MM, DRAWER_LAYER_MAX_USABLE_HEIGHT_MM
 from organizer_features.stack import STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
 from organizer_features.pegboard import pegboard_standard
@@ -66,7 +66,7 @@ HEIGHT_TOLERANCE = 0.5          # mm; "taller" means taller by more than this
 STACK_STEPS = {
     "lid": STACK_SEAT_DEPTH,
     "direct": STACK_PLUG_DEPTH,
-    "b4b": B4B_STACK_RECESS_DEPTH,
+    "b4b": B4B_STACK_PEG_EXPOSED,
 }
 
 DRAWER_DEFAULTS: dict[str, Any] = {
@@ -244,7 +244,7 @@ def bin_cells(one: dict[str, Any], drawer: dict[str, Any]) -> tuple[int, int]:
 def stack_pitch(one: dict[str, Any]) -> float:
     """What a bin adds between consecutive stack seating datums."""
     if one.get("stack") == "b4b":
-        return float(one["z"]) - B4B_STACK_RECESS_DEPTH
+        return float(one["z"]) - B4B_STACK_PEG_EXPOSED
     if one.get("stack") == "direct":
         return float(one["z"]) - STACK_PLUG_DEPTH     # the skirt overlaps the bin below
     return float(one["z"])
@@ -332,7 +332,7 @@ def space_stack_metrics(layout: dict[str, Any] | None, bins: list[dict[str, Any]
                 height = b4b_summary(box)["assembled_envelope_mm"][2]
                 metrics[one["id"]] = {
                     "physical_mm": height,
-                    "pitch_mm": height - (B4B_STACK_RECESS_DEPTH if box.b4b.stacking else 0),
+                    "pitch_mm": height - (B4B_STACK_PEG_EXPOSED if box.b4b.stacking else 0),
                 }
             else:
                 summary = stack_summary(box)

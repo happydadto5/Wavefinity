@@ -26,6 +26,7 @@ from organizer_geometry import (
 )
 from .._constants import (
     B4B_STACK_RECESS_DEPTH,
+    B4B_STACK_PEG_EXPOSED,
     B4B_STACK_BOSS_DIAMETER,
     B4B_STACK_FEMALE_RADIAL_CLEARANCE,
     B4B_STACK_SOCKET_DEPTH,
@@ -439,7 +440,7 @@ def _stack_pegs(box: BoxSpec) -> list[trimesh.Trimesh]:
     """Four separately printed pegs, shown installed in assembly-space preview."""
     eff = b4b_effective_box(box)
     top_z = b4b_lid_underside_z(box) + b4b_lid_skin_from_eff(eff)
-    total_h = B4B_STACK_SOCKET_DEPTH + B4B_STACK_RECESS_DEPTH
+    total_h = B4B_STACK_SOCKET_DEPTH + B4B_STACK_PEG_EXPOSED
     solids: list[trimesh.Trimesh] = []
     for cx, cy in _stack_locator_centres(eff):
         peg = _chamfered_boss(

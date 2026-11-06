@@ -25,7 +25,8 @@ B4B_WALL_CORNER_FILLET = 0.6
 
 # Effective base / stacking
 B4B_MIN_FLOOR_SKIN = 0.8        # printable floor left under a stack recess
-B4B_STACK_RECESS_DEPTH = 2.0    # female recess depth == male boss height
+B4B_STACK_PEG_EXPOSED = 2.0     # male peg length proud of the lid socket
+B4B_STACK_RECESS_DEPTH = 2.5    # female recess depth: 0.5 mm of spare past the peg tip
 # The one place this expression is written.  The UI reads it from the catalog
 # rather than duplicating the arithmetic, and the geometry below reads this
 # name rather than the two constants, so the two can never drift apart.
