@@ -64,6 +64,12 @@ from ._compose import b4b_body_with_features
 # construction everywhere; this allowance exists because mesh booleans on a
 # wavy case leave slivers, never to give a real clash somewhere to hide.
 B4B_NOISE_CC = 0.05
+# The only interference a stowed bail may show is its two stow detents.  This
+# is an *absolute* ceiling on that, checked alongside the swept comparison:
+# a baseline comparison on its own cannot see a rotation-invariant clash,
+# because an eye buried in its own fork overlaps by the same amount at every
+# angle and therefore never looks like motion adding interference.
+B4B_HANDLE_STOWED_CEIL_CC = 0.02
 
 
 def _triangle_distances(a, b):
