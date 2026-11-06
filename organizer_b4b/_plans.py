@@ -740,11 +740,19 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
     forbidden = layout.outer_structural_polygon.buffer(B4B_RUNNING_GAP + 0.01)
     heel_lands = []
     for cx in (-half, half):
-        lo = cx - dims.eye_band / 2.0 + B4B_RUNNING_GAP
-        hi = cx + dims.eye_band / 2.0 - B4B_RUNNING_GAP
-        free = LineString([(lo, front_crest), (hi, front_crest)]).difference(forbidden)
-        runs = [free] if isinstance(free, LineString) else list(free.geoms)
-        lands = [(r.bounds[0], r.bounds[2]) for r in runs if r.length >= 0.4]
+        # The wave is not phased to the pivot, so a trough can sit mostly
+        # under the eye's edge.  Try the usual inset window first (every width
+        # that builds today keeps it), then the full eye band: the heel is as
+        # wide as the eye, which already clears the ears by the running gap.
+        lands = []
+        for inset in (B4B_RUNNING_GAP, 0.0):
+            lo = cx - dims.eye_band / 2.0 + inset
+            hi = cx + dims.eye_band / 2.0 - inset
+            free = LineString([(lo, front_crest), (hi, front_crest)]).difference(forbidden)
+            runs = [free] if isinstance(free, LineString) else list(free.geoms)
+            lands = [(r.bounds[0], r.bounds[2]) for r in runs if r.length >= 0.4]
+            if lands:
+                break
         if not lands:
             raise ValueError("the handle stop has no cleared landing over the wall trough")
         heel_lands.extend(lands)
