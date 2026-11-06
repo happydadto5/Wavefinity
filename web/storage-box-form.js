@@ -80,7 +80,7 @@
     const minHeight = Number(rules.min_secure_height_mm) || 1;
     const box = { ...defaults(catalog), ...(initialSpace?.storage_box || {}), edge_bevel: bevelOf(initialSpace) };
 
-    const form = el("div", "storage-box-form");   // one column of areas: size, Lid, Case Options, Label, Material, status
+    const form = el("div", "storage-box-form");   // one column of areas: size, Lid, options, Label, Material, status
     const events = new AbortController();
 
     // ---- Interior size (Width / Depth / Height, three across) ----
@@ -109,7 +109,6 @@
 
     // ---- Case Settings ----
     const caseWrap = el("div", "storage-box-case");
-    caseWrap.append(el("h4", "storage-box-title", "Case Settings"));
 
     // Lid group
     const lidGroup = el("div", "storage-box-group");
@@ -154,7 +153,6 @@
 
     // Options group
     const optGroup = el("div", "storage-box-group");
-    optGroup.append(el("h5", "storage-box-subtitle", "Case Options"));
     const optRow = el("div", "space-dimension-row");
     const stacking = select([["false", "Not stackable"], ["true", "Stackable"]], String(!!box.stacking));
     stacking.id = id("stacking");
@@ -167,7 +165,6 @@
 
     // Label group
     const labelGroup = el("div", "storage-box-group");
-    labelGroup.append(el("h5", "storage-box-subtitle", "Label"));
     const labelRow = el("div", "space-dimension-row");
     const labelLoc = select([["none", "No label"], ["top", "Top"], ["front", "Front"]],
       box.label_enabled ? (box.label_location || "top") : "none");
@@ -180,13 +177,12 @@
     const labelStyle = select([["flat", "Flat"], ["wavy", "Wavy"]], box.front_label_style || "flat");
     labelStyle.id = id("label-style");
     const labelStyleRow = labeled("Front label style", labelStyle);
-    labelRow.append(labeled("Location", labelLoc), labelTextRow, labelStyleRow);
+    labelRow.append(labeled("Label", labelLoc), labelTextRow, labelStyleRow);
     labelGroup.append(labelRow);
     caseWrap.append(labelGroup);
 
     // Material group
     const matGroup = el("div", "storage-box-group");
-    matGroup.append(el("h5", "storage-box-subtitle", "Material"));
     const matRow = el("div", "space-dimension-row");
     const wallSel = document.createElement("select"); wallSel.id = id("wall");
     const baseSel = document.createElement("select"); baseSel.id = id("base");
