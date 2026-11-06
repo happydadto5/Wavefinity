@@ -53,7 +53,7 @@
   function defaults(catalog) {
     const rules = catalog?.b4b_rules || {};
     return {
-      secure_lid: true, latch_count: "auto", hinge_count: "2", lid_headroom_mm: 1,
+      secure_lid: true, latch_count: "1", hinge_count: "2", lid_headroom_mm: 1,
       edge_bevel: "default",
       label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
       stacking: false, handle: false,
@@ -123,8 +123,28 @@
     const snugness = select([["0.5", "0.5 mm — Tight"], ["1", "1.0 mm — Standard"], ["2", "2.0 mm — Loose"]],
       String(box.lid_headroom_mm ?? 1));
     snugness.id = id("lid-snugness");
-    const latchCount = select([["auto", "Auto"], ["1", "1"], ["2", "2"]], box.latch_count || "auto");
+    const latchCount = select([], "1");
     latchCount.id = id("latch-count");
+    function syncLatchChoices(preferred = latchCount.value) {
+      const width = Number(xInput.value);
+      const canFitTwo = Number.isFinite(width) && width > 96;
+      const legacyChoice = preferred === "auto"
+        ? (canFitTwo ? "2" : "1")
+        : preferred;
+      latchCount.replaceChildren();
+      for (const [value, label] of [["0", "None"], ["1", "1"], ...(canFitTwo ? [["2", "2"]] : [])]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        latchCount.append(option);
+      }
+      latchCount.value = legacyChoice === "2" && !canFitTwo ? "1" : legacyChoice;
+      if (!latchCount.value) latchCount.value = "1";
+    }
+    syncLatchChoices(box.latch_count || "1");
+    for (const eventName of ["input", "change"]) {
+      xInput.addEventListener(eventName, () => syncLatchChoices(), { signal: events.signal });
+    }
     const latchRow = labeled("Number of latches", latchCount);
     const hingeCount = select([["2", "2"], ["1", "1"]], String(box.hinge_count) === "1" ? "1" : "2");
     hingeCount.id = id("hinge-count");
@@ -236,6 +256,7 @@
       const value = normalizeAxis(axis, requested, input.value);
       if (!Number.isFinite(value)) return NaN;
       input.value = String(value);
+      if (axis === "x") syncLatchChoices();
       showReadouts();
       if (!silent) onChange();
       return value;
@@ -295,7 +316,7 @@
           x, y, z,
           storage_box: {
             secure_lid: latched,
-            latch_count: latched ? latchCount.value : "auto",
+            latch_count: latchCount.value,
             hinge_count: latched ? hingeCount.value : "2",
             lid_headroom_mm: latched ? Number(snugness.value) : 1,
             edge_bevel: bevel.value,
@@ -337,7 +358,7 @@
       lidType.value = b.secure_lid ? "latched" : "lid_only";
       snugness.value = String(b.lid_headroom_mm ?? 1);
       bevel.value = bevelOf(space);
-      latchCount.value = b.latch_count || "auto";
+      syncLatchChoices(b.latch_count || "1");
       hingeCount.value = String(b.hinge_count) === "1" ? "1" : "2";
       stacking.value = String(!!b.stacking);
       handle.value = String(!!b.handle);

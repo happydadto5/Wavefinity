@@ -185,7 +185,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 - **Latched Lid**.
 - **Lid Only**.
 - Lid snugness / clearance choices.
-- Automatic or allowed latch count behavior based on the case.
+- **Number of latches**: None or 1 at every width; 2 only when the inside width is over 96 mm. New cases start with 1 latch. Older automatic counts are resolved from the case width when loaded.
 
 ### Case options
 

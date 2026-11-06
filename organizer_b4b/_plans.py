@@ -19,7 +19,6 @@ from ._constants import (
     B4B_SWEEP_STEP_DEG,
     B4B_LID_RELIEF_MAX,
     B4B_HINGE_AXIS_STEP,
-    B4B_LATCH_TWO_ABOVE_FIELD_X,
     B4B_HANDLE_WALL_CLEAR,
     B4B_RUNNING_GAP,
     B4B_HANDLE_BOTTOM_MARGIN,
@@ -421,49 +420,48 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         profile, profile.clear_span, profile.far_lug, "hinge"
     )
 
-    # ---- front latches: user override, else one authoritative width threshold #
-    if eff.b4b.latch_count == "1":
-        latch_count = 1
-    elif eff.b4b.latch_count == "2":
-        latch_count = 2
-    else:
-        latch_count = 1 if eff.x <= B4B_LATCH_TWO_ABOVE_FIELD_X + _EPS else 2
-    latch_centers_x = _root_centres(
-        layout, eff.x / 6.0, profile.latch_root_width, latch_count
-    )
-    latch_half = profile.latch_root_width / 2.0
-    front_crest = min(
-        _wall_extreme_y(layout, cx - latch_half, cx + latch_half, -1.0)
-        for cx in latch_centers_x
-    )
-    pivot_axis_z = lid_top_z - profile.pivot_radius
-    catch_axis_z = pivot_axis_z - profile.latch_draw
-    pivot_axis_y = front_crest - profile.pivot_standoff
-    catch_axis_y = front_crest - profile.catch_standoff
-    latch_root_out = _root_outward(profile.latch_root_depth, wall_depth)
-    latch_root_face_y = front_crest - latch_root_out
-    # Same rule as the hinge: the root stops below the lid's pivot ear so the
-    # lever swings on running clearance instead of rubbing its own receiver.
-    pivot_inboard = max(0.0, profile.pivot_standoff - latch_root_out)
-    pivot_down = math.sqrt(
-        max(0.0, profile.pivot_radius ** 2 - pivot_inboard ** 2)
-    )
-    latch_root_top_z = min(
-        underside_z - 1.0, pivot_axis_z - pivot_down - B4B_HW_CLEARANCE
-    )
-    if latch_root_top_z - profile.latch_root_height < 0.5:
-        raise ValueError(
-            f"a {eff.z:g} mm Storage Box is too short for a secure lid: the latch "
-            f"receiver needs {profile.latch_root_height:.0f} mm of front wall "
-            f"below the lid seam; use at least "
-            f"{B4B_LATCHED_MIN_HEIGHT:g} mm of bin height"
+    # ---- front latches: use the explicit, validated count ------------------ #
+    latch_count = int(eff.b4b.latch_count)
+    latch_centers_x: tuple[float, ...] = ()
+    latch_screw = catch_screw = 0
+    pivot_axis_y = pivot_axis_z = catch_axis_y = catch_axis_z = 0.0
+    front_crest = latch_root_top_z = latch_root_face_y = 0.0
+    if latch_count:
+        latch_centers_x = _root_centres(
+            layout, eff.x / 6.0, profile.latch_root_width, latch_count
         )
-    latch_screw = _screw_for_stack(
-        profile, profile.clear_span, profile.far_lug, "latch pivot"
-    )
-    catch_screw = _screw_for_stack(
-        profile, profile.clear_span, profile.far_lug, "catch"
-    )
+        latch_half = profile.latch_root_width / 2.0
+        front_crest = min(
+            _wall_extreme_y(layout, cx - latch_half, cx + latch_half, -1.0)
+            for cx in latch_centers_x
+        )
+        pivot_axis_z = lid_top_z - profile.pivot_radius
+        catch_axis_z = pivot_axis_z - profile.latch_draw
+        pivot_axis_y = front_crest - profile.pivot_standoff
+        catch_axis_y = front_crest - profile.catch_standoff
+        latch_root_out = _root_outward(profile.latch_root_depth, wall_depth)
+        latch_root_face_y = front_crest - latch_root_out
+        # Keep the receiver below its lid-side pivot ear with running clearance.
+        pivot_inboard = max(0.0, profile.pivot_standoff - latch_root_out)
+        pivot_down = math.sqrt(
+            max(0.0, profile.pivot_radius ** 2 - pivot_inboard ** 2)
+        )
+        latch_root_top_z = min(
+            underside_z - 1.0, pivot_axis_z - pivot_down - B4B_HW_CLEARANCE
+        )
+        if latch_root_top_z - profile.latch_root_height < 0.5:
+            raise ValueError(
+                f"a {eff.z:g} mm Storage Box is too short for a secure lid: the latch "
+                f"receiver needs {profile.latch_root_height:.0f} mm of front wall "
+                f"below the lid seam; use at least "
+                f"{B4B_LATCHED_MIN_HEIGHT:g} mm of bin height"
+            )
+        latch_screw = _screw_for_stack(
+            profile, profile.clear_span, profile.far_lug, "latch pivot"
+        )
+        catch_screw = _screw_for_stack(
+            profile, profile.clear_span, profile.far_lug, "catch"
+        )
 
     return B4BHardwarePlan(
         profile=profile,
@@ -487,7 +485,7 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         catch_axis_y=catch_axis_y,
         catch_axis_z=catch_axis_z,
         latch_front_crest=front_crest,
-        latch_root_width=profile.latch_root_width,
+        latch_root_width=profile.latch_root_width if latch_count else 0.0,
         latch_root_top_z=latch_root_top_z,
         latch_root_face_y=latch_root_face_y,
         fillet_radius=fillet,
@@ -667,10 +665,10 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
     # Where a latch shares the root's horizontal envelope, keep the same
     # clear wall between them by moving the mounting down toward the bottom.
     hardware = b4b_hardware_plan(box)
-    x_gap = min(
+    x_gap = min((
         abs(lc - hc) - (hardware.latch_root_width + dims.root_width) / 2.0
         for lc in hardware.latch_centers_x for hc in (-half, half)
-    )
+    ), default=math.inf)
     if x_gap + _EPS < B4B_FRONT_ROOT_SEPARATION:
         latch_bottom = hardware.latch_root_top_z - profile.latch_root_height
         clear_axis = latch_bottom - B4B_FRONT_ROOT_SEPARATION - dims.root_above

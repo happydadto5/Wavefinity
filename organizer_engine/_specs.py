@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import math
 from organizer_features.pegboard import PegboardMountSpec
 
@@ -265,11 +265,10 @@ SCOOP_CURVE_SEGMENTS = 32
 # tuning lives in ``organizer_b4b.py``; this dataclass is only the saved intent.
 # --------------------------------------------------------------------------- #
 B4B_LID_HEADROOM_CHOICES = (0.5, 1.0, 2.0)   # UI: Lid snugness (Tight/Standard/Loose)
-# Latch count and latch strength are both derived from the case now - the count
-# from one authoritative width threshold, the geometry from the automatically
-# selected screw family.  Both tuples survive only so an older saved design
-# still parses; neither is offered as a new choice.
-B4B_LATCH_COUNTS = ("auto", "1", "2")
+# Latch choices for a Storage Box. BoxSpec converts the legacy "auto" value
+# using this shared width threshold when it loads an older design.
+B4B_LATCH_TWO_ABOVE_FIELD_X = 96.0
+B4B_LATCH_COUNTS = ("0", "1", "2")
 B4B_LATCH_STRENGTHS = ("lightweight", "standard")
 # Rear hinge count for a secure lid; two is the default at every size.
 B4B_HINGE_COUNTS = ("1", "2")
@@ -454,7 +453,7 @@ class B4BSpec:
     enabled: bool = False
     lid: bool = True
     secure_lid: bool = True
-    latch_count: str = "auto"          # legacy only; derived from case width
+    latch_count: str = "1"              # 0 | 1 | 2
     latch_strength: str = "standard"   # legacy only; derived from screw family
     hinge_count: str = "2"             # 1 | 2; meaningful only with a secure lid
     lid_headroom_mm: float = 1.0       # UI: Lid snugness
@@ -470,7 +469,7 @@ class B4BSpec:
     version: int = B4B_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if self.latch_count not in B4B_LATCH_COUNTS:
+        if self.latch_count not in B4B_LATCH_COUNTS and self.latch_count != "auto":
             raise ValueError(
                 f"latch count must be one of {', '.join(B4B_LATCH_COUNTS)}"
             )
@@ -525,8 +524,7 @@ class B4BSpec:
         secure = bool(self.secure_lid) and legacy_lid
         stacking = bool(self.stacking) and legacy_lid
         handle = bool(self.handle) and secure
-        # Latch count is user-configurable (Auto/1/2); strength is still
-        # derived from the case, not an override.
+        # Count is explicit; strength is still derived from the case.
         latch_count = self.latch_count
         latch_strength = self.latch_strength
         return B4BSpec(
@@ -809,6 +807,9 @@ class BoxSpec:
                     f"grid so boxes of different sizes still interlock; "
                     f"{value:g} mm is not - try {nearest * GRID_PITCH:.0f} mm"
                 )
+        if self.b4b.latch_count == "auto":
+            resolved = "2" if self.x > B4B_LATCH_TWO_ABOVE_FIELD_X else "1"
+            object.__setattr__(self, "b4b", replace(self.b4b, latch_count=resolved))
         if self.wall_depth * 2.0 >= min(self.x, self.y) - WAVE_MATING_GAP - 2.0 * WAVE_AMPLITUDE:
             raise ValueError("wall thickness leaves no cavity")
 

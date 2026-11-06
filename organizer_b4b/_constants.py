@@ -303,9 +303,7 @@ B4B_HINGE_AXIS_STEP = 0.05       # quantum for any forced rearward move
 B4B_HINGE_MAX_PROJECTION = {"M2": 5.75, "M3": 7.0}
 
 # --- front latches --------------------------------------------------------- #
-# Deterministic count from one authoritative threshold, never "however many
-# old-style pads happened to fit".
-B4B_LATCH_TWO_ABOVE_FIELD_X = 96.0
+# Latch layout and hardware limits.
 B4B_LATCH_RELEASE_ANGLE = 25.0   # hook must be off the pin by here
 B4B_LATCH_OPEN_ANGLE = 75.0      # full sampled swing
 B4B_LATCH_DETENT = 0.20          # hook-mouth interference against the pin
