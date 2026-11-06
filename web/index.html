@@ -137,7 +137,7 @@
               </div>
             </div>
             <div id="surface-bin-controls" class="surface-bin-controls" hidden>
-              <div class="setting-group"><span class="setting-group-label">Base</span>
+              <div class="setting-group">
                 <div class="field-grid two">
                   <label title="The platform under this Surface bin. Auto matches the Base Trim edge.">Base height<select id="surface-base-mode"><option value="edge">Auto — Match Surface edge</option><option value="custom">Custom</option></select></label>
                   <label id="surface-base-custom-row">Custom base <span class="unit">mm</span><input id="surface-base-custom" type="number" min="0.4" step="0.1"></label>
@@ -146,7 +146,7 @@
                 </div>
                 <p class="muted surface-bin-help">Auto matches the Base Trim edge. If you are not using the Base Trim, choose Custom.</p>
               </div>
-              <div class="setting-group"><span class="setting-group-label">Planning</span>
+              <div class="setting-group">
                 <div class="field-grid two">
                   <label title="The object's full physical height or length. Wavefinity uses it only to plan this Surface.">Object height <span class="unit">mm</span><input id="surface-object-height" type="number" min="0.1" step="0.1" placeholder="Not set"></label>
                   <p id="surface-object-height-inline-error" class="field-error" hidden></p>
@@ -184,9 +184,9 @@
           </div>
           <div id="side-openings-option" class="lid-option-card" hidden>
             <div id="side-openings-panel">
-              <div class="setting-group"><span class="setting-group-label">Opening</span>
+              <div class="setting-group">
                 <div class="field-grid two">
-                  <label class="inline-select">Shape
+                  <label class="inline-select">Opening shape
                     <select id="side-opening-shape">
                       <option value="curved">Curved</option>
                       <option value="square">Square</option>
@@ -260,9 +260,8 @@
               </div>
 
               <div id="edge-mount-label-panel" class="b4b-card edge-mount-card">
-                <h4 class="b4b-card-title">Label</h4>
                 <div class="field-grid three">
-                  <label class="inline-select">Mode
+                  <label class="inline-select">Label mode
                     <select id="edge-mount-label-mode">
                       <option value="none">None</option>
                       <option value="separate">Separate part</option>
@@ -277,7 +276,7 @@
                       <input id="edge-mount-label-text" type="text" maxlength="80" placeholder="e.g. PRUNER">
                     </label>
                     <label class="checkbox-row"><span>Flip text</span><input id="edge-mount-label-flip" type="checkbox"></label>
-                    <label class="inline-select edge-mount-compact-select">Length
+                    <label class="inline-select edge-mount-compact-select">Label length
                       <select id="edge-mount-label-length-mode">
                         <option value="full">Full side</option>
                         <option value="text">Text length</option>
@@ -1141,7 +1140,6 @@
           </div>
           <div id="portable-case" class="storage-box-case">
             <div id="portable-case-lid-group" class="storage-box-group">
-              <h5 class="storage-box-subtitle">Lid</h5>
               <div class="space-dimension-row">
                 <label class="space-field"><span>Lid type</span>
                   <select id="portable-lid-type"><option value="latched" selected>Latched lid</option><option value="lid_only">Lid only</option></select>

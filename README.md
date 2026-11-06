@@ -152,6 +152,14 @@ not placed waits in the **Unplaced bins** rail beside the Space (a derived view 
 Inventory, in Inventory order - never stored coordinates). Drag it into the
 Space; drag a placed bin off the Space to unplace it again.
 
+**Field labels stand alone.** No section or group label may merely name the
+fields below it: every field label must stand alone without a group heading.
+When a field only makes sense under a heading, the heading's words fold into
+the field's label instead (*Label mode* and *Opening shape*, not *Mode* and
+*Shape* under a *Label* or *Opening* heading). Headings that carry a working
+control, screen and dialog titles, and list headings that do not explain
+themselves are not group labels and stay.
+
 ---
 
 ## Quick start

@@ -85,7 +85,6 @@
 
     // ---- Interior size (Width / Depth / Height, three across) ----
     const sizeGroup = el("div", "storage-box-group");
-    sizeGroup.append(el("h5", "storage-box-subtitle", "Interior size"));
     const sizeRow = el("div", "space-dimension-row");
     const sizeInput = (axis, value) => {
       const input = document.createElement("input");
@@ -112,7 +111,6 @@
 
     // Lid group
     const lidGroup = el("div", "storage-box-group");
-    lidGroup.append(el("h5", "storage-box-subtitle", "Lid"));
     const lidRow = el("div", "space-dimension-row");
     const lidType = select([["latched", "Latched lid"], ["lid_only", "Lid only"]],
       box.secure_lid ? "latched" : "lid_only");

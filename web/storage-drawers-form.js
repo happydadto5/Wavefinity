@@ -26,7 +26,7 @@
     for (const [key, title] of choices) { const option = document.createElement("option"); option.value = key; option.textContent = title; node.append(option); }
     node.value = String(value); return node;
   };
-  const group = (host, title) => { const section = el("div", "sd-form-group storage-box-group"); section.append(el("h5", "storage-box-subtitle", title)); host.append(section); return section; };
+  const group = host => { const section = el("div", "sd-form-group storage-box-group"); host.append(section); return section; };
   // Fix 1101 (Opus H4): drawer-wall choices must not offer values the backend
   // now rejects. Keep in sync with STORAGE_DRAWER_DRAWER_WALL_MIN_MM in
   // organizer_storage/drawers.py.
@@ -92,7 +92,7 @@
     name.disabled = mode === "edit";
     name.id = `sd-name-${epoch}`;
     name.dataset.heightNeutral = "1";
-    const sizeGroup = group(form, "Basics"); sizeGroup.classList.add("sd-basics-group");
+    const sizeGroup = group(form); sizeGroup.classList.add("sd-basics-group");
     sizeGroup.append(labeled("Space name", name,
       mode === "edit" ? "The Space name can't be changed - it is tied to the folder." : null));
     const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
@@ -147,7 +147,7 @@
       }
     };
     updatePrinterRow();
-    const drawersGroup = group(form, "Drawers"); drawersGroup.classList.add("sd-drawers-group");
+    const drawersGroup = group(form); drawersGroup.classList.add("sd-drawers-group");
     const count = input(block.drawers.length, "number"); count.min = String(minDrawers); count.max = String(maxDrawers); count.step = "1";
     count.id = `sd-count-${epoch}`;
     count.disabled = mode === "edit";
@@ -173,7 +173,7 @@
     drawersRowB.append(labeled("Handles", handles), handleField);
     drawersGroup.append(drawersRowA, drawersRowB);
     const drawerRows = el("div", "sd-drawer-rows"); drawersGroup.append(drawerRows);
-    const cabinet = group(form, "Cabinet"); cabinet.classList.add("sd-cabinet-group");
+    const cabinet = group(form); cabinet.classList.add("sd-cabinet-group");
     const style = select(block.cabinet_style, [["full", "Full"], ["open", "Open"]]);
     style.title = "Full hides the drawer rails behind solid side panels. Open uses slim frames so the rails stay visible.";
     const rear = select(block.rear_support, [["cross", "Rear cross"], ["solid", "Rear solid"]]);
@@ -195,8 +195,8 @@
       frameField);
     cabinet.append(cabinetRowA, cabinetRowB);
     // Finish: labels + material in one area (Fix 117).
-    const finish = group(form, "Finish"); finish.classList.add("sd-finish-group");
-    const labels = el("div", "sd-subgroup"); labels.append(el("strong", "sd-subhead", "Labels"));
+    const finish = group(form); finish.classList.add("sd-finish-group");
+    const labels = el("div", "sd-subgroup");
     const unitEnabled = select(String(block.unit_label_enabled), [["false", "Unit label off"], ["true", "Unit label on"]]);
     const unitText = input(block.unit_label_text); unitText.maxLength = labelLimit;
     unitText.id = `sd-unit-label-${epoch}`;
@@ -209,7 +209,7 @@
     const labelsRowB = el("div", "sd-size-grid");
     labelsRowB.append(labeled("Drawer labels", drawerEnabled), styleField);
     labels.append(labelsRowA, labelsRowB);
-    const material = el("div", "sd-subgroup"); material.append(el("strong", "sd-subhead", "Material")); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
+    const material = el("div", "sd-subgroup"); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
     material.append(matA, matB);
     // Fix 1101 (Opus H4): per-key UI floor. Only drawer_wall_mm is floored;
     // Cabinet/base/top keep the full drawer material list.
