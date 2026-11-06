@@ -31,7 +31,7 @@ from ._constants import (
     B4B_LABEL_KEEPOUT,
 )
 from ._layout import b4b_layout, b4b_lid_skin, b4b_effective_box, b4b_lid_underside_z
-from ._plans import _front_span, _wall_extreme_y, b4b_hardware_plan, b4b_handle_plan
+from ._plans import _front_span, b4b_hardware_plan, b4b_handle_plan
 from ._geometry import _stack_locator_centres, _weld
 
 
@@ -61,6 +61,7 @@ B4B_FRONT_LABEL_MARGIN_Y = 1.75         # plate margin above/below the text
 # ordinary running clearance, not a fit meant to compensate for the absence
 # of a retention feature.
 B4B_FRONT_LABEL_CLEAR = 0.25
+B4B_FRONT_LABEL_SIDE_CLEAR = 0.3         # running clearance at each plate edge
 # Total outward projection of the whole holder, measured from the locally
 # flattened wall face - not derived from the plate/clearance stack, so the
 # holder never balloons just because the plate got thinner or thicker.
@@ -270,7 +271,8 @@ def b4b_front_label_fit(box: BoxSpec) -> tuple[bool, float, float, float]:
             handle.root_bottom_z - B4B_LABEL_KEEPOUT,
             grip_bottom_z,
         )
-    side_margin = B4B_FRONT_LABEL_SIDE_LEG_W - B4B_FRONT_LABEL_SIDE_OVERLAP
+    side_margin = (B4B_FRONT_LABEL_SIDE_LEG_W - B4B_FRONT_LABEL_SIDE_OVERLAP
+                   + B4B_FRONT_LABEL_SIDE_CLEAR)
     # Generic placeholders (not the actual label text) used only to answer
     # "could any readable label ever fit here", so the UI can gate the
     # control before the user has typed anything.
@@ -561,7 +563,8 @@ def b4b_front_label_geometry(box: BoxSpec):
     plate_t = B4B_FRONT_LABEL_PLATE_T
     leg_w = B4B_FRONT_LABEL_SIDE_LEG_W
     side_overlap = B4B_FRONT_LABEL_SIDE_OVERLAP
-    side_margin = leg_w - side_overlap
+    side_clear = B4B_FRONT_LABEL_SIDE_CLEAR
+    side_margin = leg_w - side_overlap + side_clear
     holder_depth = B4B_FRONT_LABEL_HOLDER_DEPTH
 
     # Fit the lettering to the widest space the envelope could ever offer,
@@ -602,10 +605,10 @@ def b4b_front_label_geometry(box: BoxSpec):
     # The real B4B wall is wavy (a printable interlock texture); the label
     # needs a flat backing instead, so fill the wave valleys - only across
     # this holder's own footprint, never touching the child-bin mating face
-    # or the rest of the wall - out to the most outward point the wave
-    # reaches over that span.  Every other member below is built against
-    # this flat reference, not the raw wavy exterior.
-    flat_back_y = _wall_extreme_y(layout, -holder_w / 2.0, holder_w / 2.0, -1.0)
+    # or the rest of the wall - out to the actual body's foremost bound.
+    # This also accounts for rounded corners on small cases. Every other
+    # member is built against this flat reference, not the raw exterior.
+    flat_back_y = layout.outer_structural_polygon.bounds[1]
     # Guaranteed inside solid wall material for every x in the span (the
     # wave's shallowest possible point, plus a small margin) - never as deep
     # as the inner mating face, so child-bin capacity is untouched.
@@ -657,11 +660,11 @@ def b4b_front_label_geometry(box: BoxSpec):
 
     def _side_channel(side: float) -> trimesh.Trimesh:
         """One left/right channel: a leg attached to the flat patch with a
-        front lip overlapping ``side_overlap`` of the plate's edge, so the
+        front lip overlapping the plate's edge, so the
         plate must be lifted clear of it rather than pulled straight out the
         front - unlike a friction-fit slide, nothing depends on how snugly
         it happens to sit."""
-        leg_centre_x = side * (plate_w / 2.0 - side_overlap + leg_w / 2.0)
+        leg_centre_x = side * (plate_w / 2.0 + side_clear - side_overlap + leg_w / 2.0)
         leg_depth = (flat_back_y + embed) - holder_front_y
         leg = trimesh.creation.box(extents=(leg_w, leg_depth, plate_h))
         leg.apply_translation((
@@ -669,7 +672,7 @@ def b4b_front_label_geometry(box: BoxSpec):
             (flat_back_y + embed + holder_front_y) / 2.0,
             (seat_z + holder_top_z) / 2.0,
         ))
-        slot_centre_x = side * (plate_w / 2.0 - side_overlap / 2.0)
+        slot_centre_x = side * (plate_w / 2.0 + side_clear - side_overlap / 2.0)
         slot = trimesh.creation.box(extents=(side_overlap, channel_t, plate_h))
         slot.apply_translation((
             slot_centre_x,
