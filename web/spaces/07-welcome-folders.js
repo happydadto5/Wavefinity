@@ -158,10 +158,14 @@ SP.renderOtherSpaces = () => {
     const list = container.querySelector("[data-other-spaces-list]");
     list.innerHTML = SP.otherSpaces.map((one, index) => {
       const kind = SP_KINDS[one.kind];
-      const meta = [kind?.label || "Space", one.summary_text || SP.sizeText(one.size)].filter(Boolean).join(" · ");
-      return `<li class="welcome-recent-item"><button type="button" class="welcome-recent-open" data-other-index="${index}" title="${escapeHtml(one.folder)}">
+      // An unreadable Space is shown with its reason but cannot be opened.
+      const unavailable = Boolean(one.invalid);
+      const meta = unavailable
+        ? [one.error || "Space unavailable"]
+        : [kind?.label || "Space", one.summary_text || SP.sizeText(one.size)].filter(Boolean);
+      return `<li class="welcome-recent-item${unavailable ? " missing" : ""}"><button type="button" class="welcome-recent-open" data-other-index="${index}" title="${escapeHtml(one.folder)}"${unavailable ? " disabled" : ""}>
         <span class="welcome-recent-icon" aria-hidden="true">${SP.compactKindIcon(one.kind)}</span>
-        <span class="welcome-recent-text"><strong>${escapeHtml(one.name)}</strong><small>${escapeHtml(meta)}</small></span>
+        <span class="welcome-recent-text"><strong>${escapeHtml(one.name)}</strong><small>${escapeHtml(meta.join(" · "))}</small></span>
       </button></li>`;
     }).join("");
   });

@@ -16,7 +16,7 @@ from organizer_engine import (
     BASE_UNIT,
     MIN_HEIGHT_ABOVE_BASE,
 )
-from organizer_engine._specs import B4B_EDGE_BEVELS, B4B_HINGE_COUNTS, B4B_HINGE_TYPES
+from organizer_engine._specs import B4B_LATCH_TWO_ABOVE_FIELD_X, B4B_EDGE_BEVELS, B4B_HINGE_COUNTS, B4B_HINGE_TYPES
 from organizer_engine.product_rules import (
     B4B_LATCHED_MIN_HEIGHT,
     B4B_MIN_FIELD_XY,
@@ -88,7 +88,7 @@ def storage_box_defaults() -> dict[str, Any]:
     """The established B4B/Storage Box settings a new or legacy Space starts from."""
     return {
         "secure_lid": True,
-        "latch_count": "auto",
+        "latch_count": "1",
         "hinge_count": "2",
         "hinge_type": "screw",
         "latch_strength": "standard",
@@ -135,13 +135,17 @@ def _storage_box_material(raw: Any, name: str) -> float:
     return value
 
 
-def normalise_storage_box(raw: Any) -> dict[str, Any]:
+def normalise_storage_box(raw: Any, width_mm: Any = None) -> dict[str, Any]:
     """A complete, validated ``space.storage_box`` block.
 
     Missing keys read the established defaults, so a legacy Storage Box Space
     with no block behaves exactly like a new one with default settings. The
     block never carries redundant ``enabled``/``lid`` flags: a Storage Box Space
     is always a B4B case with a lid.
+
+    A legacy stored latch count of ``"auto"`` resolves in memory to the count
+    the box supports by its width (``width_mm``): 2 only over the engine's
+    threshold, else 1. Nothing is written back here.
     """
     if raw is None:
         raw = {}
@@ -150,6 +154,12 @@ def normalise_storage_box(raw: Any) -> dict[str, Any]:
     merged = {**storage_box_defaults(), "edge_bevel": "none", **{
         key: value for key, value in raw.items() if key in storage_box_defaults()
     }}
+    if str(merged["latch_count"]).strip().lower() == "auto":
+        try:
+            wide = float(width_mm) > B4B_LATCH_TWO_ABOVE_FIELD_X
+        except (TypeError, ValueError):
+            wide = False
+        merged["latch_count"] = "2" if wide else "1"
     headroom = merged["lid_headroom_mm"]
     if isinstance(headroom, bool):
         raise ValueError("storage box lid snugness must be a number in mm")
@@ -266,7 +276,7 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
         result["max_x_mm"], result["max_y_mm"] = surface_maximums(
             raw, x, y, trim_size, strict=True)
     if kind == "portable":
-        result["storage_box"] = normalise_storage_box(raw.get("storage_box"))
+        result["storage_box"] = normalise_storage_box(raw.get("storage_box"), x)
     return result
 
 def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> None:

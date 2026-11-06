@@ -339,15 +339,43 @@ def _unused_migrate(
     _write_metadata(folder, mode, space, inventory)
 
 
+def _unavailable_space_entry(folder: Path, error: Exception) -> dict[str, Any]:
+    """A Space folder that could not be read, named instead of left out.
+
+    Shaped like a recent-list entry marked ``invalid``; ``error`` is the
+    plain-words reason shown beside it.
+    """
+    if isinstance(error, FolderMetadataError):
+        reason = str(error).replace(" Nothing was changed.", "").replace(" The file was left unchanged.", "")
+    else:
+        reason = "Its files could not be read."
+    return {
+        "folder": str(folder),
+        "name": folder.name,
+        "folder_mode": "space",
+        "space_id": None,
+        "kind": None,
+        "size": None,
+        "missing": False,
+        "invalid": True,
+        "error": f"Unavailable: {reason}".strip(),
+    }
+
+
 def other_spaces(
     prefs: dict[str, Any], exclude_space_id: str | None = None,
     exclude_folder: str | Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Discover healthy direct-child Spaces without changing folder or profile state."""
+    """Discover direct-child Spaces without changing folder or profile state.
+
+    A Space folder that cannot be read is listed as an unavailable entry
+    (``invalid`` with a plain-words ``error``), never silently left out.
+    """
     root = effective_space_root(prefs)
     if not root.is_dir():
         return []
     by_id: dict[str, list[dict[str, Any]]] = {}
+    unavailable: list[dict[str, Any]] = []
     try:
         children = root.iterdir()
         for child in children:
@@ -355,7 +383,11 @@ def other_spaces(
                 continue
             try:
                 info = describe(child.resolve(), prefs)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as error:
+                # Only a folder that carries Wavefinity metadata can be a broken
+                # Space; any other folder is simply not one.
+                if (child / METADATA_FILE).exists() or (child / LEGACY_METADATA_FILE).exists():
+                    unavailable.append(_unavailable_space_entry(child, error))
                 continue
             sid = info.get("space_id")
             if (info["folder_mode"] != "space" or not sid or not info.get("space")
@@ -370,7 +402,10 @@ def other_spaces(
         (excluded_id and entry["space_id"] == excluded_id)
         or (not excluded_id and exclude_folder and _same(entry["folder"], exclude_folder))
     )]
-    return sorted(unique, key=lambda entry: (entry["name"].casefold(), entry["folder"].casefold()))
+    unavailable = [entry for entry in unavailable if not (
+        not excluded_id and exclude_folder and _same(entry["folder"], exclude_folder)
+    )]
+    return sorted([*unique, *unavailable], key=lambda entry: (entry["name"].casefold(), entry["folder"].casefold()))
 
 
 def prepare_folder_for_open(target: Path, prefs: dict[str, Any]) -> dict[str, Any]:
@@ -662,11 +697,20 @@ def space_routes(
             current = load_preferences()
             return {"folder": None, "space": None, "recent": recent(current), "storage": storage,
                     "other_spaces": welcome_spaces(current)}
-        info = describe(target, prefs)
-        if not info["needs_setup"]:
-            info = prepare_folder_for_open(target, prefs)
+        try:
+            info = describe(target, prefs)
             if not info["needs_setup"]:
-                remember_prepared(target, info)
+                info = prepare_folder_for_open(target, prefs)
+                if not info["needs_setup"]:
+                    remember_prepared(target, info)
+        except DuplicateSpaceError:
+            raise
+        except (OSError, ValueError):
+            # One unreadable Space must not abort startup: fall through to Home
+            # and list it (as unavailable) with the other Spaces.
+            current = load_preferences()
+            return {"folder": None, "space": None, "recent": recent(current), "storage": storage,
+                    "other_spaces": other_spaces(current)}
         current = load_preferences()
         return {"folder": info, "space": info, "recent": recent(current), "storage": storage,
                 "other_spaces": welcome_spaces(current, target)}

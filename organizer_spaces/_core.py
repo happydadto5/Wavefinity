@@ -268,7 +268,7 @@ def _space(raw: Any) -> dict[str, Any] | None:
         # A legacy Storage Box Space with no block reads the established
         # defaults; it needs no migration.
         try:
-            res["storage_box"] = normalise_storage_box(raw.get("storage_box"))
+            res["storage_box"] = normalise_storage_box(raw.get("storage_box"), size[0])
         except ValueError:
             return None
     return res

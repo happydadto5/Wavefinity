@@ -27,6 +27,7 @@ from organizer_base_trim import (
     base_trim_design_to_dict,
 )
 from organizer_engine import B4BSpec, BoxSpec
+from organizer_engine._specs import B4B_LATCH_TWO_ABOVE_FIELD_X
 from organizer_inserts import EDITOR_SNAP, Layout
 from organizer_inventory import normalise_space_definition
 from organizer_engine.product_rules import SURFACE_TRIM_HEIGHTS
@@ -65,7 +66,7 @@ def storage_box_design(space: dict[str, Any]) -> dict[str, Any]:
         enabled=True,
         lid=True,
         secure_lid=settings["secure_lid"],
-        latch_count=settings["latch_count"] if settings["secure_lid"] else "auto",
+        latch_count=settings["latch_count"] if settings["secure_lid"] else ("2" if definition["x"] > B4B_LATCH_TWO_ABOVE_FIELD_X else "1"),
         hinge_count=settings["hinge_count"],
         hinge_type=settings.get("hinge_type", "screw"),
         latch_strength=settings["latch_strength"],

@@ -357,7 +357,7 @@ def _is_base_trim_request(payload: dict[str, Any]) -> bool:
 
 def _storage_box_arrangement_issue(arranged: dict[str, Any], space: dict[str, Any]) -> str | None:
     if any(abs(float(arranged.get(axis, 0)) - float(space[axis])) > 1e-6 for axis in ("x", "y", "z")) \
-            or normalise_storage_box(arranged.get("storage_box")) != normalise_storage_box(space.get("storage_box")):
+            or normalise_storage_box(arranged.get("storage_box"), space["x"]) != normalise_storage_box(space.get("storage_box"), space["x"]):
         return "Storage Box settings and saved arrangement disagree. Reopen this Space and try again."
     return None
 
