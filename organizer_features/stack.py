@@ -61,6 +61,7 @@ from organizer_features.lid_hinge import (
     HINGE_BORE_RADIUS,
     HINGE_PIN_DIAMETER,
     LidHinge,
+    body_hinge_cutters,
     body_hinge_parts,
     hinge_layout,
     lid_hinge_parts,
@@ -274,7 +275,8 @@ def _lid_hinge(eff: BoxSpec) -> LidHinge | None:
     hinge = _FLIP_HINGES.get(key)
     if hinge is None:
         hinge = hinge_layout(wavy_cavity_polygon(eff), eff.z, rise, seat,
-                             STACK_PLUG_DEPTH, eff.base_thickness)
+                             STACK_PLUG_DEPTH, eff.base_thickness,
+                             outer=wavy_outer_polygon(eff))
         if len(_FLIP_HINGES) > 32:
             _FLIP_HINGES.clear()
         _FLIP_HINGES[key] = hinge
@@ -340,10 +342,10 @@ def _swept_plug_polygon(eff: BoxSpec, hinge: LidHinge) -> Polygon:
             for sign, squared in ((-1.0, forward_sq), (1.0, backward_sq)):
                 if squared <= _EPS:
                     continue
-                # q is at least rail_radius + gap + link skin, safely greater
-                # than the complete 3 mm plug depth for the inverse root.
-                end0 = hinge.axis_y - math.sqrt(q0*q0 + sign*squared)
-                end1 = hinge.axis_y - math.sqrt(q1*q1 + sign*squared)
+                # Close to the corner pin no plug point can sweep as far as
+                # this edge; clamping there only trims more, never less.
+                end0 = hinge.axis_y - math.sqrt(max(0.0, q0*q0 + sign*squared))
+                end1 = hinge.axis_y - math.sqrt(max(0.0, q1*q1 + sign*squared))
                 band = Polygon([(x0, y0), (x1, y1), (x1, end1), (x0, end0)])
                 if band.area > 0.0:
                     bands.append(band)
@@ -574,6 +576,12 @@ def stack_body_cutters(eff: BoxSpec) -> list[trimesh.Trimesh]:
         # A flip lid carries no lock bumps (see make_lid_parts), so no notches.
         if not lid_has_flip(eff):
             cutters.extend(_lid_lock_notches(eff))
+        else:
+            # The flip lid's knuckles swing in room cut from the back wall top,
+            # and the pin bore runs out through both side walls.
+            hinge = _lid_hinge(eff)
+            if hinge is not None:
+                cutters.extend(body_hinge_cutters(hinge))
     return cutters
 
 
@@ -745,8 +753,7 @@ def make_lid_parts(
     # with no step.  The plug below it keeps its own running clearance, and the
     # lid lock bumps keep their own interference, both independent of the
     # plate.  Nothing here is a preview-only offset.
-    # A flip plate has the concentric rail nose removed from its rear edge.
-    # Its matching fixed rail bears on the back rim and shares this top height.
+    # A flip plate is cleared behind the hinge pin and over each bin knuckle.
     # It has no lock bumps to resist the swing.
     plate = _extrude_polygon(outer, rise)
     plate.apply_translation((0.0, 0.0, rim))
@@ -770,9 +777,11 @@ def make_lid_parts(
         lid = union([lid, handle])
 
     if hinge is not None:
-        # Links pass under the circular rail nose; every moving knuckle and
-        # link remains below the top / stacking recess floor.
-        lid = union([lid, *lid_hinge_parts(hinge)])
+        # Lid knuckles sit in the back-top corner, flush with the back face and
+        # the lid top; a stacking lid's seat is cut through them as well.
+        lid = union([lid, *lid_hinge_parts(hinge, wavy_outer_polygon(eff))])
+        if lid_stackable(eff):
+            lid = difference([lid, _lid_stack_seat(eff)])
 
     regions = label_regions or []
     if lid_spec(eff).label_enabled and not regions:

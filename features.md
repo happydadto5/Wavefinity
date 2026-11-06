@@ -786,12 +786,12 @@ If a requested handle cannot physically fit, Wavefinity rejects it rather than s
 
 The Hinged Lid kind is available for stackable and non-stackable lids alike. It does not depend on the handle: a flip lid may still carry a Knob or Pull to lift it by.
 
-When on, the lid and bin gain a hinge along the back inside edge (the back is always the hinge side; there is no side choice):
+When on, the lid and bin gain a piano hinge across the full back edge, in the back-top corner (the back is always the hinge side; there is no side choice):
 
-- The pin is a strand of standard 1.75 mm filament that you thread through the hinge. It is the only part that is not printed. The channel through the knuckles is 2.15 mm across (0.2 mm printable clearance each side).
-- The hinge is inside the bin. Knuckles alternate lid / bin / lid along a straight pin axis, below the lid top and any stacking recess. The bin's walls and base do not change. A fixed rail takes a shallow strip along the back top interior, following the actual wavy back outline.
-- The fixed rail covers the back rim. Rail and moving plate share the usual closed top height and the same stacking recess, so a stackable flip lid still takes a bin on top. A rounded joint with a small running seam lets the plate turn without striking the rail. Links pass underneath the rail; thin lids place the pin lower to leave printable material under the stacking seat.
-- Open, the lid swings back past vertical (to at least 105 degrees) and stays open by itself, leaving the bin's opening clear.
+- The pin is a strand of standard 1.75 mm filament. It is the only part that is not printed. The channel through the knuckles is 2.15 mm across (0.2 mm printable clearance each side) and runs straight out through both side walls, so both ends are open and the filament can be pushed in from either side.
+- Knuckles alternate bin / lid / bin across the whole width, with bin knuckles at both ends. They use the support-free octagon shape. Their backs sit on the deepest point of the bin's wavy back face and their tops on the lid top, so the closed bin is no deeper and no taller and still nests against its neighbours. The hinge cuts into the back top corner instead: each bin knuckle's underside runs down to the inside wall at 45 degrees, so it prints upright without support.
+- A stackable flip lid keeps its stacking recess; the recess is cut through the knuckles too, and the pin sits lower so the bore keeps a full shell under the recess floor.
+- Open, the lid swings back past vertical and rests at 105 degrees on a flat stop: a square heel on each lid knuckle lands on a ledge cut in the back wall, not on the knuckle outlines. A bin with a neighbour directly behind it opens to about 90 degrees.
 - The below-rim plug is trimmed against the complete swing arcs at every depth, keeping at least the selected Lid fit (Tight / Standard / Loose) from the front and side waves throughout opening. This can leave extra plug clearance when closed; the rim seat remains unchanged.
 - A flip lid has no snap-fit lock bumps; holding the lid shut is a separate feature.
 
