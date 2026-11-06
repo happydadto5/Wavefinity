@@ -120,7 +120,7 @@ SP.printPegboardHooks = async () => {
 // Fix 004 Correction 6.M.
 const wireInfoButtons = (prefix = "space-head") => {
     const btnOpen = document.getElementById(prefix + "-open");
-    if (btnOpen) btnOpen.addEventListener("click", () => SP.run(SP.openExisting));
+    if (btnOpen) btnOpen.addEventListener("click", SP.openLaunchSelection);
     const btnEdit = document.getElementById(prefix + "-edit");
     if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
     const btnPrinterSettings = document.getElementById(prefix + "-printer-settings");

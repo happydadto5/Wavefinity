@@ -390,6 +390,12 @@ SP.showHome = (message = null) => {
   SP.showDialog();
 };
 
+// Open Space... in the design area: the same launch selection screen as at
+// startup. It is a modal over the design, so closing it without a choice
+// (X, backdrop, Escape) leaves the design untouched, and every choice on it
+// runs the same resume/open/new-space flow as at launch.
+SP.openLaunchSelection = () => SP.showHome();
+
 // The Wavefinity Folder control stays below the main Welcome actions.
 SP.renderStorageCard = () => {
   const info = SP.storage;
