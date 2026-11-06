@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import numpy as np
+import trimesh
 from organizer_engine import CORNER_INSET, GRID_PITCH, BoxSpec
 
 from ._constants import (
@@ -22,6 +24,9 @@ from ._constants import (
     B4B_LATCH_MAX_PROJECTION,
     B4B_HANDLE_GRIP_ABS_MIN,
     B4B_HANDLE_MAX_PROJECTION,
+    B4B_RUNNING_GAP,
+    B4B_HANDLE_STOP_FACE,
+    B4B_HANDLE_DETENT_RAMP,
     B4B_FRONT_ROOT_SEPARATION,
     _EPS,
 )
@@ -59,12 +64,263 @@ from ._compose import b4b_body_with_features
 # construction everywhere; this allowance exists because mesh booleans on a
 # wavy case leave slivers, never to give a real clash somewhere to hide.
 B4B_NOISE_CC = 0.05
-# The only interference a stowed bail may show is its two stow detents.  This
-# is an *absolute* ceiling on that, checked alongside the swept comparison:
-# a baseline comparison on its own cannot see a rotation-invariant clash,
-# because an eye buried in its own fork overlaps by the same amount at every
-# angle and therefore never looks like motion adding interference.
-B4B_HANDLE_STOWED_CEIL_CC = 0.02
+
+
+def _triangle_distances(a, b):
+    """Exact triangle-pair distances, including edge crossings and piercings."""
+    best = np.full(len(a), np.inf)
+    for i in range(3):
+        q = trimesh.triangles.closest_point(b, a[:, i])
+        best = np.minimum(best, np.sum((q - a[:, i]) ** 2, axis=1))
+        q = trimesh.triangles.closest_point(a, b[:, i])
+        best = np.minimum(best, np.sum((q - b[:, i]) ** 2, axis=1))
+    for i in range(3):
+        p, u = a[:, i], a[:, (i + 1) % 3] - a[:, i]
+        for j in range(3):
+            q, v = b[:, j], b[:, (j + 1) % 3] - b[:, j]
+            w = p - q
+            uu = np.einsum('ij,ij->i', u, u)
+            vv = np.einsum('ij,ij->i', v, v)
+            uv = np.einsum('ij,ij->i', u, v)
+            uw = np.einsum('ij,ij->i', u, w)
+            vw = np.einsum('ij,ij->i', v, w)
+            den = uu * vv - uv * uv
+            nonparallel = den > 1e-20
+            t = np.divide(uv * vw - vv * uw, den,
+                          out=np.zeros_like(den), where=nonparallel)
+            r = np.divide(uu * vw - uv * uw, den,
+                          out=np.zeros_like(den), where=nonparallel)
+            interior = nonparallel & (t >= 0) & (t <= 1) & (r >= 0) & (r <= 1)
+            d = np.sum((w + t[:, None] * u - r[:, None] * v) ** 2, axis=1)
+            best = np.minimum(best, np.where(interior, d, np.inf))
+            # Boundary minima of the segment pair.
+            for end in (p, p + u):
+                f = np.clip(np.divide(np.einsum('ij,ij->i', end - q, v), vv,
+                                     out=np.zeros_like(vv), where=vv > 1e-20), 0, 1)
+                best = np.minimum(best, np.sum((end - q - f[:, None] * v) ** 2, axis=1))
+            for end in (q, q + v):
+                f = np.clip(np.divide(np.einsum('ij,ij->i', end - p, u), uu,
+                                     out=np.zeros_like(uu), where=uu > 1e-20), 0, 1)
+                best = np.minimum(best, np.sum((end - p - f[:, None] * u) ** 2, axis=1))
+        # An edge may pierce a triangle without meeting any of its edges.
+        for tri, origin, direction in ((b, p, u),
+                                       (a, b[:, i], b[:, (i + 1) % 3] - b[:, i])):
+            e1, e2 = tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]
+            h = np.cross(direction, e2)
+            det = np.einsum('ij,ij->i', e1, h)
+            inv = np.divide(1.0, det, out=np.zeros_like(det), where=abs(det) > 1e-14)
+            offset = origin - tri[:, 0]
+            bary_u = inv * np.einsum('ij,ij->i', offset, h)
+            cross = np.cross(offset, e1)
+            bary_v = inv * np.einsum('ij,ij->i', direction, cross)
+            along = inv * np.einsum('ij,ij->i', e2, cross)
+            hit = ((abs(det) > 1e-14) & (bary_u >= 0) & (bary_v >= 0)
+                   & (bary_u + bary_v <= 1) & (along >= 0) & (along <= 1))
+            best[hit] = 0.0
+    return np.sqrt(best)
+
+
+def _handle_contact_faces(triangles, plan, *, moving):
+    """Name only complete triangles on the two specific mating surface pairs.
+
+    A face crossing a contact boundary is deliberately not exempt. Neither an
+    angle nor a whole moving/fixed part is ever excluded from clearance.
+    """
+    tags = np.zeros(len(triangles), dtype=int)
+    tol = 2e-5
+    for index, cx in enumerate(plan.centers_x, 1):
+        x = triangles[:, :, 0] - cx
+        y = triangles[:, :, 1] - plan.axis_y
+        z = triangles[:, :, 2] - plan.axis_z
+        axial = np.all(abs(x) <= plan.eye_band / 2.0 + tol, axis=1)
+        if moving:
+            ang = math.radians(plan.stop_angle)
+            radial = y * math.cos(ang) + z * math.sin(ang)
+            tangent = -y * math.sin(ang) + z * math.cos(ang)
+            mask = axial & np.all((radial >= plan.eye_radius - 0.6 - tol)
+                    & (abs(tangent) <= B4B_HANDLE_STOP_FACE / 2.0 + tol), axis=1)
+        else:
+            wall_y = triangles[:, :, 1] - plan.front_crest
+            mask = axial & np.all((wall_y >= -tol) & (wall_y <= 1.2 + tol)
+                    & (abs(z) <= B4B_HANDLE_STOP_FACE / 2.0 + tol), axis=1)
+            # Only exposed pad faces, never wall triangles inside its volume.
+            on_face = np.all(abs(wall_y) <= tol, axis=1)
+            on_face |= np.all(abs(abs(z) - B4B_HANDLE_STOP_FACE / 2.0) <= tol, axis=1)
+            on_face |= np.all(np.isclose(abs(x), plan.eye_band / 2.0, atol=tol, rtol=0.0), axis=1)
+            mask &= on_face
+        tags[mask] = index
+    for index, cx in enumerate(plan.detent_centers_x, 3):
+        if moving:
+            # Pocket floor plus its entry rim form one detent contact
+            # surface. Include the bump's ramp footprint, so the unchanged
+            # elastic snap can ride onto/off that rim at any swing angle.
+            stand = plan.wall_clear + plan.detent_bump
+            radius = max(2.0 * B4B_HANDLE_DETENT_RAMP, stand + B4B_HANDLE_DETENT_RAMP)
+            reach = radius + B4B_RUNNING_GAP
+            delta = triangles - [cx, plan.axis_y, plan.detent_pocket_z]
+            patch = np.all((abs(delta[:, :, 0]) <= reach + tol)
+                           & (abs(delta[:, :, 2]) <= reach + tol)
+                           & (delta[:, :, 1] >= plan.thickness / 2.0 - 0.01), axis=1)
+            # Include cut pocket walls/floor as well as the outer entry rim.
+            depth = max(0.05, plan.detent_bump - plan.detent_interference)
+            centre = np.array([cx, plan.axis_y + plan.eye_radius, plan.detent_pocket_z])
+            half = np.array([plan.band * 0.35, depth, 1.5])
+            d = abs(triangles - centre)
+            pocket = np.all(d <= half + tol, axis=(1, 2))
+            tags[patch | pocket] = index
+        else:
+            stand = plan.wall_clear + plan.detent_bump
+            radius = max(2.0 * B4B_HANDLE_DETENT_RAMP, stand + B4B_HANDLE_DETENT_RAMP)
+            centre = np.array([cx, plan.front_crest, plan.detent_z])
+            bump = trimesh.creation.icosphere(subdivisions=2, radius=radius)
+            bump.apply_scale((1.0, stand / radius, 1.0))
+            bump.apply_translation(centre)
+            lo, hi = bump.bounds
+            local = np.flatnonzero(np.all(triangles.max(axis=1) >= lo - tol, axis=1)
+                                   & np.all(triangles.min(axis=1) <= hi + tol, axis=1))
+            # Boolean cuts add vertices *within* the flat icosphere facets.
+            # Comparing ellipsoid radii would misclassify those real faces.
+            for start in range(0, len(local), 128):
+                ids = local[start:start + 128]
+                points = np.concatenate((triangles[ids], triangles[ids].mean(axis=1)[:, None]), axis=1)
+                _, distances, _ = trimesh.proximity.closest_point_naive(bump, points.reshape(-1, 3))
+                tags[ids[np.all(distances.reshape(-1, 4) <= tol, axis=1)]] = index
+
+    return tags
+
+
+def _split_detent_surfaces(triangles, plan):
+    """Split large arm triangles at the local detent-patch boundary.
+
+    Classification must not depend on the boolean engine's triangulation of
+    an otherwise flat arm face, nor exempt the rest of that face.
+    """
+    stand = plan.wall_clear + plan.detent_bump
+    radius = max(2.0 * B4B_HANDLE_DETENT_RAMP, stand + B4B_HANDLE_DETENT_RAMP)
+    reach = radius + B4B_RUNNING_GAP
+    result = list(triangles)
+    for cx in plan.detent_centers_x:
+        limits = ((0, cx - reach), (0, cx + reach),
+                  (2, plan.detent_pocket_z - reach), (2, plan.detent_pocket_z + reach),
+                  (1, plan.axis_y + plan.thickness / 2.0 - 0.01))
+        output = []
+        for triangle in result:
+            lo, hi = triangle.min(axis=0), triangle.max(axis=0)
+            if (hi[0] < cx - reach or lo[0] > cx + reach
+                    or hi[2] < plan.detent_pocket_z - reach
+                    or lo[2] > plan.detent_pocket_z + reach):
+                output.append(triangle)
+                continue
+            polygons = [list(triangle)]
+            for axis, value in limits:
+                divided = []
+                for poly in polygons:
+                    if min(v[axis] for v in poly) >= value or max(v[axis] for v in poly) <= value:
+                        divided.append(poly)
+                        continue
+                    sides = [[], []]
+                    for v, w in zip(poly, poly[1:] + poly[:1]):
+                        side = int(v[axis] >= value)
+                        sides[side].append(v)
+                        if (v[axis] < value < w[axis]) or (w[axis] < value < v[axis]):
+                            point = v + (w - v) * ((value - v[axis]) / (w[axis] - v[axis]))
+                            sides[0].append(point)
+                            sides[1].append(point)
+                        elif v[axis] == value:
+                            sides[1 - side].append(v)
+                    divided.extend(side for side in sides if len(side) >= 3)
+                polygons = divided
+            for poly in polygons:
+                for i in range(1, len(poly) - 1):
+                    tri = np.asarray([poly[0], poly[i], poly[i + 1]])
+                    if np.linalg.norm(np.cross(tri[1] - tri[0], tri[2] - tri[0])) > 1e-12:
+                        output.append(tri)
+        result = output
+    return np.asarray(result)
+
+
+def _validate_handle_clearance(bail, body, plan):
+    """Surface-pair clearance over the entire rest-to-stop interval.
+
+    Triangle distances catch grazing, unlike volume. Midpoint checks use a
+    rotational displacement bound to certify the intervals between poses;
+    uncertain intervals subdivide rather than silently skipping a short rub.
+    """
+    fixed = np.asarray(body.triangles)
+    source = _split_detent_surfaces(np.asarray(bail.triangles), plan)
+    moving_tags = _handle_contact_faces(source, plan, moving=True)
+    fixed_tags = _handle_contact_faces(fixed, plan, moving=False)
+    low, high = fixed.min(axis=1), fixed.max(axis=1)
+
+    def tree(ids):
+        lo, hi = low[ids].min(axis=0), high[ids].max(axis=0)
+        if len(ids) <= 24:
+            return lo, hi, ids, None
+        axis = int(np.argmax(hi - lo))
+        ids = ids[np.argsort((low[ids, axis] + high[ids, axis]))]
+        mid = len(ids) // 2
+        return lo, hi, tree(ids[:mid]), tree(ids[mid:])
+
+    root = tree(np.arange(len(fixed)))
+
+    def candidates(node, lo, hi):
+        if np.any(node[1] < lo) or np.any(node[0] > hi):
+            return []
+        if node[3] is None:
+            ids = node[2]
+            return ids[np.all(high[ids] >= lo, axis=1) & np.all(low[ids] <= hi, axis=1)].tolist()
+        return candidates(node[2], lo, hi) + candidates(node[3], lo, hi)
+
+    radii = np.linalg.norm(source[:, :, 1:] - [plan.axis_y, plan.axis_z], axis=2).max(axis=1)
+    gap = B4B_RUNNING_GAP
+
+    def certify(left, right):
+        angle = (left + right) / 2.0
+        half = math.radians((right - left) / 2.0)
+        moved = source.copy()
+        yz = source[:, :, 1:] - [plan.axis_y, plan.axis_z]
+        c, sn = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+        moved[:, :, 1] = yz[:, :, 0] * c - yz[:, :, 1] * sn + plan.axis_y
+        moved[:, :, 2] = yz[:, :, 0] * sn + yz[:, :, 1] * c + plan.axis_z
+        unresolved = False
+        for i, triangle in enumerate(moved):
+            motion = 2.0 * radii[i] * math.sin(half / 2.0)
+            need = gap + motion
+            ids = np.asarray(candidates(root, triangle.min(axis=0) - need,
+                                        triangle.max(axis=0) + need), dtype=int)
+            if not len(ids):
+                continue
+            # X never changes in this rotation. An axial running gap is an
+            # exact certificate even when the generic motion bound is loose.
+            xgap = np.maximum(low[ids, 0] - triangle[:, 0].max(),
+                              triangle[:, 0].min() - high[ids, 0])
+            keep = xgap < gap - 2e-5
+            if moving_tags[i]:
+                keep &= fixed_tags[ids] != moving_tags[i]
+            ids = ids[keep]
+            if not len(ids):
+                continue
+            distances = _triangle_distances(np.repeat(triangle[None], len(ids), axis=0), fixed[ids])
+            minimum = float(distances.min())
+            if minimum < gap - 2e-5:
+                raise ValueError(f"the handle has only {minimum:.3f} mm clearance at {angle:.4f} degrees "
+                                 f"(needs {gap:.2f} mm); its ends must not graze the case")
+            if minimum < need:
+                unresolved = True
+        if unresolved:
+            if right - left < 0.0001:
+                raise ValueError("could not certify the handle's running clearance between swing poses")
+            mid = (left + right) / 2.0
+            certify(left, mid)
+            certify(mid, right)
+
+    # Include both endpoints, and the leaning/deploying interval above zero.
+    certify(-plan.stop_angle, -plan.stop_angle)
+    certify(plan.rest_angle, plan.rest_angle)
+    boundaries = [-plan.stop_angle, *np.arange(-90.0, plan.rest_angle, 5.0), plan.rest_angle]
+    boundaries = sorted(set(boundaries))
+    for left, right in zip(boundaries, boundaries[1:]):
+        certify(left, right)
 
 
 def _validate_b4b_mechanics(box: BoxSpec) -> None:
@@ -130,33 +386,8 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
         bail = make_b4b_handle(box)
         if bail is None or not bail.is_watertight or bail.volume <= 0.0:
             raise ValueError("the Storage Box handle did not generate as a watertight solid")
-        # Deploying swings the bail's grip away from the wall, which about
-        # world +X is the negative rotation - the same handedness the lid and
-        # the latch straps open on.
-        angles = tuple(
-            -a for a in _sweep_angles(90.0) + (handle.stop_angle,) if a > 0.0
-        )
-        worst = _sweep_intersection_cc(
-            bail, body, handle.axis_y, handle.axis_z, angles_deg=angles
-        )
-        # The stowed bail is the one hanging at rest, leaning onto the wall.
-        stowed = _sweep_intersection_cc(
-            bail, body, handle.axis_y, handle.axis_z,
-            angles_deg=(handle.rest_angle,),
-        )
-        if stowed > B4B_HANDLE_STOWED_CEIL_CC:
-            raise ValueError(
-                f"the stowed handle interferes with the case by "
-                f"{stowed:.3f} cc (allowance "
-                f"{B4B_HANDLE_STOWED_CEIL_CC:.2f} cc for the stow detents "
-                f"alone); the bail must fold onto clearance, not into its forks"
-            )
-        if worst > stowed + B4B_NOISE_CC:
-            raise ValueError(
-                f"the carrying handle strikes the case while folding out "
-                f"(overlap {worst:.3f} cc vs {stowed:.3f} cc stowed); the "
-                f"pivot forks or the carry stop need design review"
-            )
+        _validate_handle_clearance(bail, body, handle)
+        angles = tuple(-a for a in _sweep_angles(handle.stop_angle))
         if lid is not None:
             lid_hit = _sweep_intersection_cc(
                 bail, lid, handle.axis_y, handle.axis_z, angles_deg=angles

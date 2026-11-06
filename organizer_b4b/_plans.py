@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import math
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Polygon
 from organizer_engine import GRID_PITCH, WAVE_AMPLITUDE, BoxSpec
 from organizer_engine.product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD_XY
 
@@ -21,6 +21,7 @@ from ._constants import (
     B4B_HINGE_AXIS_STEP,
     B4B_LATCH_TWO_ABOVE_FIELD_X,
     B4B_HANDLE_WALL_CLEAR,
+    B4B_RUNNING_GAP,
     B4B_HANDLE_BOTTOM_MARGIN,
     B4B_HANDLE_RIM_DROP,
     B4B_FRONT_ROOT_SEPARATION,
@@ -516,6 +517,8 @@ class B4BHandlePlan:
     thickness: float           # front-to-back, folded
     eye_radius: float
     corner_radius: float
+    heel_radius: float         # non-contact end-sweep envelope
+    heel_lands: tuple[tuple[float, float], ...]  # X spans over recessed wall
     axis_y: float
     axis_z: float
     front_crest: float
@@ -631,6 +634,23 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
         _wall_extreme_y(layout, -half, half, -1.0),
     )
     axis_y = front_crest - (dims.eye_radius + B4B_HANDLE_WALL_CLEAR)
+    # Keep the axis/rest/detent datums. Only the heel's landing fingers may
+    # reach the stop plane; the rest of its swept envelope has a running gap.
+    heel_radius = front_crest - axis_y - B4B_RUNNING_GAP - 0.01
+    # A landing finger must also clear the *neighbouring* wave crests in X,
+    # not just the wall directly behind it. Buffering the actual wall outline
+    # gives that Euclidean gap. Pads themselves stay at their original datum.
+    forbidden = layout.outer_structural_polygon.buffer(B4B_RUNNING_GAP + 0.01)
+    heel_lands = []
+    for cx in (-half, half):
+        lo = cx - dims.eye_band / 2.0 + B4B_RUNNING_GAP
+        hi = cx + dims.eye_band / 2.0 - B4B_RUNNING_GAP
+        free = LineString([(lo, front_crest), (hi, front_crest)]).difference(forbidden)
+        runs = [free] if isinstance(free, LineString) else list(free.geoms)
+        lands = [(r.bounds[0], r.bounds[2]) for r in runs if r.length >= 0.4]
+        if not lands:
+            raise ValueError("the handle stop has no cleared landing over the wall trough")
+        heel_lands.extend(lands)
     rim_z = b4b_rim_z_from_eff(eff)
     old_axis_z = rim_z - B4B_HANDLE_RIM_DROP
     drop = min(
@@ -691,6 +711,8 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
         thickness=dims.thickness,
         eye_radius=dims.eye_radius,
         corner_radius=dims.corner_radius,
+        heel_radius=heel_radius,
+        heel_lands=tuple(heel_lands),
         axis_y=axis_y,
         axis_z=axis_z,
         front_crest=front_crest,

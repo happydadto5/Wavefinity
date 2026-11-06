@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import numpy as np
 import trimesh
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
 from organizer_engine import WAVE_AMPLITUDE, BoxSpec
 from organizer_geometry import (
     _extrude_polygon,
@@ -186,19 +186,32 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
     outline = b4b_handle_outline(plan)
     slab = _softened_slab(outline, plan.thickness, B4B_HANDLE_EDGE_CHAMFER)
     slab.apply_translation((0.0, plan.axis_y, 0.0))
+    # The square tips above the axis used to sweep farther than the eye.
+    # Clip only that end; the lower U and its stow pockets are untouched.
+    reach = plan.drop + plan.band + 10.0
+    lower = trimesh.creation.box(extents=(2.0 * reach + plan.pivot_span, 2.0 * reach, reach))
+    lower.apply_translation((0.0, plan.axis_y, plan.axis_z - reach / 2.0))
+    keepers = [lower]
+    for cx in plan.centers_x:
+        end = _extrude_yz_profile(
+            Point(plan.axis_y, plan.axis_z).buffer(plan.heel_radius, quad_segs=48),
+            plan.band,
+        )
+        end.apply_translation((cx, 0.0, 0.0))
+        keepers.append(end)
+    slab = _intersection([slab, union(keepers)])
 
     eyes: list[trimesh.Trimesh] = []
     stops: list[trimesh.Trimesh] = []
     bores: list[trimesh.Trimesh] = []
     pockets: list[trimesh.Trimesh] = []
-    heel_r = plan.eye_radius + plan.wall_clear
     for cx in plan.centers_x:
         eye = _extrude_yz_profile(
             support_free_profile_yz(plan.eye_radius), plan.eye_band
         )
         eye.apply_translation((cx, plan.axis_y, plan.axis_z))
         eyes.append(eye)
-        stops.append(_handle_stop_heel(plan, cx, heel_r))
+        stops.append(_handle_stop_heel(plan, cx))
         bore = _round_bore(plan.profile.clear_bore / 2.0, plan.eye_band + 2.0)
         bore.apply_translation((cx, plan.axis_y, plan.axis_z))
         bores.append(bore)
@@ -229,14 +242,13 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
 
 
 def _handle_stop_heel(
-    plan: B4BHandlePlan, cx: float, heel_r: float
+    plan: B4BHandlePlan, cx: float
 ) -> trimesh.Trimesh:
     """A broad printed heel at one pivot, sized to land flat on its body stop.
 
-    The stop has to load real plastic faces: never the screw head, never the
-    thread, and never a knife edge.  The heel stands just proud of the eye and
-    is carried right across the eye's axial width, so the contact patch is the
-    whole face rather than a corner.
+    The cleared heel core spans the eye. Flat landing fingers reach the
+    existing pad only over wall troughs, so neither a swept corner nor the
+    adjacent wall crest can become an unintended stop.
     """
     tang = B4B_HANDLE_STOP_FACE / 2.0
     ang = math.radians(plan.stop_angle)
@@ -245,15 +257,32 @@ def _handle_stop_heel(
     cy, cz = math.cos(ang), math.sin(ang)
     ny, nz = -math.sin(ang), math.cos(ang)
     base = plan.eye_radius - 0.6
-    pts = [
-        (plan.axis_y + base * cy + tang * ny, plan.axis_z + base * cz + tang * nz),
-        (plan.axis_y + base * cy - tang * ny, plan.axis_z + base * cz - tang * nz),
-        (plan.axis_y + heel_r * cy - tang * ny, plan.axis_z + heel_r * cz - tang * nz),
-        (plan.axis_y + heel_r * cy + tang * ny, plan.axis_z + heel_r * cz + tang * nz),
-    ]
-    heel = _extrude_yz_profile(Polygon(pts), plan.eye_band)
+    def profile(radial, tangent):
+        return (plan.axis_y + radial * cy + tangent * ny,
+                plan.axis_z + radial * cz + tangent * nz)
+
+    # A rectangular heel's leading corner has radius hypot(radius, tang),
+    # not radius: it grazed before its flat face reached the stop. Keep its
+    # non-contact portion inside a cleared circle instead.
+    core = Polygon([profile(base, -tang), profile(base, tang),
+                    profile(plan.heel_radius, tang), profile(plan.heel_radius, -tang)])
+    core = core.intersection(Point(plan.axis_y, plan.axis_z).buffer(
+        plan.heel_radius, quad_segs=48))
+    heel = _extrude_yz_profile(core, plan.eye_band)
     heel.apply_translation((cx, 0.0, 0.0))
-    return heel
+    pieces = [heel]
+    # At the stop these fingers land on the upper half of the existing pad.
+    # Their trailing-only face cannot swing past the pad plane on approach.
+    # Only X runs backed by a wall trough may reach that plane.
+    radial = plan.front_crest - plan.axis_y
+    toe = Polygon([profile(base, 0.0), profile(radial, 0.0),
+                   profile(radial, tang), profile(base, tang)])
+    for lo, hi in plan.heel_lands:
+        if lo >= cx - plan.eye_band / 2.0 and hi <= cx + plan.eye_band / 2.0:
+            finger = _extrude_yz_profile(toe, hi - lo)
+            finger.apply_translation(((lo + hi) / 2.0, 0.0, 0.0))
+            pieces.append(finger)
+    return union(pieces)
 
 
 def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
