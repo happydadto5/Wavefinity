@@ -237,6 +237,8 @@ TEXT_DEPTH = 0.4               # how deep the label is sunk into the floor,
 EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM = 0.6
 TEXT_MIN_BACKING = 0.2         # minimum solid material a recessed label must leave behind it
 TEXT_MARGIN = 1.0              # clear space between the label and the cavity wall
+TEXT_LETTER_EXPANSION = 0.25  # mm per side
+TEXT_LETTER_SPACING = 0.5      # mm between neighbouring glyphs
 TEXT_FONT_FAMILY = "DejaVu Sans"
 TEXT_FONT_WEIGHT = "bold"
 

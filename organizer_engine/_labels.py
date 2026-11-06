@@ -9,7 +9,7 @@ from typing import Iterable
 import numpy as np
 import trimesh
 from matplotlib.font_manager import FontProperties
-from matplotlib.textpath import TextPath
+from matplotlib.textpath import TextPath, TextToPath
 from shapely.affinity import rotate as rotate_polygon, translate as translate_polygon
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 from shapely.ops import unary_union
@@ -28,6 +28,8 @@ from ._specs import (
     TEXT_DEPTH,
     TEXT_MIN_BACKING,
     TEXT_MARGIN,
+    TEXT_LETTER_EXPANSION,
+    TEXT_LETTER_SPACING,
     TEXT_FONT_FAMILY,
     TEXT_FONT_WEIGHT,
     TOP_LABEL_LEDGE_DEPTH,
@@ -78,39 +80,82 @@ def text_outline(label: str, cap_height: float) -> Polygon | MultiPolygon:
     if cap_height <= 0:
         raise ValueError("cap height must be positive")
 
-    path = TextPath(
-        (0.0, 0.0), label, size=cap_height / _cap_ratio(), prop=_font()
-    )
-    rings = []
-    for ring in path.to_polygons():
-        if len(ring) < 3:
-            continue
-        polygon = Polygon(ring)
-        if not polygon.is_valid:
-            polygon = polygon.buffer(0)
-        if polygon.is_empty or polygon.area <= 0:
-            continue
-        rings.append(polygon)
-    if not rings:
+    size = cap_height / _cap_ratio()
+    font = _font()
+    font.set_size(size)
+    metrics = TextToPath()
+    glyphs = []
+    x = 0.0
+    for index, character in enumerate(label):
+        path = TextPath((0.0, 0.0), character, size=size, prop=font)
+        rings = []
+        for ring in path.to_polygons():
+            if len(ring) < 3:
+                continue
+            polygon = Polygon(ring)
+            if not polygon.is_valid:
+                polygon = polygon.buffer(0)
+            if not polygon.is_empty and polygon.area > 0:
+                rings.append(polygon)
+        rings.sort(key=lambda item: item.area, reverse=True)
+        shells, holes = [], []
+        for ring_index, ring in enumerate(rings):
+            probe = ring.representative_point()
+            depth = sum(1 for bigger in rings[:ring_index] if bigger.contains(probe))
+            (holes if depth % 2 else shells).append(ring)
+        if shells:
+            glyph = unary_union(shells)
+            if holes:
+                glyph = glyph.difference(unary_union(holes))
+            # Keep every counter open, even for unusually small lettering.
+            expansion = TEXT_LETTER_EXPANSION
+            if any(hole.buffer(-expansion).is_empty for hole in holes):
+                low, high = 0.0, expansion
+                for _ in range(24):
+                    middle = (low + high) / 2.0
+                    if all(not hole.buffer(-middle).is_empty for hole in holes):
+                        low = middle
+                    else:
+                        high = middle
+                expansion = low * 0.99
+            if not glyph.is_empty:
+                glyphs.append(translate_polygon(glyph.buffer(expansion, join_style="round"), xoff=x))
+        advance, _, _ = metrics.get_text_width_height_descent(character, font, False)
+        x += advance
+        if index < len(label) - 1:
+            x += TEXT_LETTER_SPACING
+    if not glyphs:
         raise ValueError(f"'{label}' has no printable outline")
-
-    rings.sort(key=lambda item: item.area, reverse=True)
-    shells, holes = [], []
-    for index, ring in enumerate(rings):
-        probe = ring.representative_point()
-        depth = sum(1 for bigger in rings[:index] if bigger.contains(probe))
-        (holes if depth % 2 else shells).append(ring)
-
-    filled = unary_union(shells)
-    if holes:
-        filled = filled.difference(unary_union(holes))
-    if filled.is_empty:
-        raise ValueError(f"'{label}' has no printable outline")
+    filled = unary_union(glyphs)
 
     minx, miny, maxx, maxy = filled.bounds
     return translate_polygon(
         filled, xoff=-(minx + maxx) / 2.0, yoff=-(miny + maxy) / 2.0
     )
+
+
+def _fit_label_cap(label: str, max_cap: float, width: float, height: float,
+                   rotated: bool = False) -> float:
+    """Find the largest cap whose actual expanded outline fits the rectangle."""
+    def fits(cap: float) -> bool:
+        minx, miny, maxx, maxy = text_outline(label, cap).bounds
+        w, h = maxx - minx, maxy - miny
+        if rotated:
+            w, h = h, w
+        return w <= width and h <= height
+
+    if width <= 0 or height <= 0:
+        return 0.0
+    if fits(max_cap):
+        return max_cap
+    low, high = 0.0, max_cap
+    for _ in range(30):
+        mid = (low + high) / 2.0
+        if fits(mid):
+            low = mid
+        else:
+            high = mid
+    return low
 
 
 def _rim_label_side(side: str) -> str:
@@ -163,15 +208,10 @@ def _top_label_fit(
             f"at the rim, and this bin does not leave that much above its floor"
         )
     top_label_zone(box, side)
-    probe = text_outline(label, TOP_LABEL_CAP_HEIGHT)
-    minx, miny, maxx, maxy = probe.bounds
     inside_x, inside_y = box.usable_inside
     room_x = (inside_x if side in ("front", "back") else inside_y) - 2.0 * TOP_LABEL_MARGIN
     room_y = TOP_LABEL_LEDGE_DEPTH - 2.0 * TOP_LABEL_MARGIN
-    width, height = maxx - minx, maxy - miny
-    if width <= 0.0 or height <= 0.0:
-        raise ValueError(f"'{label}' has no printable outline")
-    cap_height = TOP_LABEL_CAP_HEIGHT * min(1.0, room_x / width, room_y / height)
+    cap_height = _fit_label_cap(label, TOP_LABEL_CAP_HEIGHT, room_x, room_y)
     if cap_height <= 0.0:
         raise ValueError(f"'{label}' has no room on the rim label ledge")
     outline = text_outline(label, cap_height)
@@ -498,11 +538,7 @@ def label_placement(
 
     orientations: list[tuple[bool, float]] = []
     for rotated in (False, True):
-        across, up = ((ideal_height, ideal_width) if rotated
-                      else (ideal_width, ideal_height))
-        max_cap = min(TEXT_CAP_HEIGHT_IDEAL,
-                      TEXT_CAP_HEIGHT_IDEAL * room_x / across,
-                      TEXT_CAP_HEIGHT_IDEAL * room_y / up)
+        max_cap = _fit_label_cap(label, TEXT_CAP_HEIGHT_IDEAL, room_x, room_y, rotated)
         if max_cap < TEXT_CAP_HEIGHT_MIN - 1e-9:
             continue
         orientations.append((rotated, max_cap))
@@ -540,7 +576,8 @@ def label_placement(
                     return LabelPlacement(cap, rotated, x, y, turns)
 
     longest = max(room_x, room_y)
-    needed = ideal_width * (TEXT_CAP_HEIGHT_MIN / TEXT_CAP_HEIGHT_IDEAL)
+    minimum_bounds = text_outline(label, TEXT_CAP_HEIGHT_MIN).bounds
+    needed = minimum_bounds[2] - minimum_bounds[0]
     obstacle_note = " around the insert features" if obstacles else ""
     raise ValueError(
         f"'{label}' will not fit on this floor{obstacle_note} either way round: it needs "

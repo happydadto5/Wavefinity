@@ -11,6 +11,7 @@ from organizer_engine import (
     make_top_label_ledge, require_text_backing, text_outline, text_prism,
     top_label_surface_z, top_label_zone,
 )
+from organizer_engine._labels import _fit_label_cap
 from ._core import EDITOR_SNAP, Feature, Zone, layout_zone, snapped_zone
 from ._registry import (
     OPTION_TYPES, OptionDefinition, SIDE_CHOICES, SettingInteraction, defaults, feature,
@@ -93,7 +94,7 @@ def text_fitted(one: Feature) -> tuple[float, object]:
         if not math.isfinite(cap) or cap <= 0.0:
             raise ValueError("Letter height must be a positive number")
         return cap, _oriented_text(label, cap, turns)
-    fits = TEXT_CAP_HEIGHT_IDEAL * min(zone.width / width, zone.depth / height)
+    fits = _fit_label_cap(label, TEXT_CAP_HEIGHT_IDEAL, zone.width, zone.depth, bool(turns % 2))
     if not math.isfinite(fits) or fits <= 0.0:
         raise ValueError(f"'{label}' has no room to print in this box")
     if wanted not in (None, ""):
@@ -206,12 +207,9 @@ def rim_text_geometry(box: BoxSpec, one: Feature):
     wanted = TOP_LABEL_CAP_HEIGHT if raw_height in (None, "") else float(raw_height)
     if not math.isfinite(wanted) or wanted <= 0:
         raise ValueError("Letter height must be a positive number")
-    probe = _oriented_text(label, wanted, turns)
-    x0, y0, x1, y1 = probe.bounds
     available_x = shelf_zone.bounds[2] - shelf_zone.bounds[0] - 2 * TOP_LABEL_MARGIN
     available_y = shelf_zone.bounds[3] - shelf_zone.bounds[1] - 2 * TOP_LABEL_MARGIN
-    scale = min(1.0, available_x / (x1 - x0), available_y / (y1 - y0))
-    cap = wanted * scale
+    cap = _fit_label_cap(label, wanted, available_x, available_y, bool(turns % 2))
     if cap <= 0:
         raise ValueError("rim Label does not fit its selected side")
     glyph = _oriented_text(label, cap, turns)
