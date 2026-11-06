@@ -20,6 +20,7 @@ from .._constants import (
     B4B_HW_FILLET,
     B4B_HANDLE_EYE_OVERLAP,
     B4B_HANDLE_STOP_FACE,
+    B4B_HANDLE_END_CLEARANCE,
     B4B_HANDLE_DETENT_RAMP,
     B4B_HANDLE_EDGE_CHAMFER,
     B4B_HANDLE_EDGE_STEPS,
@@ -168,6 +169,18 @@ def b4b_handle_outline(plan: B4BHandlePlan) -> Polygon:
     return outline
 
 
+def _handle_end_radius(plan: B4BHandlePlan) -> float:
+    """Reach of the arm ends' non-contact envelope at the carry stop.
+
+    The plan's ``heel_radius`` leaves only the running gap to the wall crest;
+    the ends are relieved back to ``B4B_HANDLE_END_CLEARANCE`` so print growth
+    cannot close it.  Only the datums of the ends move - the eye, axis, rest
+    pose and detents are computed from the plan and are untouched.
+    """
+    reach = plan.front_crest - plan.axis_y - B4B_HANDLE_END_CLEARANCE - 0.01
+    return max(plan.eye_radius, min(plan.heel_radius, reach))
+
+
 def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
     """The folding bail, in assembly space, shown stowed against the front wall.
 
@@ -194,7 +207,9 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
     keepers = [lower]
     for cx in plan.centers_x:
         end = _extrude_yz_profile(
-            Point(plan.axis_y, plan.axis_z).buffer(plan.heel_radius, quad_segs=48),
+            Point(plan.axis_y, plan.axis_z).buffer(
+                _handle_end_radius(plan), quad_segs=48
+            ),
             plan.band,
         )
         end.apply_translation((cx, 0.0, 0.0))
@@ -264,10 +279,11 @@ def _handle_stop_heel(
     # A rectangular heel's leading corner has radius hypot(radius, tang),
     # not radius: it grazed before its flat face reached the stop. Keep its
     # non-contact portion inside a cleared circle instead.
+    end = _handle_end_radius(plan)
     core = Polygon([profile(base, -tang), profile(base, tang),
-                    profile(plan.heel_radius, tang), profile(plan.heel_radius, -tang)])
+                    profile(end, tang), profile(end, -tang)])
     core = core.intersection(Point(plan.axis_y, plan.axis_z).buffer(
-        plan.heel_radius, quad_segs=48))
+        end, quad_segs=48))
     heel = _extrude_yz_profile(core, plan.eye_band)
     heel.apply_translation((cx, 0.0, 0.0))
     pieces = [heel]
@@ -277,8 +293,21 @@ def _handle_stop_heel(
     radial = plan.front_crest - plan.axis_y
     toe = Polygon([profile(base, 0.0), profile(radial, 0.0),
                    profile(radial, tang), profile(base, tang)])
+    # A landing run ends 0.31 mm from the neighbouring wave crest; pull each
+    # crest-side end back so the finger keeps the end clearance there too,
+    # without thinning a run below the 0.4 mm it needs to land on the pad.
+    relief = B4B_HANDLE_END_CLEARANCE - B4B_RUNNING_GAP - 0.01
+    eye_lo, eye_hi = cx - plan.eye_band / 2.0, cx + plan.eye_band / 2.0
     for lo, hi in plan.heel_lands:
-        if lo >= cx - plan.eye_band / 2.0 and hi <= cx + plan.eye_band / 2.0:
+        if lo >= eye_lo and hi <= eye_hi:
+            new_lo = lo + (relief if lo > eye_lo + 1e-6 else 0.0)
+            new_hi = hi - (relief if hi < eye_hi - 1e-6 else 0.0)
+            if new_hi - new_lo < 0.4:
+                # keep a 0.4 mm landing centred in the run (a shorter run
+                # is left as the plan resolved it)
+                mid = (lo + hi) / 2.0
+                new_lo, new_hi = (mid - 0.2, mid + 0.2) if hi - lo >= 0.4 else (lo, hi)
+            lo, hi = new_lo, new_hi
             finger = _extrude_yz_profile(toe, hi - lo)
             finger.apply_translation(((lo + hi) / 2.0, 0.0, 0.0))
             pieces.append(finger)

@@ -400,6 +400,7 @@ B4B_HANDLE_BOTTOM_MARGIN = 4.0     # clear run above the case bottom
 B4B_HANDLE_RIM_DROP = 8.0          # pivot axis below the rim/lid-seat datum
 B4B_HANDLE_STOP_ANGLE = 95.0       # deployed carry stop
 B4B_HANDLE_STOP_FACE = 2.5         # minimum Y/Z contact length at the stop
+B4B_HANDLE_END_CLEARANCE = 0.5     # arm-end clearance to the case at the stop (0.3 survives print growth)
 B4B_HANDLE_DETENT = 0.20           # stow detent interference
 B4B_HANDLE_DETENT_BUMP = 0.35      # body bump height
 B4B_HANDLE_DETENT_RAMP = 0.5
