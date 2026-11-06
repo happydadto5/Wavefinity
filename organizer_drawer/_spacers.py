@@ -748,6 +748,11 @@ def generate_connectors(
             f"{report['connector_short_seams']} shared seam(s) are too short for a connector; "
             "those bins print without connectors."
         )
+    if report.get("connector_rim_label_seams"):
+        notes.append(
+            f"{report['connector_rim_label_seams']} seam(s) have a rim label on the shared wall; "
+            "a rim label blocks the connector there, so no clip is made for them."
+        )
     return {"connectors": made, "notes": notes}
 
 

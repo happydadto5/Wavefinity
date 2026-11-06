@@ -59,6 +59,26 @@ def _connector_eligible(item: dict[str, Any]) -> bool:
     return True
 
 
+def _rim_label_walls(spec: Any) -> frozenset[str]:
+    """Walls (front/back/left/right) of a saved design that carry a rim Text
+    label ledge.  Only a rim-level Text with text counts; a base label or a
+    ledge on another wall says nothing about this one."""
+    layout = spec.get("layout") if isinstance(spec, dict) else None
+    features = layout.get("features") if isinstance(layout, dict) else None
+    walls: set[str] = set()
+    for feature in features if isinstance(features, list) else ():
+        options = feature.get("options") if isinstance(feature, dict) else None
+        if (isinstance(options, dict) and feature.get("kind") == "text"
+                and options.get("level") == "rim" and str(options.get("text") or "").strip()):
+            walls.add(str(options.get("rim_side") or "back"))
+    return frozenset(walls)
+
+
+def _seam_rim_blocked(a: dict[str, Any], b: dict[str, Any], a_wall: str, b_wall: str) -> bool:
+    """A rim label ledge on the wall a and b share leaves no room for a clip."""
+    return a_wall in a.get("rim_walls", ()) or b_wall in b.get("rim_walls", ())
+
+
 def _top_wall(item: dict[str, Any]) -> float:
     """The wall a connector meets at the top of this footprint.
 
@@ -71,27 +91,40 @@ def _top_wall(item: dict[str, Any]) -> float:
     return STACK_MIN_WALL if item["top"].get("stack", "none") in ("lid", "b4b") else DEFAULT_WALL
 
 
-def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str, Any]], int, int]:
+def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str, Any]], int, int, int]:
     """One connector per shared seam long enough to seat one, grouped by the
     two rim heights and wall thickness it joins.  Stacks join at their top
     bins.  Returns the groups, how many seams join incompatible bins -
-    different wall thicknesses, which no printed connector fits - and how
-    many shared seams are too short for even the smallest connector."""
+    different wall thicknesses, which no printed connector fits - how
+    many shared seams are too short for even the smallest connector, and
+    how many seams a rim label ledge on the shared wall blocks."""
     counts: dict[tuple[float, float, float], int] = {}
     mismatched = 0
     short_seams = 0
+    rim_blocked = 0
     need = math.ceil(MIN_CONNECTOR_SEAM / step - 1e-9)
     for index, a in enumerate(items):
         for b in items[index + 1:]:
             if not _connector_eligible(a) or not _connector_eligible(b):
                 continue
-            if a["gx"] + a["w"] == b["gx"] or b["gx"] + b["w"] == a["gx"]:
+            if a["gx"] + a["w"] == b["gx"]:
                 overlap = min(a["gy"] + a["d"], b["gy"] + b["d"]) - max(a["gy"], b["gy"])
-            elif a["gy"] + a["d"] == b["gy"] or b["gy"] + b["d"] == a["gy"]:
+                a_wall, b_wall = "right", "left"
+            elif b["gx"] + b["w"] == a["gx"]:
+                overlap = min(a["gy"] + a["d"], b["gy"] + b["d"]) - max(a["gy"], b["gy"])
+                a_wall, b_wall = "left", "right"
+            elif a["gy"] + a["d"] == b["gy"]:
                 overlap = min(a["gx"] + a["w"], b["gx"] + b["w"]) - max(a["gx"], b["gx"])
+                a_wall, b_wall = "back", "front"
+            elif b["gy"] + b["d"] == a["gy"]:
+                overlap = min(a["gx"] + a["w"], b["gx"] + b["w"]) - max(a["gx"], b["gx"])
+                a_wall, b_wall = "front", "back"
             else:
                 continue
             if overlap < need:
+                continue
+            if _seam_rim_blocked(a, b, a_wall, b_wall):
+                rim_blocked += 1
                 continue
             wall_a, wall_b = _top_wall(a), _top_wall(b)
             if not math.isclose(wall_a, wall_b):
@@ -110,7 +143,7 @@ def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str
         {"heights": [key[0], key[1]], "wall": key[2], "count": count}
         for key, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
     ]
-    return groups, mismatched, short_seams
+    return groups, mismatched, short_seams, rim_blocked
 
 
 def _pegboard_report(drawer: dict[str, Any], bins: list[dict[str, Any]]) -> dict[str, Any]:
@@ -434,7 +467,8 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     }
     for item in items:
         item["has_lid"] = item["bin"] in lid_rows
-    connectors, mismatched, short_seams = _connectors(items, step)
+        item["rim_walls"] = _rim_label_walls(specs.get(item["bin"]))
+    connectors, mismatched, short_seams, rim_blocked = _connectors(items, step)
     if surface:
         for component in _interior_components(items, cols, rows):
             problems.append({"type": "restraint", "keys": component, "message": INTERIOR_COMPONENT_MESSAGE})
@@ -458,6 +492,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         "connector_total": sum(one["count"] for one in connectors),
         "connector_mismatched": mismatched,
         "connector_short_seams": short_seams,
+        "connector_rim_label_seams": rim_blocked,
         "problems": problems,
         "height_issues": len(issues),
         "placed": sum(len(item["layers"]) for item in items),
