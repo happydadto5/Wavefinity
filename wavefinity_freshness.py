@@ -76,7 +76,14 @@ def git_state() -> dict:
     _, origin_url = _git("config", "--get", "remote.origin.url")
     is_wavefinity = "wavefinity" in origin_url.lower()
     status_code, porcelain = _git("status", "--porcelain")
-    clean = status_code == 0 and not porcelain
+    # Notes and reports (*.md) never block a launch; any other change does.
+    def _counts(line: str) -> bool:
+        paths = line[3:].split(" -> ")
+        return not all(one.strip().strip('"').lower().endswith(".md") for one in paths)
+
+    clean = status_code == 0 and not any(
+        _counts(line) for line in porcelain.splitlines() if line.strip()
+    )
     ahead = behind = 0
     if upstream:
         count_code, counts = _git("rev-list", "--left-right", "--count", "HEAD...@{u}")
