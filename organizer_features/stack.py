@@ -160,10 +160,10 @@ def stack_step_depth(box: BoxSpec) -> float:
 def stack_foot_growth(box: BoxSpec) -> float:
     """How far the body grows past the typed height to hold its stepped foot.
 
-    A lid bin's foot is extra: it extends the detached part.  A direct bin's
-    skirt lives inside the typed height, so it grows nothing.
+    Always zero: a lid bin's stepped foot and a direct bin's skirt are both
+    formed inside the typed height, so the part measures exactly what was typed.
     """
-    return 0.0 if direct_stack_enabled(box) else stack_step_depth(box)
+    return 0.0
 
 
 def _stack_wall_box(box: BoxSpec) -> BoxSpec:
@@ -210,10 +210,10 @@ def normalize_stack_settings(box: BoxSpec) -> BoxSpec:
 def stack_effective_box(box: BoxSpec) -> BoxSpec:
     """The BoxSpec the body and its interior parts are actually built from.
 
-    Settings are normalized defensively, then a lid bin's body is made taller
-    by its engagement depth.  Consecutive bodies are placed one stack pitch
-    apart, so the foot overlaps without falsifying the pitch.  A direct bin's
-    skirt sits inside the typed height, so its body is exactly that tall.
+    Settings are normalized defensively.  Consecutive bodies are placed one
+    stack pitch apart, so the foot overlaps without falsifying the pitch.  A
+    direct bin's skirt and a lid bin's foot sit inside the typed height, so
+    the body plus its lid rise is exactly that tall.
     """
     if not vertical_stack_enabled(box) and not lid_enabled(box):
         return box
@@ -832,10 +832,11 @@ def stack_closed_height(box: BoxSpec) -> float:
 def stack_module_height(box: BoxSpec) -> float:
     """Contribution between consecutive stack seating datums.
 
-    A direct bin's skirt overlaps the top of the bin below, so it adds its
-    typed height less the skirt depth.
+    A direct bin's skirt and a lid bin's foot overlap the bin below (the
+    skirt into its mouth, the foot into its lid recess), so each adds its
+    typed height less that engagement depth.
     """
-    return box.z - STACK_SKIRT_DEPTH if direct_stack_enabled(box) else box.z
+    return box.z - stack_step_depth(box)
 
 
 def stack_pitch(box: BoxSpec) -> float:
