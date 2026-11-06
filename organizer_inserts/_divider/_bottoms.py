@@ -15,6 +15,7 @@ from ._consts import (
     BOTTOM_EMBED,
     BOTTOM_CROSSBAR_THICKNESS,
     BOTTOM_CROSSBAR_CHAMFER,
+    RIB_THICKNESS,
     _option_flag,
 )
 
@@ -66,7 +67,10 @@ def _custom_divider_sloped_bottoms(
     alternate = _option_flag(options.get("alternate_bottom"))
     minimal = _option_flag(options.get("minimal_bottom"))
     along = spec_feature.along if spec_feature.along in ("x", "y") else "x"
-    x_edges, y_edges = divider_grid_edges(spec_feature.zone, columns - 1, rows - 1)
+    x_edges, y_edges = divider_grid_edges(
+        spec_feature.zone, columns - 1, rows - 1,
+        float(options.get("thickness") or RIB_THICKNESS),
+    )
     solids: list[trimesh.Trimesh] = []
     for index, cell in enumerate(cells):
         slope_zone = Zone(

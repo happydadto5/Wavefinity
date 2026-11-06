@@ -66,13 +66,82 @@ def even_centres(lo: float, hi: float, count: int) -> list[float]:
     return [lo + (index + 1) * gap for index in range(count)]
 
 
+def equal_clear_centres(
+    lo: float, hi: float, count: int, thickness: float = 0.0,
+) -> list[float]:
+    """Return divider centres that leave every compartment the same clear width.
+
+    ``lo``/``hi`` are the real faces the end compartments run to. The clear
+    width is the span minus the dividers' total thickness, shared evenly by
+    the ``count + 1`` compartments; centres follow from it. With zero
+    thickness this is the plain fence-post spacing.
+    """
+    if count < 1:
+        return []
+    clear = ((hi - lo) - count * thickness) / (count + 1)
+    return [lo + (index + 1) * clear + (index + 0.5) * thickness
+            for index in range(count)]
+
+
+def even_centres(lo: float, hi: float, count: int) -> list[float]:
+    """Return equally spaced fence-post positions inside an interval."""
+    return equal_clear_centres(lo, hi, count, 0.0)
+
+
+def full_span_mean_zone(box: BoxSpec) -> Zone:
+    """The ordinary bin's inner wall faces at the wave mean.
+
+    A full-span divider runs to the built wavy wall, whose face swings about
+    its mean by the wave amplitude. Compartments are sized from that mean (the
+    built face averaged over one wave period), not from the conservative
+    straight-sided ``Zone.whole`` rectangle that is pulled in by a full
+    amplitude and slope allowance.
+    """
+    from organizer_engine._wave import _periodic_wall_face
+
+    def mean_face(run_axis: str, side: float, half: float) -> float:
+        samples, offsets = _periodic_wall_face(box.wall_depth, run_axis, side)
+        area = float(sum(
+            0.5 * (offsets[i] + offsets[i + 1]) * (samples[i + 1] - samples[i])
+            for i in range(len(samples) - 1)
+        ))
+        return side * half + area / float(samples[-1] - samples[0])
+
+    return Zone(
+        mean_face("y", -1.0, box.half_x), mean_face("x", -1.0, box.half_y),
+        mean_face("y", 1.0, box.half_x), mean_face("x", 1.0, box.half_y),
+    )
+
+
+def resolve_divider_span(box: BoxSpec, spec_feature: Feature) -> Feature:
+    """Give a full-span Divider the real wall-face span it is spaced across.
+
+    An ordinary bin stores its full-span divider zone as the conservative
+    ``Zone.whole`` placeholder; that is replaced by the wave-mean wall faces.
+    Any other zone (a Storage Box stores its own exact mating-wall span) is
+    already explicit and is used as it stands.
+    """
+    if spec_feature.kind != "divider" or not spec_feature.full_span:
+        return spec_feature
+    zone, whole = spec_feature.zone, Zone.whole(box)
+    if any(abs(a - b) > 1e-6 for a, b in (
+        (zone.x0, whole.x0), (zone.y0, whole.y0),
+        (zone.x1, whole.x1), (zone.y1, whole.y1),
+    )):
+        return spec_feature
+    return replace(spec_feature, zone=full_span_mean_zone(box))
+
+
 def divider_grid_edges(
-    zone: Zone, grid_x: int, grid_y: int,
+    zone: Zone, grid_x: int, grid_y: int, thickness: float = 0.0,
 ) -> tuple[list[float], list[float]]:
-    """Return atomic column/row edges in low-X, low-Y order."""
+    """Return atomic column/row edges in low-X, low-Y order.
+
+    The interior edges are divider centres, spaced for equal clear widths.
+    """
     return (
-        [zone.x0, *even_centres(zone.x0, zone.x1, grid_x), zone.x1],
-        [zone.y0, *even_centres(zone.y0, zone.y1, grid_y), zone.y1],
+        [zone.x0, *equal_clear_centres(zone.x0, zone.x1, grid_x, thickness), zone.x1],
+        [zone.y0, *equal_clear_centres(zone.y0, zone.y1, grid_y, thickness), zone.y1],
     )
 
 
@@ -150,6 +219,7 @@ def divider_cells(
     """Return Divider-owned compartments in front-to-back row-major order."""
     if spec_feature.kind != "divider":
         raise ValueError("divider cells require a divider feature")
+    spec_feature = resolve_divider_span(box, spec_feature)
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
     thickness = float(options["thickness"])
@@ -157,8 +227,8 @@ def divider_cells(
         raise ValueError("divider thickness must be positive")
     grid_x, grid_y = divider_grid_counts(options)
     if grid_x or grid_y:
-        x_centres = even_centres(zone.x0, zone.x1, grid_x)
-        y_centres = even_centres(zone.y0, zone.y1, grid_y)
+        x_centres = equal_clear_centres(zone.x0, zone.x1, grid_x, thickness)
+        y_centres = equal_clear_centres(zone.y0, zone.y1, grid_y, thickness)
     else:
         count = spec_feature.count or 1
         spacing = float(options["spacing"])

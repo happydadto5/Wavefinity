@@ -11,7 +11,6 @@ from organizer_geometry import _extrude_xz_profile, _extrude_yz_profile, interse
 from .._core import MAX_DIVIDER_COUNT, Feature, Zone, connector_keep_out
 from .._divider_cells import (
     _divider_cross_centres,
-    _even_centres,
     divider_cells,
     divider_grid_counts,
     divider_grid_edges,
@@ -19,7 +18,9 @@ from .._divider_cells import (
     divider_scoop_side,
     divider_scoop_targets,
     normalize_divider_scoop,
+    equal_clear_centres,
     normalized_compartment_spans,
+    resolve_divider_span,
 )
 from .._registry import (
     OptionDefinition,
@@ -91,11 +92,15 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
 def divider_max_bottom_angle(box: BoxSpec, one: Feature, base_z: float) -> float:
     """Maximum slope from the same longest-run/height rule as the builder."""
     options = one.options or {}
+    one = resolve_divider_span(box, one)
     height = float(options.get("height") or connector_keep_out(box) - base_z)
     run = one.zone.width if one.along == "x" else one.zone.depth
     grid_x, grid_y = divider_grid_counts(options)
     if grid_x or grid_y:
-        x_edges, y_edges = divider_grid_edges(one.zone, grid_x, grid_y)
+        x_edges, y_edges = divider_grid_edges(
+            one.zone, grid_x, grid_y,
+            float(options.get("thickness") or RIB_THICKNESS),
+        )
         edges = x_edges if one.along == "x" else y_edges
         spans = normalized_compartment_spans(
             options.get("compartment_spans"), len(y_edges) - 1, len(x_edges) - 1,
@@ -217,7 +222,9 @@ def build_divider(
     full_span_cavity: Polygon | None = None,
 ) -> list[trimesh.Trimesh]:
     """One or more evenly spaced parallel walls subdividing the bin."""
-    spec_feature = normalize_divider_scoop(box, spec_feature, base_z)
+    spec_feature = resolve_divider_span(
+        box, normalize_divider_scoop(box, spec_feature, base_z),
+    )
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
     wall_style = str(options.get("wall_style", "straight"))
@@ -403,30 +410,24 @@ def _build_divider_grid(
     full_span = spec_feature.full_span
     solids: list[trimesh.Trimesh] = []
     # Walls that divide X run along Y; walls that divide Y run along X.
-    for centre in _even_centres(zone.x0, zone.x1, grid_x):
+    x_centres = equal_clear_centres(zone.x0, zone.x1, grid_x, thickness)
+    y_centres = equal_clear_centres(zone.y0, zone.y1, grid_y, thickness)
+    for centre in x_centres:
         solids.extend(_one_grid_wall(
             box, spec_feature, "y", centre, thickness, height, angle, base_z, full_span,
             full_span_cavity=full_span_cavity,
         ))
-    for centre in _even_centres(zone.y0, zone.y1, grid_y):
+    for centre in y_centres:
         solids.extend(_one_grid_wall(
             box, spec_feature, "x", centre, thickness, height, angle, base_z, full_span,
             full_span_cavity=full_span_cavity,
         ))
     slope_along = spec_feature.along if spec_feature.along in ("x", "y") else "x"
-    slope_centres = (
-        _even_centres(zone.y0, zone.y1, grid_y)
-        if slope_along == "x"
-        else _even_centres(zone.x0, zone.x1, grid_x)
-    )
+    slope_centres = y_centres if slope_along == "x" else x_centres
     # The dividers running the same way as the slope cut the ramp into cells;
     # each cell restarts its own slope from the floor rather than one unbroken
     # ramp sweeping across them.
-    slope_run_splits = (
-        _even_centres(zone.x0, zone.x1, grid_x)
-        if slope_along == "x"
-        else _even_centres(zone.y0, zone.y1, grid_y)
-    )
+    slope_run_splits = x_centres if slope_along == "x" else y_centres
     solids.extend(_divider_sloped_bottoms(
         box, spec_feature, options, slope_along, slope_centres, height, base_z,
         run_splits=slope_run_splits,
@@ -512,7 +513,9 @@ def _build_custom_divider_grid(
     cells = divider_cells(box, spec_feature, base_z)
     rows, columns = grid_y + 1, grid_x + 1
     owner = divider_owner_matrix(cells, rows, columns)
-    x_edges, y_edges = divider_grid_edges(spec_feature.zone, grid_x, grid_y)
+    x_edges, y_edges = divider_grid_edges(
+        spec_feature.zone, grid_x, grid_y, thickness,
+    )
     solids: list[trimesh.Trimesh] = []
     vertical_present = {
         line: [owner[row][line - 1] != owner[row][line] for row in range(rows)]

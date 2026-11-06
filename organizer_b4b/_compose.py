@@ -29,6 +29,35 @@ def b4b_divider_zone(box: BoxSpec):
     )
 
 
+def b4b_divider_span_zone(box: BoxSpec):
+    """The Storage Box inner mating-wall faces at the wave mean.
+
+    Dividers are spaced across this span so every compartment comes out the
+    same clear width; the wave swings the real faces equally about it. Falls
+    back to the plain box rectangle if the wall is too short to average.
+    """
+    import numpy as np
+    from organizer_engine._specs import WAVE_LENGTH
+    from organizer_engine._wave import _wall_face_values
+    from organizer_inserts import Zone
+
+    eff = b4b_effective_box(box)
+    cavity = b4b_mating_polygon(eff)
+    along = np.linspace(-WAVE_LENGTH / 2.0, WAVE_LENGTH / 2.0, 3501)
+
+    def mean_face(run_axis: str, side: float) -> float:
+        faces = _wall_face_values(cavity, along, run_axis, side)
+        return float(np.mean(0.5 * (faces[1:] + faces[:-1])))
+
+    try:
+        return Zone(
+            mean_face("y", -1.0), mean_face("x", -1.0),
+            mean_face("y", 1.0), mean_face("x", 1.0),
+        )
+    except ValueError:
+        return b4b_divider_zone(eff)
+
+
 def b4b_divider_work_box(box: BoxSpec) -> BoxSpec:
     eff = b4b_effective_box(box)
     return replace(
@@ -61,14 +90,15 @@ def normalize_b4b_divider(box: BoxSpec, feature):
         # Storage Box has no ordinary connector band. Default to full child height.
         options["height"] = eff.z
 
+    span = b4b_divider_span_zone(eff)
     one = replace(
         feature,
-        zone=b4b_divider_zone(eff),
+        zone=span,
         full_span=True,
         options=options,
     )
     one = normalize_divider_scoop(work, one, work.base_thickness)
-    return replace(one, zone=b4b_divider_zone(eff), full_span=True)
+    return replace(one, zone=span, full_span=True)
 
 
 def b4b_divider_solids(box: BoxSpec, features):
