@@ -16,7 +16,6 @@ from organizer_geometry import (
 )
 from .._constants import (
     B4B_RUNNING_GAP,
-    B4B_HEAD_RECESS_DEPTH,
     B4B_HW_RELIEF_CLEARANCE,
     B4B_HW_FILLET,
     B4B_HANDLE_EYE_OVERLAP,
@@ -44,7 +43,6 @@ from ._cutters import (
     _root_taper_prism,
     _relief_cutter,
     _pivot_section,
-    _head_recess_cutter,
     _ear_solid,
     _gusset,
 )
@@ -293,7 +291,6 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
             z_hi=plan.root_top_z,
         )
         solid = _intersection([root, keeper])
-        out_x = 1.0 if cx >= 0.0 else -1.0
         for ex, thickness, terminal in (
             (near_x, plan.near_ear, False),
             (far_x, plan.far_lug, True),
@@ -352,21 +349,7 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
             extents=(plan.eye_band, 1.2, B4B_HANDLE_STOP_FACE)
         )
         pad.apply_translation((cx, plan.front_crest + 0.6, plan.axis_z))
-        # The fork's root deliberately overlaps its own ears for strength (and
-        # spans well above and below the pivot axis - see the resolved plan's
-        # own root_above/root_below), so the near ear's head pocket is only
-        # authoritative once it is cut from the finished fork, root and heel
-        # pad together.
-        head_cut = _head_recess_cutter(
-            radius=profile.head_pocket_radius,
-            depth=B4B_HEAD_RECESS_DEPTH,
-            x_centre=near_x,
-            thickness=plan.near_ear,
-            axis_y=plan.axis_y,
-            axis_z=plan.axis_z,
-            side=int(out_x),
-        )
-        parts.append(difference([union([solid, pad]), head_cut]))
+        parts.append(union([solid, pad]))
     for cx in plan.detent_centers_x:
         # Radius comes from the ramp requirement, not from taste: the bump has
         # to rise its full height over at least this much run so the arm rides

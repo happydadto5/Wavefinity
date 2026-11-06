@@ -11,7 +11,6 @@ from organizer_engine.product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD
 
 from ._constants import (
     B4B_SCREW_MAX_TAIL,
-    B4B_HEAD_RECESS_DEPTH,
     HardwareProfile,
     B4B_HW_CLEARANCE,
     B4B_LID_FITTING_DROP,
@@ -418,7 +417,7 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         root_bottom_z=hinge_root_bottom_z,
     )
     hinge_screw = _screw_for_stack(
-        profile, profile.clear_span + B4B_HEAD_RECESS_DEPTH, profile.far_lug, "hinge"
+        profile, profile.clear_span, profile.far_lug, "hinge"
     )
 
     # ---- front latches: user override, else one authoritative width threshold #

@@ -24,7 +24,6 @@ from ._constants import (
     B4B_STACK_MIN_BASE,
     _SUPPORT_FREE_INSCRIBED,
     B4B_RUNNING_GAP,
-    B4B_HEAD_RECESS_DEPTH,
     HardwareProfile,
     B4B_HW_M2,
     B4B_HW_M3,
@@ -402,7 +401,7 @@ def b4b_handle_dimensions(box: BoxSpec, profile: HardwareProfile) -> HandleDimen
     near_ear, eye_band, far_lug = _handle_pivot_stack(profile)
     fork_width = near_ear + eye_band + far_lug + 2.0 * B4B_RUNNING_GAP
     fork_clear_span = (
-        near_ear - B4B_HEAD_RECESS_DEPTH + eye_band + 2.0 * B4B_RUNNING_GAP
+        near_ear + eye_band + 2.0 * B4B_RUNNING_GAP
     )
     eye_radius = (
         profile.clear_bore / 2.0

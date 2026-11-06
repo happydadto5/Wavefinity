@@ -13,7 +13,6 @@ from organizer_geometry import (
 )
 from .._constants import (
     B4B_RUNNING_GAP,
-    B4B_HEAD_RECESS_DEPTH,
     B4B_HW_RELIEF_CLEARANCE,
     B4B_LID_FITTING_DROP,
 )
@@ -40,7 +39,6 @@ from ._cutters import (
     _root_taper_prism,
     _relief_cutter,
     _pivot_section,
-    _head_recess_cutter,
     _ear_solid,
     _gusset,
 )
@@ -53,7 +51,7 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
     profile = plan.profile
     parts: list[trimesh.Trimesh] = []
     for cx in plan.hinge_centers_x:
-        near_x, _mid_x, far_x = _stack_positions(cx, profile)
+        _near_x, _mid_x, far_x = _stack_positions(cx, profile)
         half = plan.hinge_root_width / 2.0 + 1.0
         cavity = _cavity_prism(box, cx - half, cx + half)
         root_prof = _root_profile_yz(
@@ -194,7 +192,7 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
     profile = plan.profile
     parts: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
-        near_x, _mid_x, far_x = _stack_positions(cx, profile)
+        _near_x, _mid_x, far_x = _stack_positions(cx, profile)
         half = plan.latch_root_width / 2.0 + 1.0
         cavity = _cavity_prism(box, cx - half, cx + half)
         root_prof = _root_profile_yz(
@@ -218,7 +216,6 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
         )
         solid = _intersection([root, keeper])
         bottom_z = max(0.6, plan.latch_root_top_z - profile.latch_root_height)
-        out_x = 1.0 if cx >= 0.0 else -1.0
         for ex, thickness, terminal in (
             (near_x, profile.near_ear, False),
             (far_x, profile.far_lug, True),
@@ -270,19 +267,7 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
             face_y=plan.latch_root_face_y,
             outward_sign=-1.0,
         )
-        # Same reasoning as the rear hinge: the catch root is built to overlap
-        # its own ears, so the near ear's head pocket is only authoritative
-        # once it is cut from the fully unioned receiver.
-        head_cut = _head_recess_cutter(
-            radius=profile.head_pocket_radius,
-            depth=B4B_HEAD_RECESS_DEPTH,
-            x_centre=near_x,
-            thickness=profile.near_ear,
-            axis_y=plan.catch_axis_y,
-            axis_z=plan.catch_axis_z,
-            side=int(out_x),
-        )
-        parts.append(difference([solid, cavity, relief, head_cut]))
+        parts.append(difference([solid, cavity, relief]))
     return parts
 
 
@@ -299,7 +284,6 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
     parts: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
         near_x, _mid_x, far_x = _stack_positions(cx, profile)
-        out_x = 1.0 if cx >= 0.0 else -1.0
         for ex, thickness, terminal in (
             (near_x, profile.near_ear, False),
             (far_x, profile.far_lug, True),
@@ -344,9 +328,6 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
                     bore_r=profile.bore_radius(terminal),
                     axis_y=plan.pivot_axis_y,
                     axis_z=plan.pivot_axis_z,
-                    head_recess_r=None if terminal else profile.head_pocket_radius,
-                    head_recess_depth=0.0 if terminal else B4B_HEAD_RECESS_DEPTH,
-                    head_recess_side=0 if terminal else int(out_x),
                 )
             )
     return parts

@@ -295,59 +295,16 @@ def _pivot_section(
     return translate_polygon(support_free_profile_yz(radius), axis_y, axis_z)
 
 
-def _head_recess_cutter(
-    *, radius: float, depth: float, x_centre: float, thickness: float,
-    axis_y: float, axis_z: float, side: int,
-) -> trimesh.Trimesh:
-    """The shallow cylindrical socket-head counterbore for one ear's outer face.
-
-    ``side`` is +1 to open through the ear's +X face, -1 for its -X face.  The
-    shoulder sits exactly ``depth`` inside that face; a small overcut beyond
-    the face keeps the boolean from leaving a whisker-thin web there.
-
-    This is a standalone cutter, not something folded into one ear's own
-    extrusion, precisely so a caller can subtract it from a FINISHED hardware
-    group after every root/ear union - a root deliberately built to overlap
-    and reinforce its ear can otherwise refill a pocket cut only inside that
-    ear's own solid.
-    """
-    s = float(side)
-    overcut = 0.1
-    face_x = x_centre + s * thickness / 2.0
-    pocket_x = face_x - s * (depth - overcut) / 2.0
-    cutter = _round_bore(radius, depth + overcut)
-    cutter.apply_translation((pocket_x, axis_y, axis_z))
-    return cutter
-
-
 def _ear_solid(
     *, section: Polygon, thickness: float, x_centre: float,
     bore_r: float, axis_y: float, axis_z: float,
-    head_recess_r: float | None = None,
-    head_recess_depth: float = 0.0,
-    head_recess_side: int = 0,
 ) -> trimesh.Trimesh:
-    """One printed ear with a uniform outer barrel and a round screw bore.
-
-    When ``head_recess_side`` is +/-1, a shallow cylindrical counterbore is
-    also cut into that outer face (+1 = the +X face, -1 = the -X face) so a
-    socket-head screw seats slightly recessed instead of bearing on the bare
-    clearance bore.  This is only safe when nothing is unioned onto this ear
-    afterward - a caller whose root deliberately overlaps the ear must instead
-    cut :func:`_head_recess_cutter` from the finished, unioned group.
-    """
+    """One printed ear with a uniform outer barrel and a round screw bore."""
     ear = _extrude_yz_profile(section, thickness)
     ear.apply_translation((x_centre, 0.0, 0.0))
     bore = _round_bore(bore_r, thickness + 3.0)
     bore.apply_translation((x_centre, axis_y, axis_z))
-    cutters = [bore]
-    if head_recess_side and head_recess_r is not None and head_recess_depth > 0.0:
-        cutters.append(_head_recess_cutter(
-            radius=head_recess_r, depth=head_recess_depth,
-            x_centre=x_centre, thickness=thickness,
-            axis_y=axis_y, axis_z=axis_z, side=head_recess_side,
-        ))
-    return difference([ear, *cutters])
+    return difference([ear, bore])
 
 
 def _gusset(

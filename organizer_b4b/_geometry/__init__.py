@@ -35,7 +35,6 @@ from .._constants import (
     B4B_LID_SKIRT_MIN_LAP,
     B4B_SUPPORT_FREE_FLAT,
     B4B_RUNNING_GAP,
-    B4B_HEAD_RECESS_DEPTH,
     HardwareProfile,
     B4B_HW_RELIEF_CLEARANCE,
     B4B_LID_ROOT_BITE,
@@ -85,7 +84,6 @@ from ._cutters import (
     _root_taper_prism,
     _relief_cutter,
     _pivot_section,
-    _head_recess_cutter,
     _ear_solid,
     _gusset,
 )

@@ -80,15 +80,6 @@ B4B_RUNNING_GAP = 0.30
 # stacks below are designed to produce zero tail; this is the acceptance limit.
 B4B_SCREW_MAX_TAIL = 0.5
 
-# Shallow socket-head counterbore in the head-side (near) ear of every screw
-# stack.  The head sits in the bottom ~0.5 mm of this pocket rather than
-# bearing fully proud on the bare clearance bore, so it positively locates
-# and cannot wander against the bore edge - without disappearing into the
-# ear or reviving the old one-sided head-bearing boss.
-B4B_HEAD_POCKET_DIAMETRAL_CLEARANCE = 0.20
-B4B_HEAD_RECESS_DEPTH = 0.50
-
-
 @dataclass(frozen=True)
 class HardwareProfile:
     """One metric screw family and every Storage Box dimension derived from it.
@@ -146,15 +137,10 @@ class HardwareProfile:
     def clear_span(self) -> float:
         """Clearance-bored stack the screw crosses before its lug.
 
-        The head seats ``B4B_HEAD_RECESS_DEPTH`` inside the near ear's outer
-        face rather than on it, so the screw starts that much further into
-        the stack and this many fewer millimetres of clearance-bored material
-        remain between the head and the terminal lug.
+        The head bears on the near ear's flat outer face, so the screw crosses
+        the full ear, centre member, and running gaps before reaching the lug.
         """
-        return (
-            self.near_ear - B4B_HEAD_RECESS_DEPTH
-            + self.mid_member + 2.0 * B4B_RUNNING_GAP
-        )
+        return self.near_ear + self.mid_member + 2.0 * B4B_RUNNING_GAP
 
     @property
     def catch_inner_radius(self) -> float:
@@ -169,30 +155,18 @@ class HardwareProfile:
         return (self.pilot if terminal else self.clear_bore) / 2.0
 
     @property
-    def head_pocket_diameter(self) -> float:
-        """Printed counterbore diameter - the physical head plus running clearance."""
-        return self.head_diameter + B4B_HEAD_POCKET_DIAMETRAL_CLEARANCE
-
-    @property
-    def head_pocket_radius(self) -> float:
-        return self.head_pocket_diameter / 2.0
-
     @property
     def head_bearing_margin(self) -> float:
-        """Actual head-bearing material on the uniform outer barrels.
-
-        Measured against the head *pocket*, not the bare head: the pocket is
-        what actually gets cut into the barrel's near ear.
-        """
+        """Bearing material around a screw head on the flat outer ear face."""
         radius = min(self.pivot_radius, self.catch_radius)
-        return radius * _SUPPORT_FREE_INSCRIBED - self.head_pocket_diameter / 2.0
+        return radius * _SUPPORT_FREE_INSCRIBED - self.head_diameter / 2.0
 
     @property
     def required_uniform_radius(self) -> float:
-        """Smallest uniform ear radius that protects both bore and head pocket."""
+        """Smallest uniform ear radius that protects the bore and head bearing."""
         return max(
             self.clear_bore / 2.0 + self.bore_shell,
-            (self.head_pocket_diameter / 2.0 + self.head_bearing_min)
+            (self.head_diameter / 2.0 + self.head_bearing_min)
             / _SUPPORT_FREE_INSCRIBED,
         )
 

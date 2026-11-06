@@ -385,6 +385,8 @@ def validate_b4b_design(
                 f"but {len(plan.hinge_centers_x)} hinge centers were generated"
             )
         # --- printability and structure, not merely "it resolved to a number"
+        # The screw head bears on the flat outer face, so this margin is
+        # measured from the physical head diameter around the uncut barrel.
         if profile.head_bearing_margin + _EPS < profile.head_bearing_min:
             raise ValueError(
                 f"a {profile.name} head has only {profile.head_bearing_margin:.2f} mm "
