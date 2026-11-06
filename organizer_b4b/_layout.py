@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from functools import lru_cache
 import math
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, Point, Polygon, box as _rect
+from shapely.ops import unary_union
 from organizer_engine import (
     CORNER_INSET,
     GRID_PITCH,
@@ -15,11 +16,13 @@ from organizer_engine import (
     _rounded,
     _wall_points,
     wall_wave_value,
+    wavy_rect_outer,
 )
 from organizer_engine._wave import wall_wave_slope
 from organizer_engine.product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD_XY
 
 from ._constants import (
+    B4B_CAVITY_CORNER_CLEARANCE,
     B4B_WALL_CORNER_FILLET,
     B4B_STACK_MIN_BASE,
     _SUPPORT_FREE_INSCRIBED,
@@ -168,6 +171,42 @@ def _outer_rounded_outline(half_x: float, half_y: float, radius: float) -> Polyg
     return outline
 
 
+def _cavity_with_bin_corners(
+    inner: Polygon, bin_half_x: float, bin_half_y: float,
+    inner_half_x: float, inner_half_y: float,
+) -> Polygon:
+    """``inner`` with each corner formed to receive the matched bin's corner.
+
+    The unit-matched bin's finished corner (walls stop ``CORNER_INSET`` short,
+    tip rounded) is grown by its designed receiving clearance and joined into
+    the cavity at each corner.  Only the region past the wall runs' ends is
+    touched, so the wavy faces and their running gap are exactly as before.
+    ``inner`` is the unrounded wall outline: rounding it would cut the face
+    back near each run end and put the bin corner into the cavity.
+    The corner form is part of the one cavity plan, so it holds along the full
+    cavity height.
+    """
+    receiving = wavy_rect_outer(bin_half_x, bin_half_y).buffer(
+        B4B_CAVITY_CORNER_CLEARANCE, join_style=1, quad_segs=32
+    )
+    reach_x = inner_half_x - CORNER_INSET
+    reach_y = inner_half_y - CORNER_INSET
+    past = 2.0 + WAVE_MATING_GAP
+    windows = unary_union([
+        _rect(
+            min(sx * reach_x, sx * (inner_half_x + past)),
+            min(sy * reach_y, sy * (inner_half_y + past)),
+            max(sx * reach_x, sx * (inner_half_x + past)),
+            max(sy * reach_y, sy * (inner_half_y + past)),
+        )
+        for sx in (-1.0, 1.0) for sy in (-1.0, 1.0)
+    ])
+    result = unary_union([inner, receiving.intersection(windows)])
+    if not isinstance(result, Polygon) or not result.is_valid:
+        raise RuntimeError("Storage Box cavity corner form is not a valid single polygon")
+    return result
+
+
 @lru_cache(maxsize=64)
 def b4b_layout(box: BoxSpec) -> B4BLayout:
     """Resolve the exact child field and its outward-built case wall."""
@@ -181,7 +220,13 @@ def b4b_layout(box: BoxSpec) -> B4BLayout:
         inner = inner.buffer(0)
     if not isinstance(inner, Polygon) or not inner.is_valid:
         raise RuntimeError("Storage Box inner mating outline is not a valid single polygon")
-    inner = _rounded(inner, B4B_WALL_CORNER_FILLET)
+    inner = _cavity_with_bin_corners(
+        inner,
+        eff.x / 2.0 - WAVE_MATING_GAP / 2.0,
+        eff.y / 2.0 - WAVE_MATING_GAP / 2.0,
+        inner_half_x,
+        inner_half_y,
+    )
 
     outer_half_x = inner_half_x + eff.wall_depth
     outer_half_y = inner_half_y + eff.wall_depth

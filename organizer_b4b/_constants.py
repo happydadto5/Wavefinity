@@ -5,12 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
+from organizer_engine._specs import T_JUNCTION_CLEARANCE
+
 
 # --------------------------------------------------------------------------- #
 # tuning constants - centralised, conservative first-print defaults
 # --------------------------------------------------------------------------- #
 # B4B wall corner treatment.  The child-compatible wavy faces are never
-# buffered; only their corner joins receive this small printable rounding.
+# buffered; only their corner joins are formed.  The cavity corner carries the
+# unit-matched bin's finished corner at the clearance that corner was designed
+# to keep from a receiving wall (the figure the drawer cavity gives it), so the
+# bin drops in and lifts out freely.  Read from the engine, never restated, so
+# the box and the bin corner cannot drift apart.
+B4B_CAVITY_CORNER_CLEARANCE = T_JUNCTION_CLEARANCE
+# The bare rounding the cavity corners used to carry.  It opened the join and
+# cut the wavy face back near each run end, where the bin corner then bit in;
+# the clearance form above supersedes it, so the cavity no longer reads this.
 B4B_WALL_CORNER_FILLET = 0.6
 
 # Effective base / stacking
