@@ -346,12 +346,13 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
         if plan.piano is None:
             paths.append(("hinge", profile.clear_span, profile.far_lug,
                           plan.hinge_screw_length_mm))
-        paths += [
-            ("latch pivot", profile.clear_span, profile.far_lug,
-             plan.latch_screw_length_mm),
-            ("catch", profile.clear_span, profile.far_lug,
-             plan.catch_screw_length_mm),
-        ]
+        if plan.latch_count_resolved:
+            paths += [
+                ("latch pivot", profile.clear_span, profile.far_lug,
+                 plan.latch_screw_length_mm),
+                ("catch", profile.clear_span, profile.far_lug,
+                 plan.catch_screw_length_mm),
+            ]
     handle = b4b_handle_plan(box)
     if handle is not None:
         paths.append((
@@ -439,7 +440,8 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
             )
 
     # 5. the hook is geometrically off the pin by the release angle.
-    _validate_latch_release(plan)
+    if plan.latch_count_resolved:
+        _validate_latch_release(plan)
 
     # 6. lid opening sweep about the hinge axis, every 5 degrees to 120.
     if lid is not None:
@@ -684,6 +686,8 @@ def validate_b4b_design(
         ):
             if eff.wall_depth > target + _EPS or (what == "hinge" and plan.piano):
                 continue
+            if what == "latch" and not plan.latch_count_resolved:
+                continue
             if _root_outward(target, eff.wall_depth) <= 0.0:
                 raise ValueError(
                     f"the {what} root adds no reinforcement over a "
@@ -698,7 +702,7 @@ def validate_b4b_design(
                 f"hardware bolted on rather than grown from the case"
             )
         ceiling = B4B_LATCH_MAX_PROJECTION[profile.name]
-        if plan.latch_projection > ceiling + _EPS:
+        if plan.latch_count_resolved and plan.latch_projection > ceiling + _EPS:
             raise ValueError(
                 f"the closed latch stands {plan.latch_projection:.2f} mm off "
                 f"the front wall (review ceiling {ceiling:g} mm)"
@@ -710,6 +714,8 @@ def validate_b4b_design(
         ):
             if what == "hinge" and plan.piano is not None:
                 continue
+            if what != "hinge" and not plan.latch_count_resolved:
+                continue
             if length not in profile.lengths:
                 raise ValueError(
                     f"the {what} screw did not resolve to an allowed "
@@ -720,7 +726,7 @@ def validate_b4b_design(
         # needs both envelopes to overlap - comparing one axis alone would
         # condemn every handled case, since the latch always sits above the
         # pivots and that is exactly the intended arrangement.
-        if b4b.handle:
+        if b4b.handle and plan.latch_count_resolved:
             handle = b4b_handle_plan(box)
             if handle is not None:
                 latch_lo = plan.latch_root_top_z - profile.latch_root_height
@@ -742,14 +748,15 @@ def validate_b4b_design(
                         f"this Storage Box is too wide for a centred bail and its "
                         f"latches at once"
                     )
-        detent = profile.nominal - profile.hook_mouth
-        if abs(detent - B4B_LATCH_DETENT) > 0.05 + _EPS:
-            raise ValueError(
-                f"the {profile.name} hook mouth gives {detent:.2f} mm of pin "
-                f"interference, away from the {B4B_LATCH_DETENT:.2f} mm detent "
-                f"the latch is tuned around (band 0.15-0.25 mm)"
-            )
-        _validate_latch_release(plan)
+        if plan.latch_count_resolved:
+            detent = profile.nominal - profile.hook_mouth
+            if abs(detent - B4B_LATCH_DETENT) > 0.05 + _EPS:
+                raise ValueError(
+                    f"the {profile.name} hook mouth gives {detent:.2f} mm of pin "
+                    f"interference, away from the {B4B_LATCH_DETENT:.2f} mm detent "
+                    f"the latch is tuned around (band 0.15-0.25 mm)"
+                )
+            _validate_latch_release(plan)
 
     if deep:
         _validate_b4b_mechanics(box)
