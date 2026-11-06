@@ -6,6 +6,8 @@ import math
 from dataclasses import replace
 from typing import Iterable
 
+import manifold3d
+import numpy as np
 import trimesh
 from shapely.geometry import Polygon, box as shapely_box
 
@@ -22,6 +24,7 @@ from organizer_engine import (
     top_label_surface_z,
     wavy_cavity_polygon,
 )
+from organizer_engine._lift_grabbers import make_lift_grabbers
 
 from ._core import (
     BASE_PLATE,
@@ -436,6 +439,26 @@ def make_fitted_insert(
     # plate's own footprint keeps that true for every holder, including any
     # added later.
     limit = _extrude_polygon(footprint, box.z * 2.0)
+    grabbers = make_lift_grabbers(box)
+    if grabbers:
+        clearance = 0.4
+        padding = manifold3d.Manifold.cube((2 * clearance,) * 3, center=True)
+        keep_outs = []
+        for grabber in grabbers:
+            solid = manifold3d.Manifold(manifold3d.Mesh(
+                np.asarray(grabber.vertices, dtype=np.float32),
+                np.asarray(grabber.faces, dtype=np.uint32),
+            ))
+            expanded = solid.minkowski_sum(padding).to_mesh()
+            keep_out = trimesh.Trimesh(
+                vertices=expanded.vert_properties[:, :3],
+                faces=expanded.tri_verts, process=False,
+            )
+            if keep_out.is_empty:
+                raise RuntimeError("could not build Inside Grip insert clearance")
+            keep_out.apply_translation((0.0, 0.0, -box.base_thickness))
+            keep_outs.append(keep_out)
+        limit = difference([limit, *keep_outs])
     return intersection([body, limit])
 
 
