@@ -50,7 +50,11 @@ B4B_LID_SKIRT_WALL = 2.0       # locating skirt wall thickness
 # printed running fit per side - loose enough to drop in without forcing, tight
 # enough that the closed lid does not rattle on the spigot.
 B4B_LID_SEAT_CLEARANCE = 0.15
-B4B_LID_SKIRT_LAP = 4.0        # how far the skirt laps down past the body rim
+B4B_LID_SKIRT_LAP = 2.0        # centering lap: how far the skirt laps down past the body rim
+# Clearance between the skirt tip and the top of a child of the stated inside
+# height - room for ordinary print growth so the lid seats instead of riding on
+# a full-height bin.
+B4B_LID_SKIRT_TIP_CLEARANCE = 0.5
 B4B_LID_SKIRT_MIN_LAP = 0.30   # smallest lap that still counts as a locating skirt
 # A latched lid needs a printable body wall below its latch pad, independent
 # of the selected latch strength - see organizer_engine.product_rules.B4B_LATCHED_MIN_HEIGHT.

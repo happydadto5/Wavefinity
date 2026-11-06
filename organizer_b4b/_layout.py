@@ -23,6 +23,8 @@ from organizer_engine.product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD
 
 from ._constants import (
     B4B_CAVITY_CORNER_CLEARANCE,
+    B4B_LID_SKIRT_LAP,
+    B4B_LID_SKIRT_TIP_CLEARANCE,
     B4B_WALL_CORNER_FILLET,
     B4B_STACK_MIN_BASE,
     _SUPPORT_FREE_INSCRIBED,
@@ -583,7 +585,11 @@ def b4b_internal_floor_z(box: BoxSpec) -> float:
 
 
 def b4b_lid_underside_z_from_eff(eff: BoxSpec) -> float:
-    return eff.base_thickness + eff.z + eff.b4b.lid_headroom_mm
+    # The skirt hangs below the underside, so a nominal-height child needs at
+    # least lap + tip clearance above it; the riser carries what the chosen
+    # headroom does not, instead of taking it from the child's stated height.
+    skirt_room = B4B_LID_SKIRT_LAP + B4B_LID_SKIRT_TIP_CLEARANCE
+    return eff.base_thickness + eff.z + max(eff.b4b.lid_headroom_mm, skirt_room)
 
 
 def b4b_lid_underside_z(box: BoxSpec) -> float:
