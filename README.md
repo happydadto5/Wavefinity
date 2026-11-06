@@ -646,8 +646,8 @@ which suppress Inventory logging entirely.
   direct interfaces are intentionally same-mode only. The Height field is the
   module contribution: a 50 mm lid bin adds exactly 50 mm. Its detached physical
   envelope also includes the exposed interlock (1 mm on a lid), which the drawer
-  clearance check includes. A direct bin measures exactly its Height; its 3 mm
-  skirt sits inside that, so each bin added adds the Height less 3 mm. Dragging a bin in a
+  clearance check includes. A direct bin measures exactly its Height; its 2 mm
+  skirt sits inside that, so each bin added adds the Height less 2 mm. Dragging a bin in a
   stack takes it and everything above it; dragging the bottom bin moves the
   whole stack.
 - **Inventory is the primary Space control.** Each ordinary row shows a

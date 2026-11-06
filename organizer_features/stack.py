@@ -85,9 +85,8 @@ from organizer_geometry import (
 STACK_LID_SKIN = 2.0      # minimum lid rise above the rim
 STACK_SEAT_DEPTH = 1.0    # lid mode: base step height == lid top recess depth
 STACK_PLUG_DEPTH = 3.0    # how far a lid plug reaches into the mouth it closes
-STACK_SKIRT_DEPTH = 3.0   # direct mode: how far the skirt drops into the bin below
+STACK_SKIRT_DEPTH = 2.0   # direct mode: how far the skirt drops into the bin below
 STACK_SKIRT_BEVEL = 1.0   # direct mode: 45 degree lead-in on the skirt's entering edge
-STACK_SKIRT_LAYER = 0.1   # direct mode: step of the 45 degree ramps (one thin print layer)
 STACK_PROFILE_POINTS = 192
 STACK_FIT = 0.25          # clearance per side on every sliding face
 STACK_MIN_FLOOR_SKIN = 0.8   # floor left under the stepped base
@@ -177,12 +176,13 @@ def _stack_wall_box(box: BoxSpec) -> BoxSpec:
 def stack_base_minimum(box: BoxSpec) -> float:
     """Visible/saved base thickness required by the selected stack foot.
 
-    The foot's flare has to finish entirely inside solid base material before
-    the vertical cavity wall begins, or the floor/wall corner intersects the
-    taper before the outside has returned to full wall thickness.
+    Direct skirts need only their depth and floor skin. Lid feet also need
+    room for their flare inside the solid base.
     """
     if not vertical_stack_enabled(box):
         return DEFAULT_BASE_THICKNESS
+    if direct_stack_enabled(box):
+        return STACK_SKIRT_DEPTH + STACK_MIN_FLOOR_SKIN
     flare = stack_foot_flare_height(_stack_wall_box(box))
     return stack_step_depth(box) + max(STACK_MIN_FLOOR_SKIN, flare)
 
@@ -377,8 +377,6 @@ def _outline_run(inner: Polygon, outer: Polygon) -> float:
 
 def stack_foot_flare_height(eff: BoxSpec) -> float:
     """Vertical run needed for a <=45 degree foot/lid flare."""
-    if direct_stack_enabled(eff):
-        return _skirt_flare_height(eff)
     run = _outline_run(_plug_polygon(eff), wavy_outer_polygon(eff))
     return math.ceil((run + _EPS) * 100.0) / 100.0
 
@@ -442,43 +440,13 @@ def _skirt_polygon(eff: BoxSpec) -> Polygon:
     return skirt
 
 
-def _skirt_flare_height(eff: BoxSpec) -> float:
-    """Rise the base needs to grow from the skirt out to the full wall at
-    45 degrees, in whole print layers."""
-    run = _outline_run(_skirt_polygon(eff), wavy_outer_polygon(eff))
-    return math.ceil(run / STACK_SKIRT_LAYER - _EPS) * STACK_SKIRT_LAYER
-
-
 def _skirt_keep(eff: BoxSpec) -> trimesh.Trimesh:
-    """The solid the base keeps: beveled skirt, then a 45 degree ramp out.
-
-    Stacked one-layer slabs of the distance field around the skirt, so every
-    overhang is exactly 45 degrees and no underside is a flat ceiling.  The
-    ramp slabs are wider than the body outline; the body-sized cutter they are
-    subtracted from trims them.
-    """
+    """Straight skirt with a small bevel on its entering edge."""
     skirt = _skirt_polygon(eff)
-    step = stack_step_depth(eff)
-    layers = int(round((step + _skirt_flare_height(eff)) / STACK_SKIRT_LAYER))
-    top = layers * STACK_SKIRT_LAYER + 2.0 * _PROFILE_EPS
-    slabs: list[trimesh.Trimesh] = []
-    previous = None
-    for index in range(layers + 1):
-        z = index * STACK_SKIRT_LAYER
-        if z < STACK_SKIRT_BEVEL - _EPS:
-            outline = skirt.buffer(-(STACK_SKIRT_BEVEL - z))
-        elif z <= step + _EPS:
-            outline = skirt
-        else:
-            outline = skirt.buffer(z - step)
-        if previous is not None and outline.equals(previous):
-            continue                       # the slab already standing here reaches up
-        previous = outline
-        base = -2.0 * _PROFILE_EPS if index == 0 else z
-        slab = _extrude_polygon(outline, top - base)
-        slab.apply_translation((0.0, 0.0, base))
-        slabs.append(slab)
-    return union(slabs)
+    return _profile_loft(
+        [skirt.buffer(-STACK_SKIRT_BEVEL), skirt, skirt],
+        [-2.0 * _PROFILE_EPS, STACK_SKIRT_BEVEL, stack_step_depth(eff) + _PROFILE_EPS],
+    )
 
 
 def _lid_lock_masks(eff: BoxSpec) -> list[Polygon]:
@@ -588,17 +556,18 @@ def stack_body_cutters(eff: BoxSpec) -> list[trimesh.Trimesh]:
         # The insertion zone stays completely inside the receiver.  Only above
         # its seating datum does the outside grow back to full size.
         outer = wavy_outer_polygon(eff)
-        flare = stack_foot_flare_height(eff)
-        shell = _extrude_polygon(outer, step + flare + 2.0 * _PROFILE_EPS)
-        shell.apply_translation((0.0, 0.0, -_PROFILE_EPS))
         if direct_stack_enabled(eff):
+            shell = _extrude_polygon(outer, step + _PROFILE_EPS)
             keep = _skirt_keep(eff)
         else:
+            flare = stack_foot_flare_height(eff)
+            shell = _extrude_polygon(outer, step + flare + 2.0 * _PROFILE_EPS)
             plug = _plug_polygon(eff)
             keep = _profile_loft(
                 [plug, plug, outer, outer],
                 [-2.0 * _PROFILE_EPS, step, step + flare, step + flare + 2.0 * _PROFILE_EPS],
             )
+        shell.apply_translation((0.0, 0.0, -_PROFILE_EPS))
         cutters.append(difference([shell, keep]))
 
     if lid_enabled(eff):
