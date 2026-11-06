@@ -331,7 +331,7 @@ def _handle_pivot_stack(profile: HardwareProfile) -> tuple[float, float, float]:
     proven handle stack.
     """
     if profile.name == "M2":
-        return 2.20, 3.20, 2.60
+        return 2.20, 2.60, 2.60
     return 2.60, 5.40, 3.40
 
 
