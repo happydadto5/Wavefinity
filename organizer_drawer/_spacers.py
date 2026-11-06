@@ -753,6 +753,11 @@ def generate_connectors(
             f"{report['connector_rim_label_seams']} seam(s) have a rim label on the shared wall; "
             "a rim label blocks the connector there, so no clip is made for them."
         )
+    if report.get("connector_side_opening_seams"):
+        notes.append(
+            f"{report['connector_side_opening_seams']} seam(s) have a side opening that cuts the shared wall "
+            "and leaves under 12 mm of intact wall for a clip to grip, so no clip is made for them."
+        )
     return {"connectors": made, "notes": notes}
 
 

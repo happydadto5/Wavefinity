@@ -7,7 +7,9 @@ from typing import Any, Iterable
 import numpy as np
 from organizer_engine import (
     DEFAULT_WALL,
+    LOCK_TOP_BELOW_RIM,
     LOCKED_CONNECTOR_LENGTH,
+    SIDE_OPENING_WIDTHS,
     BoxSpec,
     ConnectorSpec,
     differing_connector_plan,
@@ -79,6 +81,58 @@ def _seam_rim_blocked(a: dict[str, Any], b: dict[str, Any], a_wall: str, b_wall:
     return a_wall in a.get("rim_walls", ()) or b_wall in b.get("rim_walls", ())
 
 
+def _side_opening_cuts(spec: Any) -> tuple[tuple[str, float], ...]:
+    """``(wall, width_mm)`` for each Side Opening of a saved design that cuts
+    the wall where a connector grips (from the rim down to the lock, 4 mm
+    below it).  An opening is centred on its wall.  A bridged opening that
+    stops short of that zone leaves the grip intact and is not listed."""
+    box = spec.get("box") if isinstance(spec, dict) else None
+    raw = box.get("side_openings") if isinstance(box, dict) else None
+    if not (isinstance(raw, dict) and raw.get("enabled")):
+        return ()
+    width = SIDE_OPENING_WIDTHS.get(str(raw.get("size", "medium")))
+    sides = raw.get("sides")
+    if width is None or not isinstance(sides, (list, tuple)):
+        return ()
+    try:
+        if raw.get("percent_mode") == "inset_v2":
+            from_top = float(raw.get("from_top_percent", 0.0))
+        elif "from_top_percent" in raw:
+            from_top = 100.0 - float(raw["from_top_percent"])
+        else:
+            from_top = 0.0 if not raw.get("top_support") else 100.0
+        rim, floor = float(box["z"]), float(box["base_thickness"])
+        # Distance the opening's top edge sits below the rim; 0 is open-top.
+        depth = (rim - floor) * from_top / 100.0 if from_top > 1e-9 else 0.0
+    except (KeyError, TypeError, ValueError):
+        depth = 0.0
+    if depth >= LOCK_TOP_BELOW_RIM - 1e-9:
+        return ()
+    return tuple((str(side), float(width)) for side in sides)
+
+
+def _intact_run_mm(
+    a: dict[str, Any], b: dict[str, Any], a_wall: str, b_wall: str, step: float, along_x: bool,
+) -> float:
+    """Longest stretch of the shared seam, in mm, left after the Side Openings
+    on the shared wall of either bin are cut out of it."""
+    if along_x:
+        lo, hi = max(a["gx"], b["gx"]) * step, min(a["gx"] + a["w"], b["gx"] + b["w"]) * step
+    else:
+        lo, hi = max(a["gy"], b["gy"]) * step, min(a["gy"] + a["d"], b["gy"] + b["d"]) * step
+    gaps: list[tuple[float, float]] = []
+    for item, wall in ((a, a_wall), (b, b_wall)):
+        centre = ((item["gx"] + item["w"] / 2.0) if along_x else (item["gy"] + item["d"] / 2.0)) * step
+        for side, width in item.get("opening_cuts", ()):
+            if side == wall:
+                gaps.append((centre - width / 2.0, centre + width / 2.0))
+    best, cursor = 0.0, lo
+    for start, end in sorted(gaps):
+        best = max(best, min(start, hi) - cursor)
+        cursor = max(cursor, end)
+    return max(best, hi - cursor)
+
+
 def _top_wall(item: dict[str, Any]) -> float:
     """The wall a connector meets at the top of this footprint.
 
@@ -91,17 +145,19 @@ def _top_wall(item: dict[str, Any]) -> float:
     return STACK_MIN_WALL if item["top"].get("stack", "none") in ("lid", "b4b") else DEFAULT_WALL
 
 
-def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str, Any]], int, int, int]:
+def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str, Any]], int, int, int, int]:
     """One connector per shared seam long enough to seat one, grouped by the
     two rim heights and wall thickness it joins.  Stacks join at their top
     bins.  Returns the groups, how many seams join incompatible bins -
     different wall thicknesses, which no printed connector fits - how
     many shared seams are too short for even the smallest connector, and
-    how many seams a rim label ledge on the shared wall blocks."""
+    how many seams a rim label ledge on the shared wall blocks, and how many
+    a Side Opening leaves without a 12 mm run of intact wall to grip."""
     counts: dict[tuple[float, float, float], int] = {}
     mismatched = 0
     short_seams = 0
     rim_blocked = 0
+    opening_blocked = 0
     need = math.ceil(MIN_CONNECTOR_SEAM / step - 1e-9)
     for index, a in enumerate(items):
         for b in items[index + 1:]:
@@ -109,16 +165,16 @@ def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str
                 continue
             if a["gx"] + a["w"] == b["gx"]:
                 overlap = min(a["gy"] + a["d"], b["gy"] + b["d"]) - max(a["gy"], b["gy"])
-                a_wall, b_wall = "right", "left"
+                a_wall, b_wall, along_x = "right", "left", False
             elif b["gx"] + b["w"] == a["gx"]:
                 overlap = min(a["gy"] + a["d"], b["gy"] + b["d"]) - max(a["gy"], b["gy"])
-                a_wall, b_wall = "left", "right"
+                a_wall, b_wall, along_x = "left", "right", False
             elif a["gy"] + a["d"] == b["gy"]:
                 overlap = min(a["gx"] + a["w"], b["gx"] + b["w"]) - max(a["gx"], b["gx"])
-                a_wall, b_wall = "back", "front"
+                a_wall, b_wall, along_x = "back", "front", True
             elif b["gy"] + b["d"] == a["gy"]:
                 overlap = min(a["gx"] + a["w"], b["gx"] + b["w"]) - max(a["gx"], b["gx"])
-                a_wall, b_wall = "front", "back"
+                a_wall, b_wall, along_x = "front", "back", True
             else:
                 continue
             if overlap < need:
@@ -137,13 +193,17 @@ def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str
             if overlap * step + 1e-9 < max(MIN_CONNECTOR_SEAM, plan["length_mm"]):
                 short_seams += 1
                 continue
+            if _intact_run_mm(a, b, a_wall, b_wall, step, along_x) + 1e-9 < max(
+                    LOCKED_CONNECTOR_LENGTH, plan["length_mm"]):
+                opening_blocked += 1
+                continue
             key = (*sorted((round(a["h"], 2), round(b["h"], 2)), reverse=True), wall_a)
             counts[key] = counts.get(key, 0) + 1
     groups = [
         {"heights": [key[0], key[1]], "wall": key[2], "count": count}
         for key, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
     ]
-    return groups, mismatched, short_seams, rim_blocked
+    return groups, mismatched, short_seams, rim_blocked, opening_blocked
 
 
 def _pegboard_report(drawer: dict[str, Any], bins: list[dict[str, Any]]) -> dict[str, Any]:
@@ -468,7 +528,8 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     for item in items:
         item["has_lid"] = item["bin"] in lid_rows
         item["rim_walls"] = _rim_label_walls(specs.get(item["bin"]))
-    connectors, mismatched, short_seams, rim_blocked = _connectors(items, step)
+        item["opening_cuts"] = _side_opening_cuts(specs.get(item["bin"]))
+    connectors, mismatched, short_seams, rim_blocked, opening_blocked = _connectors(items, step)
     if surface:
         for component in _interior_components(items, cols, rows):
             problems.append({"type": "restraint", "keys": component, "message": INTERIOR_COMPONENT_MESSAGE})
@@ -493,6 +554,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         "connector_mismatched": mismatched,
         "connector_short_seams": short_seams,
         "connector_rim_label_seams": rim_blocked,
+        "connector_side_opening_seams": opening_blocked,
         "problems": problems,
         "height_issues": len(issues),
         "placed": sum(len(item["layers"]) for item in items),
