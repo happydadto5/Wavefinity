@@ -1126,5 +1126,18 @@ class StorageBoxHeightCapTests(unittest.TestCase):
                 self.assertEqual(storage_box_height_cap(layout), 40.0)
 
 
+class SpaceStackMetricsIsolationTests(unittest.TestCase):
+    def test_one_failing_row_build_does_not_remove_its_siblings(self):
+        import organizer_drawer._core as core
+        layout = {"space": {"kind": "box"}}
+        bins = [{"id": "a", "kind": "bin"}, {"id": "b", "kind": "bin"}]
+        spec = {"box": {}}
+        plain = mock.Mock(b4b=mock.Mock(enabled=False))
+        with patch.object(core, "design_specs", return_value={"a": spec, "b": spec}),                 patch.object(core, "design_from_dict", return_value=(plain,)),                 patch.object(core, "stack_summary", side_effect=[
+                    ValueError("handle graze"), {"closed_height_mm": 30, "pitch_mm": 30}]):
+            metrics = core.space_stack_metrics(layout, bins)
+        self.assertEqual(list(metrics), ["b"])
+
+
 if __name__ == "__main__":
     unittest.main()

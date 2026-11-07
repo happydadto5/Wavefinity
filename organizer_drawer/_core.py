@@ -341,8 +341,10 @@ def space_stack_metrics(layout: dict[str, Any] | None, bins: list[dict[str, Any]
                     "pitch_mm": summary["pitch_mm"],
                 }
         except (ValueError, TypeError, KeyError, OverflowError):
-            if not surface:
-                raise
+            # A row whose own build fails has no planning height. That failure
+            # belongs to that row (its own preview and print raise it); it must
+            # never stop the report or the print of its sibling designs.
+            continue
     return metrics
 
 
