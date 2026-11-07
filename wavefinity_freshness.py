@@ -592,7 +592,7 @@ def _promote(stage: Path, runtime: dict, problems: list[str]) -> None:
             raise Stop(f"The runtime folder could not be moved aside ({error}); it is still in place and "
                        "nothing was changed.",
                        "Close whatever is using C:/Projects/Wavefinity-Runtime, then launch again.")
-        _log_event("runtime-moved-aside", kind=kind, source=str(RUNTIME_DIR), preserved_as=str(aside),
+        _log_event("runtime-moved-aside", preservation_kind=kind, source=str(RUNTIME_DIR), preserved_as=str(aside),
                    head=runtime.get("head"), branch=runtime.get("branch"), reasons=problems)
     try:
         for attempt in range(11):
