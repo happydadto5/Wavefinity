@@ -214,13 +214,12 @@ def stack_effective_box(box: BoxSpec) -> BoxSpec:
     Settings are normalized defensively.  Consecutive bodies are placed one
     stack pitch apart, so the foot overlaps without falsifying the pitch.  A
     direct bin's skirt and a lid bin's foot sit inside the typed height, so
-    the body plus its lid rise is exactly that tall.
+    the body plus its lid rise is exactly that tall.  Any lidded bin, stackable
+    or not, is shortened once by its lid's rise: the typed height is the total.
     """
     if not vertical_stack_enabled(box) and not lid_enabled(box):
         return box
     normalized = normalize_stack_settings(box)
-    if not vertical_stack_enabled(box):
-        return normalized
     body_z = box.z + stack_foot_growth(box) - stack_lid_rise(normalized)
     return replace(normalized, z=body_z)
 
@@ -932,6 +931,14 @@ def validate_stack_design(box: BoxSpec) -> None:
                 f"a stackable bin needs at least {minimum:g} mm of height - "
                 f"the {'skirt' if direct_stack_enabled(box) else 'foot'} and its "
                 f"floor take up the bottom {floor:g} mm"
+            )
+    elif lid_enabled(box):
+        minimum = box.base_thickness + MIN_HEIGHT_ABOVE_BASE + stack_lid_rise(box)
+        if box.z < minimum - _EPS:
+            raise ValueError(
+                f"a bin with a lid needs at least {minimum:g} mm of total height - "
+                f"the lid takes the top {stack_lid_rise(box):g} mm and the floor "
+                f"the bottom {box.base_thickness:g} mm"
             )
     eff = stack_effective_box(box)
     if lid_enabled(box):

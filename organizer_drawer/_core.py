@@ -337,7 +337,7 @@ def space_stack_metrics(layout: dict[str, Any] | None, bins: list[dict[str, Any]
             else:
                 summary = stack_summary(box)
                 metrics[one["id"]] = {
-                    "physical_mm": summary["body_z_mm"],
+                    "physical_mm": summary["closed_height_mm"],
                     "pitch_mm": summary["pitch_mm"],
                 }
         except (ValueError, TypeError, KeyError, OverflowError):
