@@ -44,7 +44,7 @@ HINGE_MIN_KNUCKLES = 5            # bin, lid, bin, lid, bin
 HINGE_BARREL_RADIUS = HINGE_BORE_RADIUS + HINGE_BARREL_WALL
 HINGE_HALF = HINGE_BARREL_RADIUS  # axis offset from the back plane
 _SEGMENTS = 48
-_ROOT = 1.0 + math.sqrt(2.0)      # 45 degree web: axis-to-wall run, in barrel radii
+HINGE_BEVEL_ANGLE = 50.0          # underside bevel, degrees up from the print plane
 
 
 @dataclass(frozen=True)
@@ -80,8 +80,10 @@ class LidHinge:
 def _back_face(cavity: Polygon, xs: list[float]) -> list[float]:
     """Back face extrema of the actual sampled wall path, including its ends."""
     _, min_y, _, max_y = cavity.bounds
-    return [float(LineString([(x, min_y - 1.0), (x, max_y + 1.0)])
-                  .intersection(cavity).bounds[3]) for x in xs]
+    ys = [float(LineString([(x, min_y - 1.0), (x, max_y + 1.0)])
+                .intersection(cavity).bounds[3]) for x in xs]
+    # A sample beyond a narrower polygon's own width misses it (NaN): skip it.
+    return [y for y in ys if math.isfinite(y)]
 
 
 def hinge_layout(
@@ -107,7 +109,11 @@ def hinge_layout(
     back_y = min(_back_face(outer, xs))
     inner_y = min(_back_face(cavity, xs))
     inner_u = back_y - inner_y
-    reach = axis_v + _ROOT * r - inner_u     # 45 degree web meets the inside face
+    a = math.radians(HINGE_BEVEL_ANGLE)
+    # The bevel roots lowest where the wall's inside face is shallowest.
+    near_u = max(0.0, back_y - max(_back_face(cavity, xs)))
+    reach = (axis_v + r * math.cos(a)
+             + max(0.0, r + r * math.sin(a) - near_u) * math.tan(a))
     if top - reach - 1.0 <= floor_z or rim - (axis_v + swing - rise) <= floor_z + 1.0:
         raise ValueError("this bin is too short for a flip lid - increase height or turn Flip lid off")
 
@@ -156,25 +162,37 @@ def _swing(h: LidHinge) -> Polygon:
     return _barrel(h, h.swing_radius)
 
 
+def _bevel_tangent(h: LidHinge) -> tuple[float, float]:
+    """Where the bevel leaves the barrel's front underside."""
+    a = math.radians(HINGE_BEVEL_ANGLE)
+    return h.half + h.half * math.sin(a), h.axis_v + h.half * math.cos(a)
+
+
 def _bin_knuckle_section(h: LidHinge) -> Polygon:
-    """The barrel, with a 45 degree web that leaves it tangent on the front
-    underside and runs down and back until it roots in the wall, so it prints
-    upright without support. Behind and below the axis it also fills back to
-    the wavy outside face (the caller clips to that face)."""
+    """The barrel on a bevel that leaves the back wall below the hinge.
+
+    The bevel runs tangent to the barrel's front underside and falls back at
+    ``HINGE_BEVEL_ANGLE`` off the print plane until it meets the wall's inside
+    run, wherever that run lies, so every downward-facing surface is steeper
+    than 45 degrees and the knuckle prints upright without support. Behind the
+    wall the section fills back to the wavy outside face (the caller clips to
+    that face), so nothing but the wall itself sits under the bevel."""
     r, va = h.half, h.axis_v
-    s = r / math.sqrt(2.0)
-    tangent = (r + s, va + s)                     # where the 45 degree line leaves the barrel
-    foot = (-1.5, va + s + (tangent[0] + 1.5))    # same line, run back past the wall
-    web = _uv(h, [(r, va), tangent, foot, (-1.5, va)])
-    return _barrel(h).union(web)
+    tu, tv = _bevel_tangent(h)
+    foot = (-1.5, tv + (tu + 1.5) * math.tan(math.radians(HINGE_BEVEL_ANGLE)))
+    bevel = _uv(h, [(r, va), (tu, tv), foot, (-1.5, va)])
+    return _barrel(h).union(bevel)
 
 
 def _lid_knuckle_section(h: LidHinge) -> Polygon:
-    """The barrel plus a square heel from the axis up to the lid top. The
-    heel's back face is the lid's stop face; it lies a barrel radius behind
+    """The barrel plus a square heel from the axis up to the lid top, clipped
+    at the lid top plane so the top is one flat face flush with the lid top.
+    The heel's back face is the lid's stop face; it lies a barrel radius behind
     the axis, so at the stop angle it is tangent to the barrel's circle."""
     heel = _uv(h, [(0.0, 0.0), (h.half, 0.0), (h.half, h.axis_v), (0.0, h.axis_v)])
-    return _barrel(h).union(heel)
+    below_top = _uv(h, [(-5.0, 0.0), (8.0 * h.half, 0.0),
+                        (8.0 * h.half, 8.0 * h.half + h.axis_v), (-5.0, 8.0 * h.half + h.axis_v)])
+    return _barrel(h).union(heel).intersection(below_top)
 
 
 def _bin_cut_section(h: LidHinge) -> Polygon:
