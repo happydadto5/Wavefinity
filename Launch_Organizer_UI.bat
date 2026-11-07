@@ -14,7 +14,8 @@ rem checkout can never be what runs.
 if exist "%~dp0launcher.json" goto :launch
 
 if not exist "%WF_HOME%\Launcher\current.txt" goto :notinstalled
-findstr /r /x /c:"[0-9A-Za-z][0-9A-Za-z._-]*" "%WF_HOME%\Launcher\current.txt" >nul 2>&1
+rem Use the same version-id rules as the windowless launcher.
+powershell -NoProfile -Command "$id = Get-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'Wavefinity\Launcher\current.txt') -TotalCount 1; if ($id -cnotmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') { exit 1 }" >nul 2>&1
 if errorlevel 1 goto :notinstalled
 set "WF_CURRENT="
 set /p WF_CURRENT=<"%WF_HOME%\Launcher\current.txt"
