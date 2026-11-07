@@ -1,16 +1,19 @@
 """Flip lid: a full-width piano hinge in the bin's back-top corner.
 
-Lid and bin knuckles take turns along one straight axis on a strand of 1.75 mm
-filament. Every knuckle stays inside the bin's own wavy back face and below the
-lid's top, so the closed bin is no deeper and no taller, and it still nests
-against its neighbours. The hinge cuts into the back top corner instead. The
-pin bore runs out through both side faces, so the filament can be pushed in
-from either end.
+Five or more round barrels (bin at both ends and the middle, lid between, a
+bin+lid pair added as the width grows) take turns along one straight axis on a
+strand of 1.75 mm filament, in a 2.0 mm bore. Every knuckle stays inside the
+bin's own wavy back face and below the lid's top, so the closed bin is no
+deeper and no taller, and it still nests against its neighbours. The axis sits
+low enough that the lid plate runs unbroken over the swing circle; the lid
+gives up only the strip behind the pin and the swing room itself. The pin bore
+runs out through both side faces, so the filament can be pushed in from either
+end.
 
 Sections are drawn in the hinge's corner frame: ``u`` forward from the back
 plane (the deepest trough of the back face over the hinge) and ``v`` down from
-the lid top. The axis sits ``half`` in from the back plane and ``axis_v`` down
-from the top.
+the lid top. The axis sits ``half`` (the barrel radius) in from the back plane
+and ``axis_v`` down from the top.
 """
 from __future__ import annotations
 
@@ -19,7 +22,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import trimesh
-from shapely.affinity import translate as translate_polygon
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.polygon import orient
 
@@ -28,21 +30,21 @@ from organizer_geometry import (
 )
 
 HINGE_PIN_DIAMETER = 1.75
-HINGE_PIN_CLEARANCE = 0.2
-HINGE_BORE_RADIUS = HINGE_PIN_DIAMETER / 2.0 + HINGE_PIN_CLEARANCE
-HINGE_BARREL_WALL = 0.9           # printed shell round the bore at its thinnest
+HINGE_BORE_DIAMETER = 2.0         # round bore for the 1.75 mm filament
+HINGE_BORE_RADIUS = HINGE_BORE_DIAMETER / 2.0
+HINGE_PIN_CLEARANCE = HINGE_BORE_RADIUS - HINGE_PIN_DIAMETER / 2.0
+HINGE_BARREL_WALL = 1.0           # printed shell round the bore, all the way round
 HINGE_SWING_GAP = 0.3             # radial running gap round a swinging knuckle
 HINGE_AXIAL_GAP = 0.3             # between neighbouring knuckles
+HINGE_ROOF = 0.8                  # lid left over the swing circle (two top skins)
 HINGE_STOP_ANGLE = 105.0          # the lid rests open here, on a flat stop
 HINGE_KNUCKLE_TARGET = 10.0
 HINGE_KNUCKLE_MIN = 3.0
-# Support-free octagon (vertical sides, flat top and bottom, 45 degree facets).
-_FLAT = 0.35
-_INSCRIBED = (1.0 + _FLAT) / math.sqrt(2.0)
-_CIRCUM = math.sqrt(1.0 + _FLAT * _FLAT)
-HINGE_HALF = (HINGE_BORE_RADIUS + HINGE_BARREL_WALL) / _INSCRIBED
-HINGE_BARREL_RADIUS = HINGE_HALF  # knuckle half-size, kept for the readout
+HINGE_MIN_KNUCKLES = 5            # bin, lid, bin, lid, bin
+HINGE_BARREL_RADIUS = HINGE_BORE_RADIUS + HINGE_BARREL_WALL
+HINGE_HALF = HINGE_BARREL_RADIUS  # axis offset from the back plane
 _SEGMENTS = 48
+_ROOT = 1.0 + math.sqrt(2.0)      # 45 degree web: axis-to-wall run, in barrel radii
 
 
 @dataclass(frozen=True)
@@ -88,32 +90,35 @@ def hinge_layout(
 ) -> LidHinge:
     """Resolve the corner axis, the knuckle run and the plate/plug limits.
 
-    The axis sits one knuckle half-size in from the back plane and from the
-    lid top. A stacking lid has its seat recessed into the top, so there the
-    axis drops until the bore keeps a full shell under the seat floor.
+    The axis sits one barrel radius in from the back plane, so the barrels are
+    tangent to it. It sits low enough that the swing circle (barrel plus
+    running gap) leaves ``HINGE_ROOF`` of lid over it; a stacking lid has its
+    seat recessed into the top, so there the axis drops by the seat depth as
+    well and the recess floor leaves the same roof over the swing circle.
     """
     if outer is None:
         outer = cavity
-    r = HINGE_HALF
+    r = HINGE_BARREL_RADIUS
     top = rim + rise
-    axis_v = max(r, seat_depth + HINGE_BARREL_WALL + HINGE_BORE_RADIUS) if seat_depth else r
+    swing = r + HINGE_SWING_GAP
+    axis_v = seat_depth + HINGE_ROOF + swing
     min_x, _, max_x, _ = outer.bounds
     xs = list(np.linspace(min_x * 0.9, max_x * 0.9, 721))
     back_y = min(_back_face(outer, xs))
     inner_y = min(_back_face(cavity, xs))
     inner_u = back_y - inner_y
-    swing = _CIRCUM * r + HINGE_SWING_GAP
-    reach = axis_v + (2.0 + _FLAT) * r - inner_u     # support web on the inside face
+    reach = axis_v + _ROOT * r - inner_u     # 45 degree web meets the inside face
     if top - reach - 1.0 <= floor_z or rim - (axis_v + swing - rise) <= floor_z + 1.0:
         raise ValueError("this bin is too short for a flip lid - increase height or turn Flip lid off")
 
-    span = (min_x, max_x)
     total = max_x - min_x
-    count = max(3, int(round((total + HINGE_AXIAL_GAP) / (HINGE_KNUCKLE_TARGET + HINGE_AXIAL_GAP))))
-    if count % 2 == 0:
-        count += 1
+    # Anchored on five (bin at both ends and the middle, lid between); a
+    # bin+lid pair joins as the width grows, keeping knuckles near the target.
+    pairs = int(math.floor(((total + HINGE_AXIAL_GAP)
+                            / (HINGE_KNUCKLE_TARGET + HINGE_AXIAL_GAP) - 1.0) / 2.0 + 0.5))
+    count = max(HINGE_MIN_KNUCKLES, 2 * pairs + 1)
     length = (total - (count - 1) * HINGE_AXIAL_GAP) / count
-    while length < HINGE_KNUCKLE_MIN and count > 3:
+    while length < HINGE_KNUCKLE_MIN and count > HINGE_MIN_KNUCKLES:
         count -= 2
         length = (total - (count - 1) * HINGE_AXIAL_GAP) / count
     if length < HINGE_KNUCKLE_MIN:
@@ -141,33 +146,35 @@ def _uv(h: LidHinge, pts) -> Polygon:
     return orient(Polygon([h.yz(u, v) for u, v in pts]), 1.0)
 
 
-def _octagon(h: LidHinge) -> Polygon:
-    r, f = h.half, _FLAT * h.half
-    pts = [(r, -f), (r, f), (f, r), (-f, r), (-r, f), (-r, -f), (-f, -r), (f, -r)]
-    return translate_polygon(Polygon(pts), h.axis_y, h.axis_z)
+def _barrel(h: LidHinge, radius: float | None = None) -> Polygon:
+    """The round barrel about the axis (or a circle of ``radius`` about it)."""
+    r = h.half if radius is None else radius
+    return Point(h.axis_y, h.axis_z).buffer(r, quad_segs=_SEGMENTS)
 
 
 def _swing(h: LidHinge) -> Polygon:
-    return Point(h.axis_y, h.axis_z).buffer(h.swing_radius, quad_segs=_SEGMENTS)
+    return _barrel(h, h.swing_radius)
 
 
 def _bin_knuckle_section(h: LidHinge) -> Polygon:
-    """The octagon, with its front-lower facet carried on down and back until it
-    roots in the wall, so it prints upright without support. Below the axis it
-    also fills back to the wavy outside face (the caller clips to that face)."""
-    r, f, va = h.half, _FLAT * h.half, h.axis_v
-    return _uv(h, [
-        (0.0, va - f), ((1 - _FLAT) * r, va - r), ((1 + _FLAT) * r, va - r),
-        (2 * r, va - f), (2 * r, va + f),
-        (-1.5, va + (1 + _FLAT) * r + r + 1.5), (-1.5, va), (0.0, va),
-    ])
+    """The barrel, with a 45 degree web that leaves it tangent on the front
+    underside and runs down and back until it roots in the wall, so it prints
+    upright without support. Behind and below the axis it also fills back to
+    the wavy outside face (the caller clips to that face)."""
+    r, va = h.half, h.axis_v
+    s = r / math.sqrt(2.0)
+    tangent = (r + s, va + s)                     # where the 45 degree line leaves the barrel
+    foot = (-1.5, va + s + (tangent[0] + 1.5))    # same line, run back past the wall
+    web = _uv(h, [(r, va), tangent, foot, (-1.5, va)])
+    return _barrel(h).union(web)
 
 
 def _lid_knuckle_section(h: LidHinge) -> Polygon:
-    """The octagon plus a square heel from the axis up to the lid top. The
-    heel's back face is the lid's stop face."""
+    """The barrel plus a square heel from the axis up to the lid top. The
+    heel's back face is the lid's stop face; it lies a barrel radius behind
+    the axis, so at the stop angle it is tangent to the barrel's circle."""
     heel = _uv(h, [(0.0, 0.0), (h.half, 0.0), (h.half, h.axis_v), (0.0, h.axis_v)])
-    return _octagon(h).union(heel)
+    return _barrel(h).union(heel)
 
 
 def _bin_cut_section(h: LidHinge) -> Polygon:
@@ -197,11 +204,10 @@ def _stop_section(h: LidHinge) -> Polygon:
 
 
 def _lid_notch_section(h: LidHinge) -> Polygon:
-    """What the lid gives up over each bin knuckle: the swing circle, and the
-    plate above it all the way to the top so no thin lip is left."""
-    reach = h.half + h.swing_radius
-    above = _uv(h, [(-5.0, -5.0), (reach, -5.0), (reach, h.axis_v), (-5.0, h.axis_v)])
-    return _swing(h).union(above)
+    """What the lid gives up over each bin knuckle: the swing circle and the
+    strip behind the pin. The lid plate stays whole over the circle (the axis
+    is set so ``HINGE_ROOF`` of it is left), so no thin lip is cut."""
+    return _swing(h).union(_behind_section(h))
 
 
 def _behind_section(h: LidHinge) -> Polygon:
@@ -256,7 +262,7 @@ def plate_hinge_cutter(hinge: LidHinge, half_x: float) -> trimesh.Trimesh:
 
 
 def lid_hinge_parts(hinge: LidHinge, outer: Polygon | None = None) -> list[trimesh.Trimesh]:
-    """Lid knuckles (octagon + stop heel), bored for the pin."""
+    """Lid knuckles (round barrel + stop heel), bored for the pin."""
     section = _lid_knuckle_section(hinge)
     knuckles = union([_x_prism(section, x0, x1) for x0, x1 in _lids(hinge)])
     if outer is not None:
