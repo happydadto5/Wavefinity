@@ -304,6 +304,7 @@ import math
 import mimetypes
 import os
 from pathlib import Path
+import re
 import shutil
 import secrets
 import subprocess
@@ -331,7 +332,7 @@ from wavefinity_web_impl._runtime import (
     SERVER_VERSION,
     API_COMPAT_VERSION,
     SERVER_INSTANCE,
-    SERVER_BUILD,
+    SERVER_BUILD as FALLBACK_BUILD,
     SOURCE_FILES,
     source_fingerprint,
     SOURCE_ROOT,
@@ -365,8 +366,6 @@ from wavefinity_web_impl._runtime import (
     _interior_work_box,
     WavefinityServer,
     build_parser,
-    _pid_on_port,
-    _replace_stale_process,
 )
 from wavefinity_web_impl._nest import (
     _json_value,
@@ -474,10 +473,62 @@ HOSTED = (
 )
 
 
+# The launcher (wavefinity_freshness.py) writes this stamp inside the runtime
+# checkout's .git directory before it starts the server, so it never shows up
+# as a working-tree change and is not rewritten while the server runs.
+BUILD_STAMP_FILE = APP_DIR / ".git" / "wavefinity-build-stamp.json"
+_HEX40_RE = re.compile(r"[0-9a-f]{40}")
+
+
+def load_build_identity(stamp_file: Path = BUILD_STAMP_FILE, root: Path = APP_DIR) -> dict[str, Any]:
+    """The build this process was started from, as the launcher stamped it.
+
+    A missing, unreadable or mismatched stamp yields "unknown" values - never
+    a made-up version - so a server started any other way cannot pass for a
+    verified launcher build.
+    """
+    identity: dict[str, Any] = {
+        "build": FALLBACK_BUILD, "commit": "unknown", "branch": "unknown",
+        "verified_at": "unknown", "runtime_path": "unknown",
+        "launch_token": "unknown", "stamp": "missing",
+    }
+    try:
+        data = json.loads(stamp_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return identity
+    identity["stamp"] = "invalid"
+    if not isinstance(data, dict):
+        return identity
+    commit = data.get("commit")
+    path = data.get("runtime_path")
+    token = data.get("token")
+    fields = (data.get("branch"), data.get("verified_at"))
+    if not (isinstance(commit, str) and _HEX40_RE.fullmatch(commit)
+            and isinstance(path, str) and isinstance(token, str) and token
+            and all(isinstance(one, str) and one for one in fields)):
+        return identity
+    # A stamp copied from another checkout does not describe this one.
+    if os.path.normcase(os.path.realpath(path)) != os.path.normcase(os.path.realpath(root)):
+        return identity
+    identity.update({
+        "build": commit[:12], "commit": commit, "branch": fields[0],
+        "verified_at": fields[1], "runtime_path": str(Path(root).resolve()),
+        "launch_token": token, "stamp": "present",
+    })
+    return identity
+
+
+BUILD_IDENTITY = load_build_identity()
+SERVER_BUILD = BUILD_IDENTITY["build"]
+
+
 def health_payload(client_address: str, *, hosted: bool = HOSTED) -> dict[str, Any]:
     result = {
         "ok": True, "version": SERVER_VERSION, "instance": SERVER_INSTANCE,
         "api_compat": API_COMPAT_VERSION, "build": SERVER_BUILD,
+        "commit": BUILD_IDENTITY["commit"], "branch": BUILD_IDENTITY["branch"],
+        "verified_at": BUILD_IDENTITY["verified_at"],
+        "stamp": BUILD_IDENTITY["stamp"],
         "source_fingerprint": SOURCE_FINGERPRINT,
     }
     try:
@@ -486,6 +537,8 @@ def health_payload(client_address: str, *, hosted: bool = HOSTED) -> dict[str, A
         loopback = False
     if not hosted and loopback:
         result["source_root"] = SOURCE_ROOT
+        result["runtime_path"] = BUILD_IDENTITY["runtime_path"]
+        result["launch_token"] = BUILD_IDENTITY["launch_token"]
     return result
 
 
@@ -3211,31 +3264,25 @@ def main(argv: list[str] | None = None) -> int:
     try:
         server = make_server(args.host, args.port)
     except OSError:
-        if _replace_stale_process(requested_url, args.host, args.port):
-            try:
-                server = make_server(args.host, args.port)
-            except OSError as error:
-                raise RuntimeError(
-                    f"port {args.port} freed up but would not rebind"
-                ) from error
-        else:
-            try:
-                with urlopen(requested_url + "api/health", timeout=1.5) as response:
-                    existing = json.loads(response.read())
-                if not existing.get("ok"):
-                    raise RuntimeError("another service is using the Wavefinity port")
-            except Exception as error:
-                raise RuntimeError(
-                    f"port {args.port} is already in use and is not Wavefinity"
-                ) from error
-            print(
-                f"Wavefinity is already running: {requested_url}\n"
-                "(could not confirm which process to replace - close that "
-                "window by hand and relaunch to pick up code changes)"
-            )
-            if not args.no_browser:
-                webbrowser.open(requested_url)
-            return 0
+        # Replacing a running server is the launcher's job, and only for an
+        # instance it has proven it owns; this process never kills a listener.
+        try:
+            with urlopen(requested_url + "api/health", timeout=1.5) as response:
+                existing = json.loads(response.read())
+            if not existing.get("ok"):
+                raise RuntimeError("another service is using the Wavefinity port")
+        except Exception as error:
+            raise RuntimeError(
+                f"port {args.port} is already in use and is not Wavefinity"
+            ) from error
+        print(
+            f"Wavefinity is already running: {requested_url}\n"
+            "(this process did not replace it - close that window by hand, "
+            "or use the Wavefinity launcher, to pick up code changes)"
+        )
+        if not args.no_browser:
+            webbrowser.open(requested_url)
+        return 0
     PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
     host, port = server.server_address[:2]
     url = f"http://{host}:{port}/"

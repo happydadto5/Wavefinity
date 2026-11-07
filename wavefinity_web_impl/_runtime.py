@@ -10,15 +10,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import signal
-import subprocess
 import sys
 import threading
 import time
 import uuid
 from http.server import ThreadingHTTPServer
 from typing import Any
-from urllib.request import urlopen
 from organizer_engine import (
     BASE_UNIT,
     MAX_WALL,
@@ -42,11 +39,19 @@ from organizer_features.stack import (
 
 WEB_ROOT = APP_DIR / "web"
 IMAGE_ROOT = APP_DIR / "images"
-DEFAULT_OUTPUT = APP_DIR / "generated"
+# The launcher keeps generated output and the legacy preferences file outside
+# the (replaceable) runtime checkout by pointing WAVEFINITY_DATA_DIR at them.
+DATA_DIR = (
+    Path(os.environ["WAVEFINITY_DATA_DIR"]).expanduser().resolve()
+    if os.environ.get("WAVEFINITY_DATA_DIR") else APP_DIR
+)
+DEFAULT_OUTPUT = DATA_DIR / "generated"
 SERVER_VERSION = "1"
 API_COMPAT_VERSION = 2
 SERVER_INSTANCE = uuid.uuid4().hex
-SERVER_BUILD = os.environ.get("RENDER_GIT_COMMIT", SERVER_VERSION)[:12]
+# Hosted builds know their commit from the platform; everything else learns it
+# from the launcher's build stamp (see wavefinity_web.load_build_identity).
+SERVER_BUILD = os.environ.get("RENDER_GIT_COMMIT", "unknown")[:12]
 SOURCE_FILES = (
     "wavefinity_web.py", "web/index.html", "web/app.js", "web/spaces.js",
     "web/styles.css", "web/drawer-panel.js", "web/drawer-model.js",
@@ -127,7 +132,7 @@ def _preview_geometry_lock(token: tuple[str, str, int] | None):
         yield
     finally:
         GEOMETRY_LOCK.release()
-LEGACY_PREFERENCES_FILE = APP_DIR / "wavefinity_prefs.json"
+LEGACY_PREFERENCES_FILE = DATA_DIR / "wavefinity_prefs.json"
 
 
 def _user_config_dir() -> Path:
@@ -325,9 +330,9 @@ class WavefinityServer(ThreadingHTTPServer):
     # requests with the stale one unpredictably - so it stays off there.
     # On POSIX, SO_REUSEADDR carries no such risk: it only permits binding
     # over a socket of this launcher's own past connections still winding
-    # down in TIME_WAIT, which is exactly what _replace_stale_process()'s
-    # own health-check requests leave behind, and a bare bind() without it
-    # can otherwise refuse the immediate relaunch for up to a minute.
+    # down in TIME_WAIT, which is exactly what the launcher's own health-check
+    # requests leave behind, and a bare bind() without it can otherwise
+    # refuse the immediate relaunch for up to a minute.
     allow_reuse_address = os.name != "nt"
 
 
@@ -336,92 +341,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")))
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--launch-token", default="",
+                        help="launcher-assigned token; carried on the command line so "
+                             "the launcher can correlate this process with its record")
     parser.add_argument("--check", action="store_true",
                         help="print source freshness and build identity, then exit")
     return parser
-
-
-def _pid_on_port(host: str, port: int) -> int | None:
-    """Best-effort: whichever process the OS says is actually bound to this
-    port right now, independent of anything this app wrote about itself.
-
-    ``PID_FILE`` only names a process this launcher itself started; a
-    process from before that file existed, or started some other way
-    entirely, never wrote one - this is the fallback that finds it anyway,
-    by asking the OS directly instead of relying on the process's own
-    cooperation. Never trusted by itself: the caller still requires a real
-    ``/api/health`` response before acting on whatever PID this returns.
-    """
-    try:
-        if os.name == "nt":
-            output = subprocess.run(
-                ["netstat", "-ano"], capture_output=True, text=True,
-                timeout=5, creationflags=subprocess.CREATE_NO_WINDOW,
-            ).stdout
-            for line in output.splitlines():
-                parts = line.split()
-                if (len(parts) >= 5 and parts[0] == "TCP"
-                        and parts[3] == "LISTENING"
-                        and parts[1].rsplit(":", 1)[-1] == str(port)):
-                    return int(parts[-1])
-        else:
-            output = subprocess.run(
-                ["lsof", "-ti", f"tcp:{port}"],
-                capture_output=True, text=True, timeout=5,
-            ).stdout
-            for line in output.splitlines():
-                if line.strip():
-                    return int(line.strip())
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-    return None
-
-
-def _replace_stale_process(requested_url: str, host: str, port: int) -> bool:
-    """Kill whatever previous process is still holding the port.
-
-    A relaunch during active development means "give me the code on disk
-    now," not "reuse whatever is already listening" - that silently serves
-    stale code with no visible sign anything is wrong, since the browser
-    just talks to whichever process answers the port. The only thing that
-    licenses killing anything here is ``/api/health`` proving a genuine
-    Wavefinity service - not some unrelated program - is what actually
-    answers on this port; how its PID is found (this launcher's own record
-    of a process it started, or failing that an OS-level lookup that does
-    not depend on the target's cooperation at all) does not change that.
-    """
-    try:
-        with urlopen(requested_url + "api/health", timeout=1.5) as response:
-            if not json.loads(response.read()).get("ok"):
-                return False
-    except Exception as error:
-        if hasattr(error, "close"):
-            error.close()
-        return False
-    # A PID file can outlive its process and be reused by Windows. Only the
-    # operating system's current port owner is safe to terminate.
-    pid = _pid_on_port(host, port)
-    if pid is None:
-        return False
-    try:
-        if os.name == "nt":
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        else:
-            os.kill(pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError):
-        return False
-    for _ in range(30):
-        time.sleep(0.1)
-        try:
-            with urlopen(requested_url + "api/health", timeout=0.3):
-                continue
-        except Exception as error:
-            if hasattr(error, "close"):
-                error.close()
-            return True
-    return False
