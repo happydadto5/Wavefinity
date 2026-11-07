@@ -1,6 +1,29 @@
 "use strict";
 
+// Story 2658: New Bin sits beside New Space while the Space header's button row is
+// showing. The header is hidden with no active Space and while Space edit is open,
+// so the same element goes back to the front of the Bin actions row then.
+SP.placeNewBin = () => {
+    const newBin = document.getElementById("designer-new-bin");
+    const newSpace = document.getElementById("space-head-new-space");
+    const binActions = document.getElementById("bin-actions");
+    if (!newBin || !newSpace || !binActions) return;
+    const head = document.getElementById("space-head");
+    const viewing = document.getElementById("space-head-view");
+    const headShowing = Boolean(head && !head.hidden && viewing && !viewing.hidden);
+    if (headShowing) {
+        if (newSpace.nextElementSibling !== newBin) newSpace.after(newBin);
+    } else if (newBin.parentElement !== binActions) {
+        binActions.prepend(newBin);
+    }
+};
+
 SP.renderSpaceInfo = () => {
+    SP.renderSpaceInfoBody();
+    SP.placeNewBin();
+};
+
+SP.renderSpaceInfoBody = () => {
     const isSpace = state.folderMode === "space" && state.activeSpace;
     // Story 2519: the Storage Box action presence follows the contents on every render.
     SP.syncStorageBoxBinActions();

@@ -1945,6 +1945,12 @@ body.relocating > :not(dialog) { pointer-events: none; }
 .design-bin-select-label { font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
 /* Fix 2646: Select Bin label is bold and a step larger than the 13px select text. */
 .design-bin-select-label-primary { font-size: 14px; font-weight: 700; }
+/* Story 2658: the Select Bin field is about 2.5x its old ~95px (240px). Both nav
+   rows take a full line with the label on the left, so the Drawer and Bin fields
+   stack as one column. */
+.bin-controls-box .design-bin-nav { flex: 1 1 100%; }
+.bin-controls-box .design-bin-select-label { flex: 0 0 84px; order: -1; }
+.bin-controls-box .design-bin-select { flex: 0 1 240px; }
 /* margin removed - bin controls are grouped in a box */
 
 /* Fix 103 (Section C): structural Design. When a Storage Drawers cabinet or
