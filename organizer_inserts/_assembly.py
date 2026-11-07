@@ -18,6 +18,7 @@ from organizer_engine import (
     LOCK_PROTRUSION,
     TOP_LABEL_CAP_HEIGHT,
     _rounded,
+    direct_stack_enabled,
     flat_cavity_polygon,
     label_placement,
     lid_enabled,
@@ -109,13 +110,15 @@ def build_features(
     than added to it. The exporter collects it through :func:`build_texts`;
     the preview asks for it here so it can draw it in place.
     """
-    from organizer_features.stack import STACK_PLUG_DEPTH, stack_enabled
+    from organizer_features.stack import STACK_INTERIOR_MARGIN, STACK_PLUG_DEPTH, stack_enabled
 
     features = list(features)
     check_layout(box, features, bounds, base_z, mode)
     max_feature_z = box.z
     if stack_enabled(box):
         max_feature_z = box.z - STACK_PLUG_DEPTH
+    if lid_enabled(box) and not direct_stack_enabled(box):
+        max_feature_z = box.z - STACK_PLUG_DEPTH - STACK_INTERIOR_MARGIN
     solids: list[trimesh.Trimesh] = []
     recessed_nests = [
         one for one in features
@@ -138,15 +141,10 @@ def build_features(
                 "a Photo Nest exceeds the shared recessed deck; reduce its size or move it inward"
             )
         top = shared.bounds[1][2]
-        if stack_enabled(box) and top > max_feature_z + 1e-6:
+        if (stack_enabled(box) or lid_enabled(box)) and top > max_feature_z + 1e-6:
             raise ValueError(
                 "a Photo Nest rises into the stacking interface; keep interior "
                 f"parts below {max_feature_z:.1f} mm, reduce its height, or make the bin taller"
-            )
-        if lid_enabled(box) and top > box.z + 1e-6:
-            raise ValueError(
-                "a Photo Nest rises above the bin rim and conflicts with the lid; "
-                "reduce its height, remove the lid, or make the bin taller"
             )
         if not stack_enabled(box) and not lid_enabled(box) and mode != "fused" and top > box.z + 1e-6:
             raise ValueError(
@@ -231,19 +229,12 @@ def build_features(
                 )
         for solid in made:
             top = solid.bounds[1][2]
-            if stack_enabled(box):
+            if stack_enabled(box) or lid_enabled(box):
                 if top > max_feature_z + 1e-6:
                     raise ValueError(
                         f"a {one.kind} rises into the stacking interface; keep "
                         f"interior parts below {max_feature_z:.1f} mm, reduce its "
                         "height, or make the bin taller"
-                    )
-            elif lid_enabled(box):
-                if top > box.z + 1e-6:
-                    raise ValueError(
-                        f"a {one.kind} rises above the bin rim and conflicts with "
-                        "the lid; reduce its height, remove the lid, or make the "
-                        "bin taller"
                     )
             elif top > box.z + 1e-6 and not _allows_above_rim(one, mode):
                 raise ValueError(

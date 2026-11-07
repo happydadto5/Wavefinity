@@ -86,6 +86,7 @@ from organizer_geometry import (
 STACK_LID_SKIN = 2.0      # minimum lid rise above the rim
 STACK_SEAT_DEPTH = 1.0    # lid mode: base step height == lid top recess depth
 STACK_PLUG_DEPTH = 3.0    # how far a lid plug reaches into the mouth it closes
+STACK_INTERIOR_MARGIN = 0.5  # lidded bins: interior parts stop this far below the plug bottom
 STACK_SKIRT_DEPTH = 2.0   # direct mode: how far the skirt drops into the bin below
 STACK_SKIRT_BEVEL = 1.0   # direct mode: 45 degree lead-in on the skirt's entering edge
 STACK_PROFILE_POINTS = 192
