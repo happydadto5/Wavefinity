@@ -276,13 +276,13 @@ function Set-ShortcutFile([string]$Link, [string]$FromFile, [string]$NewTarget) 
 function Initialize-Environment {
     if (-not (Test-Path -LiteralPath $EnvPython)) {
         $base = $null
-        foreach ($candidate in @(@{ Name = 'py'; Prefix = @('-3') }, @{ Name = 'python'; Prefix = @() })) {
+        foreach ($candidate in @(@{ Name = 'py'; Prefix = @('-3.12') }, @{ Name = 'python'; Prefix = @() })) {
             $command = Get-Command $candidate.Name -ErrorAction SilentlyContinue | Select-Object -First 1
             if (-not $command) { continue }
-            $probe = & $command.Source @($candidate.Prefix + @('-c', 'import sys, venv; print(sys.version_info[0])')) 2>$null
-            if ($LASTEXITCODE -eq 0 -and "$probe".Trim() -eq '3') { $base = @{ Exe = $command.Source; Prefix = $candidate.Prefix }; break }
+            $probe = & $command.Source @($candidate.Prefix + @('-c', 'import sys, venv; print(int(sys.version_info[:2] == (3, 12)))')) 2>$null
+            if ($LASTEXITCODE -eq 0 -and "$probe".Trim() -eq '1') { $base = @{ Exe = $command.Source; Prefix = $candidate.Prefix }; break }
         }
-        if (-not $base) { Stop-Activation 'No Python 3 with the venv module was found.' 'Install Python 3 from python.org, then run this again.' }
+        if (-not $base) { Stop-Activation 'No Python 3.12 with the venv module was found.' 'Install Python 3.12 from python.org, then run this again.' }
         Say "Creating the managed Python environment at $EnvDir"
         New-Item -ItemType Directory -Force -Path $WfHome | Out-Null
         & $base.Exe @($base.Prefix + @('-m', 'venv', $EnvDir))
@@ -307,7 +307,7 @@ function Initialize-DataMapping([string[]]$LegacyDirs) {
             $path = Join-Path $dir $name
             if (-not (Test-Path -LiteralPath $path)) { $items += [ordered]@{ legacy_path = $path; exists = $false }; continue }
             $isFolder = (Get-Item -LiteralPath $path -Force).PSIsContainer
-            $files = if ($isFolder) { @(Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue) } else { @(Get-Item -LiteralPath $path -Force) }
+            $files = @(if ($isFolder) { Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue } else { Get-Item -LiteralPath $path -Force })
             $size = [long](($files | Measure-Object -Property Length -Sum).Sum)
             $entry = [ordered]@{ legacy_path = $path; exists = $true; files = $files.Count; bytes = $size }
             if ($name -eq 'generated') {
