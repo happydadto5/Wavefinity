@@ -8,6 +8,7 @@ import trimesh
 from organizer_engine import CORNER_INSET, GRID_PITCH, BoxSpec
 
 from ._constants import (
+    B4B_HANDLE_EDGE_CHAMFER,
     B4B_STACK_SOCKET_DEPTH,
     B4B_STACK_SOCKET_MIN_SKIN,
     B4B_LID_SKIRT_MIN_LAP,
@@ -147,8 +148,17 @@ def _handle_contact_faces(triangles, plan, *, moving):
                     & (abs(tangent) <= B4B_HANDLE_STOP_FACE / 2.0 + tol), axis=1)
         else:
             wall_y = triangles[:, :, 1] - plan.front_crest
-            mask = axial & np.all((wall_y >= -tol) & (wall_y <= 1.2 + tol)
-                    & (abs(z) <= B4B_HANDLE_STOP_FACE / 2.0 + tol), axis=1)
+            half_face = B4B_HANDLE_STOP_FACE / 2.0
+            # The relief slot's floor continues the pad's plane above it, so
+            # the landing fingers rest on one flat face, not on the pad alone.
+            flat = np.all(abs(wall_y) <= tol, axis=1)
+            in_pad = np.all(abs(z) <= half_face + tol, axis=1)
+            # That floor runs a running gap past each side of the pad, so a
+            # finger at the pad's edge still sits on the same flat face.
+            slot = np.all(abs(x) <= plan.eye_band / 2.0 + B4B_RUNNING_GAP + tol, axis=1)
+            mask = np.all((wall_y >= -tol) & (wall_y <= 1.2 + tol), axis=1) & (
+                (axial & in_pad)
+                | (flat & slot & np.all(z >= -half_face - tol, axis=1)))
             # Only exposed pad faces, never wall triangles inside its volume.
             on_face = np.all(abs(wall_y) <= tol, axis=1)
             on_face |= np.all(abs(abs(z) - B4B_HANDLE_STOP_FACE / 2.0) <= tol, axis=1)
@@ -166,7 +176,7 @@ def _handle_contact_faces(triangles, plan, *, moving):
             delta = triangles - [cx, plan.axis_y, plan.detent_pocket_z]
             patch = np.all((abs(delta[:, :, 0]) <= reach + tol)
                            & (abs(delta[:, :, 2]) <= reach + tol)
-                           & (delta[:, :, 1] >= plan.thickness / 2.0 - 0.01), axis=1)
+                           & (delta[:, :, 1] >= plan.thickness / 2.0 - 0.01 - B4B_HANDLE_EDGE_CHAMFER - tol), axis=1)
             # Include cut pocket walls/floor as well as the outer entry rim.
             depth = max(0.05, plan.detent_bump - plan.detent_interference)
             centre = np.array([cx, plan.axis_y + plan.eye_radius, plan.detent_pocket_z])
@@ -208,40 +218,65 @@ def _split_detent_surfaces(triangles, plan):
     for cx in plan.detent_centers_x:
         limits = ((0, cx - reach), (0, cx + reach),
                   (2, plan.detent_pocket_z - reach), (2, plan.detent_pocket_z + reach),
-                  (1, plan.axis_y + plan.thickness / 2.0 - 0.01))
-        output = []
-        for triangle in result:
-            lo, hi = triangle.min(axis=0), triangle.max(axis=0)
-            if (hi[0] < cx - reach or lo[0] > cx + reach
-                    or hi[2] < plan.detent_pocket_z - reach
-                    or lo[2] > plan.detent_pocket_z + reach):
-                output.append(triangle)
-                continue
-            polygons = [list(triangle)]
-            for axis, value in limits:
-                divided = []
-                for poly in polygons:
-                    if min(v[axis] for v in poly) >= value or max(v[axis] for v in poly) <= value:
-                        divided.append(poly)
-                        continue
-                    sides = [[], []]
-                    for v, w in zip(poly, poly[1:] + poly[:1]):
-                        side = int(v[axis] >= value)
-                        sides[side].append(v)
-                        if (v[axis] < value < w[axis]) or (w[axis] < value < v[axis]):
-                            point = v + (w - v) * ((value - v[axis]) / (w[axis] - v[axis]))
-                            sides[0].append(point)
-                            sides[1].append(point)
-                        elif v[axis] == value:
-                            sides[1 - side].append(v)
-                    divided.extend(side for side in sides if len(side) >= 3)
-                polygons = divided
+                  (1, plan.axis_y + plan.thickness / 2.0 - 0.01 - B4B_HANDLE_EDGE_CHAMFER))
+        result = _split_at_limits(
+            result, limits, (cx - reach, cx + reach),
+            (plan.detent_pocket_z - reach, plan.detent_pocket_z + reach))
+    return np.asarray(result)
+
+
+def _split_at_limits(triangles, limits, x_window, z_window):
+    """Cut every triangle overlapping the X/Z window along each ``(axis, value)`` plane."""
+    output = []
+    for triangle in triangles:
+        lo, hi = triangle.min(axis=0), triangle.max(axis=0)
+        if (hi[0] < x_window[0] or lo[0] > x_window[1]
+                or hi[2] < z_window[0] or lo[2] > z_window[1]):
+            output.append(triangle)
+            continue
+        polygons = [list(triangle)]
+        for axis, value in limits:
+            divided = []
             for poly in polygons:
-                for i in range(1, len(poly) - 1):
-                    tri = np.asarray([poly[0], poly[i], poly[i + 1]])
-                    if np.linalg.norm(np.cross(tri[1] - tri[0], tri[2] - tri[0])) > 1e-12:
-                        output.append(tri)
-        result = output
+                if min(v[axis] for v in poly) >= value or max(v[axis] for v in poly) <= value:
+                    divided.append(poly)
+                    continue
+                sides = [[], []]
+                for v, w in zip(poly, poly[1:] + poly[:1]):
+                    side = int(v[axis] >= value)
+                    sides[side].append(v)
+                    if (v[axis] < value < w[axis]) or (w[axis] < value < v[axis]):
+                        point = v + (w - v) * ((value - v[axis]) / (w[axis] - v[axis]))
+                        sides[0].append(point)
+                        sides[1].append(point)
+                    elif v[axis] == value:
+                        sides[1 - side].append(v)
+                divided.extend(side for side in sides if len(side) >= 3)
+            polygons = divided
+        for poly in polygons:
+            for i in range(1, len(poly) - 1):
+                tri = np.asarray([poly[0], poly[i], poly[i + 1]])
+                if np.linalg.norm(np.cross(tri[1] - tri[0], tri[2] - tri[0])) > 1e-12:
+                    output.append(tri)
+    return output
+
+
+def _split_stop_pads(triangles, plan):
+    """Split body triangles at each stop pad's edges.
+
+    The boolean union can merge the pad's wall-plane face into a larger
+    coplanar triangle, which then fails the whole-triangle contact test and
+    makes the landing fingers look like they graze the wall.
+    """
+    half_z = B4B_HANDLE_STOP_FACE / 2.0
+    result = list(triangles)
+    for cx in plan.centers_x:
+        edge = plan.eye_band / 2.0
+        limits = ((0, cx - edge), (0, cx + edge),
+                  (2, plan.axis_z - half_z), (2, plan.axis_z + half_z))
+        result = _split_at_limits(
+            result, limits, (cx - edge, cx + edge),
+            (plan.axis_z - half_z, plan.axis_z + half_z))
     return np.asarray(result)
 
 
@@ -252,7 +287,7 @@ def _validate_handle_clearance(bail, body, plan):
     rotational displacement bound to certify the intervals between poses;
     uncertain intervals subdivide rather than silently skipping a short rub.
     """
-    fixed = np.asarray(body.triangles)
+    fixed = _split_stop_pads(np.asarray(body.triangles), plan)
     source = _split_detent_surfaces(np.asarray(bail.triangles), plan)
     moving_tags = _handle_contact_faces(source, plan, moving=True)
     fixed_tags = _handle_contact_faces(fixed, plan, moving=False)

@@ -151,11 +151,15 @@ def b4b_handle_outline(plan: B4BHandlePlan) -> Polygon:
         (-half - band, -1e4), (half + band, -1e4),
         (half + band, z_lo), (-half - band, z_lo),
     ])
+    # The body ears (barrel plus fillet) stand a running gap off the eye band,
+    # and the arm swings past them at the carry stop, so the band must stay at
+    # eye width until it is clear of the ear before it widens.
+    z_hold = max(z_lo, plan.axis_z - (plan.profile.pivot_radius + B4B_HW_FILLET))
     for cx in plan.centers_x:
         keeper = keeper.union(Polygon([
             (cx - band, z_lo), (cx + band, z_lo),
-            (cx + eye, plan.axis_z), (cx + eye, z_hi),
-            (cx - eye, z_hi), (cx - eye, plan.axis_z),
+            (cx + eye, z_hold), (cx + eye, z_hi),
+            (cx - eye, z_hi), (cx - eye, z_hold),
         ]))
     trimmed = outline.intersection(keeper)
     if isinstance(trimmed, Polygon) and trimmed.is_valid and not trimmed.is_empty:
