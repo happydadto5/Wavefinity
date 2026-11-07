@@ -44,7 +44,7 @@ HINGE_MIN_KNUCKLES = 5            # bin, lid, bin, lid, bin
 HINGE_BARREL_RADIUS = HINGE_BORE_RADIUS + HINGE_BARREL_WALL
 HINGE_HALF = HINGE_BARREL_RADIUS  # axis offset from the back plane
 _SEGMENTS = 48
-HINGE_BEVEL_ANGLE = 50.0          # underside bevel, degrees up from the print plane
+HINGE_BEVEL_ANGLE = 45.0          # underside bevel, degrees up from the print plane
 
 
 @dataclass(frozen=True)
@@ -174,7 +174,7 @@ def _bin_knuckle_section(h: LidHinge) -> Polygon:
     The bevel runs tangent to the barrel's front underside and falls back at
     ``HINGE_BEVEL_ANGLE`` off the print plane until it meets the wall's inside
     run, wherever that run lies, so every downward-facing surface is steeper
-    than 45 degrees and the knuckle prints upright without support. Behind the
+    than or equal to 45 degrees and the knuckle prints upright without support. Behind the
     wall the section fills back to the wavy outside face (the caller clips to
     that face), so nothing but the wall itself sits under the bevel."""
     r, va = h.half, h.axis_v

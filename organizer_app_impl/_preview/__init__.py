@@ -10,6 +10,7 @@ from organizer_engine import (
     make_lift_grabbers,
     lift_grabber_collision_volumes,
     lid_stackable,
+    lid_has_flip,
     direct_stack_enabled,
     preview_rings,
     make_box,
@@ -196,8 +197,10 @@ def preview_geometry(
         except Exception:
             continue
 
-    if (direct_stack_enabled(box) or box.edge_mount.active or box.side_openings.enabled
+    if (direct_stack_enabled(box) or lid_has_flip(box) or box.edge_mount.active or box.side_openings.enabled
             or box.pegboard.enabled or (layout is not None and layout.surface_lightweight_base)):
+        # Hinged lids need the actual shell: its alternating bin knuckles,
+        # beveled roots, swing clearances and pin bore are built by make_box().
         # make_box() already includes Lift Grabbers; Edge Mount also adds the
         # Projecting Label plate and cuts the shell's own small screw holes
         # and driver-access openings. Side Openings cut the finished shell
@@ -277,7 +280,7 @@ def preview_geometry(
     # make_box() already bakes lift grabbers into the shell it returns, so
     # only draw them separately when the Edge Mount/Side Openings shell above
     # did not already include them.
-    if (box.lift_grabbers.enabled and not direct_stack_enabled(box)
+    if (box.lift_grabbers.enabled and not direct_stack_enabled(box) and not lid_has_flip(box)
             and not box.edge_mount.active and not box.side_openings.enabled):
         for grabber_mesh in make_lift_grabbers(box):
             geometry.extend(_mesh_preview_geometry(grabber_mesh, "lift_grabber"))
