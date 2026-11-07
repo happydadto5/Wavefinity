@@ -595,7 +595,14 @@ def _promote(stage: Path, runtime: dict, problems: list[str]) -> None:
         _log_event("runtime-moved-aside", kind=kind, source=str(RUNTIME_DIR), preserved_as=str(aside),
                    head=runtime.get("head"), branch=runtime.get("branch"), reasons=problems)
     try:
-        os.rename(stage, RUNTIME_DIR)
+        for attempt in range(11):
+            try:
+                os.rename(stage, RUNTIME_DIR)
+                break
+            except PermissionError:
+                if attempt == 10:
+                    raise
+                time.sleep(0.5)
     except OSError as error:
         if aside is not None:
             with contextlib.suppress(OSError):
