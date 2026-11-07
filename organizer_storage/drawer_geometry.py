@@ -56,6 +56,11 @@ SD_KEYHOLE_REINFORCEMENT_MM = 4.0
 SD_KEYHOLE_EDGE_MARGIN_MM = 4.0
 SD_KEYHOLE_ROW_SEPARATION_MM = 16.0
 SD_KEYHOLE_DRAWER_CLEARANCE_MM = 0.5
+# The screw head sits in a pocket cut into the inside face; the material under
+# the head's bearing surface stays at least SUPPORT thick, so a panel thinner
+# than POCKET + SUPPORT grows a land toward the wall (never toward the drawers).
+SD_KEYHOLE_HEAD_POCKET_MM = 3.5
+SD_KEYHOLE_HEAD_SUPPORT_MM = 2.0
 # stands 0.25 mm past the dovetail root, plus 0.3 mm of clearance.
 SD_RIB_SEAT_GAP_MM = 0.55
 SD_LOW_RAIL_CLEAR_MM = 0.3
@@ -213,9 +218,19 @@ def _wall_mount_plan(block: dict, datum: _Datum) -> dict | None:
     return {"holes": tuple(holes), "bridge_rows": tuple(bridge_rows)}
 
 
-def _rear_keyhole_cutter(x: float, z: float, datum: _Datum) -> trimesh.Trimesh:
-    y0 = datum.rear - SD_KEYHOLE_REINFORCEMENT_MM - 0.2
-    y1 = datum.rear + 0.2
+def _keyhole_panel_mm(rear_t: float) -> float:
+    return max(rear_t, SD_KEYHOLE_REINFORCEMENT_MM)
+
+
+def _keyhole_land_mm(rear_t: float) -> float:
+    """Extra thickness behind the rear plane so pocket + support fit."""
+    return max(0.0, SD_KEYHOLE_HEAD_POCKET_MM + SD_KEYHOLE_HEAD_SUPPORT_MM - _keyhole_panel_mm(rear_t))
+
+
+def _rear_keyhole_cutter(x: float, z: float, datum: _Datum, rear_t: float) -> trimesh.Trimesh:
+    face_y = datum.rear - _keyhole_panel_mm(rear_t)
+    y0 = face_y - 0.2
+    y1 = datum.rear + _keyhole_land_mm(rear_t) + 0.2
     depth = y1 - y0
 
     def cylinder(radius: float, centre_z: float) -> trimesh.Trimesh:
@@ -234,11 +249,26 @@ def _rear_keyhole_cutter(x: float, z: float, datum: _Datum) -> trimesh.Trimesh:
         SD_KEYHOLE_SHANK_MM / 2.0,
         z + SD_KEYHOLE_CAPTURE_TRAVEL_MM,
     )
-    return union([head, slot, capture])
+    # Head pocket on the inside face: the head circle swept along the slide.
+    pocket_y1 = face_y + SD_KEYHOLE_HEAD_POCKET_MM
+    pocket_depth = pocket_y1 - y0
+    head_r = SD_KEYHOLE_HEAD_MM / 2.0
+
+    def pocket_cylinder(centre_z: float) -> trimesh.Trimesh:
+        mesh = trimesh.creation.cylinder(radius=head_r, height=pocket_depth, sections=48)
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2.0, (1, 0, 0)))
+        mesh.apply_translation((x, (y0 + pocket_y1) / 2.0, centre_z))
+        return mesh
+
+    pocket = [
+        pocket_cylinder(z + SD_KEYHOLE_CAPTURE_TRAVEL_MM),
+        _box(x - head_r, y0, z, x + head_r, pocket_y1, z + SD_KEYHOLE_CAPTURE_TRAVEL_MM),
+    ]
+    return union([head, slot, capture, *pocket])
 
 
 def _wall_mount_reinforcement(
-    plan: dict | None, datum: _Datum, *, cross: bool,
+    plan: dict | None, datum: _Datum, rear_t: float, *, cross: bool,
 ) -> list[trimesh.Trimesh]:
     if plan is None:
         return []
@@ -247,12 +277,13 @@ def _wall_mount_reinforcement(
     rear_lo = datum.track_reach + SD_REAR_PANEL_INSET_MM
     rear_hi = datum.outer_x - datum.track_reach - SD_REAR_PANEL_INSET_MM
     y0 = datum.rear - SD_KEYHOLE_REINFORCEMENT_MM
+    land = _keyhole_land_mm(rear_t)
     pieces = []
     for x, z in plan["holes"]:
         pieces.append(_box(
             x - head_r - SD_KEYHOLE_EDGE_MARGIN_MM, y0,
             z - head_r - SD_KEYHOLE_EDGE_MARGIN_MM,
-            x + head_r + SD_KEYHOLE_EDGE_MARGIN_MM, datum.rear,
+            x + head_r + SD_KEYHOLE_EDGE_MARGIN_MM, datum.rear + land,
             z + SD_KEYHOLE_CAPTURE_TRAVEL_MM + shank_r + SD_KEYHOLE_EDGE_MARGIN_MM,
         ))
     if cross:
@@ -785,16 +816,16 @@ def _datum_components(space, datum):
                          rear_hi, datum.rear, datum.outer_z-datum.top-SD_REAR_TOP_CLEAR_MM)
             body = union([
                 panel, *rear_keys(),
-                *_wall_mount_reinforcement(wall_mount, datum, cross=False),
+                *_wall_mount_reinforcement(wall_mount, datum, rear_t, cross=False),
             ])
             if wall_mount is not None:
                 body = difference([
                     body,
-                    *(_rear_keyhole_cutter(x, z, datum) for x, z in wall_mount["holes"]),
+                    *(_rear_keyhole_cutter(x, z, datum, rear_t) for x, z in wall_mount["holes"]),
                 ])
             return body
         add("rear_solid", "Rear Solid Back",
-            (datum.outer_x-2*datum.track_reach+rear_t, max(rear_t, SD_KEYHOLE_REINFORCEMENT_MM) if wall_mount else rear_t,
+            (datum.outer_x-2*datum.track_reach+rear_t, _keyhole_panel_mm(rear_t) + _keyhole_land_mm(rear_t) if wall_mount else rear_t,
              datum.outer_z-datum.top-SD_REAR_TOP_CLEAR_MM-datum.base/2), rear_mesh,
             ("broad_xz", "broad_xz_90"), flip_up=True)
     else:
@@ -815,16 +846,16 @@ def _datum_components(space, datum):
             mesh.apply_transform(np.array([[1,0,0,0],[0,0,1,datum.rear-rear_t],[0,1,0,0],[0,0,0,1]], float))
             body = union([
                 mesh, *rear_keys(),
-                *_wall_mount_reinforcement(wall_mount, datum, cross=True),
+                *_wall_mount_reinforcement(wall_mount, datum, rear_t, cross=True),
             ])
             if wall_mount is not None:
                 body = difference([
                     body,
-                    *(_rear_keyhole_cutter(x, z, datum) for x, z in wall_mount["holes"]),
+                    *(_rear_keyhole_cutter(x, z, datum, rear_t) for x, z in wall_mount["holes"]),
                 ])
             return body
         add("rear_cross", "Rear Cross Brace",
-            (datum.outer_x-2*datum.track_reach+rear_t, max(rear_t, SD_KEYHOLE_REINFORCEMENT_MM) if wall_mount else rear_t,
+            (datum.outer_x-2*datum.track_reach+rear_t, _keyhole_panel_mm(rear_t) + _keyhole_land_mm(rear_t) if wall_mount else rear_t,
              datum.outer_z-datum.top-SD_REAR_TOP_CLEAR_MM-datum.base/2), rear_mesh,
             ("broad_xz", "broad_xz_90"), flip_up=True)
 
