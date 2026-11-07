@@ -1943,6 +1943,8 @@ body.relocating > :not(dialog) { pointer-events: none; }
 .design-bin-nav { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
 .design-bin-select { flex: 1; min-width: 0; padding: 9px 10px; font-size: 13px; }
 .design-bin-select-label { font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+/* Fix 2646: Select Bin label is bold and a step larger than the 13px select text. */
+.design-bin-select-label-primary { font-size: 14px; font-weight: 700; }
 /* margin removed - bin controls are grouped in a box */
 
 /* Fix 103 (Section C): structural Design. When a Storage Drawers cabinet or

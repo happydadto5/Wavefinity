@@ -620,14 +620,16 @@ DP.refreshDesignBinNav = () => {
   // H8: show the current bin's name instead of generic placeholder.
   // The value stays empty so it's inert (the change handler returns on empty id).
   const currentBin = target.kind === "bin" && currentId ? DL.bin(currentId) : null;
-  const placeholder = new Option(currentBin ? DL.label(currentBin) : "Switch bin…", "");
+  // Fix 2646: when the structural object is the current target, the current-target
+  // entry names it (Storage Box / Storage Drawers / Base Trim) instead of "Switch bin…".
+  const previewKind = DP.structuralPreviewTargetKindFor(state.activeSpace);
+  const structuralName = previewKind === "storage_drawers" ? "Storage Drawers"
+    : previewKind === "base_trim" ? "Base Trim" : "Storage Box";
+  const currentLabel = currentBin ? DL.label(currentBin) : structuralSelected ? structuralName : "Switch bin…";
+  const placeholder = new Option(currentLabel, "");
   placeholder.selected = true;
   select.append(placeholder);
-  if (showStructural) {
-    const previewKind = DP.structuralPreviewTargetKindFor(state.activeSpace);
-    select.append(new Option(previewKind === "storage_drawers" ? "Storage Drawers"
-      : previewKind === "base_trim" ? "Base Trim" : "Storage Box", "__structural__"));
-  }
+  if (showStructural) select.append(new Option(structuralName, "__structural__"));
   for (const one of alternates) select.append(new Option(DL.label(one), one.id));
   select.disabled = DP.designNavBlocked();
 };
