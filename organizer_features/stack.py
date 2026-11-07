@@ -563,7 +563,9 @@ def stack_body_cutters(eff: BoxSpec) -> list[trimesh.Trimesh]:
             keep = _skirt_keep(eff)
         else:
             flare = stack_foot_flare_height(eff)
-            shell = _extrude_polygon(outer, step + flare + 2.0 * _PROFILE_EPS)
+            # Extend beyond the true outline: the resampled loft can otherwise
+            # leave a detached sliver where it meets the outside wall.
+            shell = _extrude_polygon(outer.buffer(_PROFILE_EPS), step + flare + 2.0 * _PROFILE_EPS)
             plug = _plug_polygon(eff)
             keep = _profile_loft(
                 [plug, plug, outer, outer],
@@ -593,6 +595,12 @@ def stack_body_adders(eff: BoxSpec) -> list[trimesh.Trimesh]:
                                       wavy_outer_polygon(eff), eff.base_thickness))
         if lid_stackable(eff):
             rail = difference([rail, _lid_stack_seat(eff)])
+        else:
+            # Carry the roots into the wall, then restore the pin bore.
+            # Exact contact with the cut wall can disconnect a ledge.
+            root = rail.copy()
+            root.apply_translation((0.0, 0.0, -0.05))
+            rail = difference([union([rail, root]), body_hinge_cutters(hinge)[-1]])
         return [rail]
     return []
 
