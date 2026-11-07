@@ -1444,7 +1444,11 @@ dialog:not([open]) { display: none; }
 .welcome-steps strong { display: block; margin-bottom: 3px; color: var(--ink); font-size: 13px; }
 .welcome-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .welcome-other-container { margin-bottom: 20px; }
-.welcome-other-container .welcome-recent { max-height: 240px; overflow-y: auto; }
+.welcome-other-container .welcome-recent { max-height: 176px; overflow-y: auto; }
+.welcome-other-space-open { min-height: 36px; gap: 8px; padding: 5px 8px; }
+.welcome-other-space-open .welcome-recent-icon { flex: 0 0 20px; font-size: 18px; }
+.welcome-other-space-name { min-width: 0; overflow: hidden; color: var(--ink); font-size: 12.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.welcome-other-space-meta { min-width: 0; margin-left: auto; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 /* Fix 058 K: the compact, non-blocking first-run Space storage card. */
 .welcome-storage {
   margin: 18px 0 0;
@@ -1510,7 +1514,8 @@ body.relocating > :not(dialog) { pointer-events: none; }
 }
 .welcome-resume-card:hover, .welcome-resume-card:focus-visible { border-color: var(--teal); background: var(--teal-soft); }
 .welcome-resume-card:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-.welcome-resume-card .welcome-recent-text > span { font-weight: 650; color: var(--ink); font-size: 13px; }
+.welcome-resume-card .welcome-recent-text > strong { color: var(--ink); font-size: 18pt; line-height: 1.1; }
+.welcome-resume-card .welcome-recent-text > span { color: var(--muted); font-size: 12px; }
 .space-folder { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 0 14px; font-size: 12px; color: var(--muted); }
 .space-folder > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .link-button { border: 0; background: none; padding: 0; color: var(--teal); font: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; }

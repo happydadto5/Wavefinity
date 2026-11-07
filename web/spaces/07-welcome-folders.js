@@ -163,9 +163,9 @@ SP.renderOtherSpaces = () => {
       const meta = unavailable
         ? [one.error || "Space unavailable"]
         : [kind?.label || "Space", one.summary_text || SP.sizeText(one.size)].filter(Boolean);
-      return `<li class="welcome-recent-item${unavailable ? " missing" : ""}"><button type="button" class="welcome-recent-open" data-other-index="${index}" title="${escapeHtml(one.folder)}"${unavailable ? " disabled" : ""}>
+      return `<li class="welcome-recent-item welcome-other-space-item${unavailable ? " missing" : ""}"><button type="button" class="welcome-recent-open welcome-other-space-open" data-other-index="${index}" title="${escapeHtml(one.folder)}"${unavailable ? " disabled" : ""}>
         <span class="welcome-recent-icon" aria-hidden="true">${SP.compactKindIcon(one.kind)}</span>
-        <span class="welcome-recent-text"><strong>${escapeHtml(one.name)}</strong><small>${escapeHtml(meta.join(" · "))}</small></span>
+        <span class="welcome-other-space-name">${escapeHtml(one.name)}</span><span class="welcome-other-space-meta">${escapeHtml(meta.join(" · "))}</span>
       </button></li>`;
     }).join("");
   });
