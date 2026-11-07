@@ -2187,3 +2187,13 @@ Both preview and export share the same piano hinge geometry: alternating
 bin/lid knuckles, 2.0 mm end-access bore for 1.75 mm filament, 105 degree stop,
 inside the wavy footprint and below the lid top. Bin-side support bevels are
 45 degrees. No tests were authorized for this repair.
+
+### Keep the launch checkout current (2026-11-07)
+
+`C:\Projects\Wavefinity` must stay on `main`. Do branch-based audits or other
+work in a separate checkout/worktree; never leave the normal launch folder on
+an old branch. Both its BAT and VBS must remain the stable-launcher shims.
+Changing only the desktop shortcut is insufficient: Andrew also launches the
+BAT directly from this folder. An old branch restores the old launcher and can
+replace the current server with stale code. The stable runtime lives separately
+at `C:\Projects\Wavefinity-Runtime`. Preserve old audit work on its branch.
