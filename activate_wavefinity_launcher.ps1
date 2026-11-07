@@ -371,7 +371,7 @@ function Install-LauncherVersion($Source) {
     }
     [IO.File]::WriteAllText((Join-Path $temp 'launcher.json'), ($info | ConvertTo-Json -Depth 4), $Utf8NoBom)
     Move-Item -LiteralPath $temp -Destination $final
-    & $EnvPython (Join-Path $final 'wavefinity_freshness.py') --self-check
+    & $EnvPython (Join-Path $final 'wavefinity_freshness.py') --self-check | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Stop-Activation "Staged launcher $id failed its self-check, so it was not promoted." "It is kept at $final for inspection; the installed launcher is unchanged."
     }
