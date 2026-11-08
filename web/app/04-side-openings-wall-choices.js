@@ -677,8 +677,8 @@ function syncContainerInsideHint() {
         ? (cabinetActiveLimits().z ?? state.activeSpace.z)
         : state.activeSpace.z;
       if (Number.isFinite(Number(z))) {
-        const safe = fmt(Number(z) - 2);
-        text = `Storage Drawer is ${fmt(Number(z))}mm inside · safe bin height ${safe}mm (2 mm running clearance)`;
+        const safe = fmt(Number(z));
+        text = `Storage Drawer is ${fmt(Number(z))}mm inside · safe bin height ${safe}mm`;
       }
     }
   }

@@ -425,7 +425,7 @@ DV.render = () => {
     if (showLegend) {
       heightLegend.textContent = DL.isStorageBox()
         ? "Red bins exceed total storage bin height!"
-        : "Yellow rim: the bin stack is below the safe height (drawer inside height minus 2 mm running clearance) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam";
+        : "Yellow rim: the bin stack is below the safe height (the drawer inside height) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam";
     }
   }
 };
@@ -743,7 +743,7 @@ DV.paintScene = (ctx, drawer, cam) => {
     if (!entry.ghost && (DL.isStorageBox() || DL.isStorageDrawers()) &&
         entry.layers.some(layer => !DL.isSpacer(layer.bin))) {
       const interior = DL.isStorageBox() ? Number(DL.layout.space.z) : Number(drawer.height);
-      const threshold = DL.isStorageDrawers() ? interior - 2 : interior;
+      const threshold = interior;
       const stackTop = Math.max(0, ...entry.layers.map(layer => Number(layer.z1) || 0));
       let rim = null;
       if (threshold > 0) {
@@ -1280,7 +1280,7 @@ DV.fitStagedBinHeight = async id => {
   if (!DL.isStorageDrawers() || !DL.layout) return;
   const drawer = DL.drawer();
   const spec = DL.layout.design_specs?.[id];
-  const target = Number(drawer?.height) - 2;
+  const target = Number(drawer?.height);
   if (!spec?.box || !DL.bin(id) || !DL.isOrdinary(DL.bin(id)) || !(target > 0)) return;
   if (Math.abs(Number(spec.box.z) - target) < 1e-9) return;
   const context = DL.spaceContext();
@@ -1333,7 +1333,7 @@ DV.buildOverlay = () => {
     </div>
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
     <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
-    <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden>Yellow rim: the bin stack is below the safe height (drawer inside height minus 2 mm running clearance) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam</div>`);
+    <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden>Yellow rim: the bin stack is below the safe height (the drawer inside height) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam</div>`);
   // The staging rail sits immediately beside the physical Space, before the canvas.
   wrap.insertAdjacentHTML("afterbegin", `
     <aside id="dl-staging" class="dl-staging" aria-label="Unplaced bins">

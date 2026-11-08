@@ -863,7 +863,7 @@ function applySpaceSizingDefaults(design, remembered = null, keepStarterXY = fal
     // exact cap 38.6 -> default 38; 40.0 -> exact cap 38.0 -> default 38.)
     // A remembered short height never overrides the full height —
     // no remembered-Z exception.
-    const safeMax = Number(space.z) - 2;
+    const safeMax = Number(space.z);
     const clearZ = Math.floor(safeMax);
     design.box.z = normalizeBinDimension("z", clearZ, clearZ);
   } else if (kind === "pegboard") {

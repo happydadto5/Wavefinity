@@ -463,7 +463,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
             # drawer above, so user-grown bins get the same margin New Bin
             # applies (New Bin floors the default to whole mm; the report
             # enforces the exact cap).
-            height_cap -= 2
+            pass  # Story 2754: the stated height is the full allowance
         if not is_surface_layout(layout) and item["h"] > height_cap + 1e-6:
             problems.append({"type": "too_tall", "keys": item["keys"], "message": f"{label} is {item['h']:g} mm tall; this Space takes {height_cap:g} mm"})
         base = item["chain"][0]

@@ -22,6 +22,10 @@ from organizer_outputs.printer_profile import component_fit, normalise_printer_p
 from organizer_storage.drawers import normalise_storage_drawers_definition, storage_drawers_unit_counts
 
 SD_JOINT_CLEARANCE_MM = 0.20
+# Story 2754: a drawer's stated interior height is the full bin allowance. The
+# bin working room is built into the printed drawer instead: each drawer builds
+# this much taller inside than its stated height.
+SD_BIN_CLEARANCE_MM = 2.0
 SD_JOINT_LAND_MIN_MM = 4.0
 SD_REAR_CROSS_MIN_WIDTH_MM = 14.0
 SD_FRONT_SHOULDER_MM = 1.6
@@ -380,7 +384,7 @@ def _make_datum(space):
     base = max(block["cabinet_base_mm"], B4B_STACK_RECESS_DEPTH + B4B_MIN_FLOOR_SKIN) if block["stacking"] else block["cabinet_base_mm"]
     top = max(block["cabinet_top_mm"], B4B_STACK_SOCKET_DEPTH + B4B_STACK_SOCKET_MIN_SKIN) if block["stacking"] else block["cabinet_top_mm"]
     # Rail capture is behind the fascia. Only the selected fit is visible.
-    pitches = tuple(row["height_mm"] + block["drawer_base_mm"] + fit for row in block["drawers"])
+    pitches = tuple(row["height_mm"] + SD_BIN_CLEARANCE_MM + block["drawer_base_mm"] + fit for row in block["drawers"])
     # Descriptor order is top to bottom; physical floor positions ascend upward.
     floors = []
     # The lowest rail's underside must clear the base plate and its ribs; a thin
@@ -402,7 +406,9 @@ def _make_datum(space):
     # Fix 096 B5: physical bin clearance is measured from each flat drawer
     # floor to the underside of the structure above it. The pitch already
     # contains drawer_base + fit, so after removing the structure thickness
-    # the real usable height is the requested clear height plus fit.
+    # the stated usable height is the requested clear height plus fit. The
+    # pitch also carries SD_BIN_CLEARANCE_MM, so a bin of exactly this height
+    # has that much working room (Story 2754).
     usable_heights = tuple(row["height_mm"] + fit for row in block["drawers"])
     # The lower sliding dovetail reaches down to the base plate's top face.
     side_bottom_z = min(base,
@@ -475,7 +481,7 @@ def _cosmetic_side_shell(cavity, x0, datum, floor, height):
 
 
 def _front_plan(block, width, row, ordinal):
-    height = row["height_mm"] + block["drawer_base_mm"] + block["drawer_fit_mm"] - 2*SD_FRONT_REVEAL_MM
+    height = row["height_mm"] + SD_BIN_CLEARANCE_MM + block["drawer_base_mm"] + block["drawer_fit_mm"] - 2*SD_FRONT_REVEAL_MM
     has_label = block["drawer_labels_enabled"] and bool(row["label_text"])
     handles = block["drawer_handles"]
     choice = block["drawer_handle_size"]
@@ -863,7 +869,7 @@ def _datum_components(space, datum):
     for ordinal, (row, floor, pitch, fascia_bottom, fascia_top, front_plan) in enumerate(
         zip(block["drawers"], datum.floors, datum.pitches,
             datum.fascia_bottoms, datum.fascia_tops, datum.fronts), 1):
-        height = row["height_mm"]
+        height = row["height_mm"] + SD_BIN_CLEARANCE_MM
         def drawer_mesh(row=row, floor=floor, height=height,
                         fascia_bottom=fascia_bottom, fascia_top=fascia_top,
                         front_plan=front_plan):
