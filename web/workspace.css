@@ -22,6 +22,8 @@
 .ws-card-text { display: grid; min-width: 0; }
 .ws-card-text small { color: var(--muted); font-size: 12px; }
 body.ws-on #bin-actions { display: none !important; }
+/* Story 2714: every control in the Bin controls box lives elsewhere in the unified UI; hide the empty bordered strip. */
+body.ws-on #bin-controls-box { display: none !important; }
 
 /* The tabs and the old bin/drawer pickers give way to the selector. */
 body.ws-on #space-mode-row { display: none; }
