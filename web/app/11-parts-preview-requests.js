@@ -426,6 +426,8 @@ function clearPreviewWaitTimers() {
 // completion; this helper is unconditional on purpose.
 function cancelPreviewWait() {
   clearPreviewWaitTimers();
+  // Story 2735: while the workspace is switching items, its "Building geometry" notice owns the wait.
+  if (document.body.classList.contains("ws-item-switching")) return;
   const wrapper = $('[data-canvas="3d"]');
   const notice = $("#preview-wait");
   if (notice) notice.hidden = true;
@@ -446,7 +448,8 @@ function beginPreviewWait(requestId) {
 
   // Keep an already-visible notice up across edits while the newest preview
   // replaces the old one; only restart its wording and slow-build timer.
-  if (!notice.hidden) text.textContent = "Updating design…";
+  const switching = () => document.body.classList.contains("ws-item-switching"); // Story 2735
+  if (!notice.hidden && !switching()) text.textContent = "Updating design…";
   previewWaitTimer = setTimeout(() => {
     if (requestId !== state.previewRequest) return;
     notice.hidden = false;
@@ -457,7 +460,7 @@ function beginPreviewWait(requestId) {
     if (requestId !== state.previewRequest) return;
     notice.hidden = false;
     wrapper.classList.add("preview-recalculating");
-    text.textContent = "Rebuilding geometry…";
+    if (!switching()) text.textContent = "Rebuilding geometry…";
     previewSlowTimer = null;
   }, 1500);
 }
@@ -469,6 +472,8 @@ function endPreviewWait(requestId) {
   const notice = $("#preview-wait");
   if (notice) notice.hidden = true;
   if (wrapper) wrapper.classList.remove("preview-recalculating");
+  // Story 2735: the new item's preview is ready - the switching notice ends with it.
+  if (typeof WS !== "undefined" && WS.endItemSwitch) WS.endItemSwitch();
 }
 
 // Everything a finished, current preview does to the browser: geometry and pick

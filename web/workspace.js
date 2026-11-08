@@ -85,6 +85,7 @@ WS.items = () => {
 // Which row is the active one: the container, or the bin whose form is open.
 // While Print Space / New Space is showing, it is the row of the editor they came from.
 WS.current = () => {
+  if (WS.pending) return WS.pending; // Story 2735: a clicked row is selected at once, before its view is ready
   const temporary = WS.task === "print" || WS.task === "newspace";
   const task = temporary ? WS.prior?.task : WS.task;
   if (task === "settings") return { kind: "settings", id: "settings" };
@@ -122,10 +123,9 @@ WS.renderSelector = () => {
   const rows = (here ? [{ kind: "settings", id: "settings", label: "Layout your space" }, ...items] : items).map(one => {
     if (one.kind === "group") return `<li class="ws-group" role="presentation">${wsEsc(one.label)}</li>`;
     const picked = Boolean(now) && now.kind === one.kind && (one.kind === "container" || String(now.id || "") === String(one.id || ""));
-    const icon = one.kind === "container" ? "▦" : "▢";
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${locked ? " disabled" : ""}>
-      <span class="ws-ico" aria-hidden="true">${icon}</span><span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${WS.rowOutputs(one, picked && !locked)}</li>`;
+      <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${WS.rowOutputs(one, picked && !locked)}</li>`;
   }).join("");
   // Story 2725: live on any bin view (a bin in a space or a loose bin in My Bins). Greyed only on the
   // container and Layout views, or while a switch/action is in flight. Not tied to the classic form's
@@ -289,19 +289,70 @@ WS.showSwitching = text => {
   box.hidden = false;
 };
 
+// Story 2735: switching between items (bin / container / space layout) inside an open Space.
+// The clicked row is highlighted at once, the old preview is cleared and "Building geometry"
+// shows until the new item's preview is ready.
+WS.itemSwitchTarget = (task, arg) => {
+  if (!WS.open() || !["bin", "container", "settings"].includes(WS.task)) return null;
+  const target = task === "container" ? { kind: "container", id: "container" }
+    : task === "settings" ? { kind: "settings", id: "settings" }
+    : task === "bin" && arg ? { kind: "bin", id: arg } : null;
+  const now = WS.current();
+  return target && !(now && now.kind === target.kind && String(now.id || "") === String(target.id)) ? target : null;
+};
+
+WS.beginItemSwitch = () => {
+  document.body.classList.add("ws-item-switching");
+  const text = $("#preview-wait-text");
+  if (text) text.textContent = "Building geometry…";
+  const notice = $("#preview-wait");
+  if (notice) notice.hidden = false;
+  $('[data-canvas="3d"]')?.classList.add("preview-recalculating");
+};
+
+WS.endItemSwitch = () => {
+  if (!document.body.classList.contains("ws-item-switching")) return;
+  document.body.classList.remove("ws-item-switching");
+  const text = $("#preview-wait-text");
+  if (text) text.textContent = "Updating design…";
+  const notice = $("#preview-wait");
+  if (notice) notice.hidden = true;
+  $('[data-canvas="3d"]')?.classList.remove("preview-recalculating");
+};
+
+// A container's preview builds on its own after the view mounts; hold the notice until it lands.
+WS.waitStructuralPreview = async token => {
+  const building = () => /^(Building|Updating) preview/.test($("#preview-state")?.textContent || "");
+  for (let i = 0; i < 300 && token === WS.switchToken && building(); i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+};
+
 WS.go = async (task, arg = null) => {
   if (WS.busy) return false;
   const switching = WS.switchingMessage(task);
+  const pending = WS.itemSwitchTarget(task, arg);
+  const token = WS.switchToken = (WS.switchToken || 0) + 1;
   WS.busy = true;
-  if (switching) {
-    WS.showSwitching(switching);
+  if (pending) {
+    WS.pending = pending;
+    WS.sync(); // highlight the new row now
+    if (!switching && pending.kind !== "settings") WS.beginItemSwitch();
+  }
+  if (switching || pending) {
+    if (switching) WS.showSwitching(switching);
     await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0))); // let it paint first
   }
   try { return await WS.transition(task, arg); }
   catch (error) { toast(friendlyError(error), true, 6000); return false; }
   finally {
     WS.busy = false;
+    WS.pending = null;
     WS.sync();
+    if (pending && token === WS.switchToken && document.body.classList.contains("ws-item-switching")) {
+      if (WS.task === "container") await WS.waitStructuralPreview(token);
+      if (token === WS.switchToken) WS.endItemSwitch();
+    }
     if (switching) {
       // Keep it up until the new view has been drawn.
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
