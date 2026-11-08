@@ -49,10 +49,14 @@ body.ws-on.ws-open #drawer-canvas { cursor: pointer; }
 
 /* (A) the selector: pinned and bounded, it scrolls within itself. (B) is the rest of the pane. */
 .controls > .ws-stage {
-  position: sticky; top: 0; z-index: 6; max-height: 180px; overflow: auto; box-sizing: border-box;
+  position: sticky; top: 0; z-index: 6; max-height: 180px; overflow: hidden; box-sizing: border-box;
+  display: flex; flex-direction: column;
   background: #f8faf9; border-bottom: 2px solid var(--line-dark);
 }
-.ws-sel { padding: 8px 12px 8px; }
+/* The header row stays put; only the list of rows beneath it scrolls. */
+.ws-sel { padding: 8px 12px 8px; display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.ws-sel > .ws-items { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.ws-sel > .ws-sel-head, .ws-sel > .field-error { flex: none; }
 .ws-sel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px; }
 .ws-sel-head h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .ws-sel-actions { display: flex; gap: 6px; }
