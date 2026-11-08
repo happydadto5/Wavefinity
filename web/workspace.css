@@ -1,6 +1,5 @@
 /* Story 2692 - the unified screen: a global top bar, a left pane that edits, a right pane that is
-   always the preview. Everything is scoped to ws- classes or to body.ws-on, so the classic
-   screens are untouched behind Temp only Roll back. */
+   always the preview. Everything is scoped to ws- classes or to body.ws-on. */
 
 .ws-frame[hidden], .ws-stage[hidden], .ws-aux[hidden], .ws-space-menu[hidden] { display: none !important; }
 
@@ -10,7 +9,6 @@
   background: var(--panel); border-bottom: 1px solid var(--line-dark);
 }
 .ws-place { font-size: 15px; color: var(--ink); max-width: 260px; display: inline-block; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-roll-slot { margin-left: auto; display: flex; }
 .ws-switch-wrap { position: relative; }
 .ws-space-menu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 340px; max-height: 60vh; overflow: auto; padding: 6px;

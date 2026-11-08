@@ -12,7 +12,7 @@
 //   Container editor -> DP.openStructuralTarget()   Storage Box / Drawers / Surface
 //   Bin editor       -> DP.openInventoryRow(id)     the bin form
 //   Space settings   -> DP.selectMode("space") + SP.editSpace()
-// The classic screens are untouched behind the "Temp only Roll back" button.
+// The classic screens and forms remain as the editors this layer hosts; there is no switch back to the old layout.
 
 const WS = {
   task: "landing", // landing | container | bin | settings | print | newspace | picker  (bin with no Space = My Bins)
@@ -28,13 +28,7 @@ const WS = {
   previewSignature: "",
   entered: "",
 };
-const WS_PREF_KEY = "wavefinity-interface";
 const WS_TASKS = ["landing", "container", "bin", "settings", "print", "newspace", "picker"];
-
-WS.enabled = () => {
-  try { return localStorage.getItem(WS_PREF_KEY) !== "classic"; }
-  catch (_error) { return true; }
-};
 
 WS.open = () => Boolean(typeof DL !== "undefined" && DL.active && DL.layout && state.folderMode === "space");
 
@@ -240,9 +234,7 @@ WS.render = () => {
   const stage = $("#ws-stage");
   const aux = $("#ws-aux");
   if (!stage || !aux) return;
-  const on = WS.enabled();
-  stage.hidden = !on;
-  if (!on) { aux.hidden = true; WS.signature = ""; WS.auxSignature = ""; return; }
+  stage.hidden = false;
   const draw = (host, html, key) => {
     if (html === WS[key]) return;
     const top = host.scrollTop;
@@ -405,26 +397,6 @@ WS.settle = tries => {
   }, 150);
 };
 
-// Coming back from Classic: show the editor that matches what is actually open.
-WS.reconcile = () => {
-  if (WS.open()) {
-    WS.task = DP.mode === "space" ? "landing" : state.designTarget?.kind === "structural" ? "container" : "bin";
-    if (WS.task === "landing") WS.settle(0);
-  } else {
-    WS.task = "bin";
-  }
-  WS.prior = null;
-  WS.placeSeen = WS.placeKey();
-};
-
-WS.setEnabled = async on => {
-  if (!on && !(await WS.closeSettings())) return;
-  try { localStorage.setItem(WS_PREF_KEY, on ? "workspace" : "classic"); }
-  catch (_error) { toast("Your choice could not be remembered in this browser.", true); }
-  if (on) WS.reconcile();
-  WS.sync();
-};
-
 // ------------------------------------------------------------------ actions
 
 // Open a Space from a row. On the open screen nothing is being edited, so leaving the
@@ -571,7 +543,7 @@ WS.syncOutput = () => {
   const printContainer = $("#ws-print-container");
   const exportButton = $("#ws-export");
   if (!printBin || !exportButton) return;
-  const target = WS.enabled() ? WS.outputTarget() : null;
+  const target = WS.outputTarget();
   const what = WS.task === "container" ? WS.containerName().toLowerCase() || "container" : "bin";
   const hosted = Boolean(state.runtime.hosted);
   printBin.disabled = target !== "bin";
@@ -597,32 +569,13 @@ WS.output = (mode, button, event) => {
 // ------------------------------------------------------------------ sync
 
 WS.sync = () => {
-  const on = WS.enabled();
   const body = document.body;
   const frame = $("#ws-frame");
-  const roll = $("#ws-ui-toggle");
-  if (frame) frame.hidden = !on;
-  // One Roll back button: it lives in the bar here, and in the header in Classic.
+  if (frame) frame.hidden = false;
+  // The AI help button lives in the bar.
   const ai = $("#ai-help-open");
   const aiSlot = $("#ws-ai-slot");
-  const aiHome = $("#bin-actions");
-  if (ai && aiSlot && aiHome) {
-    if (on && ai.parentElement !== aiSlot) aiSlot.appendChild(ai);
-    if (!on && ai.parentElement !== aiHome) aiHome.appendChild(ai);
-  }
-  const slot = $("#ws-roll-slot");
-  const home = $(".header-actions");
-  if (roll && slot && home) {
-    if (on && roll.parentElement !== slot) slot.appendChild(roll);
-    if (!on && roll.parentElement !== home) home.insertBefore(roll, $("#suggestions-open"));
-    roll.textContent = on ? "Temp only Roll back" : "Back to the new UI";
-  }
-  if (!on) {
-    [...body.classList].filter(name => name.startsWith("ws-")).forEach(name => body.classList.remove(name));
-    WS.render();
-    WS.measure();
-    return;
-  }
+  if (ai && aiSlot && ai.parentElement !== aiSlot) aiSlot.appendChild(ai);
   const key = WS.placeKey();
   if (key !== WS.placeSeen) {
     const first = WS.placeSeen === "";
@@ -684,7 +637,7 @@ WS.editorToTop = () => {
 WS.measure = () => {
   const root = document.documentElement.style;
   const frame = $("#ws-frame");
-  if (!WS.enabled() || !frame) { root.setProperty("--ws-chrome", "0px"); return; }
+  if (!frame) { root.setProperty("--ws-chrome", "0px"); return; }
   const frameHeight = frame.offsetHeight;
   root.setProperty("--ws-frame", `${frameHeight}px`);
   root.setProperty("--ws-chrome", `${frameHeight}px`);
@@ -695,7 +648,7 @@ WS.measure = () => {
 // The preview is never edited; it only shows what the left side has selected:
 // the container outline, the selected bin, or the bins ticked for print.
 WS.paintPreview = () => {
-  if (!WS.enabled() || !WS.open() || !DV.cam || !DV.hits) return;
+  if (!WS.open() || !DV.cam || !DV.hits) return;
   const canvas = $("#drawer-canvas");
   const ctx = canvas?.getContext("2d");
   if (!ctx) return;
@@ -749,7 +702,7 @@ WS.paintPreview = () => {
 // The unified selection owns the preview; the classic interface keeps its normal routing.
 const wsActivatePreview = activatePreviewView;
 activatePreviewView = view => {
-  if (!WS.enabled() || !WS.open()) return wsActivatePreview(view);
+  if (!WS.open()) return wsActivatePreview(view);
   const chosen = WS.task === "bin" || WS.task === "container" ? "3d" : "drawer";
   return wsActivatePreview(chosen);
 };
@@ -759,25 +712,18 @@ DV.render = () => { wsRender(); WS.paintPreview(); };
 
 // A click on a bin in the preview picks it (its form opens at once); the preview never edits.
 DP.onLayoutClick = key => {
-  if (!WS.enabled() || !WS.open() || WS.task === "settings" || WS.task === "print" || WS.task === "newspace") return false;
+  if (!WS.open() || WS.task === "settings" || WS.task === "print" || WS.task === "newspace") return false;
   const found = DL.findPlacement(key);
   const one = found && DL.bin(found.placement.bin);
   if (!one || !DL.isOrdinary(one)) return false;
   WS.pick("bin", one.id);
   return true;
 };
-DP.layoutViewOnly = () => WS.enabled() && WS.open() && WS.task !== "settings";
+DP.layoutViewOnly = () => WS.open() && WS.task !== "settings";
 
 // The welcome / type-card dialogs become the bar and the New Space kinds; a restored
 // session opens its last Space (container selected) straight away - nothing covers it.
-const wsOriginal = {
-  showHome: SP.showHome,
-  showTypeCards: SP.showTypeCards,
-  showResume: SP.showResume,
-  openPreferred: SP.openTypedSpacePreferredView,
-};
 SP.showHome = (message = null) => {
-  if (!WS.enabled()) return wsOriginal.showHome(message);
   SP.close();
   WS.message = message || "";
   if (WS.open()) WS.resume(); else WS.enterLoose();
@@ -785,13 +731,11 @@ SP.showHome = (message = null) => {
   return null;
 };
 SP.showTypeCards = () => {
-  if (!WS.enabled()) return wsOriginal.showTypeCards();
   SP.close();
   WS.go("newspace");
   return null;
 };
 SP.showResume = (info, { startup = false } = {}) => {
-  if (!WS.enabled()) return wsOriginal.showResume(info);
   SP.resume = info;
   SP.close();
   if (startup) {
@@ -808,7 +752,6 @@ SP.showResume = (info, { startup = false } = {}) => {
   return null;
 };
 SP.openTypedSpacePreferredView = async () => {
-  if (!WS.enabled()) return wsOriginal.openPreferred();
   try {
     if (!(await DL.ensureLoaded())) return false;
   } catch (error) {
@@ -866,7 +809,6 @@ SP.openTypedSpacePreferredView = async () => {
     toggle.setAttribute("aria-expanded", String(!menu.hidden));
   });
   document.addEventListener("click", event => { if (!menu.hidden && !menu.contains(event.target)) closeMenu(); });
-  $("#ws-ui-toggle").addEventListener("click", () => WS.setEnabled(!WS.enabled()));
   $("#ws-print-space").addEventListener("click", () => { closeMenu(); WS.go("print"); });
   for (const id of ["#ws-print-bin", "#ws-print-container", "#ws-export"]) {
     $(id).addEventListener("click", event => { closeMenu(); WS.output(event.currentTarget.dataset.output, event.currentTarget, event); });

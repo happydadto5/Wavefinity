@@ -166,7 +166,7 @@ DV.camera = (width, height, drawer, view = DV.view) => {
   // Never let a close zoom put the lens inside the drawer.
   const lowest = (H * 1.25 + 25 - target[2]) / Math.max(0.2, away[2]);
   // Unified Space entry must fit even a small Space, despite the normal zoom safety distance.
-  const minimum = typeof WS !== "undefined" && WS.enabled() && WS.open() ? Math.min(fit, lowest) : lowest;
+  const minimum = typeof WS !== "undefined" && WS.open() ? Math.min(fit, lowest) : lowest;
   const b = basis(target, Math.max(fit / view.zoom, minimum));
   const project = point => {
     const v = V3.sub(point, b.eye);
@@ -1312,7 +1312,7 @@ DV.buildOverlay = () => {
     </aside>`);
   const rail = $("#dl-staging");
   rail.querySelector("[data-staging-new-bin]").addEventListener("click", () => {
-    if (typeof WS !== "undefined" && WS.enabled()) WS.newBin();
+    if (typeof WS !== "undefined") WS.newBin();
     else DP.newBinFromSpace();
   });
   rail.addEventListener("click", event => {
