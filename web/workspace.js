@@ -595,7 +595,9 @@ WS.sync = () => {
   if (["landing", "container", "settings", "print"].includes(WS.task) && !WS.open() && state.folderMode !== "space") {
     WS.task = "bin";
   }
-  const open = WS.open();
+  // Story 2704: on the open screen nothing is chosen yet - no preview, nothing current, and the
+  // space-dependent actions stay off, though the restored session is kept for picking from the list.
+  const open = WS.open() && WS.task !== "picker";
   body.classList.add("ws-on");
   body.classList.toggle("ws-open", open);
   for (const name of WS_TASKS) body.classList.toggle(`ws-task-${name}`, WS.task === name);

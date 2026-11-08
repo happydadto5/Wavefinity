@@ -48,6 +48,8 @@ body.ws-on.ws-open .workspace-footer,
 body.ws-on.ws-open #dl-staging,
 body.ws-on.ws-open .canvas-wrap[data-canvas="drawer"] .dl-hint { display: none !important; }
 body.ws-on.ws-open #drawer-canvas { cursor: pointer; }
+/* Story 2704: the open screen has nothing selected, so the right pane shows no preview. */
+body.ws-on.ws-task-picker .workspace { visibility: hidden; }
 
 /* (A) the selector: pinned and bounded, it scrolls within itself. (B) is the rest of the pane. */
 .controls > .ws-stage {
