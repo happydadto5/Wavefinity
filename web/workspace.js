@@ -15,7 +15,7 @@
 // The classic screens are untouched behind the "Temp only Roll back" button.
 
 const WS = {
-  task: "landing", // landing | container | bin | settings | print | newspace  (bin with no Space = My Bins)
+  task: "landing", // landing | container | bin | settings | print | newspace | picker  (bin with no Space = My Bins)
   prior: null, // the editor Print Space / New Space was opened from
   printPick: new Set(),
   printContainer: false,
@@ -30,7 +30,7 @@ const WS = {
   containerView: "layout",
 };
 const WS_PREF_KEY = "wavefinity-interface";
-const WS_TASKS = ["landing", "container", "bin", "settings", "print", "newspace"];
+const WS_TASKS = ["landing", "container", "bin", "settings", "print", "newspace", "picker"];
 
 WS.enabled = () => {
   try { return localStorage.getItem(WS_PREF_KEY) !== "classic"; }
@@ -101,7 +101,24 @@ WS.current = () => {
 
 // ------------------------------------------------------------------ left: selector (A)
 
+// Launch screen: existing spaces, My Bins, and (beside it) the New Space kinds.
+WS.renderPicker = () => {
+  const cards = WS.spaceRows().map(one => `<li><button type="button" class="ws-menu-item" data-ws-act="open-space" data-src="${one.src}" data-index="${one.index ?? ""}"${one.invalid ? " disabled" : ""}>
+      <span class="ws-card-icon" aria-hidden="true">${SP.compactKindIcon(one.kind)}</span>
+      <span class="ws-card-text"><strong>${wsEsc(one.name)}</strong><small>${wsEsc([SP_KINDS[one.kind]?.label, one.meta].filter(Boolean).join(" · "))}</small></span></button></li>`).join("");
+  return `<div class="ws-sel">
+    <div class="ws-sel-head"><h2>Open a Space</h2></div>
+    <ul class="ws-menu-list" aria-label="Your Spaces">${cards}
+      <li><button type="button" class="ws-menu-item" data-ws-act="my-bins">
+        <span class="ws-card-icon" aria-hidden="true">📦</span>
+        <span class="ws-card-text"><strong>My Bins / No Space</strong><small>Bins that are not in a Space</small></span></button></li>
+    </ul>
+    <p class="ws-links"><button type="button" class="link-button" data-ws-act="open-folder">Open a Space folder…</button></p>
+  </div>`;
+};
+
 WS.renderSelector = () => {
+  if (WS.task === "picker") return WS.renderPicker();
   if (!WS.open() && state.folderMode === "space") return '<div class="ws-sel"><p role="status">Opening…</p></div>';
   const items = WS.items();
   const here = WS.open();
@@ -169,7 +186,7 @@ WS.renderNewSpace = () => `<div class="ws-page ws-newspace">
     <h2>New Space - what are you organizing?</h2>
     <div class="ws-choices">${WS.KINDS.map(([kind, title, text, img]) => `<button type="button" class="ws-choice" data-ws-act="new-space" data-kind="${kind}">
       <img src="/images/${img}" alt="" width="120" height="90" decoding="async"><strong>${title}</strong><small>${text}</small></button>`).join("")}</div>
-    <div class="ws-toprow"><button type="button" class="button secondary dl-small" data-ws-act="cancel">Cancel</button></div>
+    ${WS.task === "picker" ? "" : '<div class="ws-toprow"><button type="button" class="button secondary dl-small" data-ws-act="cancel">Cancel</button></div>'}
   </div>`;
 
 // ------------------------------------------------------------------ top bar
@@ -232,7 +249,7 @@ WS.render = () => {
     if (find) host.querySelector(find)?.focus();
   };
   draw(stage, WS.renderSelector(), "signature");
-  const auxHtml = WS.task === "print" ? WS.renderPrint() : WS.task === "newspace" ? WS.renderNewSpace() : "";
+  const auxHtml = WS.task === "print" ? WS.renderPrint() : WS.task === "newspace" || WS.task === "picker" ? WS.renderNewSpace() : "";
   aux.hidden = !auxHtml;
   draw(aux, auxHtml, "auxSignature");
 };
@@ -738,9 +755,13 @@ SP.showResume = (info, { startup = false } = {}) => {
   SP.resume = info;
   SP.close();
   if (startup) {
-    // Launch always shows the open screen (spaces, My Bins, New Space) - never the last space.
+    // Launch always shows the open screen (spaces, My Bins, New Space) - never the last space,
+    // and no "Designing without a Space" toast: nothing is opened yet.
     WS.placeSeen = WS.placeKey();
-    WS.enterLoose().then(() => { WS.sync(); $("#ws-spaces")?.click(); });
+    WS.prior = null;
+    WS.task = "picker";
+    SP.refreshOtherSpaces?.().then(() => WS.sync());
+    WS.sync();
     return null;
   }
   SP.run(SP.confirmResume).then(() => { if (!WS.open()) WS.enterLoose(); });

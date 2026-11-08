@@ -101,7 +101,8 @@ body.ws-on.ws-open #drawer-canvas { cursor: pointer; }
 
 /* Print Space / New Space show only their own editor under the selector. */
 body.ws-task-print .controls > :not(#ws-stage):not(#ws-aux),
-body.ws-task-newspace .controls > :not(#ws-stage):not(#ws-aux) { display: none !important; }
+body.ws-task-newspace .controls > :not(#ws-stage):not(#ws-aux),
+body.ws-task-picker .controls > :not(#ws-stage):not(#ws-aux) { display: none !important; }
 
 /* Each editor stands alone: only its own part of the sidebar shows. */
 body.ws-task-bin #space-head,
