@@ -467,7 +467,18 @@ WS.openSpaceRow = button => {
   const src = button.dataset.src;
   const index = Number(button.dataset.index);
   if (src === "current") {
-    if (!WS.open()) return null;
+    if (!WS.open()) {
+      // Launch-restored Space: listed first, but its layout is not loaded until it is truly
+      // entered. Enter it through the normal open path; a failure shows on the picker.
+      const folder = state.runtime.hosted ? state.browserFolder : state.output;
+      const name = state.activeSpace?.name || "";
+      if (folder) WS.pickSpace(folder, name);
+      else {
+        WS.message = "That Space could not be opened because its folder is not available. Choose it again from Open Existing.";
+        WS.sync();
+      }
+      return null;
+    }
     DV.fit();
     return WS.land();
   }
