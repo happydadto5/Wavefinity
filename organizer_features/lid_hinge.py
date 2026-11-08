@@ -7,8 +7,8 @@ bin's own wavy back face and below the lid's top, so the closed bin is no
 deeper and no taller, and it still nests against its neighbours. The axis sits
 low enough that the lid plate runs unbroken over the swing circle; the lid
 gives up only the strip behind the pin and the swing room itself. The pin bore
-runs out through both side faces, so the filament can be pushed in from either
-end.
+runs out through both side faces, so the filament can be pushed in from one end only:
+the bore is closed by a thin cap at the other.
 
 Sections are drawn in the hinge's corner frame: ``u`` forward from the back
 plane (the deepest trough of the back face over the hinge) and ``v`` down from
@@ -45,6 +45,7 @@ HINGE_BARREL_RADIUS = HINGE_BORE_RADIUS + HINGE_BARREL_WALL
 HINGE_HALF = HINGE_BARREL_RADIUS  # axis offset from the back plane
 _SEGMENTS = 48
 HINGE_BEVEL_ANGLE = 45.0          # underside bevel, degrees up from the print plane
+HINGE_END_CAP = 1.0               # solid cap closing the bore at the hinge's first end
 
 
 @dataclass(frozen=True)
@@ -251,10 +252,11 @@ def _keeper(h: LidHinge, outer: Polygon) -> trimesh.Trimesh:
 
 
 def _bore(h: LidHinge) -> trimesh.Trimesh:
-    """Straight bore, open at both side faces for the filament."""
-    x0, x1 = -h.span_half, h.span_half
+    """Straight bore, blind at the first end behind a ``HINGE_END_CAP`` wall
+    and open at the other side face for the filament."""
+    x0, x1 = h.knuckles[0][0] + HINGE_END_CAP, h.span_half
     bore = _x_prism(Point(h.axis_y, h.axis_z).buffer(HINGE_BORE_RADIUS, quad_segs=32),
-                    x0 - 2.0, x1 + 2.0)
+                    x0, x1 + 2.0)
     return bore
 
 
@@ -290,7 +292,7 @@ def lid_hinge_parts(hinge: LidHinge, outer: Polygon | None = None) -> list[trime
 
 def body_hinge_cutters(hinge: LidHinge) -> list[trimesh.Trimesh]:
     """Cut from the bin: the lid knuckles' running room and the pin bore,
-    which runs out through both side walls."""
+    which is capped at its first end and runs out through the other side wall."""
     g = HINGE_AXIAL_GAP / 2.0
     section = _bin_cut_section(hinge)
     cuts = [_x_prism(section, x0 - g, x1 + g) for x0, x1 in _lids(hinge)]
