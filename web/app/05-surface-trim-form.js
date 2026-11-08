@@ -797,7 +797,9 @@ function applyStackVisibility() {
   if (connectorSection) connectorSection.hidden = b4b || baseTrimEnabled();
   syncPrintChoiceAvailability();
   const info = state.preview?.stack;
-  if (b4b || (mode === "none" && !hasLid)) {
+  // Story 2714: the handled-lid explanation (mode "none") is no longer shown.
+  // Its values below are still computed; only the visible line is suppressed.
+  if (b4b || mode === "none") {
     note.hidden = true;
     return;
   }
