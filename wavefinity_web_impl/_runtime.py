@@ -57,7 +57,8 @@ SOURCE_FILES = (
     "web/styles.css", "web/drawer-panel.js", "web/drawer-model.js",
     "web/storage-drawers.js", "web/storage-drawers-form.js",
     "web/storage-drawers-workspace.js", "web/storage-box-form.js",
-    "web/structural-design.js", "images/Drawer.png",
+    "web/structural-design.js", "web/workspace.js", "web/workspace.css",
+    "images/Drawer.png",
     "images/StorageDrawers.png",
 )
 

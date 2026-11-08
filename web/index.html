@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/drawer.css">
   <link rel="stylesheet" href="/storage-drawers.css">
+  <link rel="stylesheet" href="/workspace.css">
 </head>
 <body>
   <div id="startup-cover" class="startup-cover" role="status" aria-live="polite">
@@ -21,6 +22,14 @@
       <button id="about-btn" class="button secondary" type="button" title="Learn about Wavefinity">About</button>
     </div>
     <div class="header-actions">
+      <div id="ws-header-tools" class="ws-header-tools" role="group" aria-label="Print" hidden>
+        <button id="ws-print-bin" class="button secondary" type="button">Print Bin</button>
+        <button id="ws-print-space" class="button secondary" type="button">Print Space</button>
+      </div>
+      <div id="ws-interface-switch" class="ws-interface-switch" role="group" aria-label="Screen layout">
+        <button type="button" data-ws-ui="workspace" aria-pressed="true" title="One screen for the Space, its containers and its bins.">New workspace</button>
+        <button type="button" data-ws-ui="classic" aria-pressed="false" title="The earlier Bins and Spaces screens. Your files are the same either way.">Classic</button>
+      </div>
       <button id="suggestions-open" class="button secondary" type="button">Suggestions</button>
       <button id="designer-settings-open" class="button secondary designer-settings-button" type="button" aria-haspopup="true" aria-expanded="false" popovertarget="designer-settings-menu">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94a7.9 7.9 0 0 0 .05-.94 7.9 7.9 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.23-1.14.55-1.63.94l-2.39-.96a.5.5 0 0 0-.61.22L2.53 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.9 7.9 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .61.22l2.39-.96c.49.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.14-.55 1.63-.94l2.39.96a.5.5 0 0 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7"/></svg>
@@ -35,6 +44,7 @@
 
   <main class="app-shell" id="app-shell">
     <aside class="controls" aria-label="Bin controls">
+      <section id="ws-hierarchy" class="ws-hierarchy" aria-label="Where you are" hidden></section>
       <nav id="space-mode-row" class="space-mode-row" aria-label="Work area">
         <div id="space-mode-toggle" class="space-mode-toggle" role="tablist" aria-label="Work area">
           <button type="button" role="tab" data-space-mode="space" aria-selected="false" aria-pressed="false" tabindex="-1">Space</button>
@@ -1319,5 +1329,6 @@
   <script src="/spaces/15-folder-access-notice.js" defer></script>
   <script src="/spaces.js" defer></script>
   <script src="/structural-design.js" defer></script>
+  <script src="/workspace.js" defer></script>
 </body>
 </html>

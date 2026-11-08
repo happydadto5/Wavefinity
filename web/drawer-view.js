@@ -906,6 +906,7 @@ DV.drawLabel = (ctx, entry, topFace, ink) => {
     ctx.fillText(DV.fitText(ctx, "Spacer", width - 6), cx, cy);
     return;
   }
+  DP.paintPrintMark?.(ctx, top, cx, cy, Math.min(width, height)); // Story 2671: print-mode tick
   const stackCount = entry.layers.length;
   const info = DV.binLabelInfo(top, stackCount);
   const size = Math.min(13, height * 0.28, width / Math.max(3, info.name.length * 0.55));
@@ -1011,14 +1012,19 @@ DV.wire = () => {
   // would be silently discarded. The canvas is explicitly non-editable until
   // the print finishes (pan/zoom still work); every edit entry point already
   // funnels through readOnly().
-  const readOnly = () => Boolean(DP.structuralReadOnly2D?.()) || Boolean(SP.structuralBusy);
+  // Story 2671: the workspace shows this canvas beside a bin being edited; it
+  // is then view-and-pick only (DP.layoutViewOnly), never a placement editor.
+  const readOnly = () => Boolean(DP.structuralReadOnly2D?.()) || Boolean(SP.structuralBusy) || Boolean(DP.layoutViewOnly?.());
   canvas.addEventListener("contextmenu", event => event.preventDefault());
   canvas.addEventListener("pointerdown", event => {
     if (!DL.layout || !DV.cam) return;
     const [sx, sy] = DV.point(event);
     canvas.setPointerCapture(event.pointerId);
     if (readOnly()) {
-      // View only: no spacer toggle, selection or bin drag - just pan.
+      // View only: no spacer toggle or bin drag - just pan. The workspace may
+      // still pick a bin here (Story 2671).
+      const picked = event.button === 0 && DP.onLayoutClick ? DV.hitAt(sx, sy) : null;
+      if (picked && !picked.candidate && DP.onLayoutClick(picked.key)) return;
       const start = DV.cam.onPlane(sx, sy, 0);
       if (start) DV.pan = { cam: DV.cam, start, panX: DV.view.panX, panY: DV.view.panY };
       canvas.classList.add("panning");
@@ -1112,6 +1118,7 @@ DV.wire = () => {
     const drag = DV.drag;
     DV.drag = null;
     DV.pan = null;
+    if (drag && !drag.moved && !readOnly()) DP.onLayoutClick?.(drag.key); // Story 2671: a click, not a drag
     if (drag?.moved && !readOnly()) {
       if (drag.outside) {
         const count = DL.takeOut(drag.key);

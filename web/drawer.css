@@ -4,7 +4,7 @@
 /* In the mode the sidebar shows only the drawer panel, and the bin editor's
    chrome (placed parts, its error panel, footer, design file buttons) steps
    aside. */
-body.drawer-mode .controls > :not(#drawer-panel):not(#space-head):not(#space-mode-row),
+body.drawer-mode .controls > :not(#drawer-panel):not(#space-head):not(#space-mode-row):not(#ws-hierarchy),
 body.drawer-mode #error-panel,
 body.drawer-mode .workspace-footer,
 body.drawer-mode #preview-state,

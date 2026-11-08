@@ -1,0 +1,67 @@
+/* Story 2671 - one workspace for the open Space. Everything is scoped to
+   ws- classes or to body.ws-on, so the classic screens are untouched when the
+   switch is on Classic. */
+
+.ws-header-tools[hidden], .ws-hierarchy[hidden] { display: none !important; }
+.ws-header-tools { display: flex; gap: 6px; align-items: center; }
+.ws-header-tools .button.active { border-color: var(--teal); color: var(--teal-dark); background: var(--teal-soft); }
+.ws-interface-switch {
+  display: inline-flex; border: 1px solid var(--line-dark); border-radius: 9px; overflow: hidden; background: white;
+}
+.ws-interface-switch button {
+  border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600;
+  padding: 7px 12px; cursor: pointer;
+}
+.ws-interface-switch button + button { border-left: 1px solid var(--line-dark); }
+.ws-interface-switch button.active { background: var(--teal-soft); color: var(--teal-dark); font-weight: 700; }
+.ws-interface-switch button:focus-visible { outline: 2px solid var(--teal-dark); outline-offset: -2px; }
+
+/* The tabs give way to the hierarchy. */
+body.ws-on #space-mode-row { display: none; }
+body.ws-on #design-bin-nav, body.ws-on #design-drawer-nav { display: none !important; }
+
+.ws-hierarchy {
+  position: sticky; top: 0; z-index: 3; margin: 10px 12px 0; padding: 10px 12px 12px;
+  background: var(--panel); border: 1px solid var(--line-dark); border-left: 3px solid var(--teal); border-radius: 11px;
+  max-height: 42vh; overflow-y: auto;
+}
+.ws-crumb { margin: 0 0 8px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.ws-crumb strong { color: var(--ink); }
+.ws-crumb-link { border: 0; background: none; padding: 0; font: inherit; color: var(--teal-dark); font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.ws-tree { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ws-node, .ws-group { display: flex; align-items: center; gap: 6px; padding: 1px 0 1px calc((var(--ws-level, 1) - 1) * 16px); min-height: 28px; }
+.ws-node[data-level="2"], .ws-group[data-level="2"] { --ws-level: 2; }
+.ws-node[data-level="3"], .ws-group[data-level="3"] { --ws-level: 3; }
+.ws-group { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: none; min-height: 22px; }
+.ws-label {
+  border: 0; background: transparent; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink);
+  text-align: left; padding: 4px 8px; border-radius: 7px; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+span.ws-label { cursor: default; }
+button.ws-label:hover { background: var(--teal-soft); }
+button.ws-label:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.ws-node.current > .ws-label { background: var(--teal); color: white; font-weight: 700; }
+.ws-node.view-only > .ws-label { font-weight: 500; color: var(--muted); }
+.ws-node.active-drawer > .ws-label { box-shadow: inset 0 0 0 1px var(--teal); }
+.ws-note { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-rule { margin: 8px 0 0; font-size: 11px; color: var(--muted); line-height: 1.45; }
+.ws-tick { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); flex: none; }
+.ws-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ws-printbar { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.ws-printcount { font-size: 12px; font-weight: 700; color: var(--teal-dark); }
+
+/* One inspector: only the part of the sidebar for the selected object shows. */
+body.ws-on.ws-subject-bin #space-head,
+body.ws-on.ws-subject-newbin #space-head { display: none; }
+body.ws-on.ws-subject-container #space-head .space-head-title,
+body.ws-on.ws-subject-container #space-actions > .button-row { display: none; }
+
+/* The Space stays in view above a bin or container being edited. */
+body.ws-split .workspace { grid-template-rows: auto minmax(150px, 2fr) minmax(0, 3fr) auto auto; }
+body.ws-split .canvas-wrap[data-canvas="drawer"] { display: flex; grid-row: 2; border-bottom: 1px solid var(--line-dark); }
+body.ws-split .workspace > .canvas-wrap.active:not([data-canvas="drawer"]) { grid-row: 3; }
+body.ws-split #dl-staging,
+body.ws-split .canvas-wrap[data-canvas="drawer"] .dl-hint,
+body.ws-split .canvas-wrap[data-canvas="drawer"] .dl-height-legend { display: none !important; }
+body.ws-split .canvas-wrap[data-canvas="drawer"] .dl-view-controls { left: 10px; }
+body.ws-split #drawer-canvas { cursor: pointer; }
