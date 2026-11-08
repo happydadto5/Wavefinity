@@ -113,7 +113,7 @@ WS.renderPicker = () => {
         <span class="ws-card-icon" aria-hidden="true">📦</span>
         <span class="ws-card-text"><strong>My Bins / No Space</strong><small>Bins that are not in a Space</small></span></button></li>
     </ul>
-    <p class="ws-links"><button type="button" class="link-button" data-ws-act="open-folder">Open a Space folder…</button></p>
+    <p class="ws-links"><button type="button" class="link-button" data-ws-act="open-folder">Open a Space folder…</button>${state.runtime.hosted ? "" : ' <button type="button" class="link-button" data-ws-act="storage">Change Wavefinity folder…</button>'}</p>
   </div>`;
 };
 
@@ -226,7 +226,7 @@ WS.renderSpaceMenu = () => {
       <span class="ws-card-icon" aria-hidden="true">📦</span>
       <span class="ws-card-text"><strong>My Bins / No Space</strong><small>Bins that are not in a Space</small></span></button></li>
   </ul>
-  <p class="ws-links"><button type="button" class="link-button" data-ws-act="open-folder">Open a Space folder…</button>${state.runtime.hosted ? "" : ' <button type="button" class="link-button" data-ws-act="storage">Change Wavefinity folder…</button>'}</p>`;
+  <p class="ws-links"><button type="button" class="link-button" data-ws-act="new-space-choose">New Space…</button> <button type="button" class="link-button" data-ws-act="open-welcome">Open a Space folder…</button>${state.runtime.hosted ? "" : ' <button type="button" class="link-button" data-ws-act="storage">Change Wavefinity folder…</button>'}</p>`;
 };
 
 WS.render = () => {
@@ -297,6 +297,14 @@ WS.transition = async (task, arg) => {
     SP.close?.();
     WS.rememberPrior();
     WS.task = "newspace";
+    SP.refreshOtherSpaces?.().then(() => WS.sync());
+    return true;
+  }
+  if (task === "picker") {
+    if (!(await WS.closeSettings()) || !(await WS.flushBin())) return false;
+    SP.close?.();
+    WS.prior = null;
+    WS.task = "picker";
     SP.refreshOtherSpaces?.().then(() => WS.sync());
     return true;
   }
@@ -502,6 +510,7 @@ WS.onAction = async (act, button, event) => {
   switch (act) {
     case "open-space": return WS.openSpaceRow(button);
     case "my-bins": return WS.enterLoose();
+    case "open-welcome": return WS.go("picker");
     case "open-folder": return SP.run(SP.openExisting);
     case "storage": return SP.changeStorageParent();
     case "new-space-choose": return WS.go("newspace");
@@ -839,7 +848,6 @@ SP.openTypedSpacePreferredView = async () => {
   });
   document.addEventListener("click", event => { if (!menu.hidden && !menu.contains(event.target)) closeMenu(); });
   $("#ws-ui-toggle").addEventListener("click", () => WS.setEnabled(!WS.enabled()));
-  $("#ws-new-space").addEventListener("click", () => { closeMenu(); WS.go("newspace"); });
   $("#ws-print-space").addEventListener("click", () => { closeMenu(); WS.go("print"); });
   for (const id of ["#ws-print-bin", "#ws-export"]) {
     $(id).addEventListener("click", event => { closeMenu(); WS.output(event.currentTarget.dataset.output, event.currentTarget, event); });
