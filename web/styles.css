@@ -529,7 +529,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .field-grid { display: grid; gap: 10px; }
 .field-grid.three { grid-template-columns: repeat(3, 1fr); }
 .bin-name-mode-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, 1fr); gap: 10px; align-items: end; }
-#ordinary-size-row.bin-dimensions-row { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+#ordinary-size-row.bin-dimensions-row { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 6px; }
 .bin-dimensions-row label { min-width: 0; }
 .bin-dimensions-row input, .bin-dimensions-row select { min-width: 0; width: 100%; }
 .field-grid.two { grid-template-columns: repeat(2, 1fr); }

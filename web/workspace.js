@@ -640,12 +640,30 @@ WS.sync = () => {
     body.classList.toggle(`ws-task-${name}`, WS.task === name);
   }
   body.classList.toggle("ws-full", full);
+  if (WS.task !== WS.entered) {
+    WS.entered = WS.task;
+    if (["bin", "container", "settings"].includes(WS.task)) WS.editorToTop();
+  }
   const place = $("#ws-place");
   if (place) place.textContent = WS.placeName();
   const newBin = $("#ws-new-bin");
   if (newBin) newBin.hidden = WS.task === "picker" || (!WS.open() && state.folderMode === "space");
   WS.render();
   WS.measure();
+};
+
+// An editor opens at its heading and first field, whatever the sidebar was scrolled to before
+// (or a field focused while it filled in scrolled it partway down).
+WS.editorToTop = () => {
+  const reset = () => {
+    if (!["bin", "container", "settings"].includes(WS.task)) return;
+    const controls = $(".controls");
+    if (controls) controls.scrollTop = 0;
+    window.scrollTo(0, 0);
+  };
+  reset();
+  requestAnimationFrame(reset);
+  setTimeout(reset, 150);
 };
 
 WS.measure = () => {
