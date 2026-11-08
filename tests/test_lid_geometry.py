@@ -69,11 +69,11 @@ class HandleTests(unittest.TestCase):
                     self.assertEqual(int((overhang > 45.0 + 1e-6).sum()), 0)
 
     def test_pull_bounds_match_the_round_tube_envelope(self):
-        # Bounds recorded from the round-tube builder before the teardrop change.
+        # Bounds recorded from the even-arch builder (3x finger clearance).
         recorded = {
-            "small": ((-6.0, -2.4, -0.8), (6.0, 2.4, 9.0)),
-            "medium": ((-8.55, -3.0, -0.8), (8.55, 3.0, 11.0)),
-            "large": ((-11.4, -3.6, -0.8), (11.4, 3.6, 13.0)),
+            "small": ((-8.55, -2.0, -0.8), (8.55, 2.0, 22.0)),
+            "medium": ((-11.4, -2.4, -0.8), (11.4, 2.4, 28.8)),
+            "large": ((-14.25, -2.8, -0.8), (14.25, 2.8, 35.6)),
         }
         for size, bounds in recorded.items():
             with self.subTest(size=size):

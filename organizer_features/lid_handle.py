@@ -9,9 +9,9 @@ The handle is built with its lid-top plane at ``z = 0`` and its lowest point
 ``LID_HANDLE_ROOT_EMBED`` below that plane, so every root overlaps real lid
 material by a positive margin before the union.  Both forms are support
 conscious when the lid prints plug-down: nothing undercuts, the Dome knob blends
-into the lid through a concave fillet, the Mushroom knob is a stem under a cap
+into the lid through a concave fillet, the Mushroom knob is a neck under a flared head
 whose underside flares out at no more than 45 degrees from vertical, and the Pull is a teardrop
-section swept over a half-ellipse with vertical legs that flare into the lid.
+section of constant radius swept over a tall half-ellipse with vertical legs.
 """
 
 from __future__ import annotations
@@ -33,20 +33,20 @@ LID_KNOB_HEIGHT_RATIO = 0.55
 LID_KNOB_HEIGHT_LIMITS = (4.0, 16.0)
 LID_KNOB_BLEND_MAX = 1.5                     # base fillet radius
 
-LID_MUSHROOM_DIAMETER_LIMITS = (6.0, 24.0)   # cap; keeps the height inside LID_KNOB_HEIGHT_LIMITS
-LID_MUSHROOM_STEM_RATIO = 1.0 / 3.0          # stem diameter, of the cap diameter
+LID_MUSHROOM_DIAMETER_LIMITS = (6.0, 14.0)   # head; keeps the height inside LID_KNOB_HEIGHT_LIMITS
+LID_MUSHROOM_STEM_RATIO = 0.4                # neck radius, of the head radius
 LID_MUSHROOM_STEM_MIN_RADIUS = 1.5
-LID_MUSHROOM_STEM_HEIGHT = 3.0               # finger room under the cap
+LID_MUSHROOM_STEM_HEIGHT = 4.0               # straight neck the fingers pinch, under the head
 LID_MUSHROOM_FLARE_RUN = 1.1                 # flare height per mm of flare reach (< 45 degrees)
 LID_MUSHROOM_RIM = 1.2                       # vertical cap edge
 LID_MUSHROOM_CROWN_RATIO = 0.09              # domed top rise, of the cap diameter
 
-LID_PULL_SCALE = {"small": 0.30, "medium": 0.45, "large": 0.60}
-LID_PULL_CLEARANCE = {"small": 6.0, "medium": 8.0, "large": 10.0}
+LID_PULL_SCALE = {"small": 0.45, "medium": 0.60, "large": 0.75}
+LID_PULL_CLEARANCE = {"small": 18.0, "medium": 24.0, "large": 30.0}   # finger room under the arch
+LID_PULL_CLEARANCE_SPAN_RATIO = 0.84         # clearance cap, of the shorter free lid span
 LID_PULL_WIDTH_LIMITS = (12.0, 70.0)
-LID_PULL_TUBE_RADIUS = {"small": 1.6, "medium": 2.0, "large": 2.4}
-LID_PULL_FOOT_FLARE = 0.5                    # extra root radius, of the tube radius
-LID_PULL_THICKNESS = 3.0                     # tube diameter budget in the height
+LID_PULL_TUBE_RADIUS = {"small": 2.0, "medium": 2.4, "large": 2.8}
+LID_PULL_FOOT_FLARE = 0.0                    # extra root radius, of the tube radius (0: an even arch)
 
 _SECTIONS = 48
 _EPS = 1e-6
@@ -101,17 +101,19 @@ def _mushroom_stem_radius(diameter: float) -> float:
 
 
 def _revolved_mushroom(diameter: float) -> trimesh.Trimesh:
-    """A stem under a wider cap; the cap underside flares out gradually.
+    """A pull knob: a neck to pinch, a trumpet flare out to the head, a domed head.
 
-    The underside rises 1.1 mm for every mm it reaches outward (under 45
-    degrees from vertical), so it prints without supports, and fingers can
-    get under the cap around the stem.
+    The head underside is a smooth curve that leaves the neck vertical and
+    reaches at most 1/1.1 mm outward per mm of rise (under 45 degrees from
+    vertical), so it prints without supports and fingers get under the head
+    around the neck.
     """
     radius = diameter / 2.0
     stem = _mushroom_stem_radius(diameter)
     blend = min(1.0, LID_MUSHROOM_STEM_HEIGHT * 0.3)
     stem_top = LID_MUSHROOM_STEM_HEIGHT
-    flare_top = stem_top + (radius - stem) * LID_MUSHROOM_FLARE_RUN
+    reach = radius - stem
+    flare_top = stem_top + 2.0 * reach * LID_MUSHROOM_FLARE_RUN   # max slope = 1 / FLARE_RUN
     rim_top = flare_top + LID_MUSHROOM_RIM
     crown = diameter * LID_MUSHROOM_CROWN_RATIO
     profile = [(0.0, -LID_HANDLE_ROOT_EMBED),
@@ -121,8 +123,11 @@ def _revolved_mushroom(diameter: float) -> trimesh.Trimesh:
     for i in range(1, steps + 1):                       # concave fillet into the lid
         theta = -math.pi / 2.0 - (math.pi / 2.0) * i / steps
         profile.append((stem + blend + blend * math.cos(theta), blend + blend * math.sin(theta)))
-    profile.append((stem, stem_top))
-    profile.append((radius, flare_top))                 # straight, gradual underside
+    profile.append((stem, stem_top))                    # straight neck
+    steps = 12
+    for i in range(1, steps + 1):                       # trumpet flare out to the head
+        t = i / steps
+        profile.append((stem + reach * t * t, stem_top + (flare_top - stem_top) * t))
     profile.append((radius, rim_top))
     steps = 12
     for i in range(1, steps):                           # gently domed top
@@ -267,8 +272,9 @@ def _resolved(outer_bounds: tuple[float, float, float, float],
             f"a {size} Pull needs about {width:.0f} x {2.0 * foot:.0f} mm of flat lid but "
             f"only {available:.1f} x {cross:.1f} mm is free; {advice}"
         )
-    clearance = min(LID_PULL_CLEARANCE[size], max(4.0, min(span_x, span_y) * 0.28))
-    top = clearance + LID_PULL_THICKNESS
+    clearance = min(LID_PULL_CLEARANCE[size],
+                    max(12.0, min(span_x, span_y) * LID_PULL_CLEARANCE_SPAN_RATIO))
+    top = clearance + 2.0 * radius
     mesh = _swept_arch(width / 2.0, top, radius)
     if not run_x:                                        # run along Y instead of X
         mesh.vertices = mesh.vertices[:, [1, 0, 2]]
