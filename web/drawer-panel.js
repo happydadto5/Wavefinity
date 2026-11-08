@@ -176,7 +176,7 @@ DP.build = () => {
         </div>
         <label class="checkbox-row"><span>Auto height (the full height of the tallest bin)</span><input id="dl-sp-auto-height" type="checkbox" checked></label>
         <fieldset class="dl-sp-walls">
-          <legend>Walls</legend>
+          <legend>Spacer locations</legend>
           <label class="checkbox-row"><span>Left</span><input id="dl-sp-wall-left" type="checkbox" checked></label>
           <label class="checkbox-row"><span>Back</span><input id="dl-sp-wall-back" type="checkbox" checked></label>
           <label class="checkbox-row"><span>Right</span><input id="dl-sp-wall-right" type="checkbox" checked></label>

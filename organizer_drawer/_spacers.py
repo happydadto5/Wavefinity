@@ -364,43 +364,14 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
         candidates = valid_cands
         
         candidates.sort(key=lambda c: c["score"], reverse=True)
-        # Fix 088 S88-3: keep the per-(component, axis) best-edge rule, but
-        # select every candidate on the winning edge - the sub-segments of one
-        # logical run - not just the best one.
-        # Fix 090: the cap is applied per candidate, best scores first, and
-        # is defined explicitly: a run MAY be partially selected when the
-        # cap binds. The survivors within a chopped run are its
-        # highest-scoring candidates - the end-clipped pieces first, so a
-        # truncated run keeps its ends covered. Whole-run-or-nothing was
-        # rejected: a small high-scoring run could starve a major run
-        # entirely (1 spacer placed where 8 gaps need them).
-        winning_edge = {}
-        for cand in candidates:
-            key = (cand["comp"], cand["axis"])
-            if key not in winning_edge:
-                winning_edge[key] = cand["edge"]
-        for comp_idx in range(len(components)):
-            left = any(
-                cand["comp"] == comp_idx and cand["axis"] == "x" and
-                cand["id"].startswith("left-")
-                for cand in candidates
-            )
-            right = any(
-                cand["comp"] == comp_idx and cand["axis"] == "x" and
-                cand["id"].startswith("right-")
-                for cand in candidates
-            )
-            if walls["left"] and walls["right"] and left and right:
-                chosen_edge = winning_edge.get((comp_idx, "x"))
-                if chosen_edge is not None:
-                    notes.append(
-                        "A bin group is braced against only one side wall; "
-                        "the opposite side is not braced."
-                    )
-        winning = [
-            cand for cand in candidates
-            if winning_edge.get((cand["comp"], cand["axis"])) == cand["edge"]
-        ]
+        # Story 2728: every checked wall plans every qualifying gap. The old
+        # per-(component, axis) best-edge rule kept only one of Left/Right (and
+        # one back edge), so Refresh Spacers silently skipped checked walls.
+        # A candidate that would cross a real bin was already rejected above.
+        # Fix 090: the cap is applied per candidate, best scores first; a run
+        # MAY be partially selected when the cap binds, keeping its
+        # highest-scoring (end-clipped) candidates.
+        winning = list(candidates)
         run_count_total = len({cand["run_id"] for cand in winning})
         proposal_cap_applied = len(winning) > SPACER_SELECTED_CAP
         chosen = winning[:SPACER_SELECTED_CAP]
