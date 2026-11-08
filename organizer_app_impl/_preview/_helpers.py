@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Iterable
 import manifold3d
 import numpy as np
 import trimesh
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry import box as shape_box
+from organizer_geometry import staged
 from organizer_engine import (
     BoxSpec,
     make_scoop,
@@ -250,6 +252,19 @@ def _simplified_for_preview(mesh):
 
 
 def _thin_preview_rings(outer, cavity):
+    """Cached on the rings themselves: the same bin previewed again (any edit
+    that leaves the box alone) reuses the thinned pair instead of redoing the
+    simplify and Hausdorff checks. Returns fresh lists, never the cached ones."""
+    thinned_outer, thinned_cavity = _thin_preview_rings_cached(tuple(outer), tuple(cavity))
+    return list(thinned_outer), list(thinned_cavity)
+
+
+@lru_cache(maxsize=16)
+def _thin_preview_rings_cached(outer, cavity):
+    return _thin_preview_rings_uncached(outer, cavity)
+
+
+def _thin_preview_rings_uncached(outer, cavity):
     """Preview-only: drop wall samples that no ring needs, matched in pairs.
 
     The wavy wall is sampled far finer than a preview pixel, which makes
@@ -286,6 +301,7 @@ def _thin_preview_rings(outer, cavity):
         return outer, cavity
 
 
+@staged("conversion")
 def _mesh_preview_geometry(
     mesh, kind: str, owner: str | None = None
 ) -> list[tuple]:

@@ -82,6 +82,8 @@ from .._common import (
     _canonical_rim_label,
 )
 
+from organizer_geometry import checkpoint, stage
+
 import math
 from typing import Iterable
 import numpy as np
@@ -167,8 +169,9 @@ def preview_geometry(
         base_z=base_height(box, mode), mode=mode,
     )
     validate_rim_text_divider_clearance(box, effective_features, base_height(box, mode))
-    outer, cavity = preview_rings(box)
-    floor_cavity = _valid_preview_floor_ring(cavity)
+    with stage("outline_wave"):
+        outer, cavity = preview_rings(box)
+        floor_cavity = _valid_preview_floor_ring(cavity)
     floor_z, rim_z = box.base_thickness, box.z
     geometry: list[tuple[list[tuple[float, float, float]], str,
                           tuple[float, float, float], int, str | None]] = []
@@ -194,7 +197,8 @@ def preview_geometry(
     text_pocket_error = None
     for one in _preview_base_texts(features, draft, selected):
         try:
-            base_inlay_meshes.extend(build_text(box, one, base_height(box, mode)))
+            with stage("features"):
+                base_inlay_meshes.extend(build_text(box, one, base_height(box, mode)))
         except Exception:
             continue
 
@@ -207,24 +211,27 @@ def preview_geometry(
         # and driver-access openings. Side Openings cut the finished shell
         # last, so the real cut body - not a synthesized wall - is what
         # shows in preview here.
-        shell_body = make_box(box)
-        if box.edge_mount.active:
-            shell_body = apply_edge_mount_structure(box, shell_body)
-        if box.pegboard.enabled:
-            shell_body = apply_pegboard_mount_structure(box, shell_body)
-        if mode == "fused" and base_inlay_meshes:
-            try:
-                shell_body = apply_texts(
-                    shell_body, [("", mesh, False) for mesh in base_inlay_meshes])
-            except Exception as error:
-                text_pocket_error = f"text pocket: {error}"
-        if layout is not None:
-            shell_body = apply_surface_lightweight_base(shell_body, box, layout)
-        if box.side_openings.enabled:
-            shell_body = apply_side_openings(box, shell_body)
+        with stage("outline_wave"):
+            shell_body = make_box(box)
+        with stage("shell"):
+            if box.edge_mount.active:
+                shell_body = apply_edge_mount_structure(box, shell_body)
+            if box.pegboard.enabled:
+                shell_body = apply_pegboard_mount_structure(box, shell_body)
+            if mode == "fused" and base_inlay_meshes:
+                try:
+                    shell_body = apply_texts(
+                        shell_body, [("", mesh, False) for mesh in base_inlay_meshes])
+                except Exception as error:
+                    text_pocket_error = f"text pocket: {error}"
+            if layout is not None:
+                shell_body = apply_surface_lightweight_base(shell_body, box, layout)
+            if box.side_openings.enabled:
+                shell_body = apply_side_openings(box, shell_body)
         geometry.extend(_mesh_preview_geometry(shell_body, "outside"))
     else:
-        outer, cavity = _thin_preview_rings(outer, cavity)
+        with stage("outline_wave"):
+            outer, cavity = _thin_preview_rings(outer, cavity)
         count = len(outer)
         for index in range(count):
             a, b = outer[index], outer[(index + 1) % count]
@@ -455,10 +462,11 @@ def preview_geometry(
         draft_in_group = True
     if effective_recessed:
         try:
-            built = build_features(
-                box, effective_recessed, base_z, layout_zone(box, mode), mode=mode,
-                include_text=True,
-            )
+            with stage("features"):
+                built = build_features(
+                    box, effective_recessed, base_z, layout_zone(box, mode), mode=mode,
+                    include_text=True,
+                )
             if built:
                 top_z = max(float(solid.bounds[1][2]) for solid in built)
                 for index in represented_recessed:
@@ -517,6 +525,7 @@ def preview_geometry(
                     pick_faces[face_index] = {"type": "draft"}
 
     for feature_index, one in enumerate(features):
+        checkpoint()
         if selected is not None and feature_index == selected and draft is not None:
             continue
         if is_text(one) and one.options.get("level") == "rim":
@@ -577,10 +586,11 @@ def preview_geometry(
             tag = f"{part_kind}_{one.kind}"
 
         try:
-            built = build_features(
-                box, [one], base_z, layout_zone(box, mode), mode=mode,
-                include_text=True,
-            )
+            with stage("features"):
+                built = build_features(
+                    box, [one], base_z, layout_zone(box, mode), mode=mode,
+                    include_text=True,
+                )
             if built:
                 top_z = max(float(solid.bounds[1][2]) for solid in built)
                 feature_overhang_mm[feature_index] = round(
@@ -628,8 +638,9 @@ def preview_geometry(
         if draft_error is not None:
             built = False
             try:
-                solids = build_features(box, [draft], base_z, layout_zone(box, mode),
-                                        mode=mode, include_text=True)
+                with stage("features"):
+                    solids = build_features(box, [draft], base_z, layout_zone(box, mode),
+                                            mode=mode, include_text=True)
                 if is_text(draft) and draft.options.get("level") == "rim":
                     from organizer_inserts._text import rim_text_geometry
                     draft_ledge, draft_glyph, _cap, _surface = rim_text_geometry(box, draft)
@@ -685,8 +696,9 @@ def preview_geometry(
                     pick_faces[face_index] = {"type": "draft"}
         else:
             try:
-                solids = build_features(box, [draft], base_z, layout_zone(box, mode),
-                                        mode=mode, include_text=True)
+                with stage("features"):
+                    solids = build_features(box, [draft], base_z, layout_zone(box, mode),
+                                            mode=mode, include_text=True)
                 if is_text(draft) and draft.options.get("level") == "rim":
                     from organizer_inserts._text import rim_text_geometry
                     draft_ledge, draft_glyph, _cap, _surface = rim_text_geometry(box, draft)

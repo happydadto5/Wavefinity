@@ -6,9 +6,9 @@ from dataclasses import replace
 from functools import lru_cache
 import trimesh
 from organizer_engine import B4BSpec, BoxSpec, MAX_WALL
-from organizer_geometry import translated, union
+from organizer_geometry import checkpoint, stage, translated, union
 
-from ._layout import b4b_effective_box, b4b_mating_polygon
+from ._layout import b4b_effective_box, b4b_layout, b4b_mating_polygon
 from ._geometry import (
     make_b4b_body,
     make_b4b_lid,
@@ -146,13 +146,18 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
     from organizer_app import _mesh_preview_geometry  # local: avoid import cycle
 
     geometry: list = []
-    eff = b4b_effective_box(box)
-    body = b4b_body_with_features(box)
+    with stage("outline_wave"):
+        eff = b4b_effective_box(box)
+        b4b_layout(box)   # cached; the case wall's wave work, timed on its own
+    with stage("shell"):
+        body = b4b_body_with_features(box)
     geometry.extend(_mesh_preview_geometry(body, "b4b_body", owner="base"))
     if eff.b4b.label_location == "front" and eff.b4b.label_text.strip():
         # Plugs into the body's front channel frame - a base part.  Shown
         # installed in its holder, not laid flat as it prints.
-        _frame, front_plate, front_text, front_centre = b4b_front_label_geometry(box)
+        checkpoint()
+        with stage("features"):
+            _frame, front_plate, front_text, front_centre = b4b_front_label_geometry(box)
         geometry.extend(
             _mesh_preview_geometry(
                 translated(front_plate, front_centre), "b4b_label", owner="base"
@@ -163,23 +168,32 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
                 translated(front_text, front_centre), "b4b_label_text", owner="base"
             )
         )
+    checkpoint()
     if eff.b4b.lid:
-        lid = make_b4b_lid(box)
+        with stage("lid"):
+            lid = make_b4b_lid(box)
+            if eff.b4b.label_location == "top" and eff.b4b.label_text.strip():
+                lid, inlay = _apply_top_label(box, lid)
         if eff.b4b.label_location == "top" and eff.b4b.label_text.strip():
-            lid, inlay = _apply_top_label(box, lid)
             # Fused into the lid mesh itself - a lid part.
             geometry.extend(_mesh_preview_geometry(inlay, "b4b_label", owner="lid"))
         geometry.extend(_mesh_preview_geometry(lid, "b4b_lid", owner="lid"))
-    handle = make_b4b_handle(box)
+    checkpoint()
+    with stage("features"):
+        handle = make_b4b_handle(box)
     if handle is not None:
         # Folds against the front wall - body-mounted hardware.
         geometry.extend(_mesh_preview_geometry(handle, "b4b_handle", owner="base"))
     if eff.b4b.secure_lid:
-        for lever in make_b4b_latches(box):
+        with stage("features"):
+            levers = list(make_b4b_latches(box))
+        for lever in levers:
             # Lid-mounted moving parts.
             geometry.extend(_mesh_preview_geometry(lever, "b4b_latch", owner="lid"))
     if eff.b4b.stacking:
-        for peg in _stack_pegs(box):
+        with stage("features"):
+            pegs = list(_stack_pegs(box))
+        for peg in pegs:
             # Locating pegs stand proud of the lid's own top surface.
             geometry.extend(_mesh_preview_geometry(peg, "b4b_stack", owner="lid"))
     return tuple(geometry)
@@ -192,7 +206,10 @@ def b4b_preview_parts(box: BoxSpec, features=()) -> list[tuple[list, str, tuple,
     omitted."""
     from organizer_app import _mesh_preview_geometry  # local: avoid import cycle
     parts = list(_b4b_preview_geometry(box))
-    for mesh in b4b_divider_solids(box, features):
+    checkpoint()
+    with stage("features"):
+        dividers = b4b_divider_solids(box, features)
+    for mesh in dividers:
         parts.extend(_mesh_preview_geometry(mesh, "feature_divider", owner="base"))
     return parts
 
@@ -211,16 +228,18 @@ def b4b_preview_meshes(box: BoxSpec, features=()) -> list[dict]:
     ``positions`` at index ``9*i .. 9*i+9`` all share ``normals[3*i .. 3*i+3]``
     and the browser expands it per vertex when building its GPU buffer.
     """
-    groups: dict[tuple[str, str, int], dict[str, list[float]]] = {}
-    for points, kind, normal, layer, owner in b4b_preview_parts(box, features):
-        bucket = groups.setdefault((kind, owner, layer), {"positions": [], "normals": []})
-        for corner in points:
-            bucket["positions"].extend(corner)
-        bucket["normals"].extend(normal)
-    return [
-        {
-            "kind": kind, "owner": owner, "layer": layer,
-            "positions": bucket["positions"], "normals": bucket["normals"],
-        }
-        for (kind, owner, layer), bucket in groups.items()
-    ]
+    parts = b4b_preview_parts(box, features)
+    with stage("conversion"):
+        groups: dict[tuple[str, str, int], dict[str, list[float]]] = {}
+        for points, kind, normal, layer, owner in parts:
+            bucket = groups.setdefault((kind, owner, layer), {"positions": [], "normals": []})
+            for corner in points:
+                bucket["positions"].extend(corner)
+            bucket["normals"].extend(normal)
+        return [
+            {
+                "kind": kind, "owner": owner, "layer": layer,
+                "positions": bucket["positions"], "normals": bucket["normals"],
+            }
+            for (kind, owner, layer), bucket in groups.items()
+        ]

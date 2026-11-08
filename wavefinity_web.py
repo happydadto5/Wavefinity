@@ -329,6 +329,7 @@ from bambu_handoff import (
     stage_bambu_inputs,
 )
 
+from organizer_geometry import build_scope, checkpoint, stage
 from wavefinity_web_impl._runtime import (
     WEB_ROOT,
     IMAGE_ROOT,
@@ -346,6 +347,7 @@ from wavefinity_web_impl._runtime import (
     _PREVIEW_REQUESTS,
     _SupersededGeometry,
     _register_preview_request,
+    _token_superseded,
     _preview_geometry_lock,
     _real_preview_active,
     _real_preview_busy,
@@ -1361,8 +1363,14 @@ def show_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     token = _register_preview_request(payload, "preview")
     try:
-        with _real_preview_active():
-            return _preview_payload(payload, token)
+        with _real_preview_active(), build_scope(lambda: _token_superseded(token)) as timings:
+            result = _preview_payload(payload, token)
+            checkpoint()   # a result a newer request already replaced is not sent
+            # Where this build's time went, in ms per stage (self time): wait
+            # (queued), outline_wave, shell, features, lid, booleans,
+            # conversion, other, and the build's total. Cheap enough to keep.
+            result["build_timings_ms"] = timings.report()
+            return result
     except _SupersededGeometry:
         return {"superseded": True}
 
@@ -1481,20 +1489,23 @@ def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
             selected=selected, layout=layout,
         )
         if lid_enabled(stack_request):
-            lid, lid_texts = make_lid_parts(
-                stack_request, lid_label_regions(stack_request, layout),
-            )
+            with stage("lid"):
+                lid, lid_texts = make_lid_parts(
+                    stack_request, lid_label_regions(stack_request, layout),
+                )
             scene["geometry"].extend(_mesh_preview_geometry(lid, "lid"))
             for _text, mesh, _raised in lid_texts:
                 scene["geometry"].extend(_mesh_preview_geometry(mesh, "lid_label"))
     bounds = layout_zone(box, layout.mode)
-    geometry = [
-        {"points": points, "kind": kind, "normal": normal,
-         "layer": layer, "owner": owner,
-         "pick": scene.get("pick_faces", {}).get(index)}
-        for index, (points, kind, normal, layer, owner) in enumerate(scene["geometry"])
-    ]
-    cavity = wavy_cavity_polygon(box)
+    with stage("conversion"):
+        geometry = [
+            {"points": points, "kind": kind, "normal": normal,
+             "layer": layer, "owner": owner,
+             "pick": scene.get("pick_faces", {}).get(index)}
+            for index, (points, kind, normal, layer, owner) in enumerate(scene["geometry"])
+        ]
+    with stage("outline_wave"):
+        cavity = wavy_cavity_polygon(box)
     resolved = layout
     canonical = design_to_dict(stack_request, resolved, label, part_name, label_location, scoop)
     planning_record = inventory_bin_record(stack_request, resolved, None, label, part_name, scoop)

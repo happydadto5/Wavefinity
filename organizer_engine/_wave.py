@@ -8,7 +8,7 @@ import numpy as np
 import trimesh
 from shapely.affinity import translate as translate_polygon
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
-from organizer_geometry import _sweep_profile, translated
+from organizer_geometry import _sweep_profile, closest_points_on_line, translated
 
 from ._specs import (
     WAVE_LENGTH,
@@ -445,6 +445,20 @@ def _clearance_outline(
     return None
 
 
+@lru_cache(maxsize=32)
+def _preview_rings_cached(
+    half_x: float, half_y: float, wall_depth: float, corner_fillet: float, wall: float,
+) -> tuple[tuple[tuple[float, float], ...], tuple[tuple[float, float], ...]]:
+    outer = np.asarray(wavy_rect_outer(half_x, half_y, corner_fillet).exterior.coords)[:-1]
+    cavity = closest_points_on_line(
+        wavy_rect_cavity(half_x, half_y, wall_depth, corner_fillet, wall).exterior, outer,
+    )
+    return (
+        tuple((float(x), float(y)) for x, y in outer),
+        tuple((float(x), float(y)) for x, y in cavity),
+    )
+
+
 def preview_rings(
     spec: BoxSpec, points_per_cycle: float = 7.0
 ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
@@ -452,15 +466,16 @@ def preview_rings(
 
     Projection also suppresses folded crests, keeping the preview tied to the
     printable offset rather than drawing the old axis-shifted wall.
+
+    Preview only (print never calls it). The rings depend on the box's wave
+    outline alone, so they are cached and every later edit of the same bin
+    reuses them.
     """
     # Draw the finished printable outline, keeping its smooth wall samples.
-    outer = list(wavy_outer_polygon(spec).exterior.coords)[:-1]
-    boundary = wavy_cavity_polygon(spec).exterior
-    cavity = [
-        tuple(boundary.interpolate(boundary.project(Point(point))).coords[0])
-        for point in outer
-    ]
-    return outer, cavity
+    outer, cavity = _preview_rings_cached(
+        spec.half_x, spec.half_y, spec.wall_depth, spec.corner_fillet, spec.wall,
+    )
+    return list(outer), list(cavity)
 
 
 @lru_cache(maxsize=128)

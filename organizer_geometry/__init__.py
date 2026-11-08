@@ -6,6 +6,9 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon
 
+from ._stages import BuildAbandoned, build_scope, checkpoint, in_preview_build, stage, staged
+from ._nearest import closest_points_on_line
+
 
 def translated(
     mesh: trimesh.Trimesh, xyz: tuple[float, float, float]
@@ -27,15 +30,21 @@ def _cleaned(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
 
 
 def union(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
-    return _cleaned(trimesh.boolean.union(meshes, engine="manifold"))
+    checkpoint()
+    with stage("booleans"):
+        return _cleaned(trimesh.boolean.union(meshes, engine="manifold"))
 
 
 def difference(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
-    return _cleaned(trimesh.boolean.difference(meshes, engine="manifold"))
+    checkpoint()
+    with stage("booleans"):
+        return _cleaned(trimesh.boolean.difference(meshes, engine="manifold"))
 
 
 def intersection(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
-    return _cleaned(trimesh.boolean.intersection(meshes, engine="manifold"))
+    checkpoint()
+    with stage("booleans"):
+        return _cleaned(trimesh.boolean.intersection(meshes, engine="manifold"))
 
 
 def _extrude_polygon(polygon: Polygon, height: float) -> trimesh.Trimesh:

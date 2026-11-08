@@ -17,6 +17,8 @@ from organizer_engine import (
 )
 from organizer_engine._specs import B4B_EDGE_BEVEL_MM
 from organizer_geometry import (
+    closest_points_on_line,
+    in_preview_build,
     _extrude_polygon,
     _loft_cavity,
     _resampled_ring,
@@ -220,6 +222,12 @@ def _chamfered_extrusion(
         if inner.is_empty or not isinstance(inner, Polygon):
             raise RuntimeError("Storage Box edge bevel collapsed the outline")
         edge = inner.exterior
+        if in_preview_build():
+            # Preview only: an indexed nearest-point search, the same points to
+            # ~1e-13 mm. Print and export take the original call below, so the
+            # solids they build are untouched.
+            rings.append(closest_points_on_line(edge, np.asarray(reference, dtype=float)))
+            continue
         rings.append(np.asarray([
             edge.interpolate(edge.project(Point(x, y))).coords[0]
             for x, y in reference

@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import uuid
+import weakref
 from http.server import ThreadingHTTPServer
 from typing import Any
 from organizer_engine import (
@@ -26,6 +27,7 @@ from organizer_engine import (
     StackSpec,
     lid_enabled,
 )
+from organizer_geometry import BuildAbandoned, build_scope, checkpoint, stage
 from organizer_inserts import EDITOR_SNAP, Layout
 from organizer_app import APP_DIR, design_to_dict
 from organizer_features.stack import (
@@ -86,8 +88,10 @@ _PREVIEW_REQUEST_LOCK = threading.Lock()
 _PREVIEW_REQUESTS: OrderedDict[tuple[str, str], tuple[int, float]] = OrderedDict()
 
 
-class _SupersededGeometry(Exception):
-    pass
+# A superseded build stops at its next stage boundary by raising this. It is a
+# BaseException (see organizer_geometry._stages) so the builders' own
+# ``except Exception`` handlers never mistake it for a feature error.
+_SupersededGeometry = BuildAbandoned
 
 
 # Real (user-asked) preview builds in flight. Background warming waits for this
@@ -133,29 +137,77 @@ def _register_preview_request(payload: dict[str, Any], lane: str) -> tuple[str, 
     return client, lane, generation
 
 
+def _token_superseded(token: tuple[str, str, int] | None) -> bool:
+    """True once a newer request for the same client and lane was registered."""
+    if token is None:
+        return False
+    with _PREVIEW_REQUEST_LOCK:
+        latest = _PREVIEW_REQUESTS.get(token[:2])
+    return latest is not None and token[2] < latest[0]
+
+
+# Preview builds no longer share one global lock (Story 2731). Ordering is per
+# design view: one re-entrant lock per (client, lane), so a view never gets an
+# older result after a newer one, while builds for different views run side by
+# side. A small pool caps how many build at once so a burst of views cannot
+# thrash the CPU. GEOMETRY_LOCK still serialises print/export work among itself.
+PREVIEW_BUILD_SLOTS = max(2, min(4, os.cpu_count() or 2))
+_PREVIEW_SLOTS = threading.BoundedSemaphore(PREVIEW_BUILD_SLOTS)
+_VIEW_LOCKS_GUARD = threading.Lock()
+_VIEW_LOCKS: "weakref.WeakValueDictionary[tuple[str, str], Any]" = weakref.WeakValueDictionary()
+_PREVIEW_HELD = threading.local()
+_WAIT_POLL_SECONDS = 0.05
+
+
+def _view_lock(key: tuple[str, str]):
+    with _VIEW_LOCKS_GUARD:
+        lock = _VIEW_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _VIEW_LOCKS[key] = lock
+        return lock
+
+
+def _acquire_unless_superseded(lock, token) -> None:
+    """Acquire ``lock``; a queued request that gets replaced leaves the queue
+    instead of waiting for its turn just to be discarded."""
+    while not lock.acquire(timeout=_WAIT_POLL_SECONDS):
+        if _token_superseded(token):
+            raise _SupersededGeometry()
+    if _token_superseded(token):
+        lock.release()
+        raise _SupersededGeometry()
+
+
 @contextmanager
 def _preview_geometry_lock(token: tuple[str, str, int] | None):
-    while True:
-        GEOMETRY_LOCK.acquire()
-        if token is None:
-            break
-        if _PREVIEW_REQUEST_LOCK.acquire(blocking=False):
-            try:
-                latest = _PREVIEW_REQUESTS.get(token[:2])
-            finally:
-                _PREVIEW_REQUEST_LOCK.release()
-            if latest is not None and token[2] < latest[0]:
-                GEOMETRY_LOCK.release()
-                raise _SupersededGeometry()
-            break
-        GEOMETRY_LOCK.release()
-        # Never wait for the registry lock while holding the geometry lock.
-        with _PREVIEW_REQUEST_LOCK:
-            pass
+    """Run a preview geometry section: ordered per view, abandoned at its next
+    stage boundary if a newer request for the view arrives."""
+    held = getattr(_PREVIEW_HELD, "depth", 0)
+    view = _view_lock(token[:2]) if token is not None else None
+    slot_taken = False
+    view_taken = False
     try:
-        yield
+        with stage("wait"):
+            if view is not None:
+                _acquire_unless_superseded(view, token)
+                view_taken = True
+            if held == 0:
+                _acquire_unless_superseded(_PREVIEW_SLOTS, token)
+                slot_taken = True
+        _PREVIEW_HELD.depth = held + 1
+        with build_scope(lambda: _token_superseded(token)):
+            checkpoint()
+            yield
+            checkpoint()
     finally:
-        GEOMETRY_LOCK.release()
+        _PREVIEW_HELD.depth = held
+        if slot_taken:
+            _PREVIEW_SLOTS.release()
+        if view_taken:
+            view.release()
+
+
 LEGACY_PREFERENCES_FILE = DATA_DIR / "wavefinity_prefs.json"
 
 
