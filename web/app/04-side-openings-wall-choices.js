@@ -702,6 +702,7 @@ function syncForm() {
   syncRimLabelFromFeatures();
   formatDimField("x");
   formatDimField("y");
+  syncStarterSizeHint();
   if (document.activeElement === $("#z")) {
     $("#z").value = fmt(box.z);
   } else {

@@ -904,6 +904,18 @@ function freshDesignForCurrentFolder() {
   return applySpaceSizingDefaults(mergeDesignDefaults(starter, remembered), remembered);
 }
 
+// The starting-size hint is only true for the fresh starter bin it was shown for.
+// Show live dimensions while that design is still bound; hide it for any other bin.
+function syncStarterSizeHint() {
+  const starterHelp = $("#design-first-size-help");
+  if (!starterHelp) return;
+  const show = !!state.starterHintActive && state.designInventoryId == null && !state.designTarget;
+  starterHelp.hidden = !show;
+  starterHelp.textContent = show
+    ? `Starting size: ${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm. Change Width and Depth to fit what you want to organize.`
+    : "";
+}
+
 async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
   const design = freshDesignForCurrentFolder();
   if (overrideBox) Object.assign(design.box, overrideBox);
@@ -929,13 +941,7 @@ async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
   clearDraftSelection();
   activatePreviewView(preferredDesignView());
   await refreshPreview();
-  const starterHelp = $("#design-first-size-help");
-  if (starterHelp) {
-    const show = state.folderMode !== "space";
-    starterHelp.hidden = !show;
-    starterHelp.textContent = show
-      ? `Starting size: ${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm. Change Width and Depth to fit what you want to organize.`
-      : "";
-  }
+  state.starterHintActive = state.folderMode !== "space";
+  syncStarterSizeHint();
   if (typeof DP !== "undefined") { DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin(); }
 }

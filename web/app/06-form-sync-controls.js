@@ -566,8 +566,8 @@ function wireControls() {
   ["#x-size", "#y-size", "#z", "#base-thickness", "#wall-thickness", "#part-name"]
     .forEach(selector => $(selector).addEventListener("input", () => {
       if (selector === "#x-size" || selector === "#y-size") {
-        const starterHelp = $("#design-first-size-help");
-        if (starterHelp) starterHelp.hidden = true;
+        state.starterHintActive = false;
+        syncStarterSizeHint();
       }
       if (selector === "#wall-thickness") {
         const select = $(selector);
