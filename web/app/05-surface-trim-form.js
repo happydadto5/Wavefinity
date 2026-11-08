@@ -412,6 +412,7 @@ const LID_DEFAULTS = {
   handle_size: "medium", handle_position: "middle", fit: "standard",
   flip_enabled: false,
   snap_enabled: false,
+  alignment: "off",
 };
 
 // Everything that changes the resolved lid rise for the current bin. The three
@@ -584,6 +585,10 @@ function populateLidChoices() {
   if (fit && Array.isArray(rules.fits) && fit.options.length !== rules.fits.length) {
     fit.replaceChildren(...rules.fits.map(choice => new Option(choice.label, choice.value)));
   }
+  const align = $("#lid-alignment");
+  if (align && Array.isArray(rules.alignments) && align.options.length !== rules.alignments.length) {
+    align.replaceChildren(...rules.alignments.map(choice => new Option(choice.label, choice.value)));
+  }
   const depth = $("#lid-label-depth");
   if (depth && Array.isArray(rules.label_reliefs) && depth.options.length !== rules.label_reliefs.length) {
     depth.replaceChildren(...rules.label_reliefs.map(choice => new Option(choice.label, String(choice.value))));
@@ -674,6 +679,7 @@ function syncLidForm() {
   $("#lid-thickness").value = ({ thin: "1.2", medium: "1.4", thick: "1.6" })[lid.thickness] || lid.thickness;
   renderLidThicknessOptions();
   $("#lid-fit").value = lid.fit || "standard";
+  $("#lid-alignment").value = lid.alignment || "off";
   $("#lid-handle-type").value = lid.handle_enabled ? lid.handle_type : "none";
   $("#lid-handle-size").value = lid.handle_size;
   $("#lid-handle-position").value = lid.handle_position;
@@ -693,6 +699,8 @@ function syncLidForm() {
   $("#lid-option-panel").hidden = !hasLid;
   $("#lid-fit-row").hidden = lid.flip_enabled || !lid.snap_enabled;
   $("#lid-flip-note").hidden = !(hasLid && lid.flip_enabled);
+  $("#lid-alignment-row").hidden = !(hasLid && lid.flip_enabled);
+  $("#lid-alignment-note").hidden = !(hasLid && lid.flip_enabled && (lid.alignment || "off") !== "off");
   const handleOn = hasLid && Boolean(lid.handle_enabled);
   ["#lid-handle-size-row", "#lid-handle-position-row"].forEach(selector => {
     $(selector).hidden = !handleOn;
@@ -876,6 +884,7 @@ function readStackForm(design) {
     // Written explicitly on every save, so a missing value only ever means an
     // older file.
     fit: $("#lid-fit")?.value || remembered.fit || "standard",
+    alignment: $("#lid-alignment")?.value || remembered.alignment || "off",
     ...(($("#lid-label-depth")?.value || remembered.label_depth_mm)
       ? { label_depth_mm: Number($("#lid-label-depth")?.value || remembered.label_depth_mm) } : {}),
   };

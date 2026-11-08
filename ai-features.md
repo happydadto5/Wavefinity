@@ -362,7 +362,7 @@ These alter the ordinary bin shell rather than acting like independent interior 
 
 The bin Specification area has Stackable (Not Stackable / Stackable) and a single Lid choice (No lid / Lid - Resting fit / Lid - Snap Fit / Lid - Hinged Lid). Width and Depth snap to whole 7 mm units on blur and display the unit count; Height stays in millimetres.
 
-Choosing Lid - Resting fit, Lid - Snap Fit, or Lid - Hinged Lid includes a lid and shows the lid options; Lid fit appears only for Snap Fit. Lid thickness, optional Dome knob or Pull handle, and label text are available. Editing non-empty label text enables its options; clearing it disables the label. A saved off label stays off until its text is edited, and division labels retain their editor. Older Mushroom knobs open as Dome.
+Choosing Lid - Resting fit, Lid - Snap Fit, or Lid - Hinged Lid includes a lid and shows the lid options; Lid fit appears only for Snap Fit. A hinged lid also has Alignment (Off by default, saved as `box.lid.alignment`: off / thin 1 mm / standard 2 mm / thick 3 mm): L-shaped tabs under the two front corners. A hinged lid with Alignment on needs support for these tabs; that is expected and fine. Lid thickness, optional Dome knob or Pull handle, and label text are available. Editing non-empty label text enables its options; clearing it disables the label. A saved off label stays off until its text is edited, and division labels retain their editor. Older Mushroom knobs open as Dome.
 
 General rules:
 

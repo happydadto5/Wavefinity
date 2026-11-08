@@ -49,6 +49,9 @@ from organizer_engine import (
     WALL_STEP,
     BoxSpec,
     ConnectorSpec,
+    LID_ALIGNMENT_MM,
+    LID_ALIGNMENT_NAMES,
+    LID_ALIGNMENTS,
     LID_FIT_MM,
     LID_FIT_NAMES,
     LID_THICKNESSES,
@@ -857,6 +860,13 @@ def catalog_payload() -> dict[str, Any]:
                 for name in LID_FITS
             ],
             "default_fit": "standard",
+            "alignments": [
+                {"value": name, "mm": LID_ALIGNMENT_MM[name],
+                 "label": (LID_ALIGNMENT_NAMES[name] if name == "off"
+                           else f"{LID_ALIGNMENT_NAMES[name]} {LID_ALIGNMENT_MM[name]:g} mm")}
+                for name in LID_ALIGNMENTS
+            ],
+            "default_alignment": "off",
             "label_reliefs": [
                 {"value": value, "name": LID_LABEL_RELIEF_NAMES[value],
                  "label": f"{LID_LABEL_RELIEF_NAMES[value]} {value:g} mm"}

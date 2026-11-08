@@ -341,6 +341,10 @@ LID_HANDLE_POSITIONS = ("left", "right", "front", "back", "middle")
 LID_FITS = ("tight", "standard", "loose")
 LID_FIT_MM = {"tight": 0.15, "standard": 0.25, "loose": 0.35}
 LID_FIT_NAMES = {"tight": "Tight", "standard": "Standard", "loose": "Loose"}
+# Hinged-lid front-corner alignment tabs: how far they drop below the lid underside.
+LID_ALIGNMENTS = ("off", "thin", "standard", "thick")
+LID_ALIGNMENT_MM = {"off": 0.0, "thin": 1.0, "standard": 2.0, "thick": 3.0}
+LID_ALIGNMENT_NAMES = {"off": "Off", "thin": "Thin", "standard": "Standard", "thick": "Thick"}
 # Lid label relief (Inlay depth / Raised height), same presets as Text.
 LID_LABEL_RELIEFS = (0.2, 0.4, 0.6, 0.8)
 LID_LABEL_RELIEF_NAMES = {0.2: "Thin", 0.4: "Default", 0.6: "Thick", 0.8: "Thickest"}
@@ -370,6 +374,7 @@ class LidSpec:
     # independent of stackable, handle and label.
     flip_enabled: bool = False
     snap_enabled: bool = False
+    alignment: str = "off"            # hinged lid only; a missing value is an older file: Off
     # None is the legacy "no saved value" signal: an old inlaid label was
     # 0.4 mm and an old raised label 0.6 mm. Canonical saves always write it.
     label_depth_mm: float | None = None
@@ -383,6 +388,7 @@ class LidSpec:
         )
         choices = (
             (self.fit, LID_FITS, "lid fit"),
+            (self.alignment, LID_ALIGNMENTS, "lid alignment"),
             (self.thickness, LID_THICKNESSES, "lid thickness"),
             (self.label_style, LID_LABEL_STYLES, "lid label style"),
             (self.label_orientation, LID_LABEL_ORIENTATIONS, "lid label orientation"),
@@ -411,6 +417,12 @@ class LidSpec:
 def lid_fit_mm(box: "BoxSpec") -> float:
     """Sliding clearance per side of the removable lid's bottom plug."""
     return LID_FIT_MM[lid_spec(box).fit]
+
+
+def lid_alignment_mm(box: "BoxSpec") -> float:
+    """Depth of the hinged lid's front-corner alignment tabs (0 = Off)."""
+    spec = lid_spec(box)
+    return LID_ALIGNMENT_MM[spec.alignment] if spec.enabled and spec.flip_enabled else 0.0
 
 
 def lid_label_relief_mm(spec: LidSpec) -> float:

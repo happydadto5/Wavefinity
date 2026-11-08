@@ -42,6 +42,7 @@ from organizer_engine import (
     _lock_profile,
     direct_stack_enabled,
     LID_THICKNESSES,
+    lid_alignment_mm,
     lid_enabled,
     lid_fit_mm,
     lid_has_flip,
@@ -281,6 +282,40 @@ def _lid_skirt(eff: BoxSpec, rim: float) -> trimesh.Trimesh:
     skirt = _extrude_polygon(band, STACK_SKIRT_DEPTH)
     skirt.apply_translation((0.0, 0.0, rim - STACK_SKIRT_DEPTH))
     return skirt
+
+
+LID_ALIGNMENT_REACH = 0.2    # each tab leg runs this fraction of the lid length from its corner
+LID_ALIGNMENT_WALL = 1.2     # radial thickness of an alignment tab leg
+
+
+def _lid_alignment_tabs(eff: BoxSpec, rim: float) -> list[trimesh.Trimesh]:
+    """L-shaped tabs under a hinged lid at the two front corners (opposite the hinge).
+
+    Each tab is the mouth outline (at the stack locating clearance) cut to a thin
+    band and kept within one fifth of the lid length of its corner, so its legs
+    follow the inside of the front wall and of the adjoining side wall.  Off
+    returns nothing.
+    """
+    depth = lid_alignment_mm(eff)
+    if depth <= 0.0:
+        return []
+    outline = _plug_polygon(eff)
+    band = outline.difference(outline.buffer(-LID_ALIGNMENT_WALL))
+    if band.is_empty:
+        band = outline
+    min_x, min_y, max_x, _ = outline.bounds
+    reach = LID_ALIGNMENT_REACH * 2.0 * eff.half_y
+    tabs: list[trimesh.Trimesh] = []
+    for x0, x1 in ((min_x - 1.0, min_x + reach), (max_x - reach, max_x + 1.0)):
+        piece = band.intersection(shapely_box(x0, min_y - 1.0, x1, min_y + reach))
+        geoms = getattr(piece, "geoms", [piece])
+        for part in geoms:
+            if isinstance(part, Polygon) and not part.is_empty and part.area > 1e-6:
+                # Run 0.2 mm up into the plate so the tab unions as one solid.
+                tab = _extrude_polygon(part, depth + 0.2)
+                tab.apply_translation((0.0, 0.0, rim - depth))
+                tabs.append(tab)
+    return tabs
 
 
 def _clip_back(polygon: Polygon, back_y: float) -> Polygon:
@@ -716,7 +751,7 @@ def make_lid_parts(
 
     bumps = [] if hinge is not None else _lid_lock_bumps(eff, rim)
     from organizer_features.lid_snap import snap_fingers
-    lid = union([*parts, *bumps, *snap_fingers(eff)])
+    lid = union([*parts, *bumps, *snap_fingers(eff), *_lid_alignment_tabs(eff, rim)])
 
     if lid_stackable(eff):
         # Recess accepting the next stackable-lid bin stepped base. It keeps
