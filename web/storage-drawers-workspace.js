@@ -1,7 +1,6 @@
 /* Cabinet navigator and structural actions; mounted by the Space host in 084B. */
 (() => {
   "use strict";
-  const GUIDE_URL = "/storage-drawers-guide.html";
   const el = (tag, className, text) => { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; };
   const drawerText = (row, index, bins, fitMm = 0) => {
     const parts = [`Drawer ${index + 1}`];
@@ -19,34 +18,11 @@
     // Fix 096 F9: visible reason when drawer controls are disabled while editing.
     const editNote = el("small", "sd-help", ""); editNote.id = "sd-edit-note"; editNote.hidden = true;
     panel.append(title, editNote, list);
-    const structural = el("section", "sd-structural", "");
-    const status = el("p", "sd-structural-status", "Cabinet files need save");
-    const fit = el("p", "sd-printer-fit", "");
-    const printerRow = el("p", "sd-printer-row-note", "");
-    const printerButton = el("button", "link-button", "Printer Settings…"); printerButton.type = "button";
-    printerButton.addEventListener("click", () => callbacks.openPrinterSettings?.());
-    const save = el("button", "button sd-save", "Save Cabinet"), print = el("button", "button sd-print", "Print Cabinet");
-    const printBoth = el("button", "button sd-print-both", "Print Cabinet + Bins");
-    save.type = print.type = printBoth.type = "button";
-    // Fix 1107 (Astra AD-006): visible busy state — while a cabinet operation
-    // is in flight, placement and drawer switching are explicitly locked.
-    // The note text is set from Fix 1108's operation-specific
-    // structuralBusyLabel when shown (Change 5); it starts hidden.
-    // (round 2, GPT G2M-0429: hard-coded "Printing — …" copy was false when
-    // Save Cabinet or cabinet-only Print holds the busy flag.)
-    const saving = el("span", "structural-saving", "");
-    saving.setAttribute("role", "status");
-    const spinner = el("span", "structural-saving-spinner", "");
-    spinner.setAttribute("aria-hidden", "true");
-    saving.append(spinner, "Saving");
-    saving.hidden = true;
+    // The floating cabinet card is gone (Story 2748): Save/Print/Printer/guide
+    // live in the left controls. Only the placement-lock note stays, here.
     const busyNote = el("p", "sd-help", "");
     busyNote.hidden = true;
-    save.addEventListener("click", () => callbacks.saveCabinet?.());
-    print.addEventListener("click", event => callbacks.printCabinet?.(event));
-    printBoth.addEventListener("click", event => callbacks.printCabinetAndBins?.(event));
-    const guide = el("a", "sd-guide-link", "Assembly & print guide"); guide.href = GUIDE_URL; guide.target = "_blank"; guide.rel = "noopener";
-    structural.append(status, fit, printerRow, save, print, printBoth, saving, busyNote, guide);
+    panel.append(busyNote);
     // Damaged known cabinet settings: Inventory and designs stay usable, cabinet
     // output stays off, and one button repairs only the cabinet definition.
     const recovery = el("section", "sd-recovery", ""); recovery.hidden = true;
@@ -56,12 +32,11 @@
     const reset = el("button", "button primary", "Reset Cabinet Settings"); reset.type = "button";
     reset.addEventListener("click", () => callbacks.resetCabinet?.());
     recovery.append(recoveryTitle, recoveryMessage, recoveryNote, reset);
-    host.append(panel, structural, recovery);
+    host.append(panel, recovery);
     const selectors = () => Array.from(list.querySelectorAll(".sd-drawer-select"));
     const render = () => {
       const damaged = Boolean(current.recovery);
-      recovery.hidden = !damaged; panel.hidden = damaged; structural.hidden = damaged;
-      printerRow.replaceChildren(`Printer: ${current.printer ? `${fmt(current.printer.x_mm)} × ${fmt(current.printer.y_mm)} × ${fmt(current.printer.z_mm)} mm` : "—"} `, printerButton);
+      recovery.hidden = !damaged; panel.hidden = damaged;
       if (damaged) {
         recoveryMessage.textContent = current.recovery.message || "A cabinet setting is not valid.";
         list.replaceChildren();
@@ -121,27 +96,6 @@
       // Add/Delete Drawer live in Design only; the navigator just switches drawers.
       editNote.hidden = !editing;
       editNote.textContent = editing ? "Finish editing the current drawer to switch drawers." : "";
-      const code = current.structuralStatus?.status || current.structuralStatus;
-      status.textContent = code === "recovery_error" && current.structuralStatus.message
-        ? current.structuralStatus.message
-        : ({ saved: "Cabinet files saved", need_update: "Cabinet files need update", need_save: "Cabinet files need save" })[code] || "Cabinet files need save";
-      // Fix 1108: immediate pending state while a cabinet structural operation
-      // runs. The flag arrives on the workspace state from SP.structuralBusy -
-      // the existing side-effect owner - so the second click cannot silently
-      // do nothing: the buttons are disabled for the whole operation.
-      const structuralBusy = Boolean(current.structuralBusy);
-      saving.hidden = !structuralBusy;
-      save.disabled = structuralBusy;
-      print.disabled = structuralBusy;
-      printBoth.disabled = structuralBusy;
-      if (structuralBusy) {
-        status.textContent = current.structuralBusyLabel || "Working…";
-        save.title = print.title = printBoth.title = "A cabinet operation is already running.";
-      } else {
-        save.title = print.title = printBoth.title = "";
-      }
-      fit.textContent = current.summary?.fits_printer ? "Fits printer" : current.summary?.first_fit_error || "";
-      fit.classList.toggle("bad", Boolean(current.summary) && !current.summary.fits_printer);
       // Fix 1107 (Astra AD-006): explicit placement-lock note. The busy flag,
       // the Save/Print disabling, and the operation-specific pending label are
       // owned by Fix 1108 — this contract only toggles the note and phrases

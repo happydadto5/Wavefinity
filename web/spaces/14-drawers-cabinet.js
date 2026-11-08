@@ -355,24 +355,6 @@ SP.updateCabinetWorkspace = () => {
     } else {
       SP.cabinetWorkspace.update(data);
     }
-    // Hosted Wavefinity has no local slicer: both Print actions stay disabled, never a Save.
-    const printButtons = [".sd-print", ".sd-print-both"]
-      .map(selector => host.querySelector(selector))
-      .filter(Boolean);
-    if (state.runtime.hosted && printButtons.length) {
-      for (const printButton of printButtons) {
-        printButton.disabled = true;
-        printButton.title = SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP;
-      }
-      // Fix 096 F9: visible reason beside the disabled buttons, not only a tooltip.
-      let reason = host.querySelector(".sd-print-reason");
-      if (!reason) {
-        reason = document.createElement("p");
-        reason.className = "sd-help sd-print-reason";
-        printButtons[printButtons.length - 1].after(reason);
-      }
-      reason.textContent = "Printing is unavailable on hosted Wavefinity: there is no local slicer here.";
-    }
     if (!state.cabinetRecovery) SP.refreshCabinetStructural();
   } catch (error) {
     console.error("Storage Drawers workspace", error);

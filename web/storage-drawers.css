@@ -16,7 +16,7 @@
 .sd-drawer-row.sd-drawer-row-with-label { grid-template-columns: 72px minmax(0, 1fr) minmax(0, 1fr); }
 .sd-form-actions, .sd-printer-row, .sd-printer-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .sd-summary { color: var(--ink); font-size: 12px; line-height: 1.4; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
-.sd-structural-status, .sd-printer-fit { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.sd-printer-fit { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .sd-summary .sd-fit-verdict, .sd-summary-warning, .sd-summary .sd-summary-line:last-child { grid-column: 1 / -1; }
 .sd-navigator { position: absolute; z-index: 5; top: 16px; right: 16px; width: clamp(156px, 18vw, 196px); max-height: calc(100% - 32px); display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel, white); box-shadow: 0 4px 16px #0002; }
 .sd-navigator h3 { margin: 0; font-size: 13px; }
@@ -38,7 +38,6 @@
 .sd-workspace-host { position: absolute; z-index: 5; top: 16px; right: 16px; width: clamp(156px, 18vw, 196px); max-height: calc(100% - 32px); display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
 .sd-workspace-host[hidden] { display: none; }
 .sd-workspace-host .sd-navigator { position: static; width: auto; max-height: none; top: auto; right: auto; }
-.sd-workspace-host .sd-structural { padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel, white); box-shadow: 0 4px 16px #0002; }
 @media (max-width: 700px) {
   .sd-workspace-host { top: auto; right: 10px; bottom: 56px; width: 156px; max-height: 42%; }
 }
