@@ -794,7 +794,7 @@ def design_from_dict(
         lid = LidSpec(
             enabled=True,
             stackable=bool(lid_raw.get("stackable", False)),
-            thickness=str(lid_raw.get("thickness", "thin")),
+            thickness=str(lid_raw.get("thickness", "thin")),  # absent = old default Thin; LidSpec maps words
             label_enabled=bool(lid_raw.get("label_enabled", False)),
             label_style=str(lid_raw.get("label_style", "flush")),
             label_orientation=str(lid_raw.get("label_orientation", "horizontal")),

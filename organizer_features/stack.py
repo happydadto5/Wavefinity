@@ -105,7 +105,6 @@ LID_LOCK_CLEARANCE = 0.08
 LID_LOCK_DROP = 1.5
 LID_LOCK_EMBED = 0.20
 LID_FOUR_SNAP_MIN_SPAN = 40.0
-LID_THICKNESS_EXTRA = {"thin": 0.0, "medium": 0.8, "thick": 1.6}
 LID_LABEL_MARGIN = 2.0
 LID_LABEL_MIN_CAP = 2.5
 LID_LABEL_MIN_BACKING = 0.4   # lid left under an inlaid label pocket
@@ -132,17 +131,10 @@ def stack_lid_rise(box: BoxSpec) -> float:
     """
     if not lid_enabled(box):
         return 0.0
-    wall_box = replace(
-        box, wall=max(box.wall, STACK_MIN_WALL), standard_walls=False,
-    )
-    extra = LID_THICKNESS_EXTRA[lid_spec(box).thickness]
-    requirements = [
-        STACK_LID_SKIN + extra,
-        stack_foot_flare_height(wall_box),
-    ]
-    if lid_stackable(box):
-        requirements.append(STACK_SEAT_DEPTH + STACK_MIN_FLOOR_SKIN + extra)
-    return max(requirements)
+    plate = float(lid_spec(box).thickness)
+    # A stackable lid's top recess is cut into the plate, so the chosen
+    # thickness is the plate left under the recess floor.
+    return plate + (STACK_SEAT_DEPTH if lid_stackable(box) else 0.0)
 
 
 def stack_step_depth(box: BoxSpec) -> float:
@@ -772,18 +764,10 @@ def make_stack_lid(box: BoxSpec) -> trimesh.Trimesh:
 
 
 def lid_thickness_options(box: BoxSpec) -> dict[str, float]:
-    """Resolved physical lid rise for every Thin/Medium/Thick choice.
-
-    Read-only: each candidate is a throwaway copy of the requested design, so
-    the active thickness is never touched.
-    """
+    """The plate thickness in mm of every Very thin..Very thick choice."""
     if not lid_enabled(box):
         return {}
-    spec = lid_spec(box)
-    return {
-        name: round(stack_lid_rise(replace(box, lid=replace(spec, thickness=name))), 3)
-        for name in LID_THICKNESSES
-    }
+    return {name: float(name) for name in LID_THICKNESSES}
 
 
 def stack_closed_height(box: BoxSpec) -> float:

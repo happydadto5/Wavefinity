@@ -323,7 +323,13 @@ class StackSpec:
         return self.mode != "none"
 
 
-LID_THICKNESSES = ("thin", "medium", "thick")
+# Absolute plate thicknesses in mm, on a 0.2 grid. The keys are what is saved.
+LID_THICKNESSES = ("1.0", "1.2", "1.4", "1.6", "1.8")
+LID_THICKNESS_NAMES = {"1.0": "Very thin", "1.2": "Thin", "1.4": "Medium",
+                       "1.6": "Thick", "1.8": "Very thick"}
+LID_DEFAULT_THICKNESS = "1.6"
+# Older files stored relative words; they open on the new ladder.
+LID_LEGACY_THICKNESS = {"thin": "1.2", "medium": "1.4", "thick": "1.6"}
 LID_LABEL_STYLES = ("flush", "raised")
 LID_LABEL_ORIENTATIONS = ("horizontal", "vertical")
 LID_HANDLE_TYPES = ("knob", "pull")
@@ -348,7 +354,7 @@ class LidSpec:
 
     enabled: bool = False
     stackable: bool | None = None
-    thickness: str = "thin"
+    thickness: str = LID_DEFAULT_THICKNESS
     label_enabled: bool = False
     label_style: str = "flush"
     label_orientation: str = "horizontal"
@@ -371,6 +377,10 @@ class LidSpec:
     def __post_init__(self) -> None:
         if self.stackable is None:
             object.__setattr__(self, "stackable", self.enabled)
+        object.__setattr__(
+            self, "thickness",
+            LID_LEGACY_THICKNESS.get(str(self.thickness), str(self.thickness)),
+        )
         choices = (
             (self.fit, LID_FITS, "lid fit"),
             (self.thickness, LID_THICKNESSES, "lid thickness"),

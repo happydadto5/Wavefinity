@@ -405,7 +405,7 @@ function stackMode() {
 }
 
 const LID_DEFAULTS = {
-  enabled: false, stackable: true, thickness: "thin",
+  enabled: false, stackable: true, thickness: "1.6",
   label_enabled: false, label_style: "flush", label_orientation: "horizontal",
   label_text: "", division_labels: [], handle_enabled: false, handle_type: "knob",
   knob_shape: "dome",
@@ -598,7 +598,7 @@ function renderLidThicknessOptions() {
   // pending the plain names show rather than another bin's measurements.
   const fresh = report && report.epoch === state.lidThicknessEpoch
     && report.key === lidThicknessKey(state.design);
-  const names = { thin: "Thin", medium: "Medium", thick: "Thick" };
+  const names = { "1.0": "Very thin", "1.2": "Thin", "1.4": "Medium", "1.6": "Thick", "1.8": "Very thick" };
   [...select.options].forEach(option => {
     const mm = fresh ? report.values?.[option.value] : undefined;
     option.textContent = Number.isFinite(mm) ? `${fmt(mm)} mm \u2014 ${names[option.value]}` : names[option.value];
@@ -672,7 +672,7 @@ function syncLidForm() {
   $("#bin-stackable").value = String((state.design?.box?.stack?.mode === "direct") || (lid.enabled && Boolean(lid.stackable)));
   $("#lid-included").value = String(lid.enabled);
   $("#lid-kind").value = lid.flip_enabled ? "hinged" : lid.snap_enabled ? "snap" : "resting";
-  $("#lid-thickness").value = lid.thickness;
+  $("#lid-thickness").value = ({ thin: "1.2", medium: "1.4", thick: "1.6" })[lid.thickness] || lid.thickness;
   renderLidThicknessOptions();
   $("#lid-fit").value = lid.fit || "standard";
   $("#lid-handle-type").value = lid.handle_enabled ? lid.handle_type : "none";

@@ -51,6 +51,8 @@ from organizer_engine import (
     ConnectorSpec,
     LID_FIT_MM,
     LID_FIT_NAMES,
+    LID_THICKNESSES,
+    LID_THICKNESS_NAMES,
     LID_FITS,
     LID_LABEL_LEGACY_RAISED_MM,
     LID_LABEL_RELIEF_NAMES,
@@ -830,7 +832,11 @@ def catalog_payload() -> dict[str, Any]:
             "base_min_by_wall_mm": _stack_base_min_by_wall(),
         },
         "lid_rules": {
-            "thicknesses": ["thin", "medium", "thick"],
+            "thicknesses": [
+                {"value": name, "mm": float(name), "name": LID_THICKNESS_NAMES[name]}
+                for name in LID_THICKNESSES
+            ],
+            "default_thickness": "1.6",
             # A handle is opt-in: handle_enabled defaults to false and a
             # stackable lid never has one. Knobs come in two shapes.
             "handle_default_enabled": False,

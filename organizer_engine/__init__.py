@@ -118,6 +118,7 @@ from ._specs import (
     STACK_MODES,
     StackSpec,
     LID_THICKNESSES,
+    LID_THICKNESS_NAMES,
     LID_LABEL_STYLES,
     LID_LABEL_ORIENTATIONS,
     LID_HANDLE_TYPES,
