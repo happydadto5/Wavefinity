@@ -120,11 +120,15 @@ WS.renderSelector = () => {
   const here = WS.open();
   const now = WS.current();
   const locked = WS.task === "print" || WS.task === "newspace";
+  // Story 2736: in Layout, the bin clicked in the preview is the selected row, and can be opened with Edit.
+  const layoutBin = !locked && WS.task === "settings" && DL.selectedRow ? DL.bin(DL.selectedRow) : null;
+  const layoutPick = layoutBin && DL.isOrdinary(layoutBin) ? String(layoutBin.id) : "";
   const rows = (here ? [{ kind: "settings", id: "settings", label: "Layout your space" }, ...items] : items).map(one => {
     if (one.kind === "group") return `<li class="ws-group" role="presentation">${wsEsc(one.label)}</li>`;
     const picked = Boolean(now) && now.kind === one.kind && (one.kind === "container" || String(now.id || "") === String(one.id || ""));
+    const layoutPicked = Boolean(layoutPick) && one.kind === "bin" && String(one.id || "") === layoutPick;
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
-    return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${locked ? " disabled" : ""}>
+    return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked || layoutPicked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked || layoutPicked}"${locked ? " disabled" : ""}>
       <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${WS.rowOutputs(one, picked && !locked)}</li>`;
   }).join("");
   // Story 2725: live on any bin view (a bin in a space or a loose bin in My Bins). Greyed only on the
@@ -136,6 +140,7 @@ WS.renderSelector = () => {
   const canDelete = binSelected && Boolean(selectedBin) && DP.editableSourceFor(selectedBin) && !DP.designNavBlocked();
   const actions = `${here ? "" : '<button type="button" class="button secondary dl-small" data-ws-act="new-space-choose">New Space</button>'}
       <button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>New Bin</button>
+      ${layoutPick ? `<button type="button" class="button primary dl-small" data-ws-act="edit-bin" data-id="${wsEsc(layoutPick)}"${DP.designNavBlocked() ? " disabled" : ""}>Edit</button>` : ""}
       <button type="button" class="button secondary dl-small" data-ws-act="duplicate"${canDuplicate ? "" : " disabled"}>Duplicate</button>
       <button type="button" class="button danger dl-small" data-ws-act="delete"${canDelete ? "" : " disabled"}>Delete</button>`;
   return `<div class="ws-sel">
@@ -624,6 +629,7 @@ WS.onAction = async (act, button, event) => {
     case "new-space": return WS.newSpace(button.dataset.kind);
     case "new-bin": return WS.newBin();
     // Story 2725: call the operations directly (a .click() on a disabled classic button does nothing).
+    case "edit-bin": return WS.pick("bin", button.dataset.id);
     case "duplicate": return typeof designerDuplicate === "function" ? designerDuplicate() : null;
     case "delete": return DP.deleteDesignBin();
     case "print-picked": return WS.printPicked(event);
