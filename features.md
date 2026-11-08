@@ -186,7 +186,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 - **Lid Only**.
 - Lid snugness / clearance choices.
 - **Number of latches**: None or 1 at every width; 2 only when the inside width is over 96 mm. New cases start with 1 latch. Older automatic counts are resolved from the case width when loaded.
-- **Hinge type** (Latched Lid only): **Screw hinges** (the default; 1 or 2 screw-pivot hinges) or **Piano hinge (filament pin)**. The piano hinge runs the full back width, with case and lid knuckles taking turns on one strand of 1.75 mm filament pushed in through either open end. It never cuts into the inside: it stands about 5 mm out behind the back wall, its top flush with the lid top. The lid rests open at 105 degrees on a flat heel-and-ledge stop. Number of hinges is hidden for a piano hinge.
+- **Hinge type** (Latched Lid only): **Screw hinges** (the default; 1 or 2 screw-pivot hinges) or **Piano hinge (filament pin)**. The piano hinge runs the full back width, with case and lid knuckles taking turns on one strand of 1.75 mm filament pushed in through either open end. It never cuts into the inside: it stands about 5 mm out behind the back wall, its top flush with the lid top. The lid rests open at 110 degrees on a flat heel-and-ledge stop. Number of hinges is hidden for a piano hinge.
 
 ### Case options
 
@@ -791,11 +791,11 @@ The Hinged Lid kind is available for stackable and non-stackable lids alike. It 
 
 When on, the lid and bin gain a piano hinge across the full back edge, in the back-top corner (the back is always the hinge side; there is no side choice):
 
-- The pin is a strand of standard 1.75 mm filament. It is the only part that is not printed. The channel through the knuckles is a 2.0 mm round bore and runs straight out through both side walls, so both ends are open and the filament can be pushed in from either side.
+- The pin is a strand of standard 1.75 mm filament. It is the only part that is not printed. The channel through the knuckles is a 2.3 mm round bore (about 0.275 mm clearance round the filament) that runs straight out through one side wall; at the other end it is closed by a 2 mm solid end stop, measured from the side face where the bore meets it, so the filament is pushed in from the open end and stops against the cap.
 - Knuckles are round barrels that alternate bin / lid across the whole width. A small bin gets five (bin at both ends and the middle, lid between); a bin+lid pair is added as the width grows, so each knuckle stays near 10 mm long. Their backs sit on the deepest point of the bin's wavy back face and the pin sits low enough that the lid plate runs unbroken over the barrels, so the closed bin is no deeper and no taller and still nests against its neighbours. The lid gives up only the strip behind the pin and the swing room round each bin knuckle. Each bin knuckle's underside is a 45-degree bevel that leaves the back wall below the hinge and carries the barrel, so it prints upright without support; each lid knuckle ends in a flat top flush with the lid top.
 - The preview draws the same hinged bin body as export, including the bin-side knuckles, bevels, swing clearances and open pin bore.
 - A stackable flip lid keeps its stacking recess; the recess is cut through the knuckles too, and the pin sits lower by the recess depth so the recess floor leaves the same lid thickness over the barrels.
-- Open, the lid swings back past vertical and rests at 105 degrees on a flat stop: a square heel on each lid knuckle lands on a ledge cut in the back wall, not on the knuckle outlines. A bin with a neighbour directly behind it opens to about 90 degrees.
+- Open, the lid swings back past vertical and rests at 110 degrees on a flat stop: a square heel on each lid knuckle lands on a ledge cut in the back wall, not on the knuckle outlines. The back top of the bin is relieved over each bin knuckle by the lid plate's sweep, so the back of the lid clears it all the way to the stop. A bin with a neighbour directly behind it opens to about 90 degrees.
 - The below-rim plug is trimmed against the complete swing arcs at every depth, keeping at least the selected Lid fit (Tight / Standard / Loose) from the front and side waves throughout opening. This can leave extra plug clearance when closed; the rim seat remains unchanged.
 - A flip lid has no snap-fit lock bumps; holding the lid shut is a separate feature.
 

@@ -2,13 +2,17 @@
 
 Five or more round barrels (bin at both ends and the middle, lid between, a
 bin+lid pair added as the width grows) take turns along one straight axis on a
-strand of 1.75 mm filament, in a 2.0 mm bore. Every knuckle stays inside the
+strand of 1.75 mm filament, in a 2.3 mm bore. Every knuckle stays inside the
 bin's own wavy back face and below the lid's top, so the closed bin is no
 deeper and no taller, and it still nests against its neighbours. The axis sits
 low enough that the lid plate runs unbroken over the swing circle; the lid
 gives up only the strip behind the pin and the swing room itself. The pin bore
-runs out through both side faces, so the filament can be pushed in from one end only:
-the bore is closed by a thin cap at the other.
+runs out through one side face, so the filament is pushed in from that end only:
+the bore is closed by a ``HINGE_END_CAP`` wall at the other, measured from the
+side face where the bore really meets it (a rounded back corner leaves the face
+well inside the nominal span). The lid opens to ``HINGE_STOP_ANGLE`` on its
+stop; the bin's back top is relieved by the lid plate's swept envelope so
+nothing fouls on the way.
 
 Sections are drawn in the hinge's corner frame: ``u`` forward from the back
 plane (the deepest trough of the back face over the hinge) and ``v`` down from
@@ -22,30 +26,36 @@ from dataclasses import dataclass
 
 import numpy as np
 import trimesh
-from shapely.geometry import LineString, Point, Polygon
+from shapely.affinity import rotate
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.geometry.polygon import orient
+from shapely.ops import unary_union
 
 from organizer_geometry import (
     _extrude_polygon, _extrude_yz_profile, difference, intersection, union,
 )
 
 HINGE_PIN_DIAMETER = 1.75
-HINGE_BORE_DIAMETER = 2.0         # round bore for the 1.75 mm filament
+HINGE_BORE_DIAMETER = 2.3         # round bore for the 1.75 mm filament (0.275 mm radial clearance)
 HINGE_BORE_RADIUS = HINGE_BORE_DIAMETER / 2.0
 HINGE_PIN_CLEARANCE = HINGE_BORE_RADIUS - HINGE_PIN_DIAMETER / 2.0
-HINGE_BARREL_WALL = 1.0           # printed shell round the bore, all the way round
+HINGE_BARREL_RADIUS = 2.0         # fixed: the hinge's outside size does not follow the bore
+HINGE_BARREL_WALL = HINGE_BARREL_RADIUS - HINGE_BORE_RADIUS   # 0.85: two 0.4 mm perimeters
 HINGE_SWING_GAP = 0.3             # radial running gap round a swinging knuckle
 HINGE_AXIAL_GAP = 0.3             # between neighbouring knuckles
 HINGE_ROOF = 0.8                  # lid left over the swing circle (two top skins)
-HINGE_STOP_ANGLE = 105.0          # the lid rests open here, on a flat stop
+HINGE_STOP_ANGLE = 110.0          # the lid rests open here, on a flat stop
 HINGE_KNUCKLE_TARGET = 10.0
 HINGE_KNUCKLE_MIN = 3.0
 HINGE_MIN_KNUCKLES = 5            # bin, lid, bin, lid, bin
-HINGE_BARREL_RADIUS = HINGE_BORE_RADIUS + HINGE_BARREL_WALL
 HINGE_HALF = HINGE_BARREL_RADIUS  # axis offset from the back plane
 _SEGMENTS = 48
 HINGE_BEVEL_ANGLE = 45.0          # underside bevel, degrees up from the print plane
-HINGE_END_CAP = 1.0               # solid cap closing the bore at the hinge's first end
+HINGE_END_CAP = 2.0               # solid cap closing the bore at the hinge's first end,
+                                  # measured from the side face as it really stands there
+HINGE_END_CAP_MIN = 1.0           # least cap a narrow first knuckle may leave
+HINGE_RELIEF_GAP = 0.2            # clearance left round the lid plate's swept envelope
+HINGE_RELIEF_STEP = 2.0           # degrees between the swept plate sections
 
 
 @dataclass(frozen=True)
@@ -68,6 +78,7 @@ class LidHinge:
     open_angle_deg: float
     strip_mm: float              # how far the hinge reaches past the inside face
     seat_depth: float
+    bore_x0: float = 0.0         # where the blind bore starts: end cap past the real side face
 
     def yz(self, u: float, v: float) -> tuple[float, float]:
         return self.back_y - u, self.top_z - v
@@ -135,6 +146,17 @@ def hinge_layout(
                      for i in range(count))
     axis_y = back_y - r
     axis_z = top - axis_v
+    # The side face the bore meets is not at ``min_x``: the back corner is
+    # rounded, so at the axis the face stands well inside the span.  Take the
+    # face at its most inward across the bore's height and put the cap past it.
+    bore_ys = np.linspace(axis_y - HINGE_BORE_RADIUS, axis_y + HINGE_BORE_RADIUS, 9)
+    face_x = _side_face_x(outer, [float(y) for y in bore_ys], min_x)
+    bore_x0 = face_x + HINGE_END_CAP
+    first_end = knuckles[0][1]
+    if bore_x0 > first_end - 0.4:
+        bore_x0 = first_end - 0.4      # stay inside the first bin knuckle
+    if bore_x0 - face_x < HINGE_END_CAP_MIN:
+        raise ValueError("this bin is too narrow for a flip lid - widen it or turn Flip lid off")
     return LidHinge(
         axis_y=axis_y, axis_z=axis_z, axis_depth=rim - axis_z, rim=rim, rise=rise,
         span_half=total / 2.0, back_y=back_y, top_z=top, half=r, axis_v=axis_v,
@@ -143,7 +165,19 @@ def hinge_layout(
         plug_back_y=back_y - (2.0 * r + HINGE_SWING_GAP),
         open_angle_deg=HINGE_STOP_ANGLE,
         strip_mm=max(0.0, 2.0 * r - inner_u), seat_depth=seat_depth,
+        bore_x0=bore_x0,
     )
+
+
+def _side_face_x(outer: Polygon, ys: list[float], default: float) -> float:
+    """The first-end side face at its most inward over the heights ``ys``."""
+    min_x, _, max_x, _ = outer.bounds
+    faces = []
+    for y in ys:
+        hit = LineString([(min_x - 1.0, y), (max_x + 1.0, y)]).intersection(outer)
+        if not hit.is_empty:
+            faces.append(float(hit.bounds[0]))
+    return max(faces) if faces else default
 
 
 # --------------------------------------------------------------------------- #
@@ -222,6 +256,35 @@ def _stop_section(h: LidHinge) -> Polygon:
     return ledge.difference(_swing(h))
 
 
+def _relief_section(h: LidHinge) -> Polygon:
+    """What the bin gives up behind the pin, over each bin knuckle, so the lid
+    plate can swing to the stop.
+
+    Over a bin knuckle the plate keeps its full thickness just outside the
+    swing circle, and that edge sweeps back through the wall's top and the
+    wavy back face as the lid opens.  The envelope is the plate (from the
+    swing circle outward, a few millimetres is all that can reach the bin)
+    turned about the axis from closed to ``open_angle_deg``, grown by
+    ``HINGE_RELIEF_GAP`` and kept to the part behind the pin.  It never comes
+    nearer the axis than the swing circle less the gap, so the barrel stays."""
+    plate = box(0.0, h.axis_v - h.rise, 6.0, h.axis_v).difference(
+        Point(0.0, 0.0).buffer(h.swing_radius, quad_segs=16))
+    steps = int(math.ceil(h.open_angle_deg / HINGE_RELIEF_STEP))
+    angles = [min(h.open_angle_deg, i * HINGE_RELIEF_STEP) for i in range(steps + 1)]
+    swept = unary_union([rotate(plate, a, origin=(0.0, 0.0)) for a in angles])
+    swept = swept.buffer(HINGE_RELIEF_GAP, quad_segs=8)
+    behind = box(-20.0, -20.0, 0.0, 20.0)
+    swept = swept.intersection(behind)
+    if swept.is_empty:
+        return Polygon()
+    # (p, q) -> (u, v): forward of the axis, up from the axis.
+    polys = [swept] if isinstance(swept, Polygon) else list(swept.geoms)
+    return unary_union([
+        _uv(h, [(h.half + p, h.axis_v - q) for p, q in poly.exterior.coords[:-1]])
+        for poly in polys if isinstance(poly, Polygon) and not poly.is_empty
+    ])
+
+
 def _lid_notch_section(h: LidHinge) -> Polygon:
     """What the lid gives up over each bin knuckle: the swing circle and the
     strip behind the pin. The lid plate stays whole over the circle (the axis
@@ -253,8 +316,9 @@ def _keeper(h: LidHinge, outer: Polygon) -> trimesh.Trimesh:
 
 def _bore(h: LidHinge) -> trimesh.Trimesh:
     """Straight bore, blind at the first end behind a ``HINGE_END_CAP`` wall
-    and open at the other side face for the filament."""
-    x0, x1 = h.knuckles[0][0] + HINGE_END_CAP, h.span_half
+    (measured from the real side face) and open at the other side face for
+    the filament."""
+    x0, x1 = h.bore_x0, h.span_half
     bore = _x_prism(Point(h.axis_y, h.axis_z).buffer(HINGE_BORE_RADIUS, quad_segs=32),
                     x0, x1 + 2.0)
     return bore
@@ -291,12 +355,23 @@ def lid_hinge_parts(hinge: LidHinge, outer: Polygon | None = None) -> list[trime
 
 
 def body_hinge_cutters(hinge: LidHinge) -> list[trimesh.Trimesh]:
-    """Cut from the bin: the lid knuckles' running room and the pin bore,
-    which is capped at its first end and runs out through the other side wall."""
+    """Cut from the bin: the lid knuckles' running room, the relief the lid
+    plate's sweep needs over each bin knuckle, and the pin bore, which is
+    capped at its first end and runs out through the other side wall."""
     g = HINGE_AXIAL_GAP / 2.0
     section = _bin_cut_section(hinge)
     cuts = [_x_prism(section, x0 - g, x1 + g) for x0, x1 in _lids(hinge)]
+    cuts += _relief_prisms(hinge)
     return [union(cuts), _bore(hinge)]
+
+
+def _relief_prisms(hinge: LidHinge) -> list[trimesh.Trimesh]:
+    """The plate-sweep relief over every bin knuckle (empty when none is needed)."""
+    relief = _relief_section(hinge)
+    if relief.is_empty:
+        return []
+    g = HINGE_AXIAL_GAP / 2.0
+    return [_x_prism(relief, x0 - g, x1 + g) for x0, x1 in _bins(hinge)]
 
 
 def body_hinge_parts(
@@ -309,4 +384,8 @@ def body_hinge_parts(
     if not stop.is_empty:
         solids += [_x_prism(stop, x0, x1) for x0, x1 in _lids(hinge)]
     parts = intersection([union(solids), _keeper(hinge, outer)])
+    # The knuckles' own back fill must not stand in the lid plate's sweep either.
+    relief = _relief_prisms(hinge)
+    if relief:
+        parts = difference([parts, union(relief)])
     return [difference([parts, _bore(hinge)])]

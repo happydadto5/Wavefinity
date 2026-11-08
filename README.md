@@ -2186,7 +2186,7 @@ Remaining physical next steps:
 Ordinary hinged bins must use the actual `make_box()` mesh in preview. The
 simplified wall-ring preview omits the bin knuckles, pin bore and swing cuts.
 Both preview and export share the same piano hinge geometry: alternating
-bin/lid knuckles, 2.0 mm end-access bore for 1.75 mm filament, 105 degree stop,
+bin/lid knuckles, 2.3 mm single-end-access bore for 1.75 mm filament (2 mm end stop), 110 degree stop,
 inside the wavy footprint and below the lid top. Bin-side support bevels are
 45 degrees. No tests were authorized for this repair.
 
