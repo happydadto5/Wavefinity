@@ -183,12 +183,9 @@ DP.build = () => {
         </fieldset>
         <p class="dl-note" style="font-size: 12px;">No front-wall spacers: bins are pulled toward you when opening the drawer, so front bracing would fight you every time.</p>
         <div class="dl-action-grid">
-          <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the chosen walls">Find Spacer Candidates</button>
-          <button type="button" id="dl-sp-generate" class="button secondary" title="Generate and place the selected spacer candidates">Place Selected Spacers</button>
-          <button type="button" id="dl-sp-refresh" class="button secondary" title="Delete placed spacers, re-plan, and place replacements">Refresh Spacers</button>
+          <button type="button" id="dl-sp-refresh" class="button secondary" title="Remove the existing spacers, then generate and place new ones">Refresh Spacers</button>
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
         </div>
-        <div id="dl-sp-plan-truth"></div>
         <p id="dl-sp-reason" class="dl-note" hidden></p>
       </div>
     </details>
@@ -306,16 +303,6 @@ DP.wire = () => {
     const id = event.target.dataset.fillCandidate;
     if (id) DL.toggleFillCandidate(id);
   });
-  // Fix 1056: spacer candidates are keyboard-toggleable too - same
-  // checkbox-row pattern as fill candidates above, mutating the same
-  // selection set the 3D canvas clicks use (DL.toggleSpacerCandidate).
-  $("#dl-sp-plan-truth").addEventListener("change", event => {
-    const id = event.target.dataset.spacerCandidate;
-    if (!id) return;
-    DL.toggleSpacerCandidate(id);
-    DV.paint();
-    $(`#dl-sp-plan-truth input[data-spacer-candidate="${CSS.escape(id)}"]`)?.focus();
-  });
 
   $("#dl-batch-select-needed").addEventListener("click", () => DP.selectAllNotPrinted());
   $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllPrintable());
@@ -336,8 +323,6 @@ DP.wire = () => {
       DL.change(() => { DL.layout.settings.spacers.walls[side] = event.target.checked; });
     });
   }
-  $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
-  $("#dl-sp-generate").addEventListener("click", () => DL.generateSelectedSpacers());
   $("#dl-sp-refresh").addEventListener("click", () => {
     if (!confirm("Refresh Spacers will delete all placed spacers and create new ones. Continue?")) return;
     DL.refreshSpacers();
@@ -1074,34 +1059,6 @@ DP.renderSurfaceFill = () => {
       : '<p class="dl-note">No empty Surface cells remain.</p>';
 };
 
-// Fix 1042: pre-generation truth - every planned candidate shows its
-// resolved type and true printed envelope BEFORE Save, straight from the
-// backend's single cutoff authority. No threshold numbers live in this file.
-// Fix 1042 (review): plan notes (including the >200mm "Gap too large" note)
-// render here too - an oversized gap produces no candidate, so without this
-// the note would never reach the user's eyes.
-DP.renderSpacerPlanTruth = () => {
-  const box = $("#dl-sp-plan-truth");
-  if (!box) return;
-  const plan = DL.spacerPlan || [];
-  const notes = DL.spacerPlanNotes || [];
-  if (!plan.length && !notes.length) { box.innerHTML = ""; return; }
-  const notesHtml = notes.map(n => `<p class="dl-note">${escapeHtml(n)}</p>`).join("");
-  const headHtml = plan.length ? `<p class="dl-note">Planned spacers — what will actually print:</p>` : "";
-  const candHtml = plan.map(c => {
-      const p = (c.placements || [])[0] || {};
-      const side = String(p.side || String(c.id).split("-")[0] || "spacer");
-      const sideLabel = side.charAt(0).toUpperCase() + side.slice(1);
-      const typeLabel = c.resolved_type === "flexible" ? "Flexible" : "Rigid";
-      const reason = c.will_fallback && c.fallback_reason ? ` — ${escapeHtml(c.fallback_reason)}` : "";
-      const checked = DL.spacerSelected && DL.spacerSelected.has(c.id) ? " checked" : "";
-      return `<label class="checkbox-row"><span>${escapeHtml(sideLabel)} spacer · gap ${fmt(c.measured_gap)} mm → `
-        + `${typeLabel} · prints ${fmt(c.printed_w)} × ${fmt(c.printed_d)} mm${reason}</span>`
-        + `<input type="checkbox" data-spacer-candidate="${escapeHtml(c.id)}"${checked}></label>`;
-    }).join("");
-  box.innerHTML = notesHtml + headHtml + candHtml;
-};
-
 // Fix 1053: client-side mirror of the backend auto-height expression in
 // organizer_drawer/_spacers.py plan_spacers (the full height of the tallest
 // non-spacer bin placed in this drawer; Python round() is banker's rounding, clamped
@@ -1190,54 +1147,18 @@ DP.renderStats = () => {
   const spacerReasonCurrent = () => spacerReasonText;
   spacerReason("");
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
-  label("#dl-sp-plan", "Find Spacer Candidates", "Planning…", "spacers");
-  label("#dl-sp-generate", "Place Selected Spacers", "Placing…", "spacers");
   label("#dl-sp-refresh", "Refresh Spacers", "Refreshing…", "spacers");
-  // Nothing placed yet: these have nothing to work on, so say why instead of
-  // letting the click end in an error.
+  // Nothing placed yet: Refresh has nothing to plan against, so say why
+  // instead of letting the click end in an error.
   const nothingPlaced = DL.loaded && !DL.drawer().placements.length;
-  ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-refresh"].forEach(selector => {
-    const node = $(selector);
-    if (!nothingPlaced) return;
-    node.disabled = true;
-    node.title = "Place a bin in the Space first.";
-    spacerReason("Place a bin in the Space first.");
-  });
-  // Fix 088 S88-4: Refresh Spacers deletes placed spacers and re-adds
-  // them, so it needs something to refresh - placed spacers - or a fresh
-  // selection waiting to be saved. Otherwise it stays disabled with the
-  // reason (Fix 019 Item 4: never an enabled silent no-op).
   const refreshNode = $("#dl-sp-refresh");
-  if (refreshNode && !nothingPlaced) {
-    const hasPlacedSpacers = DL.bins.some(DL.isSpacer);
-    const hasSelection = Boolean(DL.spacerPlan) && DL.spacerSelected && DL.spacerSelected.size > 0;
-    if (!hasPlacedSpacers && !hasSelection) {
+  if (refreshNode) {
+    if (nothingPlaced) {
       refreshNode.disabled = true;
-      refreshNode.title = "No spacers placed yet - plan spacers first.";
-      spacerReason("No spacers placed yet - plan spacers first.");
+      refreshNode.title = "Place a bin in the Space first.";
+      spacerReason("Place a bin in the Space first.");
     } else {
-      refreshNode.disabled = busy;
-      refreshNode.title = "Delete placed spacers, re-plan, and place replacements";
-    }
-  }
-  // Fix 1071 (corrects Fix 1056 Change 3): the old guard skipped itself
-  // whenever the refresh block above had already set a spacer reason -
-  // exactly the case it was written for (plan exists, nothing selected,
-  // no placed spacers) - leaving Place Selected Spacers enabled with an
-  // empty selection. The else branch never touches the shared reason, so
-  // no gate is needed; when a selection is required its reason wins
-  // (Fix 096 F9: the last branch to disable a button wins).
-  const generateNode = $("#dl-sp-generate");
-  if (generateNode && !nothingPlaced) {
-    const needsSelection = Boolean(DL.spacerPlan);
-    const hasSelection = DL.spacerSelected && DL.spacerSelected.size > 0;
-    if (needsSelection && !hasSelection) {
-      generateNode.disabled = true;
-      generateNode.title = "Select at least one spacer candidate first.";
-      spacerReason("Select at least one spacer candidate first.");
-    } else {
-      generateNode.disabled = busy;
-      generateNode.title = "Generate and place the selected spacer candidates";
+      refreshNode.title = "Remove the existing spacers, then generate and place new ones";
     }
   }
   const hasPlacedSpacers = DL.drawer().placements.some(
@@ -1287,7 +1208,7 @@ DP.renderStats = () => {
 // Fix 088 S88-5: a quiet "N gaps could use spacers" hint inside the
 // collapsed Spacers section summary. Computed from a debounced (~800 ms)
 // backend spacer plan that respects the wall toggles; shown only while the
-// section is collapsed, bins are placed, and no current plan exists. Never
+// section is collapsed, bins are placed, and the section is closed. Never
 // writes plan state - the result is only counted, never stored.
 DP.spacerHintTimer = null;
 DP.spacerHintCache = null; // { signature, count } - avoids repeat backend calls
@@ -1295,7 +1216,7 @@ DP.updateSpacerHint = () => {
   const hint = $("#dl-sp-hint");
   const section = $("#dl-spacers");
   if (!hint || !section) return;
-  const usable = !section.open && !DL.spacerPlan &&
+  const usable = !section.open &&
     DL.loaded && DL.drawer().placements.length > 0;
   if (!usable) {
     if (DP.spacerHintTimer) { clearTimeout(DP.spacerHintTimer); DP.spacerHintTimer = null; }
@@ -1339,7 +1260,7 @@ DP.updateSpacerHint = () => {
     } catch (error) { text = ""; /* a hint must never fail visibly */ }
     // Publish only if the world hasn't moved on while planning.
     const now = JSON.stringify([DL.spaceContext(), DL.spacerSignature(), DL.layout.settings.spacers]);
-    const stillUsable = !$("#dl-spacers")?.open && !DL.spacerPlan &&
+    const stillUsable = !$("#dl-spacers")?.open &&
       DL.loaded && DL.drawer().placements.length > 0;
     if (now !== signature || !stillUsable) return;
     DP.spacerHintCache = { signature, text };

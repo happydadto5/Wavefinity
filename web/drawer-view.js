@@ -844,48 +844,6 @@ DV.paintScene = (ctx, drawer, cam) => {
       ctx.setLineDash([]);
     });
   }
-  // Draw spacer candidates
-  if (DL.spacerPlan) {
-    DL.spacerPlan.forEach(c => {
-      const selected = DL.spacerSelected && DL.spacerSelected.has(c.id);
-      const tone = selected ? "rgba(90, 160, 255, 0.4)" : "rgba(120, 100, 70, 0.15)";
-      const stroke = selected ? "rgba(50, 100, 200, 0.8)" : "rgba(120, 100, 70, 0.4)";
-      ctx.setLineDash(selected ? [] : [4, 4]);
-      c.placements.forEach(p => {
-        // Draw the candidate box
-        const x = p.x !== undefined ? p.x : grid.ox + p.gx * step;
-        const y = p.y !== undefined ? p.y : grid.oy + p.gy * step;
-        const w = p.w !== undefined ? p.w : 8;
-        const d = p.d !== undefined ? p.d : 8;
-        const p1 = [x, y, 0], p2 = [x + w, y, 0], p3 = [x + w, y + d, 0], p4 = [x, y + d, 0];
-        const screenPoly = face([p1, p2, p3, p4], tone, stroke, 2);
-        hits.push({ key: c.id, polys: [screenPoly], candidate: true, z: 0 });
-        // Fix 088 S88-3: a small x badge at the candidate's screen
-        // top-right corner. Clicking it removes just this candidate (no
-        // confirmation, no toast); clicking the box itself still toggles
-        // selection. The badge hit is pushed after the box hit so it wins.
-        const bx = Math.max(...screenPoly.map(pt => pt[0])) - 3;
-        const by = Math.min(...screenPoly.map(pt => pt[1])) + 3;
-        ctx.save();
-        ctx.setLineDash([]);
-        ctx.beginPath(); ctx.arc(bx, by, 9, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255,255,255,.92)"; ctx.fill();
-        ctx.strokeStyle = "rgba(120,60,50,.9)"; ctx.lineWidth = 1.5; ctx.stroke();
-        ctx.strokeStyle = "rgba(140,50,40,.95)"; ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(bx - 4, by - 4); ctx.lineTo(bx + 4, by + 4);
-        ctx.moveTo(bx + 4, by - 4); ctx.lineTo(bx - 4, by + 4);
-        ctx.stroke();
-        ctx.restore();
-        hits.push({
-          key: c.id,
-          polys: [[[bx - 11, by - 11], [bx + 11, by - 11], [bx + 11, by + 11], [bx - 11, by + 11]]],
-          candidate: true, removeCandidate: true, z: 0,
-        });
-      });
-      ctx.setLineDash([]);
-    });
-  }
 
   return hits;
 };
@@ -914,18 +872,6 @@ DV.binLabelInfo = (one, stackCount = 1) => {
   };
 };
 
-// Fix 1042: hover details for a planned (pre-Save) spacer candidate - the
-// plan-time truth from the backend's single cutoff authority.
-DV.spacerCandidateLabelInfo = c => {
-  const p = (c.placements || [])[0] || {};
-  const side = String(p.side || String(c.id).split("-")[0] || "spacer");
-  const name = `${side.charAt(0).toUpperCase() + side.slice(1)} spacer (planned)`;
-  const typeLabel = c.resolved_type === "flexible" ? "Flexible" : "Rigid";
-  const detailLine = `${typeLabel} · prints ${fmt(c.printed_w)} × ${fmt(c.printed_d)} mm`
-    + (c.will_fallback && c.fallback_reason ? ` · ${c.fallback_reason}` : "");
-  return { name, detailLine };
-};
-
 // The stackable glyph (two stacked squares) with its top-left corner at (x, y).
 DV.drawStackIcon = (ctx, x, y, size, ink) => {
   const s = size * 0.62, o = size - s;
@@ -946,13 +892,24 @@ DV.drawLabel = (ctx, entry, topFace, ink) => {
   const [cx, cy] = mid(mid(p0, p2), mid(p1, p3));
   const top = entry.layers[entry.layers.length - 1].bin;
   if (top.kind === "spacer" && top.boundary === "edge") {
-    const size = Math.min(14, height * 0.36, width / 4);
-    if (size < 7) return;
+    // Every placed spacer carries its "Spacer" label, however thin: the text
+    // runs along the block's longer side and shrinks to fit rather than
+    // being dropped.
+    const along = height > width ? [p3[0] - p0[0], p3[1] - p0[1]] : [p1[0] - p0[0], p1[1] - p0[1]];
+    let angle = Math.atan2(along[1], along[0]);
+    if (angle > Math.PI / 2) angle -= Math.PI;
+    else if (angle <= -Math.PI / 2) angle += Math.PI;
+    const long = Math.max(width, height), short = Math.min(width, height);
+    const size = Math.max(4, Math.min(14, short * 0.7, long / 3.4));
+    ctx.save();
     ctx.fillStyle = ink;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = `650 ${size}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
-    ctx.fillText(DV.fitText(ctx, "Spacer", width - 6), cx, cy);
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.fillText("Spacer", 0, 0);
+    ctx.restore();
     return;
   }
   DP.paintPrintMark?.(ctx, top, cx, cy, Math.min(width, height)); // Story 2671: print-mode tick
@@ -1076,19 +1033,13 @@ DV.wire = () => {
       // View only: no spacer toggle or bin drag - just pan. The workspace may
       // still pick a bin here (Story 2671).
       const picked = event.button === 0 && DP.onLayoutClick ? DV.hitAt(sx, sy) : null;
-      if (picked && !picked.candidate && DP.onLayoutClick(picked.key)) return;
+      if (picked && DP.onLayoutClick(picked.key)) return;
       const start = DV.cam.onPlane(sx, sy, 0);
       if (start) DV.pan = { cam: DV.cam, start, panX: DV.view.panX, panY: DV.view.panY };
       canvas.classList.add("panning");
       return;
     }
     const hit = event.button === 0 ? DV.hitAt(sx, sy) : null;
-    if (hit && hit.candidate) {
-      if (hit.removeCandidate) DL.removeSpacerCandidate(hit.key);
-      else DL.toggleSpacerCandidate(hit.key);
-      DV.paint();
-      return;
-    }
     if (hit) {
       DL.selectPlacement(hit.key);
       DV.revealRow(DL.selectedRow);
@@ -1156,8 +1107,7 @@ DV.wire = () => {
         const one = found && DL.bin(found.placement.bin);
         const standing = found ? DL.layerOf(key, found.drawer) : null;
         const levels = standing ? Math.max(...standing.item.layers.map(layer => layer.depth)) + 1 : 1;
-        const planned = !one && key ? (DL.spacerPlan || []).find(c => c.id === key) : null;
-        const info = one ? DV.binLabelInfo(one, levels) : planned ? DV.spacerCandidateLabelInfo(planned) : null;
+        const info = one ? DV.binLabelInfo(one, levels) : null;
         canvas.title = info ? `${info.name} — ${info.detailLine}` : "";
         DV.paint();
       }

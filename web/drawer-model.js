@@ -38,9 +38,6 @@ const DL = {
   report: null,
   reportError: "",
   reportTicket: 0,
-  spacerPlan: null,
-  spacerSelected: new Set(),
-  spacerPlanSignature: null,
   fillPlan: null,
   fillSelected: new Set(),
   fillSignature: null,
@@ -876,16 +873,10 @@ DL.spacerSignature = () => JSON.stringify([
   DL.bins.map(one => [one.id, one.kind, one.x, one.y, one.z, one.stack]),
 ]);
 
-// Stale spacer proposals must never survive a layout/inventory change that
+// Stale fill proposals must never survive a layout/inventory change that
 // could invalidate them (placements, dimensions, settings, the
 // active drawer, a placement change, or the bin inventory itself).
-// Toggling a candidate's own checkbox must not call this.
 DL.clearSpacerPlan = ({ preserveFill = false } = {}) => {
-  DL.spacerPlan = null;
-  DL.spacerPlanNotes = [];
-  DL.spacerSelected = new Set();
-  DL.spacerPlanSignature = null;
-  DP.renderSpacerPlanTruth();
   if (!preserveFill) {
     DL.fillPlan = null;
     DL.fillSelected = new Set();
@@ -1403,117 +1394,6 @@ DL.removePlacement = key => {
   DL.emit();
 };
 
-DL.planSpacers = () => DL.busyWith("spacers", async context => {
-  const result = await DL.inventoryCall("/api/drawer/spacers", {
-    layout: DL.layout,
-    drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
-  }, { write: false, context });
-  DL.requireSpaceContext(context);
-  DL.spacerPlan = result.candidates || [];
-  DL.spacerPlanNotes = result.notes || [];
-  DL.spacerSelected = new Set((result.selected || []).map(c => c.id));
-  DP.renderSpacerPlanTruth();
-  DL.spacerPlanSignature = result.plan_signature || null;
-  if (!DL.spacerPlan.length) {
-    const allOff = (result.notes || []).some(note =>
-      /all spacer walls are off|no spacer walls are enabled/i.test(String(note))
-    );
-    toast(
-      allOff
-        ? "No spacer walls are enabled. Turn on a wall to plan spacers."
-        : "No spacer gaps were found for the current wall settings.",
-      false,
-    );
-  }
-  DL.emit();
-});
-
-DL.toggleSpacerCandidate = id => {
-  if (!DL.spacerPlan) return;
-  if (DL.spacerSelected.has(id)) DL.spacerSelected.delete(id);
-  else DL.spacerSelected.add(id);
-  DL.emit();
-  DP.renderSpacerPlanTruth();
-};
-
-// Fix 088 S88-3: the x badge on a planned candidate removes just that
-// candidate from the plan - no confirmation, no toast. A selected candidate
-// is dropped from the selection too, so Save/Refresh never sees it again.
-DL.removeSpacerCandidate = id => {
-  if (!DL.spacerPlan) return;
-  DL.spacerPlan = DL.spacerPlan.filter(c => c.id !== id);
-  DL.spacerSelected.delete(id);
-  DL.emit();
-  DP.renderSpacerPlanTruth();
-};
-
-// The save-and-place half of spacer generation: persists every currently
-// selected planned candidate and places the resulting spacers. Assumes
-// DL.spacerPlan / DL.spacerSelected are current; callers plan first.
-DL.savePlannedSpacers = async context => {
-  if (!DL.spacerPlan) {
-    toast("No spacer plan to place. Click Find Spacer Candidates, choose spacers, then Place Selected Spacers.", true, 6000);
-    return;
-  }
-  // Fix 096 C12: the backend rejects the write when the plan went stale; the
-  // stale plan is discarded, never retried and never merged.
-  let result;
-  try {
-    result = await DL.inventoryCall("/api/drawer/spacers/generate", {
-      layout: DL.layout,
-      drawer_id: DL.layout.active, selected: Array.from(DL.spacerSelected),
-      options: DL.layout.settings.spacers,
-      plan_signature: DL.spacerPlanSignature,
-    }, { context, sideEffect: true });
-  } catch (error) {
-    if (String(error.message || "").startsWith("Spacers changed while you were planning")) {
-      DL.spacerPlan = null;
-      DL.spacerPlanNotes = [];
-      DL.spacerSelected = new Set();
-      DL.spacerPlanSignature = null;
-      DP.renderSpacerPlanTruth();
-      toast(error.message, true, 9000);
-      return;
-    }
-    throw error;
-  }
-  if (!DL.spaceContextCurrent(context)) {
-    toast("Spacer saving finished in the Space you left. The current Space was not changed.");
-    return;
-  }
-  DL.adopt(result);
-  DL.normaliseLayout(result.layout);
-  DL.spacerPlan = null;
-  DL.spacerPlanNotes = [];
-  DL.spacerSelected = new Set();
-  DL.spacerPlanSignature = null;
-  DP.renderSpacerPlanTruth();
-  DL.dirty = false;
-  DL.saveState = "saved";
-  DL.savedAt = new Date();
-  DL.emit(); // show newly saved or reused spacer rows before connector work
-  const made = result.generated?.length || 0;
-  const bits = [];
-  if (result.placed) bits.push(`${result.placed} spacer${result.placed === 1 ? "" : "s"} placed`);
-  if (made) bits.push(`${made} new file${made === 1 ? "" : "s"} saved`);
-  if (result.reused) bits.push(`${result.reused} reused from the inventory`);
-  let connectorLines = [];
-  try {
-    const connectors = await DL.saveConnectorFiles(context);
-    if (connectors.lines.length) connectorLines = ["Connector files saved:", ...connectors.lines, ...connectors.notes];
-  } catch (error) {
-    if (!DL.spaceContextCurrent(context)) {
-      toast("Spacer saving finished in the Space you left. The current Space was not changed.");
-      return;
-    }
-    connectorLines = [`Connector files could not be saved: ${friendlyError(error)}`];
-  }
-  toast([bits.join(", ") || "Nothing to fill", ...(result.notes || []), ...connectorLines].join("\n"), false, 9000);
-  DL.requestReport();
-};
-
-DL.generateSelectedSpacers = () => DL.busyWith("spacers", context => DL.savePlannedSpacers(context));
-
 DL.refreshSpacers = () => DL.busyWith("spacers", async context => {
   if (!(await DL.save())) return;
   DL.requireSpaceContext(context);
@@ -1524,11 +1404,6 @@ DL.refreshSpacers = () => DL.busyWith("spacers", async context => {
   DL.requireSpaceContext(context);
   DL.adopt(result);
   DL.normaliseLayout(result.layout);
-  DL.spacerPlan = null;
-  DL.spacerPlanNotes = [];
-  DL.spacerSelected = new Set();
-  DL.spacerPlanSignature = null;
-  DP.renderSpacerPlanTruth();
   DL.dirty = false;
   DL.saveState = "saved";
   DL.savedAt = new Date();
