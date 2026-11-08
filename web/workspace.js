@@ -127,10 +127,13 @@ WS.renderSelector = () => {
     return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${locked ? " disabled" : ""}>
       <span class="ws-ico" aria-hidden="true">${icon}</span><span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${WS.rowOutputs(one, picked && !locked)}</li>`;
   }).join("");
+  // Story 2725: live on any bin view (a bin in a space or a loose bin in My Bins). Greyed only on the
+  // container and Layout views, or while a switch/action is in flight. Not tied to the classic form's
+  // button state, which is hidden or disabled in states where the header action still works.
   const binSelected = !locked && WS.task === "bin" && (!here || Boolean(state.designInventoryId));
-  const canDuplicate = binSelected && !$("#designer-duplicate")?.hidden && !$("#designer-duplicate")?.disabled;
-  const selectedBin = here && state.designInventoryId ? DL.bin(state.designInventoryId) : null;
-  const canDelete = binSelected && selectedBin && DP.editableSourceFor(selectedBin) && !DP.designNavBlocked();
+  const canDuplicate = binSelected && !DP.designNavBlocked();
+  const selectedBin = state.designInventoryId ? DL.bin(state.designInventoryId) : null;
+  const canDelete = binSelected && Boolean(selectedBin) && DP.editableSourceFor(selectedBin) && !DP.designNavBlocked();
   const actions = `${here ? "" : '<button type="button" class="button secondary dl-small" data-ws-act="new-space-choose">New Space</button>'}
       <button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>New Bin</button>
       <button type="button" class="button secondary dl-small" data-ws-act="duplicate"${canDuplicate ? "" : " disabled"}>Duplicate</button>
@@ -558,8 +561,9 @@ WS.onAction = async (act, button, event) => {
     case "new-space-choose": return WS.go("newspace");
     case "new-space": return WS.newSpace(button.dataset.kind);
     case "new-bin": return WS.newBin();
-    case "duplicate": return $("#designer-duplicate")?.click();
-    case "delete": return $("#designer-delete-bin")?.click();
+    // Story 2725: call the operations directly (a .click() on a disabled classic button does nothing).
+    case "duplicate": return typeof designerDuplicate === "function" ? designerDuplicate() : null;
+    case "delete": return DP.deleteDesignBin();
     case "print-picked": return WS.printPicked(event);
     case "export-picked": return WS.exportPicked();
     case "pick-all": return WS.pickAll();

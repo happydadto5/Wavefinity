@@ -673,7 +673,9 @@ $("#design-bin-select").addEventListener("change", async event => {
     DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
   }
 });
-$("#designer-delete-bin").addEventListener("click", async () => {
+// Story 2725: the one Delete-the-open-bin operation. The classic button and the
+// selector header both call it, so a disabled classic button cannot block the header.
+DP.deleteDesignBin = async () => {
   if (DP.designNavBlocked() || DP.mode !== "design") return;
   const one = state.designInventoryId && DL.bin(state.designInventoryId);
   if (!one || !DP.editableSourceFor(one)) return;
@@ -685,7 +687,8 @@ $("#designer-delete-bin").addEventListener("click", async () => {
     DP.designNavBusy = false;
     DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
   }
-});
+};
+$("#designer-delete-bin").addEventListener("click", () => DP.deleteDesignBin());
 
 DP.openInventoryRow = async id => {
   // Fix 103 (R6): structural -> Inventory bin settles an unsaved structural
