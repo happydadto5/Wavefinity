@@ -164,14 +164,17 @@ themselves are not group labels and stay.
 
 ## Quick start
 
-Double-click `Launch_Organizer_UI.vbs`. It starts Wavefinity without showing a
-command window. On its first run it creates a private `.venv` beside the app,
-installs the pinned geometry packages, starts the local Wavefinity service, and
-opens the browser interface. Later launches reuse that environment. The service
-listens only on `127.0.0.1`; it is not hosted on the internet and the browser
-never replaces the Python geometry engine. Use `Launch_Organizer_UI.bat` only
-when diagnosing a startup problem, because Windows must show a command window
-for a batch file run directly.
+Double-click `Launch_Organizer_UI.bat`. It starts Wavefinity from this folder
+and opens the browser interface, showing a message box only if something is
+wrong. On the first run it builds a private Python environment under
+`%LOCALAPPDATA%\Wavefinity\Env` and installs `requirements.txt`. Every launch
+restarts the local service so the newest code runs. The service listens only on
+`127.0.0.1`; it is not hosted on the internet and the browser never replaces
+the Python geometry engine.
+
+`Launch_Wavefinity_Clean.bat` does the same after wiping saved data in
+`%LOCALAPPDATA%\Wavefinity\Data` (test data, generated files). Both call
+`launch_wavefinity.ps1`.
 
 Manual setup instead:
 
@@ -1845,8 +1848,9 @@ Non-Python files:
 
 | File | What |
 |---|---|
-| `Launch_Organizer_UI.vbs` | normal windowless application launcher |
-| `Launch_Organizer_UI.bat` | bootstrapper and diagnostic launcher; starts the local service windowlessly |
+| `Launch_Organizer_UI.bat` | normal launcher; silent unless something is wrong |
+| `Launch_Wavefinity_Clean.bat` | clean launcher; wipes saved data first |
+| `launch_wavefinity.ps1` | the launch logic both `.bat` files call |
 | `Start_Wavefinity_Dispatch_Runner.bat` | best-effort shim that asks the NN desktop Poller (which owns coder dispatch) to be running; never blocks startup |
 | `generated/WAVY_SAMPLE_SET.3mf` | regenerable local sample print plate; intentionally gitignored |
 
