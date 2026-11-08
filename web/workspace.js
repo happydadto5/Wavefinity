@@ -6,8 +6,7 @@
 //   LEFT   (A) a bounded "In this space" selector (container first, then bins) pinned at the top;
 //          (B) the editor beneath it - the existing, unchanged container / bin / Space settings
 //              forms, or temporarily the Print Space tick list or the New Space kinds.
-//   RIGHT  always the live preview, never an editing surface: the whole Space (the Space canvas),
-//          with the selected container outline or bin, or the bins ticked for print, marked.
+//   RIGHT  shows the selected bin, container, or Space layout without changing the editor.
 // Choosing a row selects it AND opens its form at once; there is no separate edit mode.
 // This layer changes where the existing forms live and how they are reached, never what they hold:
 //   Container editor -> DP.openStructuralTarget()   Storage Box / Drawers / Surface
@@ -28,6 +27,7 @@ const WS = {
   auxSignature: "",
   previewSignature: "",
   entered: "",
+  containerView: "layout",
 };
 const WS_PREF_KEY = "wavefinity-interface";
 const WS_TASKS = ["landing", "container", "bin", "settings", "print", "newspace"];
@@ -352,6 +352,8 @@ WS.arrive = () => {
   WS.printPick = new Set();
   WS.printContainer = false;
   if (WS.open()) {
+    WS.containerView = "layout";
+    Object.assign(DV.view, { zoom: 1, panX: 0, panY: 0 });
     WS.task = "landing";
     WS.settle(0);
   } else if (state.folderMode !== "space") {
@@ -395,7 +397,11 @@ WS.setEnabled = async on => {
 WS.openSpaceRow = button => {
   const src = button.dataset.src;
   const index = Number(button.dataset.index);
-  if (src === "current") return WS.open() ? WS.land() : null;
+  if (src === "current") {
+    if (!WS.open()) return null;
+    DV.fit();
+    return WS.land();
+  }
   if (src === "other") {
     const one = SP.otherSpaces[index];
     if (one) SP.run(() => SP.afterPick(one.folder));
@@ -546,6 +552,8 @@ WS.sync = () => {
     roll.textContent = on ? "Temp only Roll back" : "Back to the new UI";
   }
   if (!on) {
+    const choices = $("#ws-preview-choices");
+    if (choices) choices.hidden = true;
     [...body.classList].filter(name => name.startsWith("ws-")).forEach(name => body.classList.remove(name));
     WS.render();
     WS.measure();
@@ -579,10 +587,17 @@ WS.sync = () => {
   WS.syncOutput();
   const settings = $("#ws-space-settings");
   if (settings) { settings.hidden = !open; settings.classList.toggle("active", WS.task === "settings"); }
-  // The right side is always the whole Space while one is open.
+  const choices = $("#ws-preview-choices");
+  if (choices) {
+    choices.hidden = !open || WS.task !== "container";
+    const label = choices.querySelector('[value="container"]');
+    if (label) label.textContent = ({ storage_box: "Storage box", storage_drawers: "Cabinet", base_trim: "Surface" })[WS.containerKind()] || "Container";
+    choices.value = WS.containerView;
+  }
   if (open) {
-    const wrap = $('.canvas-wrap[data-canvas="drawer"]');
-    if (wrap && !wrap.classList.contains("active")) activatePreviewView("drawer");
+    const view = WS.task === "bin" || (WS.task === "container" && WS.containerView === "container") ? "3d" : "drawer";
+    const wrap = $(`.canvas-wrap[data-canvas="${view}"]`);
+    if (wrap && !wrap.classList.contains("active")) wsActivatePreview(view);
   }
   WS.render();
   WS.measure();
@@ -674,9 +689,13 @@ WS.paintPreview = () => {
 
 // ------------------------------------------------------------------ hooks into the existing code
 
-// While a Space is open the right side is always the Space canvas - 3D / 2D never take it over.
+// The unified selection owns the preview; the classic interface keeps its normal routing.
 const wsActivatePreview = activatePreviewView;
-activatePreviewView = view => wsActivatePreview(WS.enabled() && WS.open() && view !== "drawer" ? "drawer" : view);
+activatePreviewView = view => {
+  if (!WS.enabled() || !WS.open()) return wsActivatePreview(view);
+  const chosen = WS.task === "bin" || (WS.task === "container" && WS.containerView === "container") ? "3d" : "drawer";
+  return wsActivatePreview(chosen);
+};
 
 const wsRender = DV.render;
 DV.render = () => { wsRender(); WS.paintPreview(); };
@@ -754,6 +773,18 @@ SP.openTypedSpacePreferredView = async () => {
   aux.hidden = true;
   controls.prepend(aux);
   controls.prepend(stage);
+
+  const choices = document.createElement("select");
+  choices.id = "ws-preview-choices";
+  choices.setAttribute("aria-label", "Container preview");
+  choices.innerHTML = '<option value="container">Container</option><option value="layout">Space layout</option>';
+  choices.hidden = true;
+  $(".workspace-tools").append(choices);
+  choices.addEventListener("change", () => {
+    WS.containerView = choices.value;
+    if (WS.containerView === "layout") Object.assign(DV.view, { zoom: 1, panX: 0, panY: 0 });
+    WS.sync();
+  });
 
   const menu = $("#ws-space-menu");
   const toggle = $("#ws-spaces");

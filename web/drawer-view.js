@@ -165,7 +165,9 @@ DV.camera = (width, height, drawer, view = DV.view) => {
   const target = [home[0] + view.panX, home[1] + view.panY, home[2]];
   // Never let a close zoom put the lens inside the drawer.
   const lowest = (H * 1.25 + 25 - target[2]) / Math.max(0.2, away[2]);
-  const b = basis(target, Math.max(fit / view.zoom, lowest));
+  // Unified Space entry must fit even a small Space, despite the normal zoom safety distance.
+  const minimum = typeof WS !== "undefined" && WS.enabled() && WS.open() ? Math.min(fit, lowest) : lowest;
+  const b = basis(target, Math.max(fit / view.zoom, minimum));
   const project = point => {
     const v = V3.sub(point, b.eye);
     const depth = Math.max(0.5, V3.dot(v, b.f));
