@@ -115,6 +115,14 @@ WS.renderPicker = () => {
   </div>`;
 };
 
+// Story 2752: in a Storage Drawers space the Layout row carries small 1 / 2 / 3 drawer buttons.
+WS.drawerButtons = locked => {
+  if (!DL.isStorageDrawers() || !DL.layout?.drawers?.length) return "";
+  const off = locked || SP.editing || SP.structuralBusy || DP.designNavBlocked();
+  return `<span class="ws-drawers" role="group" aria-label="Drawers">${DL.layout.drawers.map((row, index) =>
+    `<button type="button" class="ws-drawerbtn${DL.layout.active === row.id ? " selected" : ""}" data-ws-act="drawer" data-id="${wsEsc(row.id)}" aria-pressed="${DL.layout.active === row.id}" aria-label="${wsEsc(row.name || `Drawer ${index + 1}`)}"${off ? " disabled" : ""}>${index + 1}</button>`).join("")}</span>`;
+};
+
 WS.renderSelector = () => {
   if (WS.task === "picker") return WS.renderPicker();
   if (!WS.open() && state.folderMode === "space") return '<div class="ws-sel"><p role="status">Opening…</p></div>';
@@ -129,9 +137,10 @@ WS.renderSelector = () => {
     if (one.kind === "group") return `<li class="ws-group" role="presentation">${wsEsc(one.label)}</li>`;
     const picked = Boolean(now) && now.kind === one.kind && (one.kind === "container" || String(now.id || "") === String(one.id || ""));
     const layoutPicked = Boolean(layoutPick) && one.kind === "bin" && String(one.id || "") === layoutPick;
+    const drawerButtons = one.kind === "settings" ? WS.drawerButtons(locked) : "";
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked || layoutPicked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked || layoutPicked}"${locked ? " disabled" : ""}>
-      <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${WS.rowOutputs(one, picked && !locked)}</li>`;
+      <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${drawerButtons}${WS.rowOutputs(one, picked && !locked)}</li>`;
   }).join("");
   // Story 2725: live on any bin view (a bin in a space or a loose bin in My Bins). Greyed only on the
   // container and Layout views, or while a switch/action is in flight. Not tied to the classic form's
@@ -623,6 +632,20 @@ WS.pick = (kind, id) => {
   return WS.go("bin", id);
 };
 
+WS.openDrawer = async id => {
+  if (!DL.isStorageDrawers() || !DL.layout?.drawers.some(row => row.id === id)) return;
+  if (SP.editing || SP.structuralBusy || DP.designNavBlocked()) return;
+  await WS.pick("settings");
+  if (DL.layout.active === id) return;
+  const oldId = DL.layout.active;
+  const cb = SP.cabinetCallbacks();
+  await cb.setActiveDrawer(id);
+  cb.clearCanvasPlacementSelection();
+  const selectedRow = cb.selectedRow();
+  if (selectedRow && window.StorageDrawers.drawerHoldingRow(DL.layout, selectedRow) === oldId) cb.clearSelectedRow();
+  cb.reframeCamera();
+};
+
 WS.onAction = async (act, button, event) => {
   switch (act) {
     case "open-space": return WS.openSpaceRow(button);
@@ -634,6 +657,7 @@ WS.onAction = async (act, button, event) => {
     case "new-space": return WS.newSpace(button.dataset.kind);
     case "new-bin": return WS.newBin();
     // Story 2725: call the operations directly (a .click() on a disabled classic button does nothing).
+    case "drawer": return WS.openDrawer(button.dataset.id);
     case "edit-bin": return WS.pick("bin", button.dataset.id);
     case "duplicate": return typeof designerDuplicate === "function" ? designerDuplicate() : null;
     case "delete": return DP.deleteDesignBin();

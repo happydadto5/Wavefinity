@@ -560,29 +560,7 @@ DP.designNavBusy = false;
 // entry checks; never check DP.designNavBusy alone for those.
 DP.designNavBlocked = () => DP.designNavBusy || state.designMutationBusy;
 
-DP.refreshDesignDrawerNav = () => {
-  const host = $("#design-drawer-nav"), select = $("#design-drawer-select");
-  const show = DP.mode === "design" && DL.active && DL.layout && DL.isStorageDrawers();
-  host.hidden = !show;
-  if (!show) return;
-  const rows = DL.layout.drawers;
-  select.replaceChildren(...rows.map((row, index) => new Option(row.name || `Drawer ${index + 1}`, row.id)));
-  select.value = DL.layout.active;
-  select.disabled = DP.designNavBlocked() || SP.structuralBusy;
-};
-
-$("#design-drawer-select").addEventListener("change", async event => {
-  const id = event.target.value;
-  if (DP.designNavBlocked() || SP.structuralBusy || !DL.layout?.drawers.some(row => row.id === id)) {
-    DP.refreshDesignDrawerNav();
-    return;
-  }
-  await SP.cabinetCallbacks().setActiveDrawer(id);
-  DP.refreshDesignDrawerNav();
-});
-
 DP.refreshDesignBinNav = () => {
-  DP.refreshDesignDrawerNav();
   const host = $("#design-bin-nav"), select = $("#design-bin-select");
   if (!host || !select) return;
   // Fix 103: the Design target model. A Storage Drawers / Storage Box Space
@@ -919,7 +897,6 @@ DP.update = () => {
   if (panel) panel.inert = !DL.layout;
   // Story 2519: Storage Box bin actions follow the bin contents on every change.
   if (typeof SP !== "undefined" && SP.syncStorageBoxBinActions) SP.syncStorageBoxBinActions();
-  DP.refreshDesignDrawerNav();
   if (!DL.layout) {
     const list = $("#dl-inv-list");
     if (list) list.innerHTML = '<p class="dl-note">Inventory unavailable. Select Space to retry loading.</p>';
