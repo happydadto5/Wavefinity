@@ -464,6 +464,9 @@ WS.arrive = () => {
   WS.printContainer = false;
   if (WS.open()) {
     Object.assign(DV.view, { zoom: 1, panX: 0, panY: 0 });
+    // A drawer's space opens in Overhead: flat, fitted, not turned (Story 2750).
+    // Other kinds of space keep the view they had.
+    if (DL.isStorageDrawers()) DV.setView(DV.PRESETS.overhead);
     WS.task = "landing";
     WS.settle(0);
   } else if (state.folderMode !== "space") {
