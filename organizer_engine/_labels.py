@@ -87,9 +87,14 @@ def text_outline(label: str, cap_height: float) -> Polygon | MultiPolygon:
     glyphs = []
     x = 0.0
     for index, character in enumerate(label):
-        path = TextPath((0.0, 0.0), character, size=size, prop=font)
+        # A blank character has no outline, and matplotlib's TextPath fails on
+        # the empty glyph (plain lists where it expects arrays) - skip the
+        # path but still advance past it below.
+        path = None if character.isspace() else TextPath(
+            (0.0, 0.0), character, size=size, prop=font
+        )
         rings = []
-        for ring in path.to_polygons():
+        for ring in (path.to_polygons() if path is not None else ()):
             if len(ring) < 3:
                 continue
             polygon = Polygon(ring)
