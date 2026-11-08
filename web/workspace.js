@@ -132,7 +132,7 @@ WS.renderSelector = () => {
   const selectedBin = here && state.designInventoryId ? DL.bin(state.designInventoryId) : null;
   const canDelete = binSelected && selectedBin && DP.editableSourceFor(selectedBin) && !DP.designNavBlocked();
   const actions = `${here ? "" : '<button type="button" class="button secondary dl-small" data-ws-act="new-space-choose">New Space</button>'}
-      <button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>+ New Bin</button>
+      <button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>New Bin</button>
       <button type="button" class="button secondary dl-small" data-ws-act="duplicate"${canDuplicate ? "" : " disabled"}>Duplicate</button>
       <button type="button" class="button danger dl-small" data-ws-act="delete"${canDelete ? "" : " disabled"}>Delete</button>`;
   return `<div class="ws-sel">
