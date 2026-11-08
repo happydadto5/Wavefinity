@@ -442,8 +442,13 @@ function syncPrintChoiceAvailability() {
 function chooseIndividualBinPrint(button) {
   const dialog = $("#individual-bin-print-dialog");
   if (dialog.open) return;
-  syncPrintChoiceAvailability();
   const exporting = button.dataset.output === "export";
+  // Nothing to choose when connectors cannot apply: print the bin directly.
+  if (!exporting && connectorsUnavailable()) {
+    printModel("bin", button);
+    return;
+  }
+  syncPrintChoiceAvailability();
   dialog.querySelector('[value="export"]').hidden = !exporting;
   dialog.querySelector('[value="print"]').hidden = exporting;
   $("#individual-bin-print-message").textContent = exporting
