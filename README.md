@@ -166,9 +166,12 @@ themselves are not group labels and stay.
 
 Double-click `Launch_Organizer_UI.bat`. It starts Wavefinity from this folder
 and opens the browser interface, showing a message box only if something is
-wrong. On the first run it builds a private Python environment under
-`%LOCALAPPDATA%\Wavefinity\Env` and installs `requirements.txt`. Every launch
-restarts the local service so the newest code runs. The service listens only on
+wrong. Before each launch it checks GitHub and safely updates this folder to
+the latest `main`. If it cannot check or update, it shows why and leaves the
+current service and saved data alone. On the first run it builds a private
+Python environment under `%LOCALAPPDATA%\Wavefinity\Env` and installs
+`requirements.txt`. A successful launch restarts the local service to load the
+updated code. The service listens only on
 `127.0.0.1`; it is not hosted on the internet and the browser never replaces
 the Python geometry engine.
 
@@ -2190,8 +2193,6 @@ inside the wavy footprint and below the lid top. Bin-side support bevels are
 
 `C:\Projects\Wavefinity` must stay on `main`. Do branch-based audits or other
 work in a separate checkout/worktree; never leave the normal launch folder on
-an old branch. Both its BAT and VBS must remain the stable-launcher shims.
-Changing only the desktop shortcut is insufficient: Andrew also launches the
-BAT directly from this folder. An old branch restores the old launcher and can
-replace the current server with stale code. The stable runtime lives separately
-at `C:\Projects\Wavefinity-Runtime`. Preserve old audit work on its branch.
+an old branch. The normal BAT updates this folder from GitHub before starting;
+it stops with a message if it cannot update safely. Preserve old audit work on
+its branch.

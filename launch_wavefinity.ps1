@@ -28,6 +28,40 @@ function Get-Health {
     try { return Invoke-RestMethod -Uri "${Url}api/health" -TimeoutSec 2 } catch { return $null }
 }
 
+function Update-App {
+    # Do not prompt in a hidden window or let Git's progress output become a PowerShell error.
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Fail "Wavefinity could not find Git to check for updates, so it was not started.`nAsk a coder to restore Git."
+    }
+    $env:GIT_TERMINAL_PROMPT = '0'
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $branch = & git -C $App branch --show-current 2>$null
+        if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') {
+            Fail "Wavefinity was not started because its folder is not on main.`nAsk a coder to restore the launch folder to main."
+        }
+        $changes = & git -C $App status --porcelain --untracked-files=no 2>$null
+        if ($LASTEXITCODE -ne 0 -or $changes) {
+            Fail "Wavefinity was not started because its folder has unfinished changes.`nAsk a coder to save or resolve them before launching."
+        }
+        & git -C $App fetch --quiet --no-tags origin main 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Wavefinity could not check for updates, so it was not started.`nCheck your internet connection and try again."
+        }
+        & git -C $App merge-base --is-ancestor HEAD FETCH_HEAD 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Wavefinity's local folder differs from the latest version, so it was not started.`nAsk a coder to resolve the folder safely."
+        }
+        & git -C $App merge --ff-only --quiet FETCH_HEAD 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Wavefinity could not safely update its local folder, so it was not started.`nAsk a coder to resolve the folder safely."
+        }
+    } finally {
+        $ErrorActionPreference = $oldPreference
+    }
+}
+
 function Stop-Server {
     $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $listener) { return }
@@ -42,6 +76,9 @@ function Stop-Server {
 }
 
 try {
+    # Check before stopping the current service or touching saved data.
+    Update-App
+
     # One-time setup: private Python with the packages Wavefinity needs.
     $Python = Join-Path $Env 'Scripts\pythonw.exe'
     if (-not (Test-Path $Python)) {
