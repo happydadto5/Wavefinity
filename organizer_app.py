@@ -103,6 +103,7 @@ from organizer_b4b import (
     validate_b4b_design,
 )
 from organizer_features.stack import (
+    lid_has_flip,
     make_lid_parts,
     make_stack_lid,
     normalize_stack_settings,
@@ -729,6 +730,24 @@ def generate_organizer_files(
         lid, lid_texts = make_lid_parts(
             stack_request, lid_label_regions(stack_request, layout),
         )
+        if lid_has_flip(stack_request):
+            # A hinged lid prints top-down: turn it over about the hinge
+            # direction (the X axis, the hinge runs along the back edge) so the
+            # lid's top face is on the bed, resting at z = 0. The preview and
+            # the other lid kinds are untouched.
+            flip = trimesh.transformations.rotation_matrix(math.pi, (1.0, 0.0, 0.0))
+            lid = lid.copy()
+            lid.apply_transform(flip)
+            flipped_texts = []
+            for text, mesh, raised in lid_texts:
+                mesh = mesh.copy()
+                mesh.apply_transform(flip)
+                flipped_texts.append((text, mesh, raised))
+            lid_texts = flipped_texts
+            drop = -float(lid.bounds[0][2])
+            lid.apply_translation((0.0, 0.0, drop))
+            for _text, mesh, _raised in lid_texts:
+                mesh.apply_translation((0.0, 0.0, drop))
         if lid_texts:
             written = export_text_body_3mf(
                 lid, [(text, mesh) for text, mesh, _raised in lid_texts],

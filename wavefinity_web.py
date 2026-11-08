@@ -320,6 +320,7 @@ from typing import Any, Callable
 from urllib.parse import quote, unquote, urlparse
 from urllib.request import Request, urlopen
 from photo_nest import photo_outline_from_data
+from plate_layout import space_out_for_plate
 from bambu_handoff import (
     _validate_settings_safe,
     is_bambu_studio_executable,
@@ -2081,8 +2082,25 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "files": [str(f) for f in files],
         }
 
+    # The slicer is handed the parts side by side on the plate, each resting on
+    # the bed, never stacked at their assembled spots. The saved design files
+    # are untouched; only the handoff copies move. Parts that cannot all fit
+    # the bed are reported here, before launch.
     try:
-        project_path = launch_slicer(slicer_path, files)
+        handoff_files, layout_issues = space_out_for_plate(list(files), profile)
+    except Exception as error:
+        handoff_files, layout_issues = list(files), [f"the parts could not be laid out on the plate ({error})"]
+    if layout_issues:
+        return {
+            "partial": True, "partial_stage": "preflight",
+            "error": "The parts do not fit the active printer:\n" + "\n".join(layout_issues),
+            "design_reused": design_reused,
+            "design_files": [str(f) for f in design_files],
+            "files": [str(f) for f in files],
+        }
+
+    try:
+        project_path = launch_slicer(slicer_path, handoff_files)
     except Exception as error:
         return {
             "partial": True,
