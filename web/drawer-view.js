@@ -1311,7 +1311,10 @@ DV.buildOverlay = () => {
       <div class="dl-staging-list"></div>
     </aside>`);
   const rail = $("#dl-staging");
-  rail.querySelector("[data-staging-new-bin]").addEventListener("click", () => DP.newBinFromSpace());
+  rail.querySelector("[data-staging-new-bin]").addEventListener("click", () => {
+    if (typeof WS !== "undefined" && WS.enabled()) WS.newBin();
+    else DP.newBinFromSpace();
+  });
   rail.addEventListener("click", event => {
     const id = event.target.closest("[data-staged-bin]")?.dataset.stagedBin;
     if (id) { DL.selectRow(id); DV.revealRow(id); }

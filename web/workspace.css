@@ -29,7 +29,7 @@
 .ws-card-text { display: grid; min-width: 0; }
 .ws-card-text small { color: var(--muted); font-size: 12px; }
 .ws-card-tag { margin-left: auto; font-size: 11px; color: var(--teal-dark); font-style: normal; font-weight: 700; }
-#ws-space-settings.active { border-color: var(--teal); background: var(--teal-soft); }
+body.ws-on #bin-actions { display: none !important; }
 
 /* The tabs and the old bin/drawer pickers give way to the selector. */
 body.ws-on #space-mode-row { display: none; }
@@ -45,9 +45,9 @@ body.ws-on .app-shell { height: calc(100vh - 79px - var(--ws-chrome, 0px)); }
 body.ws-on.ws-open .view-tabs,
 body.ws-on.ws-open #preview-state,
 body.ws-on.ws-open .workspace-footer,
-body.ws-on.ws-open #dl-staging,
 body.ws-on.ws-open .canvas-wrap[data-canvas="drawer"] .dl-hint { display: none !important; }
-body.ws-on.ws-open #drawer-canvas { cursor: pointer; }
+body.ws-on.ws-open:not(.ws-task-settings) #dl-staging { display: none !important; }
+body.ws-on.ws-open:not(.ws-task-settings) #drawer-canvas { cursor: pointer; }
 /* Story 2704: the open screen has nothing selected, so the right pane shows no preview. */
 body.ws-on.ws-task-picker .workspace { visibility: hidden; }
 
@@ -62,8 +62,8 @@ body.ws-on.ws-task-picker .workspace { visibility: hidden; }
 .ws-sel > .ws-items { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .ws-sel > .ws-sel-head, .ws-sel > .field-error { flex: none; }
 .ws-sel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px; }
-.ws-sel-head h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-.ws-sel-actions { display: flex; gap: 6px; }
+.ws-sel-head h2 { margin: 0; font-size: 14pt; font-weight: 700; color: var(--ink); }
+.ws-sel-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .ws-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .ws-rowbtn {
   width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; font: inherit; font-size: 14px; font-weight: 600;

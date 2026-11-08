@@ -27,7 +27,6 @@ const WS = {
   auxSignature: "",
   previewSignature: "",
   entered: "",
-  containerView: "layout",
 };
 const WS_PREF_KEY = "wavefinity-interface";
 const WS_TASKS = ["landing", "container", "bin", "settings", "print", "newspace", "picker"];
@@ -94,6 +93,7 @@ WS.items = () => {
 WS.current = () => {
   const temporary = WS.task === "print" || WS.task === "newspace";
   const task = temporary ? WS.prior?.task : WS.task;
+  if (task === "settings") return { kind: "settings", id: "settings" };
   if (task === "container") return { kind: "container", id: "container" };
   if (task === "bin") return { kind: "bin", id: WS.open() ? (temporary ? WS.prior.id : state.designInventoryId) || "" : "" };
   return null;
@@ -124,15 +124,21 @@ WS.renderSelector = () => {
   const here = WS.open();
   const now = WS.current();
   const locked = WS.task === "print" || WS.task === "newspace";
-  const rows = items.map(one => {
+  const rows = (here ? [{ kind: "settings", id: "settings", label: "Space design" }, ...items] : items).map(one => {
     if (one.kind === "group") return `<li class="ws-group" role="presentation">${wsEsc(one.label)}</li>`;
     const picked = Boolean(now) && now.kind === one.kind && (one.kind === "container" || String(now.id || "") === String(one.id || ""));
     const icon = one.kind === "container" ? "▦" : "▢";
     return `<li class="ws-row"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${locked ? " disabled" : ""}>
       <span class="ws-ico" aria-hidden="true">${icon}</span><span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button></li>`;
   }).join("");
+  const binSelected = !locked && WS.task === "bin" && (!here || Boolean(state.designInventoryId));
+  const canDuplicate = binSelected && !$("#designer-duplicate")?.hidden && !$("#designer-duplicate")?.disabled;
+  const selectedBin = here && state.designInventoryId ? DL.bin(state.designInventoryId) : null;
+  const canDelete = binSelected && selectedBin && DP.editableSourceFor(selectedBin) && !DP.designNavBlocked();
   const actions = `${here ? "" : '<button type="button" class="button secondary dl-small" data-ws-act="new-space-choose">New Space</button>'}
-      <button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>+ New Bin</button>`;
+      <button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>+ New Bin</button>
+      <button type="button" class="button secondary dl-small" data-ws-act="duplicate"${canDuplicate ? "" : " disabled"}>Duplicate</button>
+      <button type="button" class="button danger dl-small" data-ws-act="delete"${canDelete ? "" : " disabled"}>Delete</button>`;
   return `<div class="ws-sel">
     <div class="ws-sel-head"><h2>${wsEsc(here ? WS.placeName() : "My Bins")}</h2><span class="ws-sel-actions">${actions}</span></div>
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
@@ -350,6 +356,7 @@ WS.resume = () => {
   const prior = WS.prior;
   WS.prior = null;
   if (prior && WS.open() && prior.task !== "landing") {
+    if (prior.task === "settings") return WS.go("settings");
     WS.task = prior.task;
     WS.sync();
     return true;
@@ -377,7 +384,6 @@ WS.arrive = () => {
   WS.printPick = new Set();
   WS.printContainer = false;
   if (WS.open()) {
-    WS.containerView = "layout";
     Object.assign(DV.view, { zoom: 1, panX: 0, panY: 0 });
     WS.task = "landing";
     WS.settle(0);
@@ -501,6 +507,7 @@ WS.newBin = async () => {
 WS.pick = (kind, id) => {
   if (WS.busy || WS.task === "print" || WS.task === "newspace") return null;
   if (!WS.open()) return WS.go("bin");
+  if (kind === "settings") return WS.task === "settings" ? null : WS.go("settings");
   if (kind === "container") return WS.task === "container" ? null : WS.go("container");
   if (!id || (WS.task === "bin" && id === state.designInventoryId)) return null;
   return WS.go("bin", id);
@@ -516,6 +523,8 @@ WS.onAction = async (act, button, event) => {
     case "new-space-choose": return WS.go("newspace");
     case "new-space": return WS.newSpace(button.dataset.kind);
     case "new-bin": return WS.newBin();
+    case "duplicate": return $("#designer-duplicate")?.click();
+    case "delete": return $("#designer-delete-bin")?.click();
     case "print-picked": return WS.printPicked(event);
     case "export-picked": return WS.exportPicked();
     case "pick-all": return WS.pickAll();
@@ -538,12 +547,15 @@ WS.outputTarget = () => {
 
 WS.syncOutput = () => {
   const printBin = $("#ws-print-bin");
+  const printContainer = $("#ws-print-container");
   const exportButton = $("#ws-export");
   if (!printBin || !exportButton) return;
   const target = WS.enabled() ? WS.outputTarget() : null;
   const what = WS.task === "container" ? WS.containerName().toLowerCase() || "container" : "bin";
   const hosted = Boolean(state.runtime.hosted);
-  printBin.disabled = !target;
+  printBin.disabled = target !== "bin";
+  printContainer.disabled = target !== "container";
+  printContainer.textContent = `Print ${{ storage_box: "Box", storage_drawers: "Drawers", base_trim: "Surface" }[WS.containerKind()] || "Container"}`;
   exportButton.disabled = !target;
   printBin.title = !target ? "Select a bin, the storage box or the drawers to print it."
     : hosted ? "Printing needs local Wavefinity and a slicer"
@@ -570,6 +582,13 @@ WS.sync = () => {
   const roll = $("#ws-ui-toggle");
   if (frame) frame.hidden = !on;
   // One Roll back button: it lives in the bar here, and in the header in Classic.
+  const ai = $("#ai-help-open");
+  const aiSlot = $("#ws-ai-slot");
+  const aiHome = $("#bin-actions");
+  if (ai && aiSlot && aiHome) {
+    if (on && ai.parentElement !== aiSlot) aiSlot.appendChild(ai);
+    if (!on && ai.parentElement !== aiHome) aiHome.appendChild(ai);
+  }
   const slot = $("#ws-roll-slot");
   const home = $(".header-actions");
   if (roll && slot && home) {
@@ -578,8 +597,6 @@ WS.sync = () => {
     roll.textContent = on ? "Temp only Roll back" : "Back to the new UI";
   }
   if (!on) {
-    const choices = $("#ws-preview-choices");
-    if (choices) choices.hidden = true;
     [...body.classList].filter(name => name.startsWith("ws-")).forEach(name => body.classList.remove(name));
     WS.render();
     WS.measure();
@@ -609,21 +626,12 @@ WS.sync = () => {
   if (place) place.textContent = "Change Space";
   const printSpace = $("#ws-print-space");
   if (printSpace) {
-    printSpace.disabled = !open || WS.task === "print" || WS.task === "newspace";
+    printSpace.disabled = !open || WS.task !== "settings" || WS.busy;
     printSpace.title = open ? "" : "My Bins have no Space to print. Open a Space first.";
   }
   WS.syncOutput();
-  const settings = $("#ws-space-settings");
-  if (settings) { settings.hidden = !open; settings.classList.toggle("active", WS.task === "settings"); }
-  const choices = $("#ws-preview-choices");
-  if (choices) {
-    choices.hidden = !open || WS.task !== "container";
-    const label = choices.querySelector('[value="container"]');
-    if (label) label.textContent = ({ storage_box: "Storage box", storage_drawers: "Cabinet", base_trim: "Surface" })[WS.containerKind()] || "Container";
-    choices.value = WS.containerView;
-  }
   if (open) {
-    const view = WS.task === "bin" || (WS.task === "container" && WS.containerView === "container") ? "3d" : "drawer";
+    const view = WS.task === "bin" || WS.task === "container" ? "3d" : "drawer";
     const wrap = $(`.canvas-wrap[data-canvas="${view}"]`);
     if (wrap && !wrap.classList.contains("active")) wsActivatePreview(view);
   }
@@ -721,7 +729,7 @@ WS.paintPreview = () => {
 const wsActivatePreview = activatePreviewView;
 activatePreviewView = view => {
   if (!WS.enabled() || !WS.open()) return wsActivatePreview(view);
-  const chosen = WS.task === "bin" || (WS.task === "container" && WS.containerView === "container") ? "3d" : "drawer";
+  const chosen = WS.task === "bin" || WS.task === "container" ? "3d" : "drawer";
   return wsActivatePreview(chosen);
 };
 
@@ -730,14 +738,14 @@ DV.render = () => { wsRender(); WS.paintPreview(); };
 
 // A click on a bin in the preview picks it (its form opens at once); the preview never edits.
 DP.onLayoutClick = key => {
-  if (!WS.enabled() || !WS.open() || WS.task === "print" || WS.task === "newspace") return false;
+  if (!WS.enabled() || !WS.open() || WS.task === "settings" || WS.task === "print" || WS.task === "newspace") return false;
   const found = DL.findPlacement(key);
   const one = found && DL.bin(found.placement.bin);
   if (!one || !DL.isOrdinary(one)) return false;
   WS.pick("bin", one.id);
   return true;
 };
-DP.layoutViewOnly = () => WS.enabled() && WS.open();
+DP.layoutViewOnly = () => WS.enabled() && WS.open() && WS.task !== "settings";
 
 // The welcome / type-card dialogs become the bar and the New Space kinds; a restored
 // session opens its last Space (container selected) straight away - nothing covers it.
@@ -806,18 +814,6 @@ SP.openTypedSpacePreferredView = async () => {
   controls.prepend(aux);
   controls.prepend(stage);
 
-  const choices = document.createElement("select");
-  choices.id = "ws-preview-choices";
-  choices.setAttribute("aria-label", "Container preview");
-  choices.innerHTML = '<option value="container">Container</option><option value="layout">Space layout</option>';
-  choices.hidden = true;
-  $(".workspace-tools").append(choices);
-  choices.addEventListener("change", () => {
-    WS.containerView = choices.value;
-    if (WS.containerView === "layout") Object.assign(DV.view, { zoom: 1, panX: 0, panY: 0 });
-    WS.sync();
-  });
-
   const menu = $("#ws-space-menu");
   const toggle = $("#ws-spaces");
   const closeMenu = () => { menu.hidden = true; toggle.setAttribute("aria-expanded", "false"); };
@@ -851,10 +847,9 @@ SP.openTypedSpacePreferredView = async () => {
   document.addEventListener("click", event => { if (!menu.hidden && !menu.contains(event.target)) closeMenu(); });
   $("#ws-ui-toggle").addEventListener("click", () => WS.setEnabled(!WS.enabled()));
   $("#ws-print-space").addEventListener("click", () => { closeMenu(); WS.go("print"); });
-  for (const id of ["#ws-print-bin", "#ws-export"]) {
+  for (const id of ["#ws-print-bin", "#ws-print-container", "#ws-export"]) {
     $(id).addEventListener("click", event => { closeMenu(); WS.output(event.currentTarget.dataset.output, event.currentTarget, event); });
   }
-  $("#ws-space-settings").addEventListener("click", () => { closeMenu(); (WS.task === "settings" ? WS.land() : WS.go("settings")); });
   $("#part-name")?.addEventListener("input", () => WS.sync());
 
   // Every owner that changes what is open reports through one of these.
