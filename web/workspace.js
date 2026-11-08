@@ -117,7 +117,7 @@ WS.renderSelector = () => {
   const actions = `${here ? "" : '<button type="button" class="button secondary dl-small" data-ws-act="new-space-choose">New Space</button>'}
       <button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>+ New Bin</button>`;
   return `<div class="ws-sel">
-    <div class="ws-sel-head"><h2>${here ? "In this space" : "My Bins"}</h2><span class="ws-sel-actions">${actions}</span></div>
+    <div class="ws-sel-head"><h2>${wsEsc(here ? WS.placeName() : "My Bins")}</h2><span class="ws-sel-actions">${actions}</span></div>
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
     <ul class="ws-items" aria-label="${here ? `Contents of ${wsEsc(WS.placeName())}` : "Bins that are not in a Space"}">${rows || '<li class="ws-empty">Nothing here yet. Choose New Bin to add the first bin.</li>'}</ul>
   </div>`;
@@ -534,7 +534,7 @@ WS.sync = () => {
     if (["bin", "container", "settings"].includes(WS.task)) WS.editorToTop();
   }
   const place = $("#ws-place");
-  if (place) place.textContent = WS.placeName() || "Spaces";
+  if (place) place.textContent = "Change Space";
   const printSpace = $("#ws-print-space");
   if (printSpace) {
     printSpace.disabled = !open || WS.task === "print" || WS.task === "newspace";
@@ -681,7 +681,12 @@ SP.showResume = (info, { startup = false } = {}) => {
   if (!WS.enabled()) return wsOriginal.showResume(info);
   SP.resume = info;
   SP.close();
-  if (startup) WS.placeSeen = WS.placeKey();
+  if (startup) {
+    // Launch always shows the open screen (spaces, My Bins, New Space) - never the last space.
+    WS.placeSeen = WS.placeKey();
+    WS.enterLoose().then(() => { WS.sync(); $("#ws-spaces")?.click(); });
+    return null;
+  }
   SP.run(SP.confirmResume).then(() => { if (!WS.open()) WS.enterLoose(); });
   return null;
 };
