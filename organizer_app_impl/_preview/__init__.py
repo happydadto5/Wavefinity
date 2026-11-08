@@ -98,6 +98,7 @@ from ._helpers import (
     PREVIEW_DECIMALS,
     PREVIEW_MIN_FACE_AREA,
     _mesh_preview_geometry,
+    _thin_preview_rings,
     _bore_item_preview_meshes,
     bore_reference_envelope_extensions,
     _customization_zones,
@@ -223,6 +224,7 @@ def preview_geometry(
             shell_body = apply_side_openings(box, shell_body)
         geometry.extend(_mesh_preview_geometry(shell_body, "outside"))
     else:
+        outer, cavity = _thin_preview_rings(outer, cavity)
         count = len(outer)
         for index in range(count):
             a, b = outer[index], outer[(index + 1) % count]

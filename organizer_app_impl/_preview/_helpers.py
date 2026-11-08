@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Iterable
+import manifold3d
 import numpy as np
 import trimesh
 from shapely.geometry import MultiPolygon, Polygon
@@ -209,6 +210,82 @@ PREVIEW_DECIMALS = 3
 PREVIEW_MIN_FACE_AREA = 1e-4
 
 
+# Preview-only detail standard, separate from print.  Print and export build
+# and write the full-detail mesh; only the copy converted here for the browser
+# is coarsened.  Edges are collapsed only where every surface moves by less
+# than this, which is about half a preview pixel at full zoom, so outlines,
+# openings and hardware placement are unchanged.  Print never calls this.
+PREVIEW_SIMPLIFY_TOLERANCE_MM = 0.05
+# Below this a mesh is already tiny; leave it exactly as built.
+PREVIEW_SIMPLIFY_MIN_FACES = 64
+
+
+def _simplified_for_preview(mesh):
+    """Return a coarser copy of ``mesh`` for the preview, or ``mesh`` itself.
+
+    Uses manifold3d's tolerance-bounded simplify on a copy; the input mesh
+    (shared with the print builders and caches) is never modified.  Any mesh
+    that is not a clean closed solid, or any failure, keeps the original, so
+    the preview can only ever get lighter, never break.
+    """
+    try:
+        if len(mesh.faces) < PREVIEW_SIMPLIFY_MIN_FACES:
+            return mesh
+        solid = manifold3d.Manifold(manifold3d.Mesh(
+            vert_properties=np.asarray(mesh.vertices, dtype=np.float32),
+            tri_verts=np.asarray(mesh.faces, dtype=np.uint32),
+        ))
+        if solid.status() != manifold3d.Error.NoError or solid.is_empty():
+            return mesh
+        out = solid.simplify(PREVIEW_SIMPLIFY_TOLERANCE_MM).to_mesh()
+        vertices = np.asarray(out.vert_properties, dtype=float)[:, :3]
+        faces = np.asarray(out.tri_verts)
+        if not len(faces) or len(faces) >= len(mesh.faces):
+            return mesh
+        coarse = trimesh.Trimesh(vertices, faces, process=False)
+        coarse.metadata.update(mesh.metadata)
+        return coarse
+    except Exception:
+        return mesh
+
+
+def _thin_preview_rings(outer, cavity):
+    """Preview-only: drop wall samples that no ring needs, matched in pairs.
+
+    The wavy wall is sampled far finer than a preview pixel, which makes
+    thousands of wall quads per ring.  A sample is kept when either ring needs
+    it to stay within ``PREVIEW_SIMPLIFY_TOLERANCE_MM``, so both rings keep the
+    same indices and stay paired.  Returns the inputs unchanged if the result
+    is not a valid outline within twice that distance.  The build rings used by print and the
+    floor face are not touched.
+    """
+    try:
+        count = len(outer)
+        if count < 64 or len(cavity) != count:
+            return outer, cavity
+        keep: set[int] = set()
+        for ring in (outer, cavity):
+            index_of = {}
+            for index, point in enumerate(ring):
+                index_of.setdefault((point[0], point[1]), index)
+            thin = Polygon(ring).simplify(PREVIEW_SIMPLIFY_TOLERANCE_MM, preserve_topology=False)
+            for point in thin.exterior.coords:
+                keep.add(index_of[(point[0], point[1])])
+        if len(keep) < 3 or len(keep) >= count:
+            return outer, cavity
+        order = sorted(keep)
+        new_outer = [outer[i] for i in order]
+        new_cavity = [cavity[i] for i in order]
+        for before, after in ((outer, new_outer), (cavity, new_cavity)):
+            old, new = Polygon(before), Polygon(after)
+            if (not new.is_valid or old.area <= 0 or old.exterior.hausdorff_distance(
+                    new.exterior) > 2.0 * PREVIEW_SIMPLIFY_TOLERANCE_MM):
+                return outer, cavity
+        return new_outer, new_cavity
+    except Exception:
+        return outer, cavity
+
+
 def _mesh_preview_geometry(
     mesh, kind: str, owner: str | None = None
 ) -> list[tuple]:
@@ -227,6 +304,7 @@ def _mesh_preview_geometry(
     preview_kind = mesh.metadata.get("wavefinity_preview_kind")
     if preview_kind and "invalid" not in kind and "conflict" not in kind:
         kind = f"{kind}_{preview_kind}"
+    mesh = _simplified_for_preview(mesh)
     triangles = np.asarray(mesh.triangles, dtype=float)
     if not len(triangles):
         return []
