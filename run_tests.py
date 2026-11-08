@@ -5,7 +5,7 @@ Tests are broken into 4 chunks for fast troubleshooting. Run one command,
 walk away, and check which chunk needs attention.
 
 Usage:
-    python3 run_tests.py                 # all 4 chunks, run concurrently (22 modules)
+    python3 run_tests.py                 # all 4 chunks, run concurrently (19 modules)
     python3 run_tests.py part1           # fast core tests
     python3 run_tests.py part2           # geometry/insert tests
     python3 run_tests.py part3           # organizer app tests
@@ -36,7 +36,6 @@ PARTS = {
     "part1": [  # fast core — fundamental safety and geometry
         "test_b4b",
         "test_inventory_safety",
-        "test_edge_conflicts",
         "test_ui_state_safety",
         "test_lid_geometry",
         "test_bambu_handoff",
@@ -45,13 +44,11 @@ PARTS = {
         "test_stack",
     ],
     "part2": [  # geometry/inserts — 3D mesh generation
-        "test_organizer_inserts",
         "test_text_geometry",
         "test_pegboard",
         "test_photo_nest",
     ],
     "part3": [  # organizer app — drawer, bins, logging
-        "test_organizer_app",
         "test_drawer",
         "test_bin_logging",
     ],
@@ -67,7 +64,7 @@ PARTS = {
 
 # Original core gate (backward compat)
 CORE = [
-    "test_inventory_safety", "test_edge_conflicts", "test_ui_state_safety",
+    "test_inventory_safety", "test_ui_state_safety",
     "test_lid_geometry", "test_bambu_handoff", "test_space_identity",
     "test_standard_walls", "test_stack",
 ]

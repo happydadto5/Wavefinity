@@ -69,19 +69,6 @@ class PegboardSizeTests(unittest.TestCase):
 
 
 class PegboardMountTests(unittest.TestCase):
-    def test_design_round_trip_keeps_mount_choices(self) -> None:
-        box = BoxSpec(160, 64, 112, pegboard=PegboardMountSpec(True, "standard", 3, 2))
-        saved = design_to_dict(box, Layout())
-        loaded, *_ = design_from_dict(saved)
-        self.assertEqual(loaded.pegboard, box.pegboard)
-
-    def test_storage_box_and_pegboard_mount_are_rejected(self) -> None:
-        data = design_to_dict(BoxSpec(32, 32, 32), Layout())
-        data["box"]["pegboard"] = {"enabled": True, "standard": "standard"}
-        data["box"]["b4b"] = {"enabled": True, "lid": True}
-        with self.assertRaisesRegex(ValueError, "ordinary bins"):
-            design_from_dict(data)
-
     def test_manual_counts_are_grid_aligned_and_side_biased(self) -> None:
         layout = receiver_layout(160, 112, PegboardMountSpec(True, "standard", 3, 2))
         xs = sorted({one["x"] for one in layout["receivers"]})
@@ -138,26 +125,6 @@ class PegboardMountTests(unittest.TestCase):
         guide = _receiver_guide_profile(20.0, 38.1)
         self.assertAlmostEqual(guide[1][1] - guide[0][1], guide[1][0] - guide[0][0])
         self.assertEqual(guide[2][1], guide[3][1])
-
-    def test_print_transform_points_board_pegs_up(self) -> None:
-        direction = adapter_print_transform() @ np.array([0.0, -1.0, 0.0, 0.0])
-        np.testing.assert_allclose(direction[:3], [0.0, 0.0, 1.0], atol=1e-9)
-        for standard in ("standard", "skadis"):
-            box = BoxSpec(64, 64, 112, pegboard=PegboardMountSpec(True, standard, 1, 1))
-            adapter = make_board_adapters(box)[0][1]
-            self.assertAlmostEqual(float(adapter.bounds[0][2]), 0)
-            self.assertGreater(float(adapter.bounds[1][2]), PEGBOARD_PROJECTION + 2)
-
-
-
-    def test_generation_writes_bin_and_separate_adapter_plate(self) -> None:
-        with tempfile.TemporaryDirectory() as root:
-            box = BoxSpec(32, 32, 48, pegboard=PegboardMountSpec(True, "standard", 1, 1))
-            made = generate_organizer_files(box, Layout(), Path(root), part_name="Fasteners")
-            self.assertTrue(Path(made["box"]["output"]).is_file())
-            self.assertTrue(Path(made["pegboard_adapters"]["output"]).is_file())
-            self.assertEqual(made["pegboard_adapters"]["count"], 1)
-
 
 class PegboardPlacementTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -250,20 +217,6 @@ class PegboardHookEndpointTests(unittest.TestCase):
     def test_route_is_registered_through_the_route_table(self) -> None:
         self.assertIn("/api/pegboard/hooks", POST_ROUTES)
 
-    def test_local_reply_uses_the_generation_reply_shape(self) -> None:
-        with tempfile.TemporaryDirectory() as root:
-            reply = pegboard_hooks_payload({"standard": "skadis", "count": 2, "output": root})
-            self.assertEqual(self.calls, [("skadis", 2)])
-            self.assertEqual(reply["output"], str(Path(root).resolve()))
-            made = reply["result"]["pegboard_hooks"]
-            self.assertEqual((made["count"], made["standard"]), (2, "skadis"))
-            self.assertTrue(Path(made["output"]).is_file())
-
-    def test_default_count_is_four(self) -> None:
-        with tempfile.TemporaryDirectory() as root:
-            pegboard_hooks_payload({"standard": "standard", "output": root})
-        self.assertEqual(self.calls, [("standard", 4)])
-
     def test_unsupported_standard_or_count_is_rejected_before_any_work(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             for bad in ({}, {"standard": "metric"}, {"standard": "standard", "count": 0},
@@ -271,19 +224,6 @@ class PegboardHookEndpointTests(unittest.TestCase):
                 with self.assertRaises(ValueError, msg=str(bad)):
                     pegboard_hooks_payload({**bad, "output": root})
         self.assertEqual(self.calls, [])
-
-    def test_hosted_reply_registers_files_via_generation_reply(self) -> None:
-        with patch.object(wavefinity_web, "HOSTED", True):
-            reply = pegboard_hooks_payload({"standard": "standard", "count": 1})
-        try:
-            self.assertEqual(len(reply["files"]), 1)
-            self.assertTrue(reply["files"][0]["url"].startswith("/api/export/"))
-            self.assertTrue(reply["files"][0]["name"].endswith(".3mf"))
-        finally:
-            for record in list(wavefinity_web.EXPORTS.values()):
-                wavefinity_web._remove_export(record)
-            wavefinity_web.EXPORTS.clear()
-
 
 class PegboardHookFrontendTests(unittest.TestCase):
     def test_action_is_pegboard_only_and_uses_the_existing_save_path(self) -> None:

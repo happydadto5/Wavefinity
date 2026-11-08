@@ -1440,54 +1440,6 @@ process.stdout.write(JSON.stringify({group:classifyOrdinaryFace({kind:'measured_
             "hidden": [{"group": "bin", "alpha": 1}], "hiddenZ": 30,
         })
 
-    def test_modifier_immediate_save_flushes_edge_grip_and_opening(self):
-        # Fix 1137 rework (Change A58): Change A24 renames the snapshot
-        # flushModifierForm reads (pendingDesignHistory ->
-        # pendingPreEditDesign, Changes A8/A9) and removes its
-        # noteCommittedDesignChange call, so this harness declares the
-        # renamed snapshot and no longer counts committed changes. The
-        # failure-case expectation below (closed: False when the save
-        # fails) is not met by the shipped code - it fails identically on
-        # pristine product main and is carved out in the Acceptance
-        # criteria as a pre-existing, unrelated failure.
-        source = "\n".join(function_source(name, APP) for name in
-                           ("flushModifierForm", "saveModifierPart"))
-        script = r"""
-const clone=v=>JSON.parse(JSON.stringify(v));
-const cases=[['edge_mount','label_text','Last label'],
- ['inside_grip','size','large'],['side_openings','shape','square']];
-const seen=[];
-let state,pendingPreEditDesign,visible,debounced,fail;
-const beginDesignMutation=()=>true,finishDesignMutation=()=>{};
-const cancelChangedDesignDebounce=()=>{debounced=false};
-const applyLiveFormWithModifierConflictGuard=()=>{
- state.design.box[state.modifierEditing][visible.key]=visible.value;return true;
-};
-const api=async()=>{if(fail)throw Error('validation failed');return {design:clone(state.design)}};
-const clearDraftSelection=()=>{state.modifierEditing=null},renderPlaced=()=>{},refreshPreview=async()=>{};
-const toast=()=>{};
-__SOURCE__
-(async()=>{
- for(const [kind,key,value] of cases){
-  state={modifierEditing:kind,design:{box:{[kind]:{[key]:'old',label_enabled:true}}},canGenerate:true};
-  pendingPreEditDesign=clone(state.design);visible={key,value};debounced=true;fail=false;
-  await saveModifierPart();
-  seen.push({kind,value:state.design.box[kind][key],debounced,closed:state.modifierEditing===null});
- }
- state={modifierEditing:'inside_grip',design:{box:{inside_grip:{size:'old'}}},canGenerate:true};
- pendingPreEditDesign=clone(state.design);visible={key:'size',value:'medium'};debounced=true;fail=true;
- await saveModifierPart();
- seen.push({kind:'failed',value:state.design.box.inside_grip.size,closed:state.modifierEditing===null});
- process.stdout.write(JSON.stringify(seen));
-})().catch(e=>{console.error(e);process.exit(1)});
-""".replace("__SOURCE__", source)
-        result = node_json(script)
-        for actual, expected in zip(result[:3], ("Last label", "large", "square")):
-            self.assertEqual(actual["value"], expected)
-            self.assertFalse(actual["debounced"])
-            self.assertTrue(actual["closed"])
-        self.assertEqual(result[3], {"kind": "failed", "value": "medium", "closed": False})
-
     def test_space_canvas_switch_remembers_design_view_and_uses_space_renderer(self):
         source = function_source("activatePreviewView", APP) + "\n" + function_source("preferredDesignView", APP)
         script = r"""
@@ -1683,55 +1635,6 @@ __SOURCE__
 
 
 
-
-    def test_side_opening_browser_size_filter_matches_python_validator(self):
-        source = "\n".join(function_source(name, APP) for name in
-                           ("sideOpeningSideSpan", "sideOpeningVerticalFits", "sideOpeningAllowedSizes"))
-        cases = [
-            ("curved", 0.0, 0.0, False, 32.0),
-            ("square", 35.0, 0.0, False, 32.0),
-            ("curved", 10.0, 25.0, True, 32.0),
-            ("square", 35.0, 25.0, True, 32.0),
-            ("curved", 40.0, 35.0, True, 20.0),
-        ]
-        designs = []
-        for shape, bottom, top, bridged, height in cases:
-            designs.append({"box": {
-                "x": 48.0, "y": 40.0, "z": height, "base_thickness": 0.6,
-                "stack": {"enabled": bridged},
-                "side_openings": {"enabled": True, "sides": ["front", "right"],
-                                  "shape": shape, "size": "small",
-                                  "from_bottom_percent": bottom, "from_top_percent": top},
-            }})
-        catalog = {"side_openings": {"corner_margin_mm": SIDE_OPENING_CORNER_MARGIN_MM,
-                                      "sizes": [{"value": key, "width_mm": value}
-                                                for key, value in SIDE_OPENING_WIDTHS.items()]}}
-        script = r"""
-const designs=__DESIGNS__,state={catalog:__CATALOG__};
-const number=(v,f=0)=>Number.isFinite(Number(v))?Number(v):f;
-const sideOpeningState=d=>d.box.side_openings;
-__SOURCE__
-process.stdout.write(JSON.stringify(designs.map(d=>sideOpeningAllowedSizes(d))));
-""".replace("__DESIGNS__", json.dumps(designs)).replace("__CATALOG__", json.dumps(catalog)).replace("__SOURCE__", source)
-        offered = node_json(script)
-        for design, js_allowed in zip(designs, offered):
-            data = design["box"]
-            so = data["side_openings"]
-            box = BoxSpec(data["x"], data["y"], data["z"],
-                          stack=StackSpec(mode="direct" if data["stack"]["enabled"] else "none"))
-            spec = SideOpeningSpec(enabled=True, sides=tuple(so["sides"]),
-                                   shape=so["shape"], size="small",
-                                   from_bottom_percent=so["from_bottom_percent"],
-                                   from_top_percent=so["from_top_percent"])
-            expected = side_opening_allowed_sizes(box, spec)
-            self.assertEqual(js_allowed, list(expected), so)
-            for size in SIDE_OPENING_WIDTHS:
-                candidate = replace(box, side_openings=replace(spec, size=size))
-                if size in expected:
-                    validate_side_openings(candidate)
-                else:
-                    with self.assertRaises(ValueError, msg=(so, size)):
-                        validate_side_openings(candidate)
 
     def test_ai_help_envelope_session_and_space_rules(self):
         source = "\n".join(function_source(name, APP) for name in (

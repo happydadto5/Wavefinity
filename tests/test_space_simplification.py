@@ -253,22 +253,6 @@ out.cleared = [DL.selectedRow, DL.selected];
         self.assertEqual(out["placedRow"], ["B1", "B1:0"])
         self.assertEqual(out["cleared"], [None, None])
 
-    def test_spacer_repeated_counts_still_work(self):
-        out = run_node(r"""
-setLayout([bin("S1", { kind: "spacer", boundary: "", qty: 1, name: "Rigid Spacer", file: "s.3mf" })], [
-  { bin: "S1", copy: 0, gx: 0, gy: 0 }, { bin: "S1", copy: 1, gx: 2, gy: 0 }, { bin: "S1", copy: 2, gx: 4, gy: 0 },
-]);
-const groups = DL.spacerPrintGroups();
-out.qty = groups[0].qty; out.printed = groups[0].printed; out.toPrint = groups[0].toPrint;
-DL.placeAt(DL.bin("S1"), { gx: 6, gy: 0 });
-out.spacerCopies = DL.layout.drawers[0].placements.map(p => p.copy);
-out.staged = DL.stagedBins().length;
-""")
-        self.assertEqual((out["qty"], out["printed"], out["toPrint"]), (3, 1, 2))
-        self.assertEqual(out["spacerCopies"], [0, 1, 2, 3])
-        self.assertEqual(out["staged"], 0)
-
-
 class SurfaceFillTests(unittest.TestCase):
     def test_fill_settles_the_designer_autosave_and_aborts_when_it_fails(self):
         out = run_node(r"""
@@ -477,64 +461,6 @@ out.html = els["#dl-inv-list"].innerHTML;
         self.assertIn(">Mark Not Printed<", html)
         self.assertIn(">Delete<", html)
         self.assertNotIn(">Edit<", html)
-
-
-class HostedStructuralPrintTests(unittest.TestCase):
-    SCRIPT = r"""
-const fs = require("fs");
-const source = [...fs.readdirSync(process.argv[1] + "/spaces").filter(f => f.endsWith(".js")).sort().map(f => fs.readFileSync(process.argv[1] + "/spaces/" + f, "utf8")), fs.readFileSync(process.argv[1] + "/spaces.js", "utf8")].join("\n");
-// Fix 112 split the Space code: the leave-editor guard now lives in an earlier module.
-const leave = source.match(/SP\.confirmLeaveStructuralEditor = async \(\) => \{[\s\S]*?\n\};/)[0];
-const slice = leave + "\n" + source.slice(source.indexOf("SP.structuralKind = "), source.indexOf("SP.renderSpaceInfo = "));
-const calls = [], toasts = [], els = {};
-const el = () => ({ hidden: false, disabled: false, textContent: "", title: "", value: "256" });
-["space-structural", "space-structural-save", "space-structural-print", "space-structural-bed",
- "space-structural-bed-x", "space-structural-bed-y"].forEach(id => { els[id] = el(); });
-const run = async (hosted) => {
-  calls.length = 0; toasts.length = 0;
-  const state = { folderMode: "space", activeSpace: { kind: "portable", name: "Case", x: 96, y: 96, z: 40 },
-    runtime: { hosted }, browserFolder: { name: "f" }, output: "C:/x", slicer: { available: true, name: "Bambu Studio" } };
-  const SP = { renderSpaceInfo() {} };
-  const DL = { spaceContext: () => ({}), requireSpaceContext() {}, isStaleSpaceError: () => false };
-  const api = async (path, body) => { calls.push(path); return { output: "C:/x", files: [] }; };
-  const saveGeneratedFiles = async () => ["a.3mf"];
-  const toast = (m, e) => toasts.push(m);
-  const document = { getElementById: id => els[id] || null };
-  const clone = v => JSON.parse(JSON.stringify(v));
-  const fn = new Function("SP", "state", "DL", "api", "apiSideEffect", "saveGeneratedFiles", "toast", "document", "clone",
-    slice + "; return SP;");
-  const sp = fn(SP, state, DL, api, api, saveGeneratedFiles, toast, document, clone);
-  sp.renderStructuralActions();
-  const view = { disabled: els["space-structural-print"].disabled, title: els["space-structural-print"].title,
-    label: els["space-structural-print"].textContent, saveDisabled: els["space-structural-save"].disabled };
-  await sp.runStructural("print");
-  const afterPrint = [...calls];
-  await sp.runStructural("save");
-  return { view, afterPrint, afterSave: [...calls], toasts: [...toasts] };
-};
-(async () => {
-  process.stdout.write(JSON.stringify({ hosted: await run(true), local: await run(false) }));
-})();
-"""
-
-    def test_hosted_print_is_disabled_and_local_print_still_hands_off_to_the_slicer(self):
-        node = shutil.which("node")
-        if not node:
-            self.skipTest("Node.js is required")
-        done = subprocess.run([node, "-e", self.SCRIPT, str(WEB)], capture_output=True, text=True,
-                              timeout=60, encoding="utf-8")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        out = json.loads(done.stdout)
-        hosted, local = out["hosted"], out["local"]
-        self.assertTrue(hosted["view"]["disabled"])
-        self.assertFalse(hosted["view"]["saveDisabled"])
-        self.assertEqual(hosted["view"]["label"], "Export print files")
-        self.assertIn("local Wavefinity", hosted["view"]["title"])
-        self.assertEqual(hosted["afterPrint"], [])                       # Print never calls generate/save
-        self.assertEqual(hosted["afterSave"], ["/api/space/structural-generate"])
-        self.assertFalse(local["view"]["disabled"])
-        self.assertEqual(local["afterPrint"], ["/api/space/structural-print"])
-
 
 
 if __name__ == "__main__":

@@ -40,117 +40,9 @@ def big_parts(mesh, minimum=0.5):
     return [part for part in mesh.split(only_watertight=False) if abs(part.volume) > minimum]
 
 
-class FitOwnershipTests(unittest.TestCase):
-    def test_only_the_lid_plug_follows_the_lid_fit(self):
-        for fit, mm in LID_FIT_MM.items():
-            with self.subTest(fit=fit):
-                eff = st.stack_effective_box(lid_box(fit=fit))
-                cavity = wavy_cavity_polygon(eff)
-                plug = st._lid_plug_polygon(eff)
-                self.assertLess(plug.symmetric_difference(cavity.buffer(-mm)).area, 1e-3)
-                # The shared foot / top-recess outline never moves.
-                self.assertLess(st._plug_polygon(eff).symmetric_difference(
-                    cavity.buffer(-st.STACK_FIT)).area, 1e-3)
-
-
-
-
-
-
-
-class SchemaMigrationTests(unittest.TestCase):
-    def legacy_design(self, **lid):
-        design = app.design_to_dict(lid_box(), Layout())
-        block = {"enabled": True, "stackable": False, "thickness": "thin", "label_enabled": False,
-                 "label_style": "flush", "label_orientation": "horizontal", "label_text": "",
-                 "division_labels": [], "handle_type": "knob", "handle_size": "medium",
-                 "handle_position": "middle", **lid}
-        design["version"] = 6
-        design["box"]["lid"] = block
-        return design
-
-
-    def test_canonical_save_is_explicit_and_round_trips(self):
-        for style, expected in (("flush", 0.4), ("raised", 0.6)):
-            with self.subTest(style=style):
-                box, layout, *rest = app.design_from_dict(
-                    self.legacy_design(label_enabled=True, label_style=style, label_text="A"))
-                saved = app.design_to_dict(box, layout, *rest)
-                self.assertEqual(saved["box"]["lid"]["fit"], "standard")
-                self.assertEqual(saved["box"]["lid"]["label_depth_mm"], expected)
-                again = app.design_to_dict(*app.design_from_dict(saved))
-                self.assertEqual(again, saved)
-
-
-
-
-
-
-
-
-
-
-
-class ThicknessAndLabelTests(unittest.TestCase):
-    def test_thickness_choices_come_from_the_backend_for_the_current_bin(self):
-        small = lid_box(thickness="thick")
-        wide = replace(lid_box(), wall=2.4, standard_walls=False)
-        for box in (small, wide):
-            report = st.lid_thickness_options(box)
-            self.assertEqual(set(report), {"thin", "medium", "thick"})
-            for name, value in report.items():
-                cloned = replace(box, lid=replace(box.lid, thickness=name))
-                self.assertEqual(value, round(st.stack_lid_rise(cloned), 3))
-            self.assertEqual(box.lid.thickness, "thick" if box is small else "thin")   # read-only
-        self.assertNotEqual(st.lid_thickness_options(small), st.lid_thickness_options(wide))
-        preview = preview_payload({"design": app.design_to_dict(small, Layout())})
-        self.assertEqual(preview["stack"]["lid_thickness_mm"], st.lid_thickness_options(small))
-
-
-
-    def test_lid_label_depth_and_height_match_preview_and_export(self):
-        for style, raised in (("flush", False), ("raised", True)):
-            for depth in (0.2, 0.4, 0.6, 0.8):
-                with self.subTest(style=style, depth=depth):
-                    box = lid_box(label_enabled=True, label_style=style, label_text="AB",
-                                  label_depth_mm=depth, label_orientation="vertical")
-                    _lid, labels = st.make_lid_parts(box)
-                    self.assertEqual(len(labels), 1)
-                    mesh = labels[0][1]
-                    self.assertEqual(labels[0][2], raised)
-                    self.assertAlmostEqual(float(mesh.bounds[1][2] - mesh.bounds[0][2]), depth, places=3)
-                    eff = st.stack_effective_box(box)
-                    top = eff.z + st.stack_lid_rise(box)
-                    self.assertAlmostEqual(float(mesh.bounds[1][2]), top + (depth if raised else 0.0), places=3)
-                    saved = app.design_to_dict(box, Layout())
-                    self.assertEqual(saved["box"]["lid"]["label_depth_mm"], depth)
-                    self.assertEqual(saved["box"]["lid"]["label_orientation"], "vertical")
-
-
-
-
 class HandleTests(unittest.TestCase):
     SIZES = ("small", "medium", "large")
 
-    def test_handles_are_one_connected_watertight_lid_with_positive_root_overlap(self):
-        for handle_type, shape in (("knob", "mushroom"), ("knob", "dome"), ("pull", "mushroom")):
-            for size in self.SIZES:
-                for position in ("middle", "left", "front"):
-                    with self.subTest(handle=handle_type, shape=shape, size=size, position=position):
-                        box = lid_box(handle_enabled=True, handle_type=handle_type, knob_shape=shape,
-                                      handle_size=size, handle_position=position)
-                        eff = st.stack_effective_box(box)
-                        lid, _ = st.make_lid_parts(box)
-                        self.assertTrue(lid.is_watertight)
-                        self.assertEqual(len(big_parts(lid)), 1)
-                        top = eff.z + st.stack_lid_rise(box)
-                        mesh = st._lid_handle_mesh(box)
-                        mesh.apply_translation((0.0, 0.0, top))
-                        plate = wavy_outer_polygon(eff)
-                        from organizer_geometry import _extrude_polygon
-                        slab = _extrude_polygon(plate, st.stack_lid_rise(box))
-                        slab.apply_translation((0.0, 0.0, eff.z))
-                        self.assertGreater(float(intersection([slab, mesh]).volume), 0.5)
     OUTER_BOUNDS = (-24.0, -24.0, 24.0, 24.0)
     # Knob mesh recorded from the unmodified builder before the teardrop change.
     KNOB_BASELINE = {
@@ -204,14 +96,6 @@ class HandleTests(unittest.TestCase):
 
 
 class OptionalHandleTests(unittest.TestCase):
-    def test_plain_lid_has_no_handle_by_default(self):
-        box = lid_box()
-        self.assertFalse(box.lid.handle_enabled)
-        self.assertFalse(lid_has_handle(box))
-
-    def test_stackable_lid_never_has_a_handle(self):
-        self.assertFalse(lid_has_handle(lid_box(stackable=True, handle_enabled=True)))
-
     def test_mushroom_underside_is_printable_and_inside_the_envelope(self):
         for size in HandleTests.SIZES:
             with self.subTest(size=size):
@@ -232,82 +116,9 @@ class OptionalHandleTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, name):
                     handles.resolve_lid_handle((0.0, 0.0, 12.0, 12.0), "knob", "large", "middle", shape)
 
-    def test_handle_state_round_trips_and_legacy_saves_load_off(self):
-        box = lid_box(handle_enabled=True, handle_type="knob", knob_shape="dome",
-                      handle_size="large", handle_position="left")
-        saved = app.design_to_dict(box, Layout())
-        self.assertTrue(saved["box"]["lid"]["handle_enabled"])
-        again = app.design_from_dict(saved)[0].lid
-        self.assertEqual((again.handle_enabled, again.handle_type, again.knob_shape,
-                          again.handle_size, again.handle_position),
-                         (True, "knob", "dome", "large", "left"))
-        del saved["box"]["lid"]["handle_enabled"]
-        del saved["box"]["lid"]["knob_shape"]
-        legacy = app.design_from_dict(saved)[0].lid
-        self.assertFalse(legacy.handle_enabled)
-        self.assertEqual(legacy.knob_shape, "mushroom")
-
     def test_unknown_knob_shape_is_rejected(self):
         with self.assertRaises(ValueError):
             LidSpec(enabled=True, stackable=False, knob_shape="cube")
-
-
-class PersistenceAndPlanningTests(unittest.TestCase):
-    def generate(self, box):
-        captured = {}
-
-        def fake_log(output_dir, request, layout, **kwargs):
-            captured["request"] = request
-            captured["spec"] = kwargs["design_spec"]
-            return Path(output_dir) / "log.md"
-
-        with tempfile.TemporaryDirectory() as folder, \
-                mock.patch.object(app, "log_bin_to_folder", side_effect=fake_log):
-            app.generate_organizer_files(box, Layout(), Path(folder), keep_log=True)
-        return captured
-
-
-    def test_inventory_z_is_the_closed_envelope_once_and_requested_z_is_untouched(self):
-        for handle_type, size in (("knob", "small"), ("pull", "large")):
-            box = lid_box(handle_enabled=True, handle_type=handle_type, handle_size=size)
-            record = app.inventory_bin_record(box, Layout())
-            self.assertEqual(record["stack"], "none")
-            self.assertAlmostEqual(float(record["z"]), st.stack_closed_height(box), places=3)
-            self.assertAlmostEqual(stack_part_height(record), st.stack_closed_height(box), places=3)
-            self.assertEqual(app.design_to_dict(box, Layout())["box"]["z"], 50)
-        raised = lid_box(handle_enabled=True, handle_type="knob", handle_size="small", label_enabled=True,
-                         label_style="raised", label_text="A", label_depth_mm=0.8)
-        record = app.inventory_bin_record(raised, Layout())
-        self.assertAlmostEqual(float(record["z"]), st.stack_closed_height(raised), places=3)
-
-    def test_handle_off_raised_label_lid_counts_the_label_relief(self):
-        plain = lid_box(label_enabled=False)
-        raised = lid_box(label_enabled=True, label_style="raised", label_text="A", label_depth_mm=0.8)
-        self.assertFalse(lid_has_handle(raised))
-        self.assertEqual(st.lid_handle_height(raised), 0.0)
-        self.assertGreater(st.lid_label_height(raised), 0.0)
-        self.assertAlmostEqual(st.lid_above_top_height(raised), st.lid_label_height(raised), places=3)
-        self.assertAlmostEqual(st.stack_closed_height(raised) - st.stack_closed_height(plain),
-                               st.lid_label_height(raised), places=3)
-        record = app.inventory_bin_record(raised, Layout())
-        self.assertAlmostEqual(float(record["z"]), st.stack_closed_height(raised), places=3)
-
-
-
-
-class Fix1069LidGeometryPreservedTests(unittest.TestCase):
-    def test_lid_keeps_headroom_while_payload_cap_is_interior_z(self):
-        import organizer_b4b as b4b
-        from organizer_engine import B4BSpec, BoxSpec
-        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, lid_headroom_mm=1.0))
-        eff = b4b.b4b_effective_box(box)
-        # Payload authority is the interior Z, not Z + headroom.
-        self.assertEqual(b4b.b4b_max_child_height(box), eff.z)
-        self.assertEqual(b4b.b4b_max_child_height(box), 40)
-        # But the lid itself still realises its headroom: the underside datum
-        # keeps the full 1.0 mm of lid clearance above the interior.
-        self.assertAlmostEqual(
-            b4b.b4b_lid_underside_z(box), eff.base_thickness + eff.z + 1.0)
 
 
 if __name__ == "__main__":

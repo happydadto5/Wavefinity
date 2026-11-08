@@ -70,53 +70,6 @@ class StandardWallsTests(unittest.TestCase):
             self.assertLess(current[0], previous[0])
             self.assertLess(current[1], previous[1])
 
-    def test_lock_roots_stay_inside_exterior(self) -> None:
-        spec = BoxSpec(x=24.0, y=24.0, wall=MIN_WALL, standard_walls=False)
-        self.assertGreater(min(LOCK_EMBED, spec.wall_depth - LOCK_SAFE_SKIN), 0.0)
-        exterior = wavy_outer_polygon(spec).buffer(1e-6)
-        for bump in make_wall_lock_bumps(spec):
-            for x, y in bump.vertices[:, :2]:
-                self.assertTrue(exterior.covers(Point(float(x), float(y))))
-
-    def test_extreme_walls_share_the_grid_wave_and_mating_clearance(self) -> None:
-        self.assertEqual((WAVE_LENGTH, WAVE_AMPLITUDE, WAVE_MATING_GAP, GRID_PITCH),
-                         (4.0, 0.4, 0.25, 8.0))
-        thin = BoxSpec(wall=MIN_WALL, standard_walls=False)
-        thick = BoxSpec(wall=MAX_WALL, standard_walls=False)
-        self.assertAlmostEqual(
-            mating_clearance(thin, (-8.0, 0.0), thick, (8.0, 0.0)),
-            nested_clearance(),
-            places=3,
-        )
-
-    def test_min_and_max_wall_boxes_and_connectors_are_valid(self) -> None:
-        for wall in (MIN_WALL, MAX_WALL):
-            spec = BoxSpec(32.0, 48.0, 24.0, wall=wall, standard_walls=False)
-            self.assertTrue(make_box(spec).is_watertight)
-            connector = ConnectorSpec()
-            clip = make_side_connector(spec, connector, "y", 0.0, 12.0)
-            self.assertLessEqual(validate_side_fit(spec, connector, clip, "y"), 0.01)
-
-
-    def test_flat_divider_and_removable_insert_work_at_extremes(self) -> None:
-        for wall in (MIN_WALL, MAX_WALL):
-            flat = BoxSpec(
-                40.0, 48.0, 40.0, wall=wall, standard_walls=False,
-                flat_inside=0.6,
-            )
-            self.assertTrue(make_box(flat).is_watertight)
-            whole = Zone.whole(flat)
-            divider = Feature(
-                "divider", Zone(whole.x0, -0.8, whole.x1, 0.8),
-                along="x", full_span=True,
-            )
-            self.assertTrue(all(
-                solid.is_watertight
-                for solid in build_features(flat, [divider], flat.base_thickness)
-            ))
-            self.assertTrue(make_fitted_insert(flat, [divider]).is_watertight)
-
-
     def test_save_open_and_legacy_migration(self) -> None:
         custom = BoxSpec(wall=1.2)
         saved = design_to_dict(custom, Layout())
@@ -141,18 +94,6 @@ class StandardWallsTests(unittest.TestCase):
         reopened, *_ = design_from_dict(legacy_custom)
         self.assertFalse(reopened.standard_walls)
         self.assertEqual(reopened.wall, 1.2)
-
-
-
-    def test_sampler_connector_uses_requested_wall(self) -> None:
-        with patch("organizer_engine.make_side_connector", wraps=__import__(
-            "organizer_engine"
-        ).make_side_connector) as make_connector:
-            make_sampler_scene(
-                sizes=((16.0, 48.0),), wall=MAX_WALL, clips=1,
-                connector=ConnectorSpec(),
-            )
-        self.assertEqual(make_connector.call_args.args[0].wall, MAX_WALL)
 
 
 

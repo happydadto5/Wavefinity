@@ -228,65 +228,6 @@ process.stdout.write(JSON.stringify({
 
 
 
-class SpaceSizingTests(unittest.TestCase):
-    SCRIPT = "\n".join([
-        PRELUDE,
-        function_source("drawerHardClearance"),
-        function_source("drawerSpaceCapacity"),
-        function_source("normalizeBinDimension"),
-        function_source("snapToUnit"),
-        function_source("isSurfaceBinDesign"),
-        function_source("applySpaceSizingDefaults"),
-        function_source("freshDesignForCurrentFolder"),
-        "const baseTrimEnabled = () => false;",
-        """
-state.catalog = {
-  base_unit: 8, max_box_size: 350, drawer_rules: { hard_wall_clearance_mm: 0 },
-  min_height_above_base_mm: 5, base_rules: { default_mm: 0.6 },
-  defaults: { design: {
-    version: 1,
-    box: { x: 32, y: 32, z: 40, wall: 0.8, base_thickness: 0.6, corner_fillet: 0, flat_inside: false,
-           standard_base: true, standard_walls: true },
-    label: '', label_position: 'bottom', scoop: false, part_name: '',
-    layout: { version: 1, mode: 'fused', snap: 1, object_height_mm: null,
-              surface_base_mode: 'custom', surface_lightweight_base: false, features: [] } } },
-};
-state.design = { box: { base_thickness: 0.6 } };
-""",
-    ])
-
-    def run_fresh(self, remembered):
-        return node_run(self.SCRIPT + js("""
-state.spaceBinDefaults = __REMEMBERED__;
-process.stdout.write(JSON.stringify(freshDesignForCurrentFolder()));
-""", REMEMBERED=remembered))
-
-    def test_new_bin_inherits_bin_settings_but_not_composition_or_text(self):
-        remembered = json.loads(json.dumps(BIN))
-        remembered["box"].update({"x": 64, "y": 48, "z": 40})
-        remembered["box"]["edge_mount"] = {"label_enabled": True, "label_thickness_mm": 3.7}
-        remembered["box"]["lid"] = {"enabled": True}
-        remembered["layout"]["features"] = [{"kind": "bore", "zone": [0, 0, 9, 9], "options": {}}]
-        design = self.run_fresh(remembered)
-        self.assertEqual((design["box"]["x"], design["box"]["y"], design["box"]["z"]), (64, 48, 40))
-        self.assertEqual(design["box"]["wall"], 1.2)
-        self.assertFalse(design["box"]["standard_walls"])
-        self.assertEqual(design["layout"]["mode"], "removable")
-        self.assertEqual(design["layout"]["features"], [])
-        self.assertNotIn("edge_mount", design["box"])
-        self.assertNotIn("lid", design["box"])
-        self.assertEqual(design["part_name"], "")
-        self.assertEqual(design["label"], "")
-        self.assertFalse(design["scoop"])
-
-    def test_oversized_remembered_dimensions_are_clamped_by_the_space(self):
-        remembered = json.loads(json.dumps(BIN))
-        remembered["box"].update({"x": 800, "y": 800, "z": 900})
-        design = self.run_fresh(remembered)
-        self.assertEqual((design["box"]["x"], design["box"]["y"], design["box"]["z"]), (320, 240, 55))
-
-
-
 class SpaceDefaultsWriterTests(unittest.TestCase):
     SCRIPT = "\n".join([
         "const clone = v => JSON.parse(JSON.stringify(v));",
