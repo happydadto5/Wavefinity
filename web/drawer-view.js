@@ -636,7 +636,13 @@ DV.paintScene = (ctx, drawer, cam) => {
           ctx.font = '600 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(`${fmt(spot.w_mm)} × ${fmt(spot.d_mm)} mm free`, mx, my);
+          // Units only when the free area is a whole number of units; a
+          // fractional figure is never rounded, so the label stays mm-only.
+          const wUnits = spot.w_mm / DL.UNIT, dUnits = spot.d_mm / DL.UNIT;
+          const whole = value => Math.abs(value - Math.round(value)) < 1e-9;
+          const units = whole(wUnits) && whole(dUnits)
+            ? ` - ${Math.round(wUnits)} × ${Math.round(dUnits)} units` : "";
+          ctx.fillText(`${fmt(spot.w_mm)} × ${fmt(spot.d_mm)} mm free${units}`, mx, my);
         }
       });
     }
