@@ -42,7 +42,9 @@
     </div>
     <button id="ws-space-settings" class="button secondary dl-small" type="button" hidden>Space settings</button>
     <button id="ws-new-space" class="button secondary dl-small" type="button">New Space</button>
+    <button id="ws-print-bin" class="button primary dl-small" type="button" data-output="print" disabled>Print Bin</button>
     <button id="ws-print-space" class="button secondary dl-small" type="button">Print Space</button>
+    <button id="ws-export" class="button secondary dl-small" type="button" data-output="export" disabled>Export</button>
     <span id="ws-roll-slot" class="ws-roll-slot"></span>
   </div>
   <section id="ws-stage" class="ws-stage" hidden></section>
@@ -457,7 +459,7 @@
       <div id="bin-save-bar" class="bin-save-bar" role="region" aria-label="Print bin">
         <div class="print-button-wrap">
           <div class="print-choice-row">
-            <button id="export-individual-bin" class="button secondary print-button">Export</button>
+            <button id="export-individual-bin" class="button secondary print-button" data-output="export">Export</button>
             <button id="print-individual-bin" class="button primary print-button">Print</button>
           </div>
         </div>

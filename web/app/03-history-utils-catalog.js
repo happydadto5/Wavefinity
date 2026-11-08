@@ -202,6 +202,8 @@ function updateGenerateAvailability() {
     printButton.disabled = state.designMutationBusy || !state.canGenerate;
     if (!state.canGenerate) printButton.title = "Resolve the highlighted issue before creating files";
   }
+  // Story 2701: the unified top bar's Print Bin / Export follow the same availability.
+  if (typeof WS !== "undefined" && WS.syncOutput) WS.syncOutput();
 }
 
 function number(value, fallback = 0) {

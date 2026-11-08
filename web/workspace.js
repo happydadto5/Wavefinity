@@ -493,6 +493,42 @@ WS.onAction = async (act, button, event) => {
   }
 };
 
+// ------------------------------------------------------------------ top bar: Print Bin / Export
+
+// What Print Bin / Export act on: the selected container (Storage Box, Drawers, Surface) or the
+// selected bin. Nothing else prints. Read from the live selection every time, never remembered.
+WS.outputTarget = () => {
+  if (WS.busy || !["bin", "container"].includes(WS.task)) return null;
+  if (WS.task === "container") return WS.open() && WS.containerKind() && !SP.structuralBusy ? "container" : null;
+  const bin = WS.open() ? Boolean(state.designInventoryId) : state.folderMode !== "space";
+  return bin && !state.designMutationBusy && state.canGenerate ? "bin" : null;
+};
+
+WS.syncOutput = () => {
+  const printBin = $("#ws-print-bin");
+  const exportButton = $("#ws-export");
+  if (!printBin || !exportButton) return;
+  const target = WS.enabled() ? WS.outputTarget() : null;
+  const what = WS.task === "container" ? WS.containerName().toLowerCase() || "container" : "bin";
+  const hosted = Boolean(state.runtime.hosted);
+  printBin.disabled = !target;
+  exportButton.disabled = !target;
+  printBin.title = !target ? "Select a bin, the storage box or the drawers to print it."
+    : hosted ? "Printing needs local Wavefinity and a slicer"
+    : !state.slicer?.available ? "A slicer is needed - use Printer Settings to choose one"
+    : `Send the ${what} to ${state.slicer.name || "the slicer"}`;
+  exportButton.title = target ? `Create the 3MF file for the ${what}` : "Select a bin, the storage box or the drawers to export it.";
+};
+
+WS.output = (mode, button, event) => {
+  const target = WS.outputTarget();
+  if (!target) return null;
+  if (target === "bin") return chooseIndividualBinPrint(button);
+  const drawers = WS.containerKind() === "storage_drawers";
+  if (mode === "export") return drawers ? SP.runStructural("save") : SP.saveStructural();
+  return drawers ? SP.runStructural("print", event) : SP.printStructural(event);
+};
+
 // ------------------------------------------------------------------ sync
 
 WS.sync = () => {
@@ -540,6 +576,7 @@ WS.sync = () => {
     printSpace.disabled = !open || WS.task === "print" || WS.task === "newspace";
     printSpace.title = open ? "" : "My Bins have no Space to print. Open a Space first.";
   }
+  WS.syncOutput();
   const settings = $("#ws-space-settings");
   if (settings) { settings.hidden = !open; settings.classList.toggle("active", WS.task === "settings"); }
   // The right side is always the whole Space while one is open.
@@ -752,6 +789,9 @@ SP.openTypedSpacePreferredView = async () => {
   $("#ws-ui-toggle").addEventListener("click", () => WS.setEnabled(!WS.enabled()));
   $("#ws-new-space").addEventListener("click", () => { closeMenu(); WS.go("newspace"); });
   $("#ws-print-space").addEventListener("click", () => { closeMenu(); WS.go("print"); });
+  for (const id of ["#ws-print-bin", "#ws-export"]) {
+    $(id).addEventListener("click", event => { closeMenu(); WS.output(event.currentTarget.dataset.output, event.currentTarget, event); });
+  }
   $("#ws-space-settings").addEventListener("click", () => { closeMenu(); (WS.task === "settings" ? WS.land() : WS.go("settings")); });
   $("#part-name")?.addEventListener("input", () => WS.sync());
 

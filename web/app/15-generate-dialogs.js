@@ -301,7 +301,7 @@ async function printModel(target = "bin", initiatingButton = null) {
   if (!beginDesignMutation()) return;
   const button = initiatingButton || $("#print-individual-bin");
   const old = button.textContent;
-  const printButtons = [$("#print-individual-bin")].filter(Boolean);
+  const printButtons = [$("#print-individual-bin"), $("#ws-print-bin"), $("#ws-export")].filter(Boolean);
   printButtons.forEach(one => { one.disabled = true; });
   const slicerName = state.slicer?.name || "the slicer";
   button.textContent = `Sending to ${slicerName}…`;
@@ -443,7 +443,7 @@ function chooseIndividualBinPrint(button) {
   const dialog = $("#individual-bin-print-dialog");
   if (dialog.open) return;
   syncPrintChoiceAvailability();
-  const exporting = button.id === "export-individual-bin";
+  const exporting = button.dataset.output === "export";
   dialog.querySelector('[value="export"]').hidden = !exporting;
   dialog.querySelector('[value="print"]').hidden = exporting;
   $("#individual-bin-print-message").textContent = exporting

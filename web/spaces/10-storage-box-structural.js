@@ -316,6 +316,7 @@ SP.printStructural = event => {
 };
 
 SP.renderStructuralActions = () => {
+  if (typeof WS !== "undefined" && WS.syncOutput) WS.syncOutput();
   const box = document.getElementById("space-structural");
   if (!box) return;
   const kind = SP.structuralKind();

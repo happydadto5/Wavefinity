@@ -33,6 +33,8 @@
 
 /* The tabs and the old bin/drawer pickers give way to the selector. */
 body.ws-on #space-mode-row { display: none; }
+/* Story 2701: Print Bin / Export live in the top bar; the bin form's bottom bar stays only for Classic. */
+body.ws-on .bin-save-bar { display: none !important; }
 body.ws-on #design-bin-nav, body.ws-on #design-drawer-nav { display: none !important; }
 body.ws-on #space-cancel-edit { display: none; }
 
