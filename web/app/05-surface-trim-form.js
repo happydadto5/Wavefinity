@@ -612,7 +612,7 @@ function renderLidThicknessOptions() {
 // the old measurements being presented as current.
 function lidThicknessFormKey() {
   return JSON.stringify([lidThicknessKey(state.design), $("#x-size")?.value,
-    $("#y-size")?.value, $("#wall-thickness")?.value, $("#bin-stackable")?.value, $("#lid-included")?.value]);
+    $("#y-size")?.value, $("#wall-thickness")?.value, $("#bin-stackable")?.value, $("#lid-choice")?.value]);
 }
 
 // Programmatic form updates do not represent a user edit. Capture their final
@@ -670,8 +670,7 @@ function syncLidForm() {
   state.lidLabelEnabled = Boolean(lid.label_enabled);
   populateLidChoices();
   $("#bin-stackable").value = String((state.design?.box?.stack?.mode === "direct") || (lid.enabled && Boolean(lid.stackable)));
-  $("#lid-included").value = String(lid.enabled);
-  $("#lid-kind").value = lid.flip_enabled ? "hinged" : lid.snap_enabled ? "snap" : "resting";
+  $("#lid-choice").value = !lid.enabled ? "none" : lid.flip_enabled ? "hinged" : lid.snap_enabled ? "snap" : "resting";
   $("#lid-thickness").value = ({ thin: "1.2", medium: "1.4", thick: "1.6" })[lid.thickness] || lid.thickness;
   renderLidThicknessOptions();
   $("#lid-fit").value = lid.fit || "standard";
@@ -829,7 +828,7 @@ function readStackForm(design) {
   design.box = design.box || {};
   const previousConfig = lidConfiguration(design);
   const stackable = $("#bin-stackable").value === "true";
-  const hasLid = $("#lid-included").value === "true";
+  const hasLid = $("#lid-choice").value !== "none";
   const config = hasLid ? (stackable ? "stackable_lid" : "handled_lid") : "stackable_bin";
   const remembered = lidState(design);
   if (design.box.lid) state.lidMemory = rememberedLidSnapshot(design);
@@ -872,8 +871,8 @@ function readStackForm(design) {
     knob_shape: "dome",
     handle_size: $("#lid-handle-size").value || remembered.handle_size,
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
-    flip_enabled: $("#lid-kind").value === "hinged",
-    snap_enabled: $("#lid-kind").value === "snap",
+    flip_enabled: $("#lid-choice").value === "hinged",
+    snap_enabled: $("#lid-choice").value === "snap",
     // Written explicitly on every save, so a missing value only ever means an
     // older file.
     fit: $("#lid-fit")?.value || remembered.fit || "standard",

@@ -122,7 +122,7 @@ function mutationControls() {
     '#x-size, #y-size, #z, #base-thickness, #wall-thickness, #part-name, ' +
     '#lift-grabber-size, #lift-grabber-location, #connector-height-mode, ' +
     '#mode-select, ' +
-    '#bin-stackable, #lid-included, #lid-kind, #lid-thickness, #lid-fit, #lid-handle-type, #lid-handle-size, ' +
+    '#bin-stackable, #lid-choice, #lid-thickness,#lid-fit, #lid-handle-type, #lid-handle-size, ' +
     '#lid-handle-position, #lid-label-orientation, #lid-label-style, #lid-label-depth, #lid-label-text, ' +
     '#designer-new-bin, #designer-duplicate, #ai-help-open, ' +
     '#designer-save-file, #designer-open-file'

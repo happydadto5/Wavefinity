@@ -741,7 +741,7 @@ These modify the bin shell rather than behaving like ordinary interior parts. Li
 
 ## 7.1 Lid & Stacking
 
-The Specification area has **Stackable** (Not Stackable / Stackable) and **Lid** (No Lid / Include Lid) choices. A stackable bin without a lid stacks directly: a plain 3 mm locating skirt under its base drops into the mouth of the bin below. The skirt only locates (nothing snaps or grips), sits inside the typed Height, and prints upright without supports; each bin added to a stack adds its Height less 3 mm. With a lid it stacks on the lid. Including a lid shows compact lid options. Width and Depth snap to whole 7 mm units on leaving the field and show the unit count; Height stays in millimetres.
+The Specification area has **Stackable** (Not Stackable / Stackable) and a single **Lid** choice (No lid / Lid - Resting fit / Lid - Snap Fit / Lid - Hinged Lid). A stackable bin without a lid stacks directly: a plain 3 mm locating skirt under its base drops into the mouth of the bin below. The skirt only locates (nothing snaps or grips), sits inside the typed Height, and prints upright without supports; each bin added to a stack adds its Height less 3 mm. With a lid it stacks on the lid. Including a lid shows compact lid options. Width and Depth snap to whole 7 mm units on leaving the field and show the unit count; Height stays in millimetres.
 
 The lid kind is Resting fit, Snap Fit, or Hinged Lid. Lid fit is shown only for Snap Fit.
 
