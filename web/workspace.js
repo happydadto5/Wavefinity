@@ -9,7 +9,7 @@
 //   bin selected        -> DP.openInventoryRow(id)     the bin form
 // A hierarchy replaces the Bins/Spaces tabs, and while a bin or container is
 // open its Space stays visible beside it. The classic screens are untouched
-// behind the "Classic" switch; both read and write the same files.
+// behind the "Temp only Roll back" button; both read and write the same files.
 
 const WS = {
   printing: false,
@@ -344,11 +344,8 @@ WS.sync = () => {
   }
   const tools = $("#ws-header-tools");
   if (tools) tools.hidden = !on;
-  $$("[data-ws-ui]").forEach(button => {
-    const active = (button.dataset.wsUi === "workspace") === on;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
+  const toggle = $("#ws-ui-toggle");
+  if (toggle) toggle.textContent = on ? "Temp only Roll back" : "Back to the new UI";
   if (on) {
     const printBin = $("#ws-print-bin");
     const target = WS.printBinTarget();
@@ -404,7 +401,7 @@ WS.sync = () => {
 
   $("#ws-print-bin").addEventListener("click", () => WS.printBin());
   $("#ws-print-space").addEventListener("click", () => WS.startPrint());
-  $$("[data-ws-ui]").forEach(button => button.addEventListener("click", () => WS.setEnabled(button.dataset.wsUi === "workspace")));
+  $("#ws-ui-toggle").addEventListener("click", () => WS.setEnabled(!WS.enabled()));
   $("#part-name")?.addEventListener("input", () => WS.sync());
 
   // Every owner that changes what is open reports through one of these.

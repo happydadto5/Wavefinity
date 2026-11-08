@@ -5,16 +5,6 @@
 .ws-header-tools[hidden], .ws-hierarchy[hidden] { display: none !important; }
 .ws-header-tools { display: flex; gap: 6px; align-items: center; }
 .ws-header-tools .button.active { border-color: var(--teal); color: var(--teal-dark); background: var(--teal-soft); }
-.ws-interface-switch {
-  display: inline-flex; border: 1px solid var(--line-dark); border-radius: 9px; overflow: hidden; background: white;
-}
-.ws-interface-switch button {
-  border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600;
-  padding: 7px 12px; cursor: pointer;
-}
-.ws-interface-switch button + button { border-left: 1px solid var(--line-dark); }
-.ws-interface-switch button.active { background: var(--teal-soft); color: var(--teal-dark); font-weight: 700; }
-.ws-interface-switch button:focus-visible { outline: 2px solid var(--teal-dark); outline-offset: -2px; }
 
 /* The tabs give way to the hierarchy. */
 body.ws-on #space-mode-row { display: none; }
