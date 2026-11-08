@@ -101,7 +101,8 @@
     // Fix 1137: after the user leaves the field it shows "325 (40 units)"
     // like bins do; resolveMm tolerates that suffix so arrow/wheel/3D-handle
     // stepping, validation and save keep working on the displayed value.
-    const stripUnitsSuffix = value => value.replace(/\s*\(\d+\s*units\)\s*$/, "").trim();
+    // Story 2747: the finished entry reads "238 mm Interior (34 Units) (Exterior 243.9 mm)".
+    const stripUnitsSuffix = value => value.replace(/\s*mm\s+Interior[\s\S]*$/i, "").replace(/\s*\(\d+\s*units\)\s*$/i, "").trim();
     const resolveMm = field => {
       const raw = stripUnitsSuffix(field.value);
       const requested = Number(raw);
@@ -112,7 +113,10 @@
     };
     const formatUnitsInline = field => {
       const resolved = resolveMm(field);
-      if (resolved.ok) field.value = `${resolved.mm} (${resolved.units} units)`;
+      if (!resolved.ok) return;
+      const outside = lastSummary && Array.isArray(lastSummary.outside_xyz) ? Number(lastSummary.outside_xyz[field === x ? 0 : 1]) : NaN;
+      field.value = `${resolved.mm} mm Interior (${resolved.units} Units)` +
+        (Number.isFinite(outside) ? ` (Exterior ${fmt(outside)} mm)` : "");
     };
     for (const field of [x, y]) { field.inputMode = "decimal"; field.required = true; }
     // Usable height is local: the stored clear height plus the selected fit.
@@ -122,7 +126,7 @@
     const zHelp = help("");
     const zLabel = labeled("Usable height", zField, null, "mm"); zLabel.append(zHelp);
     for (const [field, title] of [[x, "Interior Width"], [y, "Interior Depth"]]) {
-      const label = labeled(title, field, null, "mm"); sizeGrid.append(label);
+      const label = labeled(title, field); sizeGrid.append(label);
       // Fix 1137: exiting the field shows "325 (40 units)" inline like bins;
       // focusing it again restores the plain mm value for editing.
       field.addEventListener("blur", () => formatUnitsInline(field), { signal: events.signal });
@@ -232,7 +236,11 @@
       const control = select(block[key], materialChoices(catalog, kind, block[key], floor)); materialFields[key] = control; row.append(labeled(title, control));
     }
     finish.append(labels, material);
-    const summaryGroup = el("div", "sd-summary-compact sd-summary-group"); form.append(summaryGroup); const summary = el("div", "sd-summary", "Checking cabinet…"); summaryGroup.append(summary);
+    const summaryGroup = el("div", "sd-summary-compact sd-summary-group"); form.append(summaryGroup); const summary = el("div", "sd-summary"); summaryGroup.append(summary);
+    // Story 2747: the summary text is gone; only warnings/errors and the guide link remain.
+    const guide = el("p", "sd-summary-line");
+    const guideLink = el("a", "", "Assembly & print guide"); guideLink.href = GUIDE_URL; guideLink.target = "_blank"; guideLink.rel = "noopener";
+    guide.append(guideLink); summaryGroup.append(guide);
     const syncVisibility = () => {
       frameField.hidden = style.value !== "open"; handleField.hidden = handles.value !== "true";
       keyholeCountField.hidden = wallMounting.value !== "keyholes";
@@ -315,26 +323,28 @@
           head.append(highlightBtn);
         }
         // Usable height never waits for summary or preview work.
-        const height = input("", "number"); height.step = "any"; height.required = true;
+        const height = input(""); height.inputMode = "decimal"; height.required = true;
         height.disabled = disabled;
         height.id = `sd-height-${epoch}-${index}`;
         height.dataset.usableHeight = "1";
         heightInputs.set(row, height);
         height.addEventListener("input", () => {
-          if (!height.value.trim() || !Number.isFinite(setUsable(row, height.value))) row.height_mm = NaN;
+          if (!height.value.trim() || !Number.isFinite(setUsable(row, stripHeightSuffix(height.value)))) row.height_mm = NaN;
           renderRowHeights(); syncHeightField(); schedule();
         }, { signal: events.signal });
+        // Story 2747: leaving the field shows "30 mm (Usable height)"; typing is unchanged.
+        height.addEventListener("blur", () => { if (Number.isFinite(usableOf(row))) height.value = heightText(usableOf(row)); }, { signal: events.signal });
+        height.addEventListener("focus", () => { height.value = stripHeightSuffix(height.value); }, { signal: events.signal });
         const label = input(row.label_text); label.maxLength = labelLimit; label.disabled = disabled;
         label.id = `sd-label-${epoch}-${index}`;
         label.dataset.heightNeutral = "1";
         label.addEventListener("input", () => { row.label_text = label.value; }, { signal: events.signal });
         const labelField = labeled("Label text", label); labelField.hidden = drawerEnabled.value !== "true";
-        line.append(labeled("Usable height", height, null, "mm"), labelField);
+        line.append(labeled("Usable height", height), labelField);
         drawerRows.append(line);
       });
       renderRowHeights();
     };
-    drawersGroup.append(help("Each height is the drawer's usable interior height."));
     if (structural) {
       const addRow = el("div", "sd-drawer-actions");
       const add = el("button", "button secondary", "Add Drawer"); add.type = "button";
@@ -348,6 +358,8 @@
     }
     let activeDrawerId = block.drawers.find(row => row.id && !String(row.id).startsWith("temporary:"))?.id || null;
     const roundMm = value => Math.round(value * 1000) / 1000;
+    const heightText = usable => `${usable} mm (Usable height)`;
+    const stripHeightSuffix = value => value.replace(/\s*mm\s*\(Usable height\)\s*$/i, "").trim();
     const getDrawerFitMm = () => Number(fit.value);
     const usableOf = row => roundMm(row.height_mm + getDrawerFitMm());
     // Fix 1098 (G2M-0360): the visible usable-height floor is the max of
@@ -373,7 +385,7 @@
         field.min = String(usableMinOf());
         field.max = String(maxUsableHeight);
         field.toggleAttribute("aria-invalid", !Number.isFinite(usable) || usable < usableMinOf() || usable > maxUsableHeight);
-        if (document.activeElement !== field) field.value = Number.isFinite(usable) ? String(usable) : "";
+        if (document.activeElement !== field) field.value = Number.isFinite(usable) ? heightText(usable) : "";
       });
       syncAddButton();
     };
@@ -488,36 +500,19 @@
         summaryKey === window.StorageDrawers.structuralDraftKey(fields.spaceDraft, printerProfile));
       if (ready !== lastReady) { lastReady = ready; onReadyChange?.(ready); }
     };
-    const line = (label, value, className = "") => {
-      const row = el("p", `sd-summary-line ${className}`.trim());
-      row.append(el("span", "sd-summary-label", label), " ", el("span", "sd-summary-value", value)); return row;
-    };
     const showSummary = response => {
       lastSummary = response;
-      const outside = (response.outside_xyz || []).map(v => fmt(v));
-      const [fx, fy] = (response.field_mm || []).map(v => fmt(v));
-      const heights = (response.drawers || []).map(row => fmt(row.usable_height_mm)).join(", ");
-      const material = response.effective_material || {};
-      const parts = response.components || [];
-      const lines = [
-        line("Finished outside", `${outside.join(" × ")} mm`, "sd-summary-outside"),
-        line("Inside each drawer", `${fx} × ${fy} mm`),
-        line("Drawers", `${response.drawer_count} · usable height${response.drawer_count === 1 ? "" : "s"} ${heights} mm`),
-        line("Parts", parts.length ? `${parts.length} files: ${parts.map(part => part.name).join(", ")}` : "—"),
-        line("Cabinet base / top", `${fmt(material.base_mm)} / ${fmt(material.top_mm)} mm`),
-      ];
-      if (response.cabinet_style === "open" && material.frame_width_mm) lines.push(line("Open frame width", `${fmt(material.frame_width_mm)} mm`));
+      const lines = [];
       for (const warning of response.warnings || []) lines.push(el("p", "sd-summary-warning", `Note: ${warning}`));
-      const guide = el("p", "sd-summary-line");
-      const link = el("a", "", "Assembly & print guide"); link.href = GUIDE_URL; link.target = "_blank"; link.rel = "noopener";
-      guide.append(link); lines.push(guide);
       summary.replaceChildren(...lines);
+      // The finished outside size now shows in the width/depth fields.
+      for (const field of [x, y]) if (document.activeElement !== field) formatUnitsInline(field);
       updatePrinterRow();
       renderRowHeights();
       syncHeightField();
       callbacks.onSummary?.(response);
     };
-    const showSummaryText = (text, bad = false) => { summary.replaceChildren(el("p", bad ? "sd-fit-verdict bad" : "sd-summary-line", text)); updatePrinterRow(); };
+    const showSummaryText = (text, bad = false) => { summary.replaceChildren(...(bad ? [el("p", "sd-fit-verdict bad", text)] : [])); updatePrinterRow(); };
     const schedule = () => {
       summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…"); notifyReady();
       renderRowHeights();

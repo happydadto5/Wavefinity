@@ -139,5 +139,10 @@ body.ws-on #welcome-dialog[open] {
   position: fixed; inset: 0; width: 100vw; max-width: none; height: 100vh; max-height: none; margin: 0; border-radius: 0; overflow: auto;
 }
 
+/* Story 2747: New Space setup takes the left side, at the width of the editing column used for bins and Spaces. */
+body.ws-on #welcome-dialog[open]:has(#space-form:not([hidden])) {
+  inset: 0 auto 0 0; width: max(420px, min(var(--sidebar-width), calc(100vw - 448px))); max-width: 100vw;
+}
+
 /* Story 2735: while switching items the old preview is cleared; the Building geometry notice stands in. */
 body.ws-item-switching .canvas-wrap > canvas { visibility: hidden; }

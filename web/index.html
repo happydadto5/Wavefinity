@@ -1115,7 +1115,6 @@
             <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="drawer-y" type="number" min="1" max="2000" step="any"></label>
             <label class="space-field"><span>Usable height <span class="unit">mm</span></span><input id="drawer-z" type="number" min="1" max="2000" step="any"></label>
           </div>
-          <p class="space-help">Measure the clear inside width, depth, and height with the drawer closed. Width is left ↔ right; Depth is front ↔ back. Wavefinity handles its required wall clearance automatically.</p>
           <div id="drawer-readout" class="derived-readout" hidden>
              <dt>Physical Size</dt><dd id="drawer-size-readout"></dd>
              <dt>Wavefinity Capacity</dt><dd id="drawer-capacity-readout"></dd>
@@ -1130,7 +1129,6 @@
               <select id="surface-trim"></select>
             </label>
           </div>
-          <p class="dl-note">The largest Wavefinity field that fits inside this maximum width and length is used. The finished Surface, including its Base Trim, never exceeds them.</p>
           <div id="surface-readout" class="derived-readout" hidden>
             <dt>Wavefinity interior</dt><dd id="surface-size-readout"></dd>
             <dt>Edge trim</dt><dd id="surface-trim-readout"></dd>
@@ -1216,14 +1214,13 @@
             <label class="space-field"><span>Holes / slots across</span><input id="pegboard-holes-x" type="number" min="1" max="500" step="1"></label>
             <label class="space-field"><span>Holes / slots high</span><input id="pegboard-holes-y" type="number" min="1" max="500" step="1"></label>
           </div>
-          <p id="pegboard-physical-help" class="space-help">Physical sizes use the largest whole board grid that fits. Any leftover border is shown below.</p>
           <div id="pegboard-readout" class="derived-readout" hidden>
             <dt>Usable grid</dt><dd id="pegboard-grid-readout"></dd>
             <div id="pegboard-border-row" class="pegboard-border-row"><dt>Residual border</dt><dd id="pegboard-border-readout"></dd></div>
           </div>
         </div>
 
-        <p id="space-folder-help" class="space-help" hidden>Wavefinity keeps this Space's designs and inventory together in the folder you choose next.</p>
+        <p id="space-folder-help" class="space-help" hidden></p>
         <p id="space-note" class="space-note"></p>
         <p id="space-error" class="field-error" role="alert" hidden></p>
         <div class="button-row space-buttons">

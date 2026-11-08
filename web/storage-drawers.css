@@ -59,7 +59,7 @@
 .sd-recovery-message { font-weight: 600; }
 .sd-printer-row-note { margin: 0; color: var(--muted); font-size: 12px; }
 .sd-form .sd-printer-row-note { color: var(--ink); }
-.welcome-dialog.storage-drawers-config { width: min(960px, calc(100vw - 32px)); }
+.welcome-dialog.storage-drawers-config { width: min(var(--sidebar-width, 40vw), calc(100vw - 32px)); min-width: min(420px, calc(100vw - 32px)); }
 .sd-guide-link { font-size: 12px; }
 .printer-settings-dialog { max-width: min(420px, calc(100vw - 24px)); }
 .printer-settings-dialog .welcome-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

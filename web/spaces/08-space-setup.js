@@ -100,12 +100,7 @@ SP.captureOrdinarySetupSnapshot = () => {
 // Local folder line: a live path that names the Space as it is typed. Hosted
 // shows the folder picked next instead, and Storage Drawers names its Space
 // in its own form, so both keep their plain sentence.
-SP.updateSavedAsMessage = () => {
-  const help = document.getElementById("space-folder-help");
-  if (!help || help.hidden || state.runtime.hosted || SP.setupKind === "storage_drawers") return;
-  const name = document.getElementById("space-name").value.trim();
-  help.textContent = "This space will be saved as \\Documents\\Wavefinity\\" + (name || "(Name space first)");
-};
+SP.updateSavedAsMessage = () => {};
 
 SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   if (update) {
@@ -166,19 +161,9 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       ? "Choose Folder & Create"
       : "Create Space";
   }
+  // Story 2747: no save-location explainer under the Space name.
   const folderHelp = document.getElementById("space-folder-help");
-  if (folderHelp) {
-    if (update) {
-      folderHelp.hidden = true;
-    } else if (state.runtime.hosted) {
-      folderHelp.hidden = false;
-      folderHelp.textContent = "Wavefinity keeps this Space's designs and inventory together in the folder you choose next.";
-    } else {
-      folderHelp.hidden = false;
-      folderHelp.textContent = "Wavefinity will save this Space under Documents\\Wavefinity using the Space name.";
-      SP.updateSavedAsMessage();
-    }
-  }
+  if (folderHelp) { folderHelp.hidden = true; folderHelp.textContent = ""; }
   if (kind === 'drawer') {
       document.getElementById('drawer-x').value = prefillSpace?.x || '';
       document.getElementById('drawer-y').value = prefillSpace?.y || '';
