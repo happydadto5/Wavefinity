@@ -1,7 +1,7 @@
 /* Story 2692 - the unified screen: a global top bar, a left pane that edits, a right pane that is
    always the preview. Everything is scoped to ws- classes or to body.ws-on. */
 
-.ws-frame[hidden], .ws-stage[hidden], .ws-aux[hidden], .ws-space-menu[hidden] { display: none !important; }
+.ws-frame[hidden], .ws-stage[hidden], .ws-aux[hidden] { display: none !important; }
 
 /* The global top bar. */
 .ws-frame {
@@ -9,13 +9,7 @@
   background: var(--panel); border-bottom: 1px solid var(--line-dark);
 }
 .ws-place { font-size: 15px; color: var(--ink); max-width: 260px; display: inline-block; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-switch-wrap { position: relative; }
-.ws-space-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 340px; max-height: 60vh; overflow: auto; padding: 6px;
-  background: white; border: 1px solid var(--line-dark); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
-}
 .ws-menu-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.ws-menu-manage { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
 .ws-menu-item {
   width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font: inherit; color: var(--ink);
   background: transparent; border: 0; border-radius: 8px; padding: 7px 8px; cursor: pointer;
@@ -27,7 +21,6 @@
 .ws-card-icon img { width: 28px; height: 28px; }
 .ws-card-text { display: grid; min-width: 0; }
 .ws-card-text small { color: var(--muted); font-size: 12px; }
-.ws-card-tag { margin-left: auto; font-size: 11px; color: var(--teal-dark); font-style: normal; font-weight: 700; }
 body.ws-on #bin-actions { display: none !important; }
 
 /* The tabs and the old bin/drawer pickers give way to the selector. */

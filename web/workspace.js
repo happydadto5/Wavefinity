@@ -217,22 +217,6 @@ WS.spaceRows = () => {
   return rows;
 };
 
-// The Spaces switcher: a dropdown anchored to the bar, never a full-screen picker.
-WS.renderSpaceMenu = () => {
-  const cards = WS.spaceRows().map(one => `<li><button type="button" class="ws-menu-item${one.current ? " current" : ""}" data-ws-act="open-space" data-src="${one.src}" data-index="${one.index ?? ""}"${one.invalid ? " disabled" : ""}>
-      <span class="ws-card-icon" aria-hidden="true">${SP.compactKindIcon(one.kind)}</span>
-      <span class="ws-card-text"><strong>${wsEsc(one.name)}</strong><small>${wsEsc([SP_KINDS[one.kind]?.label, one.meta].filter(Boolean).join(" · "))}</small></span>
-      ${one.current ? '<em class="ws-card-tag">open now</em>' : ""}</button></li>`).join("");
-  return `<ul class="ws-menu-list">${cards}
-    <li><button type="button" class="ws-menu-item${state.folderMode !== "space" ? " current" : ""}" data-ws-act="my-bins">
-      <span class="ws-card-icon" aria-hidden="true">📦</span>
-      <span class="ws-card-text"><strong>My Bins / No Space</strong><small>Bins that are not in a Space</small></span></button></li>
-  </ul>
-  <ul class="ws-menu-list ws-menu-manage"><li><button type="button" class="ws-menu-item" data-ws-act="open-welcome">
-      <span class="ws-card-icon" aria-hidden="true">🗂️</span>
-      <span class="ws-card-text"><strong>Manage Space</strong><small>Create, open or move Spaces</small></span></button></li></ul>`;
-};
-
 WS.render = () => {
   const stage = $("#ws-stage");
   const aux = $("#ws-aux");
@@ -655,12 +639,9 @@ WS.sync = () => {
     if (["bin", "container", "settings"].includes(WS.task)) WS.editorToTop();
   }
   const switcher = $("#ws-spaces");
-  if (switcher) {
-    switcher.disabled = WS.task === "picker";
-    if (switcher.disabled) { const m = $("#ws-space-menu"); if (m) m.hidden = true; switcher.setAttribute("aria-expanded", "false"); }
-  }
+  if (switcher) switcher.disabled = WS.task === "picker";
   const place = $("#ws-place");
-  if (place) place.textContent = "Manage / Create Space";
+  if (place) place.textContent = "Manage Spaces";
   const printSpace = $("#ws-print-space");
   if (printSpace) {
     printSpace.disabled = !open || WS.task !== "settings" || WS.busy;
@@ -841,19 +822,13 @@ SP.openTypedSpacePreferredView = async () => {
   controls.prepend(aux);
   controls.prepend(stage);
 
-  const menu = $("#ws-space-menu");
-  const toggle = $("#ws-spaces");
-  const closeMenu = () => { menu.hidden = true; toggle.setAttribute("aria-expanded", "false"); };
   const delegate = event => {
     const pick = event.target.closest("[data-ws-pick]");
     if (pick) { WS.pick(pick.dataset.wsPick, pick.dataset.id || ""); return; }
     const button = event.target.closest("[data-ws-act]");
-    if (button && !button.disabled) {
-      closeMenu();
-      WS.onAction(button.dataset.wsAct, button, event);
-    }
+    if (button && !button.disabled) WS.onAction(button.dataset.wsAct, button, event);
   };
-  [stage, aux, menu].forEach(host => host.addEventListener("click", delegate));
+  [stage, aux].forEach(host => host.addEventListener("click", delegate));
   aux.addEventListener("change", event => {
     const tick = event.target.dataset.wsTick;
     if (!tick) return;
@@ -862,19 +837,11 @@ SP.openTypedSpacePreferredView = async () => {
     WS.sync();
   });
 
-  toggle.addEventListener("click", event => {
-    event.stopPropagation();
-    if (menu.hidden) {
-      menu.innerHTML = WS.renderSpaceMenu();
-      SP.refreshOtherSpaces?.().then(() => { if (!menu.hidden) menu.innerHTML = WS.renderSpaceMenu(); });
-    }
-    menu.hidden = !menu.hidden;
-    toggle.setAttribute("aria-expanded", String(!menu.hidden));
-  });
-  document.addEventListener("click", event => { if (!menu.hidden && !menu.contains(event.target)) closeMenu(); });
-  $("#ws-print-space").addEventListener("click", () => { closeMenu(); WS.go("print"); });
+  // Story 2716: Manage Spaces is a plain button that opens the space management (picker) screen.
+  $("#ws-spaces").addEventListener("click", () => WS.go("picker"));
+  $("#ws-print-space").addEventListener("click", () => WS.go("print"));
   for (const id of ["#ws-print-bin", "#ws-print-container", "#ws-export"]) {
-    $(id).addEventListener("click", event => { closeMenu(); WS.output(event.currentTarget.dataset.output, event.currentTarget, event); });
+    $(id).addEventListener("click", event => WS.output(event.currentTarget.dataset.output, event.currentTarget, event));
   }
   $("#part-name")?.addEventListener("input", () => WS.sync());
 
