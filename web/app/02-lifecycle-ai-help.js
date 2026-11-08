@@ -167,9 +167,11 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false,
 }
 
 // Install a canonical design (from Inventory Edit or Duplicate) as the working Designer
-// design, replacing whatever is currently shown.
+// design, replacing whatever is currently shown. A plain bin open passes no
+// successMessage and shows no notice; actions with an outcome to confirm (such as
+// Duplicate) pass their own message.
 async function installLoadedDesignSource(rowId, spec, {
-  successMessage = "Loaded from Space.",
+  successMessage = null,
   acceptTransition = null,
 } = {}) {
   if (acceptTransition && !acceptTransition()) return false;
@@ -203,7 +205,7 @@ async function installLoadedDesignSource(rowId, spec, {
       await preview;
       await persistSpaceDesignSource(null, true);
     }
-    toast(successMessage);
+    if (successMessage) toast(successMessage);
     return true;
   } catch (error) {
     toast(`Could not load that design: ${error.message}`, true, 6000);
