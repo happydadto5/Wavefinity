@@ -1271,6 +1271,37 @@ DV.renderStaging = () => {
   rail.classList.toggle("has-selection", staged.some(one => one.id === DL.selectedRow));
 };
 
+// Story 2751: in a Storage Drawers space, picking an unplaced bin on the rail
+// sets its design height to exactly the viewed drawer's safe height (inside
+// height minus the 2 mm running clearance - the same cap the height rim and
+// the Layout report judge against), so it fits top to bottom. It is a normal
+// design-source edit, saved the way every bin edit is saved.
+DV.fitStagedBinHeight = async id => {
+  if (!DL.isStorageDrawers() || !DL.layout) return;
+  const drawer = DL.drawer();
+  const spec = DL.layout.design_specs?.[id];
+  const target = Number(drawer?.height) - 2;
+  if (!spec?.box || !DL.bin(id) || !DL.isOrdinary(DL.bin(id)) || !(target > 0)) return;
+  if (Math.abs(Number(spec.box.z) - target) < 1e-9) return;
+  const context = DL.spaceContext();
+  const design = clone(spec);
+  design.box.z = target;
+  try {
+    const data = await DL.inventoryCall("/api/drawer/design-source/save", { design, row_id: id },
+      { context, sideEffect: true });
+    DL.requireSpaceContext(context);
+    DL.adopt(data);
+    if (state.designInventoryId === id && state.design?.box) {
+      state.design.box.z = target;
+      if (state.cleanDesign?.box) state.cleanDesign.box.z = target;
+    }
+    DL.emit();
+    DL.requestReport();
+  } catch (error) {
+    if (!DL.isStaleSpaceError(error)) toast(friendlyError(error), true, 6000);
+  }
+};
+
 // Scroll the Inventory row for `id` into view (canvas -> Inventory).
 DV.revealRow = id => {
   if (!id) return;
@@ -1317,12 +1348,12 @@ DV.buildOverlay = () => {
   });
   rail.addEventListener("click", event => {
     const id = event.target.closest("[data-staged-bin]")?.dataset.stagedBin;
-    if (id) { DL.selectRow(id); DV.revealRow(id); }
+    if (id) { DL.selectRow(id); DV.revealRow(id); DV.fitStagedBinHeight(id); }
   });
   rail.addEventListener("keydown", event => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const id = event.target.closest("[data-staged-bin]")?.dataset.stagedBin;
-    if (id) { event.preventDefault(); DL.selectRow(id); DV.revealRow(id); }
+    if (id) { event.preventDefault(); DL.selectRow(id); DV.revealRow(id); DV.fitStagedBinHeight(id); }
   });
   rail.addEventListener("dragstart", event => {
     const one = DL.bin(event.target.closest?.("[data-staged-bin]")?.dataset.stagedBin);
