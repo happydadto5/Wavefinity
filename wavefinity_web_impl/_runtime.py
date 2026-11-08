@@ -90,6 +90,29 @@ class _SupersededGeometry(Exception):
     pass
 
 
+# Real (user-asked) preview builds in flight. Background warming waits for this
+# to read zero before it starts each build, so a click is never queued behind
+# a run of warming builds (Story 2720).
+_REAL_PREVIEWS = 0
+_REAL_PREVIEWS_LOCK = threading.Lock()
+
+
+@contextmanager
+def _real_preview_active():
+    global _REAL_PREVIEWS
+    with _REAL_PREVIEWS_LOCK:
+        _REAL_PREVIEWS += 1
+    try:
+        yield
+    finally:
+        with _REAL_PREVIEWS_LOCK:
+            _REAL_PREVIEWS -= 1
+
+
+def _real_preview_busy() -> bool:
+    return _REAL_PREVIEWS > 0
+
+
 def _register_preview_request(payload: dict[str, Any], lane: str) -> tuple[str, str, int] | None:
     if not isinstance(payload, dict):
         return None

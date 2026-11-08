@@ -182,6 +182,7 @@ from organizer_spaces import (
     default_space_parent,
     describe as describe_space_folder,
     effective_space_root,
+    other_spaces as other_spaces_list,
     inventory_enabled,
     space_routes,
     storage_startup_state,
@@ -343,6 +344,8 @@ from wavefinity_web_impl._runtime import (
     _SupersededGeometry,
     _register_preview_request,
     _preview_geometry_lock,
+    _real_preview_active,
+    _real_preview_busy,
     LEGACY_PREFERENCES_FILE,
     _user_config_dir,
     PREFERENCES_LOCK,
@@ -1351,9 +1354,91 @@ def show_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     token = _register_preview_request(payload, "preview")
     try:
-        return _preview_payload(payload, token)
+        with _real_preview_active():
+            return _preview_payload(payload, token)
     except _SupersededGeometry:
         return {"superseded": True}
+
+
+_WARM_LOCK = threading.Lock()
+_WARM_DONE: set[str] = set()
+_WARM_RUNNING = False
+
+
+def _warm_build(payload: dict[str, Any]) -> None:
+    """One warming build, only while no real preview is being asked for."""
+    while _real_preview_busy():
+        time.sleep(0.05)
+    try:
+        if payload.get("space") is not None:
+            _storage_drawers_structural_design(payload)
+        else:
+            _preview_payload(payload, None)
+    except Exception:
+        pass  # a Space that cannot build is skipped, exactly as a click would fail
+
+
+def _warm_space(folder: Path, prefs: dict[str, Any]) -> None:
+    """Read-only: build the previews a click on this Space would build. Never
+    opens, selects or remembers the Space and writes nothing."""
+    info = describe_space_folder(folder, prefs)
+    space = info.get("space")
+    if info.get("folder_mode") != "space" or not isinstance(space, dict) or info.get("needs_setup"):
+        return
+    kind = structural_kind(space)
+    if kind == STORAGE_DRAWERS:
+        _warm_build({"space": space, "include_preview": True})
+    elif kind is not None:
+        try:
+            design = structural_design(space, bed_x_mm=_printer_profile_for({})["x_mm"],
+                                       bed_y_mm=_printer_profile_for({})["y_mm"])
+        except Exception:
+            design = None
+        if design:
+            _warm_build({"design": design, "client_id": "warm-structural", "generation": 0})
+    for one in design_specs(load_inventory(folder).get("layout")).values():
+        if isinstance(one, dict):
+            _warm_build({"design": one})
+
+
+def _warm_run(folders: list[Path]) -> None:
+    global _WARM_RUNNING
+    try:
+        prefs = load_preferences()
+        for folder in folders:
+            try:
+                _warm_space(folder, prefs)
+            except Exception:
+                pass
+            with _WARM_LOCK:
+                _WARM_DONE.add(str(folder))
+    finally:
+        with _WARM_LOCK:
+            _WARM_RUNNING = False
+
+
+def warm_spaces_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Start quiet background pre-building of the listed Spaces' previews."""
+    global _WARM_RUNNING
+    if HOSTED:
+        return {"started": False}
+    prefs = load_preferences()
+    listed: dict[str, Path] = {}
+    for one in other_spaces_list(prefs):
+        if not one.get("invalid") and one.get("folder"):
+            listed[os.path.normcase(str(one["folder"]))] = Path(one["folder"])
+    for one in prefs.get("recent_folders") or []:
+        if isinstance(one, dict) and one.get("folder"):
+            listed.setdefault(os.path.normcase(str(one["folder"])), Path(one["folder"]))
+    with _WARM_LOCK:
+        if _WARM_RUNNING:
+            return {"started": False}
+        todo = [p for k, p in listed.items() if str(p) not in _WARM_DONE and p.is_dir()]
+        if not todo:
+            return {"started": False}
+        _WARM_RUNNING = True
+    threading.Thread(target=_warm_run, args=(todo,), daemon=True, name="space-preview-warm").start()
+    return {"started": True}
 
 
 def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
@@ -2924,6 +3009,7 @@ def _validate_design_open_guard(payload: dict[str, Any]) -> dict[str, Any]:
 
 POST_ROUTES = {
     "/api/preview": preview_payload,
+    "/api/space/warm": warm_spaces_payload,
     "/api/design/validate": _validate_design_open_guard,
     "/api/ai/prompt": ai_prompt_payload,
     "/api/ai/candidate": ai_candidate_payload,

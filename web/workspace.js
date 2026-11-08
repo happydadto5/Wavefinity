@@ -626,6 +626,16 @@ WS.output = (mode, button, event) => {
 
 // ------------------------------------------------------------------ sync
 
+// Story 2720: once the space list is showing, ask the server (once) to quietly pre-build the
+// listed spaces' previews so the first click is fast. Fire-and-forget: it opens, selects and
+// changes nothing, and a failure is ignored.
+WS.warmed = false;
+WS.warmSpaces = () => {
+  if (WS.warmed || state.runtime.hosted) return;
+  WS.warmed = true;
+  setTimeout(() => { api("/api/space/warm", {}).catch(() => {}); }, 1500);
+};
+
 WS.sync = () => {
   const body = document.body;
   const frame = $("#ws-frame");
@@ -649,6 +659,7 @@ WS.sync = () => {
   // Story 2704: on the open screen nothing is chosen yet - no preview, nothing current, and the
   // space-dependent actions stay off, though the restored session is kept for picking from the list.
   const open = WS.open() && WS.task !== "picker";
+  if (WS.task === "picker") WS.warmSpaces();
   body.classList.add("ws-on");
   body.classList.toggle("ws-open", open);
   for (const name of WS_TASKS) body.classList.toggle(`ws-task-${name}`, WS.task === name);
