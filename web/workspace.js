@@ -177,10 +177,10 @@ WS.renderPrint = () => {
 // Every kind is a full artwork choice, equal in size.
 WS.KINDS = [
   ["portable", "Storage Box", "A carrying case for your bins.", "B4B.png"],
-  ["storage_drawers", "Storage Drawers", "Print a new cabinet with drawers.", "StorageDrawers.png"],
+  ["storage_drawers", "Storage Drawers", "Drawers to hold your bins", "StorageDrawers.png"],
   ["surface", "Surface", "A countertop, shelf, or vanity.", "Vanity.png"],
-  ["drawer", "Drawer", "A drawer you already have.", "Drawer.png"],
-  ["pegboard", "Pegboard", "A pegboard you already have.", "Pegboard.png"],
+  ["drawer", "Drawer", "Organize one of your drawers", "Drawer.png"],
+  ["pegboard", "Pegboard", "Create Bins for your pegboard", "Pegboard.png"],
 ];
 
 WS.renderNewSpace = () => `<div class="ws-page ws-newspace">
@@ -227,7 +227,9 @@ WS.renderSpaceMenu = () => {
       <span class="ws-card-icon" aria-hidden="true">📦</span>
       <span class="ws-card-text"><strong>My Bins / No Space</strong><small>Bins that are not in a Space</small></span></button></li>
   </ul>
-  <p class="ws-links"><button type="button" class="link-button" data-ws-act="new-space-choose">New Space…</button> <button type="button" class="link-button" data-ws-act="open-welcome">Open a Space folder…</button>${state.runtime.hosted ? "" : ' <button type="button" class="link-button" data-ws-act="storage">Change Wavefinity folder…</button>'}</p>`;
+  <ul class="ws-menu-list ws-menu-manage"><li><button type="button" class="ws-menu-item" data-ws-act="open-welcome">
+      <span class="ws-card-icon" aria-hidden="true">🗂️</span>
+      <span class="ws-card-text"><strong>Manage Space</strong><small>Create, open or move Spaces</small></span></button></li></ul>`;
 };
 
 WS.render = () => {
@@ -596,8 +598,13 @@ WS.sync = () => {
     WS.entered = WS.task;
     if (["bin", "container", "settings"].includes(WS.task)) WS.editorToTop();
   }
+  const switcher = $("#ws-spaces");
+  if (switcher) {
+    switcher.disabled = WS.task === "picker";
+    if (switcher.disabled) { const m = $("#ws-space-menu"); if (m) m.hidden = true; switcher.setAttribute("aria-expanded", "false"); }
+  }
   const place = $("#ws-place");
-  if (place) place.textContent = "Change Space";
+  if (place) place.textContent = "Manage / Create Space";
   const printSpace = $("#ws-print-space");
   if (printSpace) {
     printSpace.disabled = !open || WS.task !== "settings" || WS.busy;

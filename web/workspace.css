@@ -15,6 +15,7 @@
   background: white; border: 1px solid var(--line-dark); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
 }
 .ws-menu-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ws-menu-manage { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
 .ws-menu-item {
   width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font: inherit; color: var(--ink);
   background: transparent; border: 0; border-radius: 8px; padding: 7px 8px; cursor: pointer;
