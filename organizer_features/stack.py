@@ -88,6 +88,7 @@ STACK_SEAT_DEPTH = 1.0    # lid mode: base step height == lid top recess depth
 STACK_PLUG_DEPTH = 3.0    # how far a lid plug reaches into the mouth it closes
 STACK_INTERIOR_MARGIN = 0.5  # lidded bins: interior parts stop this far below the plug bottom
 STACK_SKIRT_DEPTH = 2.0   # direct mode: how far the skirt drops into the bin below
+STACK_LID_SKIRT_WIDTH = 1.6  # regular lids: radial width of the hollow locating skirt band
 STACK_SKIRT_BEVEL = 1.0   # direct mode: 45 degree lead-in on the skirt's entering edge
 STACK_PROFILE_POINTS = 192
 STACK_FIT = 0.25          # clearance per side on every sliding face
@@ -280,6 +281,16 @@ def _lid_hinge(eff: BoxSpec) -> LidHinge | None:
     return hinge
 
 
+def _lid_skirt(eff: BoxSpec, rim: float) -> trimesh.Trimesh:
+    """Regular lid underside: a shallow perimeter band on the plug outline, open in the middle."""
+    outline = _lid_plug_polygon(eff)
+    inner = outline.buffer(-STACK_LID_SKIRT_WIDTH)
+    band = outline if inner.is_empty else outline.difference(inner)
+    skirt = _extrude_polygon(band, STACK_SKIRT_DEPTH)
+    skirt.apply_translation((0.0, 0.0, rim - STACK_SKIRT_DEPTH))
+    return skirt
+
+
 def _clip_back(polygon: Polygon, back_y: float) -> Polygon:
     """The part of ``polygon`` that lies in front of ``back_y``."""
     min_x, min_y, max_x, _ = polygon.bounds
@@ -430,8 +441,11 @@ def _clip_lid_locks(
     solid: trimesh.Trimesh,
     eff: BoxSpec,
     profile: list[tuple[float, float]],
+    floor: float | None = None,
 ) -> list[trimesh.Trimesh]:
     z0 = min(z for _, z in profile)
+    if floor is not None:
+        z0 = max(z0, floor) + _PROFILE_EPS     # mask starts z0 - eps: exactly at ``floor``
     z1 = max(z for _, z in profile)
     pieces: list[trimesh.Trimesh] = []
     for polygon in _lid_lock_masks(eff):
@@ -460,7 +474,8 @@ def _lid_lock_bumps(eff: BoxSpec, rim: float) -> list[trimesh.Trimesh]:
         [cavity.buffer(t - fit) for t, _ in profile],
         [z for _, z in profile],
     )
-    return _clip_lid_locks(solid, eff, profile)
+    # The buried root of the chamfer dips below the skirt; keep the bump on the band.
+    return _clip_lid_locks(solid, eff, profile, floor=rim - STACK_SKIRT_DEPTH)
 
 
 def _lid_lock_notches(eff: BoxSpec) -> list[trimesh.Trimesh]:
@@ -705,9 +720,7 @@ def make_lid_parts(
 
     parts = [plate]
     if hinge is None:
-        plug = _extrude_polygon(_lid_plug_polygon(eff), STACK_PLUG_DEPTH)
-        plug.apply_translation((0.0, 0.0, rim - STACK_PLUG_DEPTH))
-        parts.append(plug)
+        parts.append(_lid_skirt(eff, rim))
 
     bumps = [] if hinge is not None else _lid_lock_bumps(eff, rim)
     from organizer_features.lid_snap import snap_fingers
@@ -892,7 +905,8 @@ def validate_stack_design(box: BoxSpec) -> None:
             bump_profile = _lid_lock_profile(
                 lid_fit_mm(eff) + LID_LOCK_INTERFERENCE, eff.z,
             )
-            if min(z for _, z in bump_profile) < eff.z - STACK_PLUG_DEPTH - _EPS:
+            # Only the part standing proud of the skirt (t >= 0) must sit on it.
+            if min(z for t, z in bump_profile if t >= 0.0) < eff.z - STACK_SKIRT_DEPTH - _EPS:
                 raise ValueError("the stacking lid plug is too short for its lock points")
         if lid_has_handle(box):
             _lid_handle_mesh(box)         # raises if the chosen handle cannot fit

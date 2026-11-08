@@ -20,11 +20,11 @@ def snap_fingers(box):
         return []
     from organizer_engine._boxes import flat_cavity_polygon
     from organizer_engine import wavy_cavity_polygon
-    from organizer_features.stack import STACK_PLUG_DEPTH
+    from organizer_features.stack import STACK_SKIRT_DEPTH
     bottom = lock_z_levels(0.0)[0] - LOCK_NOTCH_CLEARANCE
     near = LOCK_PROTRUSION - LOCK_NOTCH_CLEARANCE
     far = near + 0.8
-    profile = [(near, bottom), (far, bottom), (far, -STACK_PLUG_DEPTH + 0.2), (near, -STACK_PLUG_DEPTH + 0.2)]
+    profile = [(near, bottom), (far, bottom), (far, -STACK_SKIRT_DEPTH + 0.2), (near, -STACK_SKIRT_DEPTH + 0.2)]
     # Clip against the real cavity, including any flat interior band. The
     # connector bump paths stay where the connector system placed them.
     low = box.z + bottom

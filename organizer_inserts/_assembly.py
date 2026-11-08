@@ -22,6 +22,7 @@ from organizer_engine import (
     flat_cavity_polygon,
     label_placement,
     lid_enabled,
+    lid_has_flip,
     top_label_surface_z,
     wavy_cavity_polygon,
 )
@@ -110,7 +111,9 @@ def build_features(
     than added to it. The exporter collects it through :func:`build_texts`;
     the preview asks for it here so it can draw it in place.
     """
-    from organizer_features.stack import STACK_INTERIOR_MARGIN, STACK_PLUG_DEPTH, stack_enabled
+    from organizer_features.stack import (
+        STACK_INTERIOR_MARGIN, STACK_PLUG_DEPTH, STACK_SKIRT_DEPTH, stack_enabled,
+    )
 
     features = list(features)
     check_layout(box, features, bounds, base_z, mode)
@@ -118,7 +121,9 @@ def build_features(
     if stack_enabled(box):
         max_feature_z = box.z - STACK_PLUG_DEPTH
     if lid_enabled(box) and not direct_stack_enabled(box):
-        max_feature_z = box.z - STACK_PLUG_DEPTH - STACK_INTERIOR_MARGIN
+        # Regular lids close with a shallow skirt; a hinged lid has no skirt but keeps its plug depth.
+        lid_depth = STACK_PLUG_DEPTH if lid_has_flip(box) else STACK_SKIRT_DEPTH
+        max_feature_z = box.z - lid_depth - STACK_INTERIOR_MARGIN
     solids: list[trimesh.Trimesh] = []
     recessed_nests = [
         one for one in features
