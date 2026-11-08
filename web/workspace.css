@@ -76,6 +76,9 @@ body.ws-on.ws-task-picker .workspace { visibility: hidden; }
 .ws-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-note { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-group { font-size: 12px; font-weight: 700; color: var(--muted); margin-top: 4px; }
+/* The hierarchy shows by indentation: container half an inch in, bins an inch in. */
+.ws-row.ws-level-1 { margin-left: .5in; }
+.ws-row.ws-level-2 { margin-left: 1in; }
 .ws-empty { color: var(--muted); font-size: 13px; padding: 4px 0; }
 
 /* Print Space and New Space take the editor region (B) for a while. */
@@ -115,6 +118,18 @@ body.ws-task-settings .dl-section[aria-label="Inventory"] { display: none; }
 /* A dimension lives in one place: size and construction of a box or cabinet are in its container editor. */
 body.ws-task-settings #space-fields-portable,
 body.ws-task-settings #space-fields-storage_drawers { display: none; }
+
+/* The Space name is shown in the heading; the layout view has no (falsely editable) Name section. */
+body.ws-task-settings #space-name-row,
+body.ws-task-settings #space-note { display: none !important; }
+
+/* Big message in the middle section while switching views. */
+.workspace { position: relative; }
+.ws-switching {
+  position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; text-align: center;
+  background: rgba(248, 250, 249, .92); color: var(--teal-dark); font-size: 32px; font-weight: 700; pointer-events: all;
+}
+.ws-switching[hidden] { display: none; }
 
 /* Setup is a full-screen task of its own. */
 body.ws-on #welcome-dialog[open] {

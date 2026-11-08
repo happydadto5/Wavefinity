@@ -119,11 +119,12 @@ WS.renderSelector = () => {
   const here = WS.open();
   const now = WS.current();
   const locked = WS.task === "print" || WS.task === "newspace";
-  const rows = (here ? [{ kind: "settings", id: "settings", label: "Space design" }, ...items] : items).map(one => {
+  const rows = (here ? [{ kind: "settings", id: "settings", label: "Layout your space" }, ...items] : items).map(one => {
     if (one.kind === "group") return `<li class="ws-group" role="presentation">${wsEsc(one.label)}</li>`;
     const picked = Boolean(now) && now.kind === one.kind && (one.kind === "container" || String(now.id || "") === String(one.id || ""));
     const icon = one.kind === "container" ? "▦" : "▢";
-    return `<li class="ws-row"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${locked ? " disabled" : ""}>
+    const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
+    return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${locked ? " disabled" : ""}>
       <span class="ws-ico" aria-hidden="true">${icon}</span><span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button></li>`;
   }).join("");
   const binSelected = !locked && WS.task === "bin" && (!here || Boolean(state.designInventoryId));
@@ -275,12 +276,50 @@ WS.flushBin = async () => {
   return true;
 };
 
+// Going to or from the space layout can take a moment; a big message in the middle section says so
+// at once and stays until the next view is actually ready (or the switch fails).
+WS.switchingMessage = task => {
+  if (!WS.open()) return "";
+  if (task === "settings" && WS.task !== "settings") return "Switching to space layout";
+  if ((task === "container" || task === "bin") && WS.task === "settings") return "Switching to bin design";
+  return "";
+};
+
+WS.showSwitching = text => {
+  const host = $(".workspace");
+  if (!host) return;
+  let box = $("#ws-switching");
+  if (!text) { if (box) box.hidden = true; return; }
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "ws-switching";
+    box.className = "ws-switching";
+    box.setAttribute("role", "status");
+    host.appendChild(box);
+  }
+  box.textContent = text;
+  box.hidden = false;
+};
+
 WS.go = async (task, arg = null) => {
   if (WS.busy) return false;
+  const switching = WS.switchingMessage(task);
   WS.busy = true;
+  if (switching) {
+    WS.showSwitching(switching);
+    await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0))); // let it paint first
+  }
   try { return await WS.transition(task, arg); }
   catch (error) { toast(friendlyError(error), true, 6000); return false; }
-  finally { WS.busy = false; WS.sync(); }
+  finally {
+    WS.busy = false;
+    WS.sync();
+    if (switching) {
+      // Keep it up until the new view has been drawn.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      WS.showSwitching("");
+    }
+  }
 };
 
 WS.toSpaceMode = async () => (DP.mode === "space" || await DP.selectMode("space"));
@@ -536,9 +575,19 @@ WS.onAction = async (act, button, event) => {
 WS.outputTarget = () => {
   if (WS.busy || !["bin", "container"].includes(WS.task)) return null;
   if (WS.task === "container") return WS.open() && WS.containerKind() && !SP.structuralBusy ? "container" : null;
-  const bin = WS.open() ? Boolean(state.designInventoryId) : state.folderMode !== "space";
-  return bin && !state.designMutationBusy && state.canGenerate ? "bin" : null;
+  return WS.binReady() ? "bin" : null;
 };
+
+// Print Bin: only an actual selected bin (never the container or the space layout).
+WS.binReady = () => {
+  if (WS.busy || WS.task !== "bin") return false;
+  const bin = WS.open() ? Boolean(state.designInventoryId) : state.folderMode !== "space";
+  return bin && !state.designMutationBusy && state.canGenerate;
+};
+
+// The container print button: lit whenever the open space has a container, whatever is selected.
+WS.containerReady = () => !WS.busy && WS.open() && Boolean(WS.containerKind()) && !SP.structuralBusy
+  && ["bin", "container", "settings"].includes(WS.task);
 
 WS.syncOutput = () => {
   const printBin = $("#ws-print-bin");
@@ -548,11 +597,17 @@ WS.syncOutput = () => {
   const target = WS.outputTarget();
   const what = WS.task === "container" ? WS.containerName().toLowerCase() || "container" : "bin";
   const hosted = Boolean(state.runtime.hosted);
-  printBin.disabled = target !== "bin";
-  printContainer.disabled = target !== "container";
-  printContainer.textContent = `Print ${{ storage_box: "Box", storage_drawers: "Drawers", base_trim: "Surface" }[WS.containerKind()] || "Container"}`;
+  const binReady = WS.binReady();
+  const containerReady = WS.containerReady();
+  printBin.disabled = !binReady;
+  printContainer.disabled = !containerReady;
+  printContainer.textContent = `Print ${{ storage_box: "Box", storage_drawers: "Drawers", base_trim: "Edge" }[WS.containerKind()] || "Container"}`;
+  printContainer.title = !containerReady ? "This space has no container to print."
+    : hosted ? "Printing needs local Wavefinity and a slicer"
+    : !state.slicer?.available ? "A slicer is needed - use Printer Settings to choose one"
+    : `Send the ${WS.containerName().toLowerCase() || "container"} to ${state.slicer.name || "the slicer"}`;
   exportButton.disabled = !target;
-  printBin.title = !target ? "Select a bin, the storage box or the drawers to print it."
+  printBin.title = !binReady ? "Select a bin to print it."
     : hosted ? "Printing needs local Wavefinity and a slicer"
     : !state.slicer?.available ? "A slicer is needed - use Printer Settings to choose one"
     : `Send the ${what} to ${state.slicer.name || "the slicer"}`;
@@ -560,12 +615,13 @@ WS.syncOutput = () => {
 };
 
 WS.output = (mode, button, event) => {
+  const drawers = WS.containerKind() === "storage_drawers";
+  if (button?.id === "ws-print-bin") return WS.binReady() ? chooseIndividualBinPrint(button) : null;
+  if (button?.id === "ws-print-container") return WS.containerReady() ? (drawers ? SP.runStructural("print", event) : SP.printStructural(event)) : null;
   const target = WS.outputTarget();
   if (!target) return null;
   if (target === "bin") return chooseIndividualBinPrint(button);
-  const drawers = WS.containerKind() === "storage_drawers";
-  if (mode === "export") return drawers ? SP.runStructural("save") : SP.saveStructural();
-  return drawers ? SP.runStructural("print", event) : SP.printStructural(event);
+  return drawers ? SP.runStructural("save") : SP.saveStructural();
 };
 
 // ------------------------------------------------------------------ sync
