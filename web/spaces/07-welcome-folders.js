@@ -53,7 +53,7 @@ SP.pickFolder = async ({ stayOnSetup = false, spaceRoot = false, accessContext =
 // setup pass - including a legacy box, v2/v3, or migration-needed Space -
 // is never applied/opened directly; it always goes through the explicit
 // setup/migration flow first - see Fix 004 Correction 9.B.
-SP.afterPick = async folder => {
+SP.afterPick = async (folder, leaveOptions) => {
   if (!folder) return null;
   if (state.runtime.hosted) {
     // A hosted object with no handle is not a folder and is never adopted.
@@ -78,7 +78,7 @@ SP.afterPick = async folder => {
   // folder as active (Fix 019 correction C1.2) - Cancel or a failed save
   // must abort before /api/folder/use ever runs, so the backend's
   // remembered active folder/Space cannot get ahead of what is on screen.
-  const okToLeave = await SP.leaveSpaceSafely();
+  const okToLeave = await SP.leaveSpaceSafely(leaveOptions);
   if (!okToLeave) return null;
   const data = await api("/api/folder/use", { output: folder });
   SP.recent = data.recent || [];

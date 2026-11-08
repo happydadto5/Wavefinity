@@ -11,9 +11,11 @@
 // Resolves true when it is safe to proceed (nothing dirty, or a successful
 // flush) and false when the switch must be aborted with everything -
 // including DL.layout/DL.dirty - left exactly as it was.
-SP.leaveDrawerLayoutSafely = async ({ noDeferredPreview = false } = {}) => {
+SP.leaveDrawerLayoutSafely = async ({ noDeferredPreview = false, visible = true } = {}) => {
+  // visible:false - no editor is on screen (the open screen is up), so there are no
+  // uncommitted form edits and no prompt may be raised while flushing.
   if (typeof flushSpaceDesignAutosave === "function" &&
-      !(await flushSpaceDesignAutosave({ deferDraftPreview: true, noDeferredPreview }))) return false;
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true, noDeferredPreview, visible }))) return false;
   if (SP._inventoryWriteChain) await SP._inventoryWriteChain;
   if (typeof DL === "undefined") return true;
   if (DL.savePromise) {

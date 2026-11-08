@@ -108,6 +108,7 @@ WS.renderPicker = () => {
       <span class="ws-card-text"><strong>${wsEsc(one.name)}</strong><small>${wsEsc([SP_KINDS[one.kind]?.label, one.meta].filter(Boolean).join(" · "))}</small></span></button></li>`).join("");
   return `<div class="ws-sel">
     <div class="ws-sel-head"><h2>Open a Space</h2></div>
+    ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
     <ul class="ws-menu-list" aria-label="Your Spaces">${cards}
       <li><button type="button" class="ws-menu-item" data-ws-act="my-bins">
         <span class="ws-card-icon" aria-hidden="true">📦</span>
@@ -380,6 +381,7 @@ WS.land = async () => {
 
 // A place just changed (a Space opened, created or left).
 WS.arrive = () => {
+  WS.message = "";
   WS.prior = null;
   WS.printPick = new Set();
   WS.printContainer = false;
@@ -425,6 +427,25 @@ WS.setEnabled = async on => {
 
 // ------------------------------------------------------------------ actions
 
+// Open a Space from a row. On the open screen nothing is being edited, so leaving the
+// restored Space must not wait on an editor prompt; if the switch cannot proceed the
+// reason is shown on the screen itself, not only as a toast.
+WS.pickSpace = folder => SP.run(async () => {
+  WS.message = "";
+  let opened = null;
+  try {
+    opened = await SP.afterPick(folder, WS.task === "picker" ? { visible: false } : undefined);
+  } catch (error) {
+    WS.message = `Could not open that Space: ${friendlyError(error)}`;
+    WS.sync();
+    throw error;
+  }
+  if (!opened) {
+    WS.message = "That Space could not be opened because the Space that is open could not be saved first. Fix the problem there, then try again.";
+    WS.sync();
+  }
+});
+
 WS.openSpaceRow = button => {
   const src = button.dataset.src;
   const index = Number(button.dataset.index);
@@ -435,11 +456,11 @@ WS.openSpaceRow = button => {
   }
   if (src === "other") {
     const one = SP.otherSpaces[index];
-    if (one) SP.run(() => SP.afterPick(one.folder));
+    if (one) WS.pickSpace(one.folder);
     return null;
   }
   const one = SP.recent[index];
-  if (one) SP.run(() => SP.afterPick(state.runtime.hosted ? { handle: one.handle, name: one.folder_name || one.name } : one.folder));
+  if (one) WS.pickSpace(state.runtime.hosted ? { handle: one.handle, name: one.folder_name || one.name } : one.folder);
   return null;
 };
 
