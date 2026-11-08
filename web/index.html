@@ -22,10 +22,6 @@
       <button id="about-btn" class="button secondary" type="button" title="Learn about Wavefinity">About</button>
     </div>
     <div class="header-actions">
-      <div id="ws-header-tools" class="ws-header-tools" role="group" aria-label="Print" hidden>
-        <button id="ws-print-bin" class="button secondary" type="button">Print Bin</button>
-        <button id="ws-print-space" class="button secondary" type="button">Print Space</button>
-      </div>
       <button id="ws-ui-toggle" class="button secondary" type="button" title="Go back to the earlier Bins and Spaces screens. Your files are the same either way.">Temp only Roll back</button>
       <button id="suggestions-open" class="button secondary" type="button">Suggestions</button>
       <button id="designer-settings-open" class="button secondary designer-settings-button" type="button" aria-haspopup="true" aria-expanded="false" popovertarget="designer-settings-menu">
@@ -39,9 +35,22 @@
     </div>
   </header>
 
+  <div id="ws-frame" class="ws-frame" role="group" aria-label="Where you are" hidden>
+    <button id="ws-spaces" class="button secondary dl-small" type="button" title="Choose a Space, or start a new one">Spaces</button>
+    <strong id="ws-place" class="ws-place"></strong>
+    <div class="ws-new-wrap">
+      <button id="ws-new" class="button secondary dl-small" type="button" aria-haspopup="true" aria-expanded="false">New</button>
+      <div id="ws-new-menu" class="ws-new-menu" role="group" aria-label="New" hidden>
+        <button id="ws-new-bin" type="button">New Bin</button>
+        <button id="ws-new-space" type="button">New Space…</button>
+      </div>
+    </div>
+    <span id="ws-roll-slot" class="ws-roll-slot"></span>
+  </div>
+  <section id="ws-stage" class="ws-stage" hidden></section>
+
   <main class="app-shell" id="app-shell">
     <aside class="controls" aria-label="Bin controls">
-      <section id="ws-hierarchy" class="ws-hierarchy" aria-label="Where you are" hidden></section>
       <nav id="space-mode-row" class="space-mode-row" aria-label="Work area">
         <div id="space-mode-toggle" class="space-mode-toggle" role="tablist" aria-label="Work area">
           <button type="button" role="tab" data-space-mode="space" aria-selected="false" aria-pressed="false" tabindex="-1">Space</button>

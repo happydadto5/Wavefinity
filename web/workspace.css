@@ -1,57 +1,114 @@
-/* Story 2671 - one workspace for the open Space. Everything is scoped to
-   ws- classes or to body.ws-on, so the classic screens are untouched when the
-   switch is on Classic. */
+/* Story 2674 - one place, one focus. Everything is scoped to ws- classes or to
+   body.ws-on, so the classic screens are untouched behind Temp only Roll back. */
 
-.ws-header-tools[hidden], .ws-hierarchy[hidden] { display: none !important; }
-.ws-header-tools { display: flex; gap: 6px; align-items: center; }
-.ws-header-tools .button.active { border-color: var(--teal); color: var(--teal-dark); background: var(--teal-soft); }
+.ws-frame[hidden], .ws-stage[hidden], .ws-new-menu[hidden] { display: none !important; }
 
-/* The tabs give way to the hierarchy. */
+/* The one slim header on every task. */
+.ws-frame {
+  display: flex; align-items: center; gap: 10px; padding: 6px 14px; min-height: 40px; box-sizing: border-box;
+  background: var(--panel); border-bottom: 1px solid var(--line-dark);
+}
+.ws-place { font-size: 15px; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-roll-slot { margin-left: auto; display: flex; }
+.ws-new-wrap { position: relative; }
+.ws-new-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 150px; padding: 4px;
+  display: grid; background: white; border: 1px solid var(--line-dark); border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+}
+.ws-new-menu button { border: 0; background: none; text-align: left; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 6px; cursor: pointer; color: var(--ink); }
+.ws-new-menu button:hover, .ws-new-menu button:focus-visible { background: var(--teal-soft); }
+
+/* The tabs and the old bin/drawer pickers give way to the task lines. */
 body.ws-on #space-mode-row { display: none; }
 body.ws-on #design-bin-nav, body.ws-on #design-drawer-nav { display: none !important; }
+body.ws-on #space-cancel-edit { display: none; }
 
-.ws-hierarchy {
-  position: sticky; top: 0; z-index: 3; margin: 10px 12px 0; padding: 10px 12px 12px;
-  background: var(--panel); border: 1px solid var(--line-dark); border-left: 3px solid var(--teal); border-radius: 11px;
-  max-height: 42vh; overflow-y: auto;
+/* The stage: full-width tasks fill the page; an editor gets only a slim line. */
+.ws-stage { background: #f8faf9; box-sizing: border-box; }
+body.ws-full .ws-stage { height: calc(100vh - 79px - var(--ws-frame, 40px)); overflow: auto; }
+body.ws-full .app-shell { display: none; }
+body.ws-on .app-shell { height: calc(100vh - 79px - var(--ws-chrome, 0px)); }
+body.ws-on:not(.ws-full) .ws-stage { max-height: 42vh; overflow: auto; border-bottom: 1px solid var(--line-dark); }
+body.ws-task-picker .ws-stage, body.ws-task-print .ws-stage, body.ws-task-mybins .ws-stage { max-height: none; }
+
+.ws-page { max-width: 980px; margin: 0 auto; padding: 18px 20px 28px; }
+.ws-page h2 { margin: 0 0 12px; font-size: 22px; }
+.ws-section { margin: 20px 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.ws-cards, .ws-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ws-cards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.ws-card, .ws-choice {
+  width: 100%; text-align: left; font: inherit; color: var(--ink); background: white; cursor: pointer;
+  border: 1px solid var(--line-dark); border-radius: 11px; padding: 10px 12px;
 }
-.ws-crumb { margin: 0 0 8px; font-size: 12px; color: var(--muted); line-height: 1.5; }
-.ws-crumb strong { color: var(--ink); }
-.ws-crumb-link { border: 0; background: none; padding: 0; font: inherit; color: var(--teal-dark); font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-.ws-tree { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.ws-node, .ws-group { display: flex; align-items: center; gap: 6px; padding: 1px 0 1px calc((var(--ws-level, 1) - 1) * 16px); min-height: 28px; }
-.ws-node[data-level="2"], .ws-group[data-level="2"] { --ws-level: 2; }
-.ws-node[data-level="3"], .ws-group[data-level="3"] { --ws-level: 3; }
-.ws-group { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: none; min-height: 22px; }
+.ws-card { display: flex; align-items: center; gap: 10px; }
+.ws-card:hover:not(:disabled), .ws-choice:hover { border-color: var(--teal); background: var(--teal-soft); }
+.ws-card:focus-visible, .ws-choice:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.ws-card.current { border-color: var(--teal); box-shadow: inset 3px 0 0 var(--teal); }
+.ws-card:disabled { opacity: .55; cursor: default; }
+.ws-card-icon { font-size: 22px; flex: none; }
+.ws-card-text { display: grid; min-width: 0; }
+.ws-card-text small, .ws-choice small { color: var(--muted); font-size: 12px; }
+.ws-card-tag { margin-left: auto; font-size: 11px; color: var(--teal-dark); font-style: normal; font-weight: 700; }
+.ws-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.ws-choice { display: grid; gap: 4px; justify-items: start; }
+.ws-choice img, .ws-choice-blank { width: 100%; max-width: 120px; height: 90px; object-fit: contain; }
+.ws-choice-blank { display: grid; place-items: center; font-size: 28px; color: var(--muted); }
+.ws-links { margin: 12px 0 0; font-size: 13px; color: var(--muted); }
+
+/* Overview, My Bins, Print Space. */
+.ws-overview, .ws-print { padding-bottom: 12px; }
+.ws-toprow { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.ws-selbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; padding: 8px 12px; min-height: 22px;
+  background: var(--teal-soft); border: 1px solid var(--teal); border-radius: 10px;
+}
+.ws-selbar.empty { background: transparent; border-style: dashed; border-color: var(--line-dark); color: var(--muted); font-size: 13px; }
+.ws-selbar strong { margin-right: auto; }
+.ws-items { gap: 2px; }
+.ws-item, .ws-group { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.ws-item > label { display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; }
+.ws-group { font-size: 12px; font-weight: 700; color: var(--muted); margin-top: 8px; }
 .ws-label {
-  border: 0; background: transparent; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink);
-  text-align: left; padding: 4px 8px; border-radius: 7px; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: 0; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink);
+  text-align: left; padding: 5px 10px; border-radius: 7px; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-span.ws-label { cursor: default; }
+span.ws-label { cursor: inherit; padding-left: 0; }
 button.ws-label:hover { background: var(--teal-soft); }
 button.ws-label:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
-.ws-node.current > .ws-label { background: var(--teal); color: white; font-weight: 700; }
-.ws-node.view-only > .ws-label { font-weight: 500; color: var(--muted); }
-.ws-node.active-drawer > .ws-label { box-shadow: inset 0 0 0 1px var(--teal); }
-.ws-note { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ws-rule { margin: 8px 0 0; font-size: 11px; color: var(--muted); line-height: 1.45; }
-.ws-tick { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); flex: none; }
-.ws-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.ws-printbar { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
-.ws-printcount { font-size: 12px; font-weight: 700; color: var(--teal-dark); }
+.ws-item.selected > .ws-label { background: var(--teal); color: white; }
+.ws-item.container > .ws-label { font-style: italic; }
+.ws-note { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+.ws-printcount { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--teal-dark); }
+.ws-item input[type="checkbox"] { width: 17px; height: 17px; margin: 0; accent-color: var(--teal); flex: none; }
 
-/* One inspector: only the part of the sidebar for the selected object shows. */
-body.ws-on.ws-subject-bin #space-head,
-body.ws-on.ws-subject-newbin #space-head { display: none; }
-body.ws-on.ws-subject-container #space-head .space-head-title,
-body.ws-on.ws-subject-container #space-actions > .button-row { display: none; }
+/* The slim line above an editor. */
+.ws-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 14px; min-height: 38px; box-sizing: border-box; }
+.ws-trail { font-size: 13px; color: var(--muted); margin-right: auto; }
+.ws-trail strong { color: var(--ink); }
+.ws-switch { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.ws-switch select { max-width: 220px; }
+.ws-linknote { font-size: 12px; color: var(--muted); }
 
-/* The Space stays in view above a bin or container being edited. */
-body.ws-split .workspace { grid-template-rows: auto minmax(150px, 2fr) minmax(0, 3fr) auto auto; }
-body.ws-split .canvas-wrap[data-canvas="drawer"] { display: flex; grid-row: 2; border-bottom: 1px solid var(--line-dark); }
-body.ws-split .workspace > .canvas-wrap.active:not([data-canvas="drawer"]) { grid-row: 3; }
-body.ws-split #dl-staging,
-body.ws-split .canvas-wrap[data-canvas="drawer"] .dl-hint,
-body.ws-split .canvas-wrap[data-canvas="drawer"] .dl-height-legend { display: none !important; }
-body.ws-split .canvas-wrap[data-canvas="drawer"] .dl-view-controls { left: 10px; }
-body.ws-split #drawer-canvas { cursor: pointer; }
+/* Overview with a layout: the Space canvas is the rest of the page, view and pick only. */
+body.ws-task-overview #dl-staging,
+body.ws-task-overview .canvas-wrap[data-canvas="drawer"] .dl-hint { display: none !important; }
+body.ws-task-overview .app-shell { grid-template-columns: 1fr; }
+body.ws-task-overview .controls, body.ws-task-overview .sidebar-resizer { display: none; }
+body.ws-task-overview #drawer-canvas { cursor: pointer; }
+
+/* Each editor stands alone: only its own part of the sidebar shows. */
+body.ws-task-bin #space-head,
+body.ws-task-container #space-head .space-head-title,
+body.ws-task-container #space-actions > .button-row { display: none; }
+body.ws-task-settings #space-actions,
+body.ws-task-settings #space-head .space-head-title,
+body.ws-task-settings .dl-section[aria-label="Inventory"] { display: none; }
+/* A dimension lives in one place: size and construction of a box or cabinet are in its container editor. */
+body.ws-task-settings #space-fields-portable,
+body.ws-task-settings #space-fields-storage_drawers { display: none; }
+
+/* Setup is a full-screen task of its own. */
+body.ws-on #welcome-dialog[open] {
+  position: fixed; inset: 0; width: 100vw; max-width: none; height: 100vh; max-height: none; margin: 0; border-radius: 0; overflow: auto;
+}
