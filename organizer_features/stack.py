@@ -807,6 +807,10 @@ def make_lid_parts(
     sunk = [mesh for _text, mesh, raised in labels if not raised]
     if sunk:
         lid = difference([lid, union(sunk) if len(sunk) > 1 else sunk[0]])
+    if hinge is not None:
+        # The plate's underside reaches into the top of the pin channel on a
+        # thick lid; bore the assembled lid so the channel is clear end to end.
+        lid = difference([lid, body_hinge_cutters(hinge)[-1]])
     lid.remove_unreferenced_vertices()
     return lid, labels
 
