@@ -4,7 +4,7 @@ Option Explicit
 ' activate_wavefinity_launcher.ps1 installs this file as
 ' %LOCALAPPDATA%\Wavefinity\Launcher\Launch_Organizer_UI.vbs and points the
 ' Wavefinity shortcut at it. It runs the installed current launcher version
-' hidden, then shows the outcome the launcher reported: READY (brief),
+' hidden, then shows the outcome the launcher reported: READY (silent),
 ' RUNNING UNVERIFIED (stays until dismissed) or STOPPED with the action to take.
 ' A copy run from a Wavefinity checkout is only a shim for the installed
 ' launcher; it never starts anything from the checkout.
@@ -67,7 +67,7 @@ If files.FileExists(statusFile) Then
 End If
 
 If state = "READY" Then
-    shell.Popup Trim(message), 6, "Wavefinity", 64
+    ' Nothing is wrong: stay silent and let the app open.
 ElseIf state = "OFFLINE_UNVERIFIED" Then
     shell.Popup Trim(message), 0, "Wavefinity - running unverified", 48
 ElseIf state = "STOPPED" Or exitCode <> 0 Then
