@@ -109,9 +109,6 @@ LID_LABEL_MARGIN = 2.0
 LID_LABEL_MIN_CAP = 2.5
 LID_LABEL_MIN_BACKING = 0.4   # lid left under an inlaid label pocket
 
-# Continuous analytic arc envelopes replace depth and angular spot samples.
-FLIP_MIN_PLUG_DEPTH = 4.0
-
 _EPS = 1e-6
 _PROFILE_EPS = 0.02
 
@@ -298,67 +295,6 @@ def _lid_top_polygon(eff: BoxSpec, hinge: LidHinge | None) -> Polygon:
     """Plan outline of the lid plate: the bin's outline, less the hinge strip."""
     outer = wavy_outer_polygon(eff)
     return outer if hinge is None else _clip_back(outer, hinge.plate_back_y)
-
-
-_FLIP_PLUGS: dict = {}
-
-
-def _swept_plug_polygon(eff: BoxSpec, hinge: LidHinge) -> Polygon:
-    """Trim every below-rim swing arc against the normal-eroded wall path.
-
-    Put q = axis_y - y, d = axis_depth and h = d - plug_depth_at_point.
-    During opening y' = axis_y - q*cos(t) + h*sin(t),
-    z' = axis_z + q*sin(t) + h*cos(t). Below the rim, z' <= axis_z+d.
-    For ALL depths in [0, STACK_PLUG_DEPTH], the complete Y interval is
-      [axis_y-sqrt(q*q+A*A), axis_y-sqrt(q*q-B*B)]
-    where A=max(0, STACK_PLUG_DEPTH-d), and
-    B*B=d*d-max(0, d-STACK_PLUG_DEPTH)**2. The first bound is the
-    bottom point's stationary position; the second is the rim crossing at
-    the depth nearest the axis. Both are reached before vertical. X never
-    changes. Keeping that entire interval inside the eroded polygon proves
-    minimum fit clearance for every point, depth and opening angle.
-
-    Pull each sampled boundary edge back through those two analytic bounds.
-    The forward inverse is convex and the backward inverse concave: straight
-    chords lie OUTSIDE their curves. Subtracting these edge bands therefore
-    conservatively includes every crossing, including between wall vertices.
-    No depth/angle sampling or smoothing can restore unsafe plug material.
-    """
-    fit = lid_fit_mm(eff)
-    key = (eff.half_x, eff.half_y, eff.wall_depth, eff.corner_fillet, eff.wall, fit,
-           hinge.axis_y, hinge.axis_depth, hinge.plug_back_y, hinge.open_angle_deg)
-    cached = _FLIP_PLUGS.get(key)
-    if cached is not None:
-        return cached
-    allowed = _clip_back(_plug_polygon(eff, fit), hinge.plug_back_y)
-    forward_sq = max(0.0, STACK_PLUG_DEPTH - hinge.axis_depth) ** 2
-    backward_sq = (hinge.axis_depth ** 2
-                   - max(0.0, hinge.axis_depth - STACK_PLUG_DEPTH) ** 2)
-    bands = []
-    for ring in (allowed.exterior, *allowed.interiors):
-        points = list(ring.coords)
-        for (x0, y0), (x1, y1) in zip(points, points[1:]):
-            q0, q1 = hinge.axis_y - y0, hinge.axis_y - y1
-            for sign, squared in ((-1.0, forward_sq), (1.0, backward_sq)):
-                if squared <= _EPS:
-                    continue
-                # Close to the corner pin no plug point can sweep as far as
-                # this edge; clamping there only trims more, never less.
-                end0 = hinge.axis_y - math.sqrt(max(0.0, q0*q0 + sign*squared))
-                end1 = hinge.axis_y - math.sqrt(max(0.0, q1*q1 + sign*squared))
-                band = Polygon([(x0, y0), (x1, y1), (x1, end1), (x0, end0)])
-                if band.area > 0.0:
-                    bands.append(band)
-    plug = allowed.difference(unary_union(bands)) if bands else allowed
-    if isinstance(plug, MultiPolygon):
-        plug = max(plug.geoms, key=lambda one: one.area)
-    if (plug.is_empty or not isinstance(plug, Polygon)
-            or plug.bounds[3] - plug.bounds[1] < FLIP_MIN_PLUG_DEPTH):
-        raise ValueError("this bin is too shallow for a flip lid - turn Flip lid off")
-    if len(_FLIP_PLUGS) > 16:
-        _FLIP_PLUGS.clear()
-    _FLIP_PLUGS[key] = plug
-    return plug
 
 
 def _profile_loft(polygons: list[Polygon], heights: list[float]) -> trimesh.Trimesh:
@@ -751,9 +687,8 @@ def make_lid_parts(
     rim = eff.z
     rise = stack_lid_rise(eff)
     # Flip lid only: the resolved hinge.  Its plate stops at the hinge strip and
-    # its plug is the swept-clearance profile; without it nothing below changes.
+    # it has no underside plug; without a hinge nothing below changes.
     hinge = _lid_hinge(eff)
-    plug_outline = _lid_plug_polygon(eff) if hinge is None else _swept_plug_polygon(eff, hinge)
     outer = wavy_outer_polygon(eff) if hinge is not None else _lid_top_polygon(eff, hinge)
 
     # Flush seat: the plate is the bin full outer outline from the rim up, so
@@ -768,12 +703,15 @@ def make_lid_parts(
     if hinge is not None:
         plate = difference([plate, plate_hinge_cutter(hinge, eff.half_x)])
 
-    plug = _extrude_polygon(plug_outline, STACK_PLUG_DEPTH)
-    plug.apply_translation((0.0, 0.0, rim - STACK_PLUG_DEPTH))
+    parts = [plate]
+    if hinge is None:
+        plug = _extrude_polygon(_lid_plug_polygon(eff), STACK_PLUG_DEPTH)
+        plug.apply_translation((0.0, 0.0, rim - STACK_PLUG_DEPTH))
+        parts.append(plug)
 
     bumps = [] if hinge is not None else _lid_lock_bumps(eff, rim)
     from organizer_features.lid_snap import snap_fingers
-    lid = union([plate, plug, *bumps, *snap_fingers(eff)])
+    lid = union([*parts, *bumps, *snap_fingers(eff)])
 
     if lid_stackable(eff):
         # Recess accepting the next stackable-lid bin stepped base. It keeps
@@ -948,16 +886,14 @@ def validate_stack_design(box: BoxSpec) -> None:
     if lid_enabled(box):
         if lid_stackable(box) and stack_lid_rise(eff) - STACK_SEAT_DEPTH < STACK_MIN_FLOOR_SKIN - _EPS:
             raise ValueError("the stacking lid does not leave enough material under its seat")
-        bump_profile = _lid_lock_profile(
-            lid_fit_mm(eff) + LID_LOCK_INTERFERENCE, eff.z,
-        )
-        if min(z for _, z in bump_profile) < eff.z - STACK_PLUG_DEPTH - _EPS:
-            raise ValueError("the stacking lid plug is too short for its lock points")
         if lid_has_flip(box):
-            # Raises if the bin is too small to hinge; resolving the swept plug
-            # is the one place the whole swing is checked against the walls.
-            hinge = _lid_hinge(eff)
-            _swept_plug_polygon(eff, hinge)
+            _lid_hinge(eff)        # raises if the bin is too small to hinge
+        else:
+            bump_profile = _lid_lock_profile(
+                lid_fit_mm(eff) + LID_LOCK_INTERFERENCE, eff.z,
+            )
+            if min(z for _, z in bump_profile) < eff.z - STACK_PLUG_DEPTH - _EPS:
+                raise ValueError("the stacking lid plug is too short for its lock points")
         if lid_has_handle(box):
             _lid_handle_mesh(box)         # raises if the chosen handle cannot fit
         spec = lid_spec(box)
