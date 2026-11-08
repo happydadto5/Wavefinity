@@ -301,7 +301,7 @@ async function printModel(target = "bin", initiatingButton = null) {
   if (!beginDesignMutation()) return;
   const button = initiatingButton || $("#print-individual-bin");
   const old = button.textContent;
-  const printButtons = [$("#print-individual-bin"), $("#ws-print-bin"), $("#ws-export")].filter(Boolean);
+  const printButtons = [$("#print-individual-bin")].filter(Boolean);
   printButtons.forEach(one => { one.disabled = true; });
   const slicerName = state.slicer?.name || "the slicer";
   button.textContent = `Sending to ${slicerName}…`;
@@ -391,6 +391,7 @@ async function printModel(target = "bin", initiatingButton = null) {
     const files = result.files || [];
     const fileNames = files.map(f => f.split(/[\\/]/).pop());
     const sentMessage = `Sent to ${slicerName}!\n${fileNames.join("\n")}`;
+    if (!designRowId && (target === "bin" || target === "all") && typeof WS !== "undefined") WS.markLooseBinPrinted();
     if (target === "bin" || target === "all") {
       // Fix 032 Correction 2 (C2.3): the slicer handoff already succeeded
       // by this point, so defer the success toast until after the final

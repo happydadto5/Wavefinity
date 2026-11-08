@@ -497,6 +497,7 @@ SP.printCabinetAndBins = async event => {
       toast(result.error || "Cabinet + bins files were saved, but the slicer did not open.", true, 8000);
     } else {
       toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\n${names(result.files)}`, false, 7000);
+      if (typeof WS !== "undefined") WS.markContainerPrinted();
     }
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
@@ -549,6 +550,7 @@ SP.runCabinetStructural = async mode => {
         toast(result.error || "Cabinet files were saved, but the slicer did not open.", true, 8000);
       } else {
         toast(`Sent to ${state.slicer?.name || "the slicer"}!\n${names(result.files)}`, false, 7000);
+        if (typeof WS !== "undefined") WS.markContainerPrinted();
       }
       saved = result;
     } else if (hosted) {

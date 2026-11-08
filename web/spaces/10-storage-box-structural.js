@@ -226,6 +226,7 @@ SP.runStructural = async (mode, event) => {
       } else {
         const names = (result.files || []).map(file => String(file).split(/[\\/]/).pop());
         toast(`Sent to ${state.slicer?.name || "the slicer"}!\n${names.join("\n")}`, false, 7000);
+        if (typeof WS !== "undefined") WS.markContainerPrinted();
       }
     }
   } catch (error) {
@@ -296,7 +297,10 @@ SP.printStorageBox = async (mode = "print") => {
     DL.emit();
     DL.requestReport();
     if (result.partial) toast(result.error || "Storage Box print stopped before Bambu Studio opened.", true, 10000);
-    else toast(`Sent Storage Box + Bins to ${state.slicer?.name || "the slicer"}!\n${(result.files || []).map(file => String(file).split(/[\\/]/).pop()).join("\n")}`, false, 8000);
+    else {
+      toast(`Sent Storage Box + Bins to ${state.slicer?.name || "the slicer"}!\n${(result.files || []).map(file => String(file).split(/[\\/]/).pop()).join("\n")}`, false, 8000);
+      if (typeof WS !== "undefined") WS.markContainerPrinted();
+    }
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
       toast("Storage Box print belongs to the Space you left. The current Space was not changed.");

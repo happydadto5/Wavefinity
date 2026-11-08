@@ -350,7 +350,10 @@ SP.printSurface = async event => {
     DL.emit();
     DL.requestReport();
     if (result.partial) toast(result.error || "Surface print stopped before Bambu Studio opened.", true, 10000);
-    else toast(`Sent Surface + Bins to ${state.slicer?.name || "the slicer"}!\n${SP.fileNames(result.files)}`, false, 8000);
+    else {
+      toast(`Sent Surface + Bins to ${state.slicer?.name || "the slicer"}!\n${SP.fileNames(result.files)}`, false, 8000);
+      if (typeof WS !== "undefined") WS.markContainerPrinted();
+    }
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
       toast("Surface print belongs to the Space you left. The current Space was not changed.");

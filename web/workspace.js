@@ -61,7 +61,7 @@ WS.items = () => {
   if (WS.containerKind()) add("container", "container", WS.containerName());
   const bins = (DL.bins || []).filter(DL.isOrdinary);
   const binItem = one => add("bin", one.id, DL.label(one), {
-    note: [`${fmt(one.x)} × ${fmt(one.y)} mm`, DL.statusLabel(one)].join(" · "),
+    note: `${fmt(one.x)} × ${fmt(one.y)} mm`,
     printable: DL.printEligible(one),
   });
   const drawers = DL.layout.drawers || [];
@@ -125,7 +125,7 @@ WS.renderSelector = () => {
     const icon = one.kind === "container" ? "▦" : "▢";
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${locked ? " disabled" : ""}>
-      <span class="ws-ico" aria-hidden="true">${icon}</span><span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button></li>`;
+      <span class="ws-ico" aria-hidden="true">${icon}</span><span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${WS.rowOutputs(one, picked && !locked)}</li>`;
   }).join("");
   const binSelected = !locked && WS.task === "bin" && (!here || Boolean(state.designInventoryId));
   const canDuplicate = binSelected && !$("#designer-duplicate")?.hidden && !$("#designer-duplicate")?.disabled;
@@ -228,6 +228,7 @@ WS.render = () => {
     const focused = document.activeElement?.closest?.(`#${host.id}`) ? document.activeElement : null;
     const find = focused ? (focused.dataset.wsAct ? `[data-ws-act="${focused.dataset.wsAct}"]`
       : focused.dataset.wsPick ? `[data-ws-pick="${focused.dataset.wsPick}"][data-id="${CSS.escape(focused.dataset.id || "")}"]`
+      : focused.dataset.wsOut !== undefined ? `[data-ws-out][data-kind="${focused.dataset.kind}"][data-id="${CSS.escape(focused.dataset.id || "")}"][data-output="${focused.dataset.output}"]`
       : focused.dataset.wsTick ? `[data-ws-tick="${CSS.escape(focused.dataset.wsTick)}"]` : null) : null;
     host.innerHTML = html;
     WS[key] = html;
@@ -568,15 +569,92 @@ WS.onAction = async (act, button, event) => {
   }
 };
 
-// ------------------------------------------------------------------ top bar: Print Bin / Export
+// ------------------------------------------------------------------ row buttons: Print / Export
 
-// What Print Bin / Export act on: the selected container (Storage Box, Drawers, Surface) or the
-// selected bin. Nothing else prints. Read from the live selection every time, never remembered.
-WS.outputTarget = () => {
-  if (WS.busy || !["bin", "container"].includes(WS.task)) return null;
-  if (WS.task === "container") return WS.open() && WS.containerKind() && !SP.structuralBusy ? "container" : null;
-  return WS.binReady() ? "bin" : null;
+// Story 2721: Print and Export live at the right end of every selector row. Only the row being
+// edited has live buttons; the others stay disabled but still read by printed state.
+// Printed state: a bin row is green when its stored status is Printed (any edit resets it); the
+// container and the loose bin remember the design signature last printed, green while it still
+// matches; Layout is green when everything printable in the space is printed and current.
+WS.PRINTED_KEY = "wavefinity.printedSignatures";
+WS.printedSigs = (() => {
+  try { return JSON.parse(localStorage.getItem(WS.PRINTED_KEY) || "{}") || {}; } catch { return {}; }
+})();
+WS.sigKey = kind => (kind === "container" ? `container:${state.activeSpaceId || state.activeSpace?.name || ""}` : "loose");
+WS.currentSig = kind => {
+  try { return JSON.stringify(kind === "container" ? state.activeSpace : state.design); } catch { return ""; }
 };
+WS.markPrinted = kind => {
+  const sig = WS.currentSig(kind);
+  if (!sig) return;
+  WS.printedSigs[WS.sigKey(kind)] = sig;
+  try { localStorage.setItem(WS.PRINTED_KEY, JSON.stringify(WS.printedSigs)); } catch { /* storage unavailable: stays in memory */ }
+  WS.sync();
+};
+WS.markContainerPrinted = () => { if (WS.open() && WS.containerKind()) WS.markPrinted("container"); };
+WS.markLooseBinPrinted = () => { if (!WS.open() && state.folderMode !== "space") WS.markPrinted("loose"); };
+
+WS.isPrinted = one => {
+  if (one.kind === "container") return WS.printedSigs[WS.sigKey("container")] === WS.currentSig("container");
+  if (one.kind === "settings") {
+    const bins = (DL.bins || []).filter(bin => DL.isOrdinary(bin) && DL.printEligible(bin));
+    const parts = bins.length + (WS.containerKind() ? 1 : 0);
+    return parts > 0 && bins.every(bin => bin.status === "printed")
+      && (!WS.containerKind() || WS.isPrinted({ kind: "container" }));
+  }
+  if (!WS.open()) return WS.printedSigs[WS.sigKey("loose")] === WS.currentSig("loose");
+  return DL.bin(one.id)?.status === "printed";
+};
+
+// Is this row's Print / Export live? Only the row being edited, and only when its action can run.
+WS.rowLive = one => {
+  if (WS.busy) return false;
+  if (one.kind === "settings") return WS.task === "settings";
+  if (one.kind === "container") return WS.task === "container" && WS.containerReady();
+  return WS.task === "bin" && WS.binReady();
+};
+
+WS.rowOutputs = (one, picked) => {
+  const live = picked && WS.rowLive(one);
+  const tone = WS.isPrinted(one) ? "printed" : "unprinted";
+  const what = one.kind === "settings" ? "the space" : one.kind === "container" ? (WS.containerName().toLowerCase() || "container") : "bin";
+  const hosted = Boolean(state.runtime.hosted);
+  const printTitle = !live ? "Select this row to print it."
+    : one.kind === "settings" ? "Choose which bins to print"
+    : hosted ? "Printing needs local Wavefinity and a slicer"
+    : !state.slicer?.available ? "A slicer is needed - use Printer Settings to choose one"
+    : `Send the ${what} to ${state.slicer.name || "the slicer"}`;
+  const exportTitle = !live ? "Select this row to export it."
+    : one.kind === "settings" ? "Bring every 3MF file in the space up to date" : `Create the 3MF file for the ${what}`;
+  const attrs = `data-ws-out data-kind="${one.kind}" data-id="${wsEsc(one.id)}"`;
+  return `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live ? "" : " disabled"} title="${wsEsc(printTitle)}">Print</button>`
+    + `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live ? "" : " disabled"} title="${wsEsc(exportTitle)}">Export</button>`;
+};
+
+// Layout: every printable bin's file, and the container's, brought up to date.
+WS.exportAll = async () => {
+  const ids = (DL.bins || []).filter(one => DL.isOrdinary(one) && DL.printEligible(one)).map(one => one.id);
+  if (ids.length) await DL.saveSelectedBins(ids, true);
+  if (WS.containerKind()) {
+    if (WS.containerKind() === "storage_drawers") await SP.runStructural("save");
+    else await SP.saveStructural();
+  }
+};
+
+WS.output = (kind, mode, button, event) => {
+  if (!WS.rowLive({ kind })) return null;
+  if (kind === "settings") return mode === "print" ? WS.go("print") : WS.exportAll();
+  if (kind === "container") {
+    const drawers = WS.containerKind() === "storage_drawers";
+    if (mode === "print") return drawers ? SP.runStructural("print", event) : SP.printStructural(event);
+    return drawers ? SP.runStructural("save") : SP.saveStructural();
+  }
+  return chooseIndividualBinPrint(button);
+};
+
+// The container print: lit whenever the open space has a container.
+WS.containerReady = () => !WS.busy && WS.open() && Boolean(WS.containerKind()) && !SP.structuralBusy
+  && ["bin", "container", "settings"].includes(WS.task);
 
 // Print Bin: only an actual selected bin (never the container or the space layout).
 WS.binReady = () => {
@@ -585,44 +663,9 @@ WS.binReady = () => {
   return bin && !state.designMutationBusy && state.canGenerate;
 };
 
-// The container print button: lit whenever the open space has a container, whatever is selected.
-WS.containerReady = () => !WS.busy && WS.open() && Boolean(WS.containerKind()) && !SP.structuralBusy
-  && ["bin", "container", "settings"].includes(WS.task);
-
-WS.syncOutput = () => {
-  const printBin = $("#ws-print-bin");
-  const printContainer = $("#ws-print-container");
-  const exportButton = $("#ws-export");
-  if (!printBin || !exportButton) return;
-  const target = WS.outputTarget();
-  const what = WS.task === "container" ? WS.containerName().toLowerCase() || "container" : "bin";
-  const hosted = Boolean(state.runtime.hosted);
-  const binReady = WS.binReady();
-  const containerReady = WS.containerReady();
-  printBin.disabled = !binReady;
-  printContainer.disabled = !containerReady;
-  printContainer.textContent = `Print ${{ storage_box: "Box", storage_drawers: "Drawers", base_trim: "Edge" }[WS.containerKind()] || "Container"}`;
-  printContainer.title = !containerReady ? "This space has no container to print."
-    : hosted ? "Printing needs local Wavefinity and a slicer"
-    : !state.slicer?.available ? "A slicer is needed - use Printer Settings to choose one"
-    : `Send the ${WS.containerName().toLowerCase() || "container"} to ${state.slicer.name || "the slicer"}`;
-  exportButton.disabled = !target;
-  printBin.title = !binReady ? "Select a bin to print it."
-    : hosted ? "Printing needs local Wavefinity and a slicer"
-    : !state.slicer?.available ? "A slicer is needed - use Printer Settings to choose one"
-    : `Send the ${what} to ${state.slicer.name || "the slicer"}`;
-  exportButton.title = target ? `Create the 3MF file for the ${what}` : "Select a bin, the storage box or the drawers to export it.";
-};
-
-WS.output = (mode, button, event) => {
-  const drawers = WS.containerKind() === "storage_drawers";
-  if (button?.id === "ws-print-bin") return WS.binReady() ? chooseIndividualBinPrint(button) : null;
-  if (button?.id === "ws-print-container") return WS.containerReady() ? (drawers ? SP.runStructural("print", event) : SP.printStructural(event)) : null;
-  const target = WS.outputTarget();
-  if (!target) return null;
-  if (target === "bin") return chooseIndividualBinPrint(button);
-  return drawers ? SP.runStructural("save") : SP.saveStructural();
-};
+// Callers that report a change in output availability land here; the row buttons are redrawn
+// with the selector by WS.sync().
+WS.syncOutput = () => { if (WS.entered) WS.render(); };
 
 // ------------------------------------------------------------------ sync
 
@@ -671,12 +714,6 @@ WS.sync = () => {
   if (switcher) switcher.disabled = WS.task === "picker";
   const place = $("#ws-place");
   if (place) place.textContent = "Manage Spaces";
-  const printSpace = $("#ws-print-space");
-  if (printSpace) {
-    printSpace.disabled = !open || WS.task !== "settings" || WS.busy;
-    printSpace.title = open ? "" : "My Bins have no Space to print. Open a Space first.";
-  }
-  WS.syncOutput();
   if (open) {
     const view = WS.task === "bin" || WS.task === "container" ? "3d" : "drawer";
     const wrap = $(`.canvas-wrap[data-canvas="${view}"]`);
@@ -852,6 +889,8 @@ SP.openTypedSpacePreferredView = async () => {
   controls.prepend(stage);
 
   const delegate = event => {
+    const out = event.target.closest("[data-ws-out]");
+    if (out) { if (!out.disabled) WS.output(out.dataset.kind, out.dataset.output, out, event); return; }
     const pick = event.target.closest("[data-ws-pick]");
     if (pick) { WS.pick(pick.dataset.wsPick, pick.dataset.id || ""); return; }
     const button = event.target.closest("[data-ws-act]");
@@ -868,10 +907,6 @@ SP.openTypedSpacePreferredView = async () => {
 
   // Story 2716: Manage Spaces is a plain button that opens the space management (picker) screen.
   $("#ws-spaces").addEventListener("click", () => WS.go("picker"));
-  $("#ws-print-space").addEventListener("click", () => WS.go("print"));
-  for (const id of ["#ws-print-bin", "#ws-print-container", "#ws-export"]) {
-    $(id).addEventListener("click", event => WS.output(event.currentTarget.dataset.output, event.currentTarget, event));
-  }
   $("#part-name")?.addEventListener("input", () => WS.sync());
 
   // Every owner that changes what is open reports through one of these.
