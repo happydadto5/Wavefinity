@@ -168,10 +168,12 @@ const state = {
   designMutationBusy: false,
   // Fix 1137: undo/redo removed - no designer history state is kept.
   canGenerate: true,
-  // Bin/Interior/Xray are independent on/off switches, not one exclusive
+  // Bin/Interior/Lid/Xray are independent on/off switches, not one exclusive
   // mode - each button flips only its own state (see setPreviewToggle()).
+  // lidVisible only matters when the bin has a lid; its button is hidden otherwise.
   binVisible: true,
   interiorVisible: true,
+  lidVisible: true,
   xrayOn: false,
   // All/Base/Lid preview state for a Storage Box preview response. The Designer
   // only ever holds ordinary bins now, so this stays "all".

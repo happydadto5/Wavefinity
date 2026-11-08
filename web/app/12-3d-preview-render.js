@@ -229,7 +229,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   const visibleGroups = b4bEnabled()
     ? new Set(state.b4bView === "base" ? ["base"] : state.b4bView === "lid" ? ["lid"] : ["base", "lid"])
     : baseTrimEnabled() ? new Set(["bin"])
-      : new Set([...(state.binVisible ? ["bin"] : []), ...(state.interiorVisible ? ["interior", "measured"] : [])]);
+      : new Set([...(state.binVisible ? ["bin"] : []), ...(state.lidVisible ? ["lid"] : []), ...(state.interiorVisible ? ["interior", "measured"] : [])]);
   if (!geometry?.length) {
     context.fillStyle = "#8b989e";
     context.textAlign = "center";
@@ -827,15 +827,26 @@ function classifyB4BFace(face) {
 
 function classifyOrdinaryFace(face) {
   if (face.kind === "measured_item") return "measured";
+  // The bin's lid gets its own group so the Lid toggle can hide it alone.
+  if (face.kind === "lid" || face.kind === "lid_label") return "lid";
   return isBinFace(face.kind) ? "bin" : "interior";
 }
 
 function currentPreviewGroups() {
-  return b4bEnabled() ? ["base", "lid"] : ["bin", "interior", "measured"];
+  return b4bEnabled() ? ["base", "lid"] : ["bin", "interior", "measured", "lid"];
+}
+
+// The Lid button only appears for an ordinary bin whose geometry has lid faces.
+function updateLidToggle() {
+  const button = $('[data-camera-toggle="lid"]');
+  if (!button) return;
+  const structural = typeof structuralDesignActive === "function" && structuralDesignActive();
+  const hasLid = !!state.preview && (state.preview.geometry || []).some(face => face.kind === "lid" || face.kind === "lid_label");
+  button.hidden = structural || !hasLid || b4bEnabled() || baseTrimEnabled();
 }
 
 function previewAabbWithoutMeasured(buffers) {
-  const selected = [buffers.groups.bin?.aabb, buffers.groups.interior?.aabb].filter(Boolean);
+  const selected = [buffers.groups.bin?.aabb, buffers.groups.lid?.aabb, buffers.groups.interior?.aabb].filter(Boolean);
   if (!selected.length) return null;
   return {
     min: [0, 1, 2].map(axis => Math.min(...selected.map(box => box.min[axis]))),
@@ -878,6 +889,7 @@ function currentPreviewPasses(buffers) {
   const passes = [];
   const visible = new Set();
   if (state.binVisible) { passes.push({ group: "bin", alpha: 1 }); visible.add("bin"); }
+  if (state.lidVisible) { passes.push({ group: "lid", alpha: 1 }); visible.add("lid"); }
   if (state.interiorVisible) {
     passes.push({ group: "interior", alpha: 1 }); visible.add("interior");
     passes.push({ group: "measured", alpha: 0.3 }); visible.add("measured");
@@ -886,6 +898,7 @@ function currentPreviewPasses(buffers) {
 }
 
 function renderPreview3D() {
+  updateLidToggle();
   // Fix 103 (Section C): a structural target in Design renders from its own
   // slot through its own scene; the ordinary predicates below read
   // state.design and must never see the structural target.

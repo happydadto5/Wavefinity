@@ -414,11 +414,11 @@ function rotateCameraStep(direction, fine) {
   renderPreview3D();
 }
 
-// Bin/Interior/Xray each toggle their own state only - see the state.binVisible
-// comment. Bin and Interior are ON by default, so their button shows the light
+// Bin/Interior/Lid/Xray each toggle their own state only - see the state.binVisible
+// comment. Bin, Interior and Lid are ON by default, so their button shows the light
 // red "off" treatment only when turned off; Xray is OFF by default, so its
 // button shows the active/blue treatment only when turned on.
-const PREVIEW_TOGGLE_KEYS = { bin: "binVisible", interior: "interiorVisible", xray: "xrayOn" };
+const PREVIEW_TOGGLE_KEYS = { bin: "binVisible", interior: "interiorVisible", lid: "lidVisible", xray: "xrayOn" };
 function setPreviewToggle(name, on) {
   const key = PREVIEW_TOGGLE_KEYS[name];
   if (!key) return;
