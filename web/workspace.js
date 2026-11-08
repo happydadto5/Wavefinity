@@ -60,8 +60,9 @@ WS.items = () => {
   }
   if (WS.containerKind()) add("container", "container", WS.containerName());
   const bins = (DL.bins || []).filter(DL.isOrdinary);
-  const binItem = one => add("bin", one.id, DL.label(one), {
-    note: `${fmt(one.x)} × ${fmt(one.y)} mm`,
+  // Story 2753: a bin placed in a drawer carries that drawer's label in its own row, not only the group line.
+  const binItem = (one, drawerLabel = "") => add("bin", one.id, DL.label(one), {
+    note: [drawerLabel, `${fmt(one.x)} × ${fmt(one.y)} mm`].filter(Boolean).join(" · "),
     printable: DL.printEligible(one),
   });
   const drawers = DL.layout.drawers || [];
@@ -71,13 +72,14 @@ WS.items = () => {
       const here = [...new Map((drawer.placements || []).map(p => DL.bin(p.bin))
         .filter(one => one && DL.isOrdinary(one)).map(one => [one.id, one])).values()];
       here.forEach(one => placed.add(one.id));
-      add("group", null, drawer.name || `Drawer ${index + 1}`);
-      here.forEach(binItem);
+      const label = drawer.name || `Drawer ${index + 1}`;
+      add("group", null, label);
+      here.forEach(one => binItem(one, label));
     });
     const loose = bins.filter(one => !placed.has(one.id));
-    if (loose.length) { add("group", null, "Not placed yet"); loose.forEach(binItem); }
+    if (loose.length) { add("group", null, "Not placed yet"); loose.forEach(one => binItem(one)); }
   } else {
-    bins.forEach(binItem);
+    bins.forEach(one => binItem(one));
   }
   return items;
 };
