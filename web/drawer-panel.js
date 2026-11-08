@@ -1461,7 +1461,7 @@ DP.renderInventory = (force = false) => {
         ${check}
         ${swatch}
         <span class="dl-bin-main">
-          <strong>${escapeHtml(DL.label(one))}</strong>
+          <strong>${escapeHtml(DL.label(one))}${DL.stackIconHtml(one)}</strong>
           <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units</small>
           ${planningText ? `<small>${escapeHtml(planningText)}</small>` : ""}
           ${lifecycle}

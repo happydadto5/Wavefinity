@@ -291,10 +291,14 @@ def stack_wall(one: dict[str, Any], specs: dict[str, Any]) -> float | None:
 
 def stack_compatibility_issue(upper: dict[str, Any], lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
     """The same physical stack rule used by placement and report."""
-    if upper.get("stack", "none") == "none" or lower.get("stack", "none") == "none":
-        return "Both bins must be printed for stacking"
-    if upper.get("stack") != lower.get("stack"):
-        return "Stacking modes must match"
+    upper_mode, lower_mode = upper.get("stack", "none"), lower.get("stack", "none")
+    if upper_mode == "none":
+        return "The upper bin must be printed as stackable"
+    # A direct (skirted) bin's interface is its own base; the bin below is just
+    # an open-topped bin, so it need not be printed as stackable.
+    plain_below = upper_mode == "direct" and lower_mode == "none"
+    if upper_mode != lower_mode and not plain_below:
+        return "Stacking modes must match" if lower_mode != "none" else "Both bins must be printed for stacking"
     same_footprint = _close(upper["x"], lower["x"]) and _close(upper["y"], lower["y"])
     # Only a lid carries a different footprint; whether the upper bin sits inside
     # the lid and clear of its siblings is decided where the offset is known.
@@ -305,6 +309,12 @@ def stack_compatibility_issue(upper: dict[str, Any], lower: dict[str, Any], spec
     top_wall, bottom_wall = stack_wall(upper, specs), stack_wall(lower, specs)
     if top_wall is None or bottom_wall is None:
         return "Stacking wall thickness is unknown; save both bin designs before stacking"
+    if plain_below:
+        # The skirt is sized to the upper bin's own mouth; a thicker lower wall
+        # narrows the lower mouth below the skirt. A thinner one only loosens it.
+        if bottom_wall > top_wall + 0.05:
+            return "The bin below has thicker walls than the skirt of the bin above fits into"
+        return None
     if not _close(top_wall, bottom_wall):
         return ("Bins need the same footprint and compatible stacking wall thickness" if same_footprint
                 else "Bins need compatible stacking wall thickness")

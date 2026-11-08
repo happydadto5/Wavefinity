@@ -490,6 +490,9 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
     ctx.fillStyle = "white";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    if (DL.stackable(one) && boxW >= 26 && boxH >= 18) {
+      DV.drawStackIcon(ctx, Math.min(poly[0][0], poly[2][0]) + 4, Math.min(poly[0][1], poly[2][1]) + 4, 11, "white");
+    }
     if (boxH >= 40 && boxW >= 55) {
       const fontSize = Math.min(12, boxW / Math.max(4, info.name.length * 0.55));
       const subSize = Math.max(7.5, Math.min(9.5, fontSize * 0.8));
@@ -917,6 +920,17 @@ DV.spacerCandidateLabelInfo = c => {
   return { name, detailLine };
 };
 
+// The stackable glyph (two stacked squares) with its top-left corner at (x, y).
+DV.drawStackIcon = (ctx, x, y, size, ink) => {
+  const s = size * 0.62, o = size - s;
+  ctx.save();
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(1, size / 9);
+  ctx.strokeRect(x + o, y, s, s * 0.8);
+  ctx.strokeRect(x, y + o + s * 0.2, s, s * 0.8);
+  ctx.restore();
+};
+
 // Name, Width × Length, Height on the top of each column; compact when small.
 DV.drawLabel = (ctx, entry, topFace, ink) => {
   const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
@@ -936,6 +950,9 @@ DV.drawLabel = (ctx, entry, topFace, ink) => {
     return;
   }
   DP.paintPrintMark?.(ctx, top, cx, cy, Math.min(width, height)); // Story 2671: print-mode tick
+  if (DL.stackable(top) && width >= 26 && height >= 18) {
+    DV.drawStackIcon(ctx, Math.min(p0[0], p3[0]) + 4, Math.min(p0[1], p1[1], p2[1], p3[1]) + 4, 11, ink);
+  }
   const stackCount = entry.layers.length;
   const info = DV.binLabelInfo(top, stackCount);
   const size = Math.min(13, height * 0.28, width / Math.max(3, info.name.length * 0.55));
@@ -1274,7 +1291,7 @@ DV.renderStaging = () => {
   const staged = DL.stagedBins();
   const drawer = DL.drawer();
   const signature = JSON.stringify([
-    staged.map(one => [one.id, DL.binNumber(one), one.name, one.x, one.y, one.z, one.status]), DL.selectedRow, drawer.id,
+    staged.map(one => [one.id, DL.binNumber(one), one.name, one.x, one.y, one.z, one.status, one.stack]), DL.selectedRow, drawer.id,
     DL.bins.some(DL.isOrdinary),
   ]);
   if (rail.dataset.signature === signature) return;
@@ -1287,7 +1304,7 @@ DV.renderStaging = () => {
     const picked = one.id === DL.selectedRow;
     return `<div class="dl-staged${picked ? " selected" : ""}" data-staged-bin="${escapeHtml(one.id)}" draggable="true" tabindex="0" title="Drag into the Space">
       <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}">${DL.swatchLabel(one)}</span>
-      <span class="dl-bin-main"><strong>${escapeHtml(DL.label(one))}</strong>
+      <span class="dl-bin-main"><strong>${escapeHtml(DL.label(one))}${DL.stackIconHtml(one)}</strong>
         <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · Unplaced · ${escapeHtml(DL.statusLabel(one))}</small></span>
     </div>`;
   }).join("") : `<p class="dl-note">${DL.bins.some(DL.isOrdinary) ? "Every bin is placed." : "New and duplicated bins wait here until you drag them into the Space."}</p>`;

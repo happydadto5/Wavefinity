@@ -274,6 +274,10 @@ DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
 DL.mmToUnits = mm => fmt(mm / 7);
 DL.isSpacer = one => one?.kind === "spacer";
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
+// The small "stackable" glyph (two stacked squares) for row lists; empty for a non-stackable bin.
+DL.stackIconHtml = one => DL.stackable(one)
+  ? `<svg class="dl-stack-icon" viewBox="0 0 12 12" width="12" height="12" role="img" aria-label="Stackable" focusable="false"><title>Stackable</title><rect x="3.5" y="0.75" width="7.5" height="5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="1" y="6.25" width="7.5" height="5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>`
+  : "";
 DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct stack", b4b: "Storage Box stacking" })[mode] || "Not stackable";
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
@@ -412,8 +416,10 @@ DL.stackWall = one => {
 // Why `upper` cannot snap onto `lower`, or "" if it can.
 DL.stackRefusal = (upper, lower) => {
   if (!DL.stackable(upper)) return `${DL.label(upper)} was not printed to stack.`;
-  if (!DL.stackable(lower)) return `${DL.label(lower)} was not printed to stack.`;
-  if (upper.stack !== lower.stack) return `A ${DL.stackName(upper.stack).toLowerCase()} bin cannot snap onto a ${DL.stackName(lower.stack).toLowerCase()} bin.`;
+  // A direct (skirted) bin's interface is its own base; the bin below is just an open-topped bin.
+  const plainBelow = upper.stack === "direct" && !DL.stackable(lower);
+  if (!plainBelow && !DL.stackable(lower)) return `${DL.label(lower)} was not printed to stack.`;
+  if (!plainBelow && upper.stack !== lower.stack) return `A ${DL.stackName(upper.stack).toLowerCase()} bin cannot snap onto a ${DL.stackName(lower.stack).toLowerCase()} bin.`;
   const sameFootprint = Math.abs(upper.x - lower.x) < 0.05 && Math.abs(upper.y - lower.y) < 0.05;
   // Only a lid can carry a different footprint. Whether the upper bin actually
   // fits on the lid (inside it, clear of its siblings) is decided where the
@@ -422,6 +428,8 @@ DL.stackRefusal = (upper, lower) => {
   if (!sameFootprint && upper.stack === "b4b") return "Storage Box stacking requires bins with the same footprint.";
   const upperWall = DL.stackWall(upper), lowerWall = DL.stackWall(lower);
   if (upperWall === null || lowerWall === null) return "Stacking wall thickness is unknown. Save both bin designs before stacking.";
+  // The skirt is sized to the upper bin's mouth: a thicker wall below narrows the mouth, a thinner one only loosens it.
+  if (plainBelow) return lowerWall > upperWall + 0.05 ? "The bin below has thicker walls than the skirt of the bin above fits into." : "";
   if (Math.abs(upperWall - lowerWall) >= 0.05) return sameFootprint
     ? "Bins need the same footprint and compatible stacking wall thickness."
     : "Bins need compatible stacking wall thickness.";
