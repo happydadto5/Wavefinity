@@ -226,3 +226,5 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .space-structural[hidden] { display: none; }
 .space-structural-summary { margin: 0 0 6px; font-size: 12px; }
 .space-structural-summary[hidden] { display: none; }
+.dl-tilt-control.disabled { opacity: 0.45; }
+.dl-tilt-control input[type="range"]:disabled { cursor: not-allowed; accent-color: #9aa5a8; }

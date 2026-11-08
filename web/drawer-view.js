@@ -11,9 +11,9 @@
 // above.
 
 const DV = {
-  view: { tilt: 48, turn: 0, zoom: 1, panX: 0, panY: 0 },
+  view: { tilt: 48, turn: 0, top: false, zoom: 1, panX: 0, panY: 0 },
   LIMITS: { tilt: [22, 86], turn: [-30, 30], zoom: [0.5, 6] },
-  PRESETS: { look: { tilt: 48, turn: 0 }, overhead: { tilt: 86, turn: 0 }, low: { tilt: 26, turn: 0 } },
+  PRESETS: { look: { tilt: 48, turn: 0 }, overhead: { top: true }, low: { tilt: 26, turn: 0 } },
   hits: [],
   drag: null,
   pan: null,
@@ -58,14 +58,20 @@ DV.syncControls = () => {
   });
   if (tilt) tilt.value = String(Math.round(DV.view.tilt));
   if (turn) turn.value = String(Math.round(DV.view.turn));
+  // Overhead is a flat plan: angle has no meaning there, so the sliders grey out.
+  if (tilt) tilt.disabled = DV.view.top;
+  if (turn) turn.disabled = DV.view.top;
+  $$(".dl-tilt-control").forEach(label => label.classList.toggle("disabled", DV.view.top));
   $$("[data-dl-view]").forEach(button => {
     const preset = DV.PRESETS[button.dataset.dlView];
-    button.classList.toggle("active", Boolean(preset)
-      && Math.round(DV.view.tilt) === preset.tilt && Math.round(DV.view.turn) === preset.turn);
+    button.classList.toggle("active", Boolean(preset) && (preset.top
+      ? DV.view.top
+      : !DV.view.top && Math.round(DV.view.tilt) === preset.tilt && Math.round(DV.view.turn) === preset.turn));
   });
 };
 
-DV.setView = ({ tilt = DV.view.tilt, turn = DV.view.turn } = {}) => {
+DV.setView = ({ tilt = DV.view.tilt, turn = DV.view.turn, top = false } = {}) => {
+  DV.view.top = Boolean(top);
   DV.view.tilt = dvClamp(tilt, DV.LIMITS.tilt);
   DV.view.turn = dvClamp(turn, DV.LIMITS.turn);
   DV.syncControls();
@@ -126,7 +132,27 @@ DV.safeFrame = (width, height) => {
     cy: top + Math.max(80, height - top - bottom) / 2,
   };
 };
+// Overhead: straight down, orthographic, so the Space draws as a flat 2D plan.
+// Height is ignored (project drops z, onPlane returns the floor point), so
+// nothing recedes and picking/dragging work exactly as in the tilted view.
+DV.topCamera = (width, height, drawer, view = DV.view) => {
+  const pad = 34;
+  const frame = DV.safeFrame(width, height);
+  const scale = Math.max(
+    0.05,
+    Math.min((width - 2 * pad) / drawer.width, (frame.height - 2 * pad) / drawer.depth) * view.zoom,
+  );
+  const left = (width - drawer.width * scale) / 2 - view.panX * scale;
+  const top = frame.cy - (drawer.depth * scale) / 2 + view.panY * scale;
+  return {
+    W: drawer.width, D: drawer.depth, H: 0, rimH: 0, flat: true,
+    eye: [drawer.width / 2, drawer.depth / 2, 1e6],
+    project: point => [left + point[0] * scale, top + (drawer.depth - point[1]) * scale],
+    onPlane: (sx, sy) => [(sx - left) / scale, drawer.depth - (sy - top) / scale, 0],
+  };
+};
 DV.camera = (width, height, drawer, view = DV.view) => {
+  if (view.top) return DV.topCamera(width, height, drawer, view);
   const W = drawer.width;
   const D = drawer.depth;
   const H = DL.isSurface() ? Math.max(drawer.height, ...DL.items(drawer).map(item => item.plan_h || item.h)) : drawer.height;
@@ -528,6 +554,7 @@ DV.paintScene = (ctx, drawer, cam) => {
   DV.stackOverHeight = false;
   const { W, D, H, eye } = cam;
   const rimH = cam.rimH ?? H;
+  const isFlat = Boolean(cam.flat);
   const shape = points => {
     const screen = points.map(cam.project);
     ctx.beginPath();
@@ -543,10 +570,10 @@ DV.paintScene = (ctx, drawer, cam) => {
   };
   const flat = (x0, y0, x1, y1, z = 0) => [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
   const walls = [
-    { inside: eye[1] < D, points: [[0, D, 0], [W, D, 0], [W, D, rimH], [0, D, rimH]], tone: "#e2d7c2" },
-    { inside: eye[0] > 0, points: [[0, 0, 0], [0, D, 0], [0, D, rimH], [0, 0, rimH]], tone: "#dcd1bb" },
-    { inside: eye[0] < W, points: [[W, 0, 0], [W, D, 0], [W, D, rimH], [W, 0, rimH]], tone: "#d9cdb6" },
-    { inside: eye[1] > 0, points: [[0, 0, 0], [W, 0, 0], [W, 0, rimH], [0, 0, rimH]], tone: "#e0d5c0" },
+    { inside: !isFlat && eye[1] < D, points: [[0, D, 0], [W, D, 0], [W, D, rimH], [0, D, rimH]], tone: "#e2d7c2" },
+    { inside: !isFlat && eye[0] > 0, points: [[0, 0, 0], [0, D, 0], [0, D, rimH], [0, 0, rimH]], tone: "#dcd1bb" },
+    { inside: !isFlat && eye[0] < W, points: [[W, 0, 0], [W, D, 0], [W, D, rimH], [W, 0, rimH]], tone: "#d9cdb6" },
+    { inside: !isFlat && eye[1] > 0, points: [[0, 0, 0], [W, 0, 0], [W, 0, rimH], [0, 0, rimH]], tone: "#e0d5c0" },
   ];
 
   // The drawer: floor, then the inside faces of the walls you can see.
@@ -636,10 +663,10 @@ DV.paintScene = (ctx, drawer, cam) => {
       if (entry.mode === "invalid" || problem === "error") color = { ...color, hue: 5, sat: 62, light: 83, ink: "#5e1f1b" };
       ctx.globalAlpha = entry.mode === "leaving" ? 0.35 : entry.mode === "ghost" ? 0.78 : 1;
       const faces = [];
-      if (eye[1] < y0) faces.push(["front", [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]]]);
-      if (eye[1] > y1) faces.push(["back", [[x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]]]);
-      if (eye[0] < x0) faces.push(["left", [[x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]]]);
-      if (eye[0] > x1) faces.push(["right", [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]]]);
+      if (!isFlat) if (eye[1] < y0) faces.push(["front", [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]]]);
+      if (!isFlat) if (eye[1] > y1) faces.push(["back", [[x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]]]);
+      if (!isFlat) if (eye[0] < x0) faces.push(["left", [[x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]]]);
+      if (!isFlat) if (eye[0] > x1) faces.push(["right", [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]]]);
       faces.push(["top", flat(x0, y0, x1, y1, z1)]);
       const stroke = entry.mode === "invalid" || problem === "error" ? "#a8443d" : "rgba(23,37,45,.45)";
       const screens = faces.map(([side, points]) => ({ side, screen: face(points, DV.tone(color, DV.FACE_TONE[side]), stroke) }));
@@ -682,7 +709,7 @@ DV.paintScene = (ctx, drawer, cam) => {
       }
       if (DL.isSurface() && !DL.isSpacer(one)) {
         const planTop = z0 + DL.effectiveHeight(one);
-        if (planTop > z1 + 0.1) {
+        if (!isFlat && planTop > z1 + 0.1) {
           ctx.save();
           ctx.setLineDash([4, 4]);
           ctx.globalAlpha = entry.ghost ? 0.2 : 0.35;
@@ -782,12 +809,12 @@ DV.paintScene = (ctx, drawer, cam) => {
   }
 
   // Walls between you and the drawer, see-through; then every rim.
-  walls.filter(wall => !wall.inside).forEach(wall => face(wall.points, "rgba(224,213,192,.3)", "rgba(120,100,70,.45)"));
+  walls.filter(wall => !isFlat && !wall.inside).forEach(wall => face(wall.points, "rgba(224,213,192,.3)", "rgba(120,100,70,.45)"));
   ctx.strokeStyle = "rgba(110,90,60,.7)";
   ctx.lineWidth = 1.4;
   face(flat(0, 0, W, D, rimH), null, "rgba(110,90,60,.6)", 1.4);
   ctx.beginPath();
-  [[0, 0], [W, 0], [0, D], [W, D]].forEach(([x, y]) => line([x, y, 0], [x, y, rimH]));
+  if (!isFlat) [[0, 0], [W, 0], [0, D], [W, D]].forEach(([x, y]) => line([x, y, 0], [x, y, rimH]));
   ctx.stroke();
   const [fx, fy] = cam.project([W / 2, 0, 0]);
   ctx.fillStyle = "#66757d";
@@ -1286,7 +1313,7 @@ DV.buildOverlay = () => {
       <div class="camera-controls-row">
         <div class="camera-views"><div class="camera-views-row">
           <button type="button" data-dl-view="look" title="Looking in from the front of this Space">Look in</button>
-          <button type="button" data-dl-view="overhead" title="Almost straight down, like a plan">Overhead</button>
+          <button type="button" data-dl-view="overhead" title="Straight down, flat like a 2D plan (angle controls are off)">Overhead</button>
           <button type="button" data-dl-view="low" title="Low view from the front of this Space - shows what hides behind what">Low</button>
           <button type="button" data-dl-view="fit" title="Frame the whole Space again (F)">Fit</button>
         </div></div>
