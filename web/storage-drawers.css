@@ -87,6 +87,6 @@
 }
 .sd-drawer-row.sd-drawer-row-active { outline: 2px solid var(--teal, #168a89); outline-offset: 2px; border-radius: 6px; background: color-mix(in srgb, var(--teal, #168a89) 8%, transparent); }
 .storage-box-units { color: var(--muted); font-size: 11px; }
-.sd-drawer-head { display: grid; gap: 2px; justify-items: start; }
+.sd-drawer-head { display: flex; gap: 6px; align-items: center; justify-content: space-between; grid-column: 1 / -1; }
 .sd-drawer-delete { font-size: 12px; }
 .sd-drawer-actions { margin-top: 6px; }

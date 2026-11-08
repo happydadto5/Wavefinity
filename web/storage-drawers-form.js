@@ -93,8 +93,12 @@
     name.id = `sd-name-${epoch}`;
     name.dataset.heightNeutral = "1";
     const sizeGroup = group(form); sizeGroup.classList.add("sd-basics-group");
-    sizeGroup.append(labeled("Space name", name,
-      mode === "edit" ? "The Space name can't be changed - it is tied to the folder." : null));
+    // Story 2755: an existing Space's name is shown as plain text, like the
+    // Storage Box; the disabled input stays hidden so draft() still reads it.
+    if (mode === "edit") {
+      name.hidden = true;
+      sizeGroup.append(el("strong", "sd-space-name", space.name || ""), name);
+    } else sizeGroup.append(labeled("Space name", name));
     const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
     const x = input(space.x), y = input(space.y);
     x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
@@ -124,7 +128,6 @@
     const zField = input("", "number"); zField.id = `sd-z-${epoch}`; zField.step = "any";
     zField.dataset.usableHeight = "1";
     const zHelp = help("");
-    const zLabel = labeled("Usable height", zField, null, "mm"); zLabel.append(zHelp);
     for (const [field, title] of [[x, "Interior Width"], [y, "Interior Depth"]]) {
       const label = labeled(title, field); sizeGrid.append(label);
       // Fix 1137: exiting the field shows "325 (40 units)" inline like bins;
@@ -132,7 +135,8 @@
       field.addEventListener("blur", () => formatUnitsInline(field), { signal: events.signal });
       field.addEventListener("focus", () => { field.value = stripUnitsSuffix(field.value); }, { signal: events.signal });
     }
-    if (structural) { sizeGrid.classList.add("sd-size-grid-three"); sizeGrid.append(zLabel); }
+    // Story 2755: zField is not shown; height is edited per drawer below. It stays
+    // detached as the value holder for the 3D height handle.
     // Fix 103 (Packet B): printer status lives beside Size, not in Summary.
     // Known oversize shows a warning here but does not block.
     const printerRow = el("p", "sd-printer-row");
@@ -268,7 +272,7 @@
         // buttons only ask the controller; the cabinet mutation authority
         // (SP.cabinetAdd / SP.cabinetDelete) does the work.
         if (structural && row.id && !String(row.id).startsWith("temporary:")) {
-          const remove = el("button", "link-button sd-drawer-delete", "Delete"); remove.type = "button";
+          const remove = el("button", "link-button sd-drawer-delete", "Del"); remove.type = "button";
           remove.disabled = disabled || block.drawers.length <= 1;
           remove.title = block.drawers.length <= 1 ? "A cabinet keeps at least one drawer." : `Delete Drawer ${index + 1}`;
           remove.addEventListener("click", event => { event.stopPropagation(); callbacks.deleteDrawer?.(row.id); }, { signal: events.signal });
@@ -301,26 +305,6 @@
               callbacks.onHighlightDrawer?.(owner, { ensure: true });
             }
           }, { signal: events.signal });
-          // Fix 1110: dedicated semantic keyboard control for row selection.
-          // A native button supplies Enter/Space semantics without a custom
-          // keydown handler. It is a leaf control appended to the drawer
-          // head, so the row's inputs and Delete button remain siblings —
-          // no interactive descendants are nested inside a button-like
-          // container. Activation mirrors a row-body click EXACTLY: select
-          // the drawer and TOGGLE the 3D highlight (ensure:false), the same
-          // as clicking the row itself. stopPropagation keeps the row's own
-          // click handler (which treats any button target as "in field" and
-          // would force ensure:true) from double-handling the activation.
-          const highlightBtn = el("button", "link-button sd-drawer-highlight", "Highlight");
-          highlightBtn.type = "button";
-          highlightBtn.setAttribute("aria-label", `Drawer ${index + 1}. Activate to select and toggle the 3D highlight, same as clicking the row.`);
-          highlightBtn.title = "Select this drawer and toggle its 3D highlight (same as clicking the row).";
-          highlightBtn.addEventListener("click", event => {
-            event.stopPropagation();
-            selectDrawer(row.id);
-            callbacks.onHighlightDrawer?.(owner, { ensure: false });
-          }, { signal: events.signal });
-          head.append(highlightBtn);
         }
         // Usable height never waits for summary or preview work.
         const height = input(""); height.inputMode = "decimal"; height.required = true;

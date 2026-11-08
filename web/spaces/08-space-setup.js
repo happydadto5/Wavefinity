@@ -148,9 +148,8 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   // the Space name"), so it is set at creation and never editable afterwards.
   spaceNameField.disabled = update;
   document.getElementById("space-error").hidden = true;
-  document.getElementById("space-note").textContent = update
-    ? "The Space name can't be changed - it is tied to the folder."
-    : "";
+  // Story 2755: no "can't be changed" notice; the name just shows plainly.
+  document.getElementById("space-note").textContent = "";
   // Drawer setup names the field for what it is and says up front that a
   // name is needed and why a folder comes next. Other types keep "Name".
   document.getElementById("space-name-label").innerHTML =
