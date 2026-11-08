@@ -8,7 +8,7 @@
 
 SP.storageBoxDefaults = () => ({
   secure_lid: true, latch_count: "1", hinge_count: "2", lid_headroom_mm: 1,
-  label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
+  label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat", label_size: "default",
   stacking: false, handle: false,
   wall_mm: Number(state.catalog?.b4b_rules?.default_wall_mm ?? 1.6),
   base_mm: Number(state.catalog?.b4b_rules?.default_base_mm ?? 1.6),
@@ -44,6 +44,7 @@ SP.fillStorageBoxForm = box => {
   set("portable-handle", Boolean(one.handle) && one.secure_lid !== false);
   set("portable-label-location", one.label_enabled ? (one.label_location === "front" ? "front" : "top") : "none");
   set("portable-label-text", one.label_text || "");
+  set("portable-label-size", one.label_size || "default");
   set("portable-front-label-style", one.front_label_style === "wavy" ? "wavy" : "flat");
   SP.fillMaterialSelect("portable-wall", state.catalog?.b4b_rules?.wall_choices, Number(one.wall_mm));
   SP.fillMaterialSelect("portable-base", state.catalog?.b4b_rules?.base_choices, Number(one.base_mm));
@@ -63,6 +64,7 @@ SP.syncStorageBoxForm = () => {
   }
   const location = value("portable-label-location");
   hide("portable-label-text-row", location === "none");
+  hide("portable-label-size-row", location === "none");
   hide("portable-front-label-style-row", location !== "front");
 };
 
@@ -133,6 +135,7 @@ SP.readStorageBoxForm = () => {
     label_text: labelled ? String(value("portable-label-text") || "").trim() : "",
     label_location: labelled ? location : "top",
     front_label_style: value("portable-front-label-style") === "wavy" ? "wavy" : "flat",
+    label_size: value("portable-label-size") || "default",
     stacking: value("portable-stacking") === "true",
     handle: latched && value("portable-handle") === "true",
     wall_mm: Number(value("portable-wall")),

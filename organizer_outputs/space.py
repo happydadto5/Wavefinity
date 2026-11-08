@@ -76,6 +76,7 @@ def storage_box_design(space: dict[str, Any]) -> dict[str, Any]:
         label_text=settings["label_text"] if settings["label_enabled"] else "",
         label_location=settings["label_location"],
         front_label_style=settings["front_label_style"],
+        label_size=settings["label_size"],
         stacking=settings["stacking"],
         handle=settings["handle"] and settings["secure_lid"],
     )

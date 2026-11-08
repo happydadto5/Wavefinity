@@ -8,6 +8,7 @@ import trimesh
 from shapely.geometry import Point, Polygon
 from shapely.affinity import translate as translate_polygon
 from organizer_engine import (
+    B4B_LABEL_SIZE_SCALE,
     TEXT_CAP_HEIGHT_MIN,
     TEXT_DEPTH,
     WAVE_AMPLITUDE,
@@ -120,6 +121,13 @@ def _b4b_front_label_bottom_z(
     return bottom_z if bottom_z >= B4B_FRONT_LABEL_BOTTOM_MIN else None
 
 
+def _scaled_ideal_cap(ideal_cap: float, label_size: str) -> float:
+    """``ideal_cap`` (the box-proportional size today's label is fitted from)
+    stepped by the chosen Size; never below the readable minimum.  The fit loops
+    still shrink it further when the surface cannot hold it."""
+    return max(ideal_cap * B4B_LABEL_SIZE_SCALE[label_size], TEXT_CAP_HEIGHT_MIN)
+
+
 def _fit_text_outline(text: str, avail_w: float, avail_h: float, ideal_cap: float):
     """Largest ``text_outline`` that fits ``avail_w`` x ``avail_h``, scaling the
     cap height down toward the readable minimum.  Raises a clear error if even
@@ -197,7 +205,8 @@ def b4b_top_label_outline(box: BoxSpec):
                 "shorten the label, disable stacking, or use a larger Storage Box"
             )
     outline = _fit_text_outline(
-        eff.b4b.label_text, avail_w, avail_h, B4B_TOP_LABEL_CAP_IDEAL
+        eff.b4b.label_text, avail_w, avail_h,
+        _scaled_ideal_cap(B4B_TOP_LABEL_CAP_IDEAL, eff.b4b.label_size),
     )
     placed = translate_polygon(outline, 0.0, label_cy)
     # Hard guarantee: the pocket is never cut through a boss.
@@ -575,7 +584,7 @@ def b4b_front_label_geometry(box: BoxSpec):
     # everywhere and the text must shrink instead.
     max_plate_w = avail_w - 2.0 * side_margin
     max_text_w = max_plate_w - 2.0 * B4B_FRONT_LABEL_MARGIN_X
-    cap = B4B_FRONT_LABEL_CAP_IDEAL
+    cap = _scaled_ideal_cap(B4B_FRONT_LABEL_CAP_IDEAL, eff.b4b.label_size)
     solved = None
     while cap >= TEXT_CAP_HEIGHT_MIN - 1e-6:
         outline = text_outline(text, cap)

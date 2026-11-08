@@ -55,7 +55,7 @@
     return {
       secure_lid: true, latch_count: "1", hinge_count: "2", hinge_type: "screw", lid_headroom_mm: 1,
       edge_bevel: "default",
-      label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
+      label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat", label_size: "default",
       stacking: false, handle: false,
       wall_mm: Number(rules.default_wall_mm ?? 1.6),
       base_mm: Number(rules.default_base_mm ?? 1.6),
@@ -176,10 +176,16 @@
     labelText.placeholder = "e.g. M3 HARDWARE";
     labelText.id = id("label-text"); labelText.value = box.label_text || "";
     const labelTextRow = labeled("Label text", labelText);
+    const labelSize = select([
+      ["very_small", "Very small"], ["small", "Small"], ["medium", "Medium"], ["default", "Default"],
+      ["medium_large", "Medium Large"], ["large", "Large"], ["extra_large", "Extra Large"],
+    ], box.label_size || "default");
+    labelSize.id = id("label-size");
+    const labelSizeRow = labeled("Size", labelSize);
     const labelStyle = select([["flat", "Flat"], ["wavy", "Wavy"]], box.front_label_style || "flat");
     labelStyle.id = id("label-style");
     const labelStyleRow = labeled("Front label style", labelStyle);
-    labelRow.append(labeled("Label", labelLoc), labelTextRow, labelStyleRow);
+    labelRow.append(labeled("Label", labelLoc), labelTextRow, labelSizeRow, labelStyleRow);
     labelGroup.append(labelRow);
     caseWrap.append(labelGroup);
 
@@ -294,6 +300,7 @@
       if (!latched) handle.value = "false";
       const labeledOn = labelLoc.value !== "none";
       labelTextRow.hidden = !labeledOn;
+      labelSizeRow.hidden = !labeledOn;
       labelStyleRow.hidden = !(labeledOn && labelLoc.value === "front");
     }
     lidType.addEventListener("change", syncVisibility, { signal: events.signal });
@@ -330,6 +337,7 @@
             label_text: labelOn ? labelText.value.trim() : "",
             label_location: labelOn ? labelLoc.value : "top",
             front_label_style: labelStyle.value,
+            label_size: labelSize.value,
             stacking: stacking.value === "true",
             handle: latched && handle.value === "true",
             wall_mm: Number(wallSel.value),
@@ -348,7 +356,7 @@
       if (callbacks.onChange) callbacks.onChange(read());
     }
     hingeType.addEventListener("change", syncVisibility, { signal: events.signal });
-    for (const input of [lidType, snugness, latchCount, hingeCount, hingeType, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel, bevel]) {
+    for (const input of [lidType, snugness, latchCount, hingeCount, hingeType, stacking, handle, labelLoc, labelText, labelSize, labelStyle, wallSel, baseSel, bevel]) {
       input.addEventListener("input", onChange, { signal: events.signal });
       input.addEventListener("change", onChange, { signal: events.signal });
     }
@@ -374,6 +382,7 @@
       labelLoc.value = b.label_enabled ? (b.label_location || "top") : "none";
       labelText.value = b.label_text || "";
       labelStyle.value = b.front_label_style || "flat";
+      labelSize.value = b.label_size || "default";
       fillMaterial(wallSel, rules.wall_choices, b.wall_mm);
       fillMaterial(baseSel, rules.base_choices, b.base_mm);
       syncVisibility();
@@ -403,7 +412,7 @@
     // cannot be silently superseded by newer input.
     function setDisabled(value) {
       const frozen = !!value;
-      for (const input of [xInput, yInput, zInput, lidType, snugness, latchCount, stacking, handle, labelLoc, labelText, labelStyle, wallSel, baseSel, bevel]) {
+      for (const input of [xInput, yInput, zInput, lidType, snugness, latchCount, stacking, handle, labelLoc, labelText, labelSize, labelStyle, wallSel, baseSel, bevel]) {
         input.disabled = frozen;
       }
     }
