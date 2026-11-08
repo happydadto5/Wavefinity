@@ -449,6 +449,10 @@ WS.setEnabled = async on => {
 WS.openSpaceRow = button => {
   const src = button.dataset.src;
   const index = Number(button.dataset.index);
+  if (src === "current" && WS.startupResume) {
+    WS.startupResume = false;
+    return SP.run(SP.confirmResume);
+  }
   if (src === "current") return WS.go("overview");
   if (src === "other") {
     const one = SP.otherSpaces[index];
@@ -626,6 +630,7 @@ WS.sync = () => {
   }
   const key = WS.placeKey();
   if (key !== WS.placeSeen) {
+    WS.startupResume = false;
     const first = WS.placeSeen === "";
     WS.placeSeen = key;
     if (!first && key !== "space-pending") WS.arrive();
@@ -710,10 +715,16 @@ SP.showTypeCards = () => {
   WS.go("picker");
   return null;
 };
-SP.showResume = info => {
+SP.showResume = (info, { startup = false } = {}) => {
   if (!WS.enabled()) return wsOriginal.showResume(info);
   SP.resume = info;
-  SP.run(SP.confirmResume);
+  if (startup) {
+    WS.startupResume = true;
+    WS.placeSeen = WS.placeKey();
+    WS.task = "picker";
+    SP.close();
+    WS.sync();
+  } else SP.run(SP.confirmResume);
   return null;
 };
 SP.openTypedSpacePreferredView = async () => {

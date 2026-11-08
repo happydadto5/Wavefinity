@@ -988,7 +988,7 @@ SP.launch = async () => {
       }
       const info = await SP.useHostedFolder(folder, { expectedSpaceId: saved.space_id || null });
       if (!info) { SP.showHome(); return; } // switch aborted mid-startup - fall back quietly
-      if (info.folder_mode === "space") SP.showResume(info);
+      if (info.folder_mode === "space") SP.showResume(info, { startup: true });
       return;
     } catch (error) {
       SP.showHome(error.message);
@@ -1013,7 +1013,7 @@ SP.launch = async () => {
     if (!(await SP.applyFolder(data))) { SP.showHome(); return; }
     // The routing decision must always end somewhere definite: the startup
     // cover is dismissed only once this resolves.
-    if (data.folder_mode === "space") SP.showResume(data);
+    if (data.folder_mode === "space") SP.showResume(data, { startup: true });
     else SP.close();
   } catch (error) {
     SP.showHome(error.message);
