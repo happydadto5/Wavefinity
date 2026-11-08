@@ -35,16 +35,14 @@
     </div>
   </header>
 
-  <div id="ws-frame" class="ws-frame" role="group" aria-label="Where you are" hidden>
-    <button id="ws-spaces" class="button secondary dl-small" type="button" title="Choose a Space, or start a new one">Spaces</button>
-    <strong id="ws-place" class="ws-place"></strong>
-    <div class="ws-new-wrap">
-      <button id="ws-new" class="button secondary dl-small" type="button" aria-haspopup="true" aria-expanded="false">New</button>
-      <div id="ws-new-menu" class="ws-new-menu" role="group" aria-label="New" hidden>
-        <button id="ws-new-bin" type="button">New Bin</button>
-        <button id="ws-new-space" type="button">New Space…</button>
-      </div>
+  <div id="ws-frame" class="ws-frame" role="group" aria-label="Wavefinity bar" hidden>
+    <div class="ws-switch-wrap">
+      <button id="ws-spaces" class="button secondary dl-small ws-switcher" type="button" aria-haspopup="true" aria-expanded="false" title="Switch Space, or go to My Bins"><strong id="ws-place" class="ws-place"></strong> <span aria-hidden="true">▾</span></button>
+      <div id="ws-space-menu" class="ws-space-menu" role="group" aria-label="Spaces" hidden></div>
     </div>
+    <button id="ws-space-settings" class="button secondary dl-small" type="button" hidden>Space settings</button>
+    <button id="ws-new-space" class="button secondary dl-small" type="button">New Space</button>
+    <button id="ws-print-space" class="button secondary dl-small" type="button">Print Space</button>
     <span id="ws-roll-slot" class="ws-roll-slot"></span>
   </div>
   <section id="ws-stage" class="ws-stage" hidden></section>

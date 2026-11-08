@@ -1,101 +1,101 @@
-/* Story 2674 - one place, one focus. Everything is scoped to ws- classes or to
-   body.ws-on, so the classic screens are untouched behind Temp only Roll back. */
+/* Story 2692 - the unified screen: a global top bar, a left pane that edits, a right pane that is
+   always the preview. Everything is scoped to ws- classes or to body.ws-on, so the classic
+   screens are untouched behind Temp only Roll back. */
 
-.ws-frame[hidden], .ws-stage[hidden], .ws-new-menu[hidden] { display: none !important; }
+.ws-frame[hidden], .ws-stage[hidden], .ws-aux[hidden], .ws-space-menu[hidden] { display: none !important; }
 
-/* The one slim header on every task. */
+/* The global top bar. */
 .ws-frame {
   display: flex; align-items: center; gap: 10px; padding: 6px 14px; min-height: 40px; box-sizing: border-box;
   background: var(--panel); border-bottom: 1px solid var(--line-dark);
 }
-.ws-place { font-size: 15px; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-place { font-size: 15px; color: var(--ink); max-width: 260px; display: inline-block; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-roll-slot { margin-left: auto; display: flex; }
-.ws-new-wrap { position: relative; }
-.ws-new-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 150px; padding: 4px;
-  display: grid; background: white; border: 1px solid var(--line-dark); border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+.ws-switch-wrap { position: relative; }
+.ws-space-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 340px; max-height: 60vh; overflow: auto; padding: 6px;
+  background: white; border: 1px solid var(--line-dark); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
 }
-.ws-new-menu button { border: 0; background: none; text-align: left; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 6px; cursor: pointer; color: var(--ink); }
-.ws-new-menu button:hover, .ws-new-menu button:focus-visible { background: var(--teal-soft); }
+.ws-menu-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ws-menu-item {
+  width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font: inherit; color: var(--ink);
+  background: transparent; border: 0; border-radius: 8px; padding: 7px 8px; cursor: pointer;
+}
+.ws-menu-item:hover:not(:disabled), .ws-menu-item:focus-visible { background: var(--teal-soft); }
+.ws-menu-item.current { box-shadow: inset 3px 0 0 var(--teal); }
+.ws-menu-item:disabled { opacity: .55; cursor: default; }
+.ws-card-icon { font-size: 20px; flex: none; }
+.ws-card-icon img { width: 28px; height: 28px; }
+.ws-card-text { display: grid; min-width: 0; }
+.ws-card-text small { color: var(--muted); font-size: 12px; }
+.ws-card-tag { margin-left: auto; font-size: 11px; color: var(--teal-dark); font-style: normal; font-weight: 700; }
+#ws-space-settings.active { border-color: var(--teal); background: var(--teal-soft); }
 
-/* The tabs and the old bin/drawer pickers give way to the task lines. */
+/* The tabs and the old bin/drawer pickers give way to the selector. */
 body.ws-on #space-mode-row { display: none; }
 body.ws-on #design-bin-nav, body.ws-on #design-drawer-nav { display: none !important; }
 body.ws-on #space-cancel-edit { display: none; }
 
-/* The stage: full-width tasks fill the page; an editor gets only a slim line. */
-.ws-stage { background: #f8faf9; box-sizing: border-box; }
-body.ws-full .ws-stage { height: calc(100vh - 79px - var(--ws-frame, 40px)); overflow: auto; }
-body.ws-full .app-shell { display: none; }
+/* Two persistent panes beneath the bar: about 40% left, the preview keeps the rest. */
 body.ws-on .app-shell { height: calc(100vh - 79px - var(--ws-chrome, 0px)); }
-body.ws-on:not(.ws-full) .ws-stage { max-height: 42vh; overflow: auto; border-bottom: 1px solid var(--line-dark); }
-body.ws-task-picker .ws-stage, body.ws-task-print .ws-stage, body.ws-task-mybins .ws-stage { max-height: none; }
 
-.ws-page { max-width: 980px; margin: 0 auto; padding: 18px 20px 28px; }
-.ws-page h2 { margin: 0 0 12px; font-size: 22px; }
-.ws-section { margin: 20px 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-.ws-cards, .ws-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.ws-cards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-.ws-card, .ws-choice {
-  width: 100%; text-align: left; font: inherit; color: var(--ink); background: white; cursor: pointer;
+/* The right pane is only ever the preview of the whole Space while one is open. */
+body.ws-on.ws-open .view-tabs,
+body.ws-on.ws-open #preview-state,
+body.ws-on.ws-open .workspace-footer,
+body.ws-on.ws-open #dl-staging,
+body.ws-on.ws-open .canvas-wrap[data-canvas="drawer"] .dl-hint { display: none !important; }
+body.ws-on.ws-open #drawer-canvas { cursor: pointer; }
+
+/* (A) the selector: pinned and bounded, it scrolls within itself. (B) is the rest of the pane. */
+.controls > .ws-stage {
+  position: sticky; top: 0; z-index: 6; max-height: 180px; overflow: auto; box-sizing: border-box;
+  background: #f8faf9; border-bottom: 2px solid var(--line-dark);
+}
+.ws-sel { padding: 8px 12px 8px; }
+.ws-sel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px; }
+.ws-sel-head h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.ws-sel-actions { display: flex; gap: 6px; }
+.ws-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ws-rowbtn {
+  width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; font: inherit; font-size: 14px; font-weight: 600;
+  color: var(--ink); background: white; border: 1px solid var(--line-dark); border-radius: 8px; padding: 5px 10px; cursor: pointer; min-height: 30px;
+}
+.ws-rowbtn:hover:not(:disabled) { border-color: var(--teal); background: var(--teal-soft); }
+.ws-rowbtn:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.ws-rowbtn:disabled { cursor: default; opacity: .7; }
+.ws-rowbtn.selected { background: var(--teal-soft); border-color: var(--teal); box-shadow: inset 3px 0 0 var(--teal); color: var(--teal-dark); }
+.ws-ico { flex: none; color: var(--muted); }
+.ws-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-note { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-group { font-size: 12px; font-weight: 700; color: var(--muted); margin-top: 4px; }
+.ws-empty { color: var(--muted); font-size: 13px; padding: 4px 0; }
+
+/* Print Space and New Space take the editor region (B) for a while. */
+.ws-aux { padding: 12px 14px 20px; }
+.ws-page h2 { margin: 0 0 8px; font-size: 18px; }
+.ws-toprow { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; }
+.ws-aux .ws-item, .ws-aux .ws-group { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.ws-aux .ws-item > label {
+  display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; box-sizing: border-box;
+  background: white; border: 1px solid var(--line-dark); border-radius: 8px; padding: 5px 10px;
+}
+.ws-item input[type="checkbox"] { width: 17px; height: 17px; margin: 0; accent-color: var(--teal); flex: none; }
+.ws-printcount { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--teal-dark); }
+.ws-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.ws-choice {
+  display: grid; gap: 4px; justify-items: start; width: 100%; text-align: left; font: inherit; color: var(--ink); background: white; cursor: pointer;
   border: 1px solid var(--line-dark); border-radius: 11px; padding: 10px 12px;
 }
-.ws-card { display: flex; align-items: center; gap: 10px; }
-.ws-card:hover:not(:disabled), .ws-choice:hover { border-color: var(--teal); background: var(--teal-soft); }
-.ws-card:focus-visible, .ws-choice:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
-.ws-card.current { border-color: var(--teal); box-shadow: inset 3px 0 0 var(--teal); }
-.ws-card:disabled { opacity: .55; cursor: default; }
-.ws-card-icon { font-size: 22px; flex: none; }
-.ws-card-text { display: grid; min-width: 0; }
-.ws-card-text small, .ws-choice small { color: var(--muted); font-size: 12px; }
-.ws-card-tag { margin-left: auto; font-size: 11px; color: var(--teal-dark); font-style: normal; font-weight: 700; }
-.ws-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-.ws-choice { display: grid; gap: 4px; justify-items: start; }
-.ws-choice img, .ws-choice-blank { width: 100%; max-width: 120px; height: 90px; object-fit: contain; }
-.ws-choice-blank { display: grid; place-items: center; font-size: 28px; color: var(--muted); }
-.ws-links { margin: 12px 0 0; font-size: 13px; color: var(--muted); }
+.ws-choice:hover { border-color: var(--teal); background: var(--teal-soft); }
+.ws-choice:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.ws-choice img { width: 100%; max-width: 120px; height: 90px; object-fit: contain; }
+.ws-choice small { color: var(--muted); font-size: 12px; }
+.ws-links { margin: 8px 4px 0; font-size: 13px; color: var(--muted); }
 
-/* Overview, My Bins, Print Space. */
-.ws-overview, .ws-print { padding-bottom: 12px; }
-.ws-toprow { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
-.ws-selbar {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; padding: 8px 12px; min-height: 22px;
-  background: var(--teal-soft); border: 1px solid var(--teal); border-radius: 10px;
-}
-.ws-selbar.empty { background: transparent; border-style: dashed; border-color: var(--line-dark); color: var(--muted); font-size: 13px; }
-.ws-selbar strong { margin-right: auto; }
-.ws-items { gap: 2px; }
-.ws-item, .ws-group { display: flex; align-items: center; gap: 8px; min-height: 30px; }
-.ws-item > label { display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; }
-.ws-group { font-size: 12px; font-weight: 700; color: var(--muted); margin-top: 8px; }
-.ws-label {
-  border: 0; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink);
-  text-align: left; padding: 5px 10px; border-radius: 7px; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-span.ws-label { cursor: inherit; padding-left: 0; }
-button.ws-label:hover { background: var(--teal-soft); }
-button.ws-label:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
-.ws-item.selected > .ws-label { background: var(--teal); color: white; }
-.ws-item.container > .ws-label { font-style: italic; }
-.ws-note { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ws-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
-.ws-printcount { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--teal-dark); }
-.ws-item input[type="checkbox"] { width: 17px; height: 17px; margin: 0; accent-color: var(--teal); flex: none; }
-
-/* The slim line above an editor. */
-.ws-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 14px; min-height: 38px; box-sizing: border-box; }
-.ws-trail { font-size: 13px; color: var(--muted); margin-right: auto; }
-.ws-trail strong { color: var(--ink); }
-.ws-switch { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-.ws-switch select { max-width: 220px; }
-.ws-linknote { font-size: 12px; color: var(--muted); }
-
-/* Overview with a layout: the Space canvas is the rest of the page, view and pick only. */
-body.ws-task-overview #dl-staging,
-body.ws-task-overview .canvas-wrap[data-canvas="drawer"] .dl-hint { display: none !important; }
-body.ws-task-overview .app-shell { grid-template-columns: 1fr; }
-body.ws-task-overview .controls, body.ws-task-overview .sidebar-resizer { display: none; }
-body.ws-task-overview #drawer-canvas { cursor: pointer; }
+/* Print Space / New Space show only their own editor under the selector. */
+body.ws-task-print .controls > :not(#ws-stage):not(#ws-aux),
+body.ws-task-newspace .controls > :not(#ws-stage):not(#ws-aux) { display: none !important; }
 
 /* Each editor stands alone: only its own part of the sidebar shows. */
 body.ws-task-bin #space-head,
