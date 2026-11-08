@@ -240,11 +240,9 @@ WS.renderBar = () => {
     const place = WS.placeName();
     const id = state.designInventoryId;
     const rows = WS.open() ? DP.designNavEditableRows() : [];
-    const printOk = $("#print-individual-bin") && !$("#print-individual-bin").disabled && !DL?.busy;
     return `<div class="ws-bar" role="group" aria-label="Bin editor">${back}
       <nav class="ws-trail" aria-label="Where you are">${wsEsc(place)} › <strong>${wsEsc(WS.binLabel(id))}</strong></nav>
-      ${rows.length > 1 ? `<label class="ws-switch">Bin <select data-ws-switch aria-label="Switch to another bin">${rows.map(one => `<option value="${wsEsc(one.id)}"${one.id === id ? " selected" : ""}>${wsEsc(DL.label(one))}</option>`).join("")}</select></label>` : ""}
-      <button type="button" class="button secondary dl-small" data-ws-act="print-bin"${printOk ? "" : " disabled"}>Print Bin</button></div>`;
+      ${rows.length > 1 ? `<label class="ws-switch">Bin <select data-ws-switch aria-label="Switch to another bin">${rows.map(one => `<option value="${wsEsc(one.id)}"${one.id === id ? " selected" : ""}>${wsEsc(DL.label(one))}</option>`).join("")}</select></label>` : ""}</div>`;
   }
   if (WS.task === "container") {
     return `<div class="ws-bar" role="group" aria-label="${wsEsc(WS.containerName())} editor">${back}
@@ -529,7 +527,9 @@ WS.printContainerNow = event => {
   return SP.printStructural(event);
 };
 
-// The same Print / Export choice the open bin's own buttons give.
+// The same Print / Export choice the open bin's own buttons give. The bin
+// editor has one Print Bin button (the form's); the slim bar no longer carries
+// a second copy whose enabled state could drift from it.
 WS.printOpenBin = () => {
   const target = $("#print-individual-bin");
   if (!target || target.disabled) return;

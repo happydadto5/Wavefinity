@@ -466,7 +466,7 @@ function updatePrimaryPrintButtonLabel() {
   if (!button) return;
   const wrap = $(".print-button-wrap");
   if (wrap) wrap.hidden = false;
-  button.textContent = "Print";
+  button.textContent = "Print Bin";
   button.title = state.runtime.hosted
     ? "Printing needs local Wavefinity and a slicer"
     : !state.slicer?.available
