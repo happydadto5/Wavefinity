@@ -274,7 +274,7 @@ WS.flushBin = async () => {
 WS.switchingMessage = task => {
   if (!WS.open()) return "";
   if (task === "settings" && WS.task !== "settings") return "Switching to space layout";
-  if ((task === "container" || task === "bin") && WS.task === "settings") return "Switching to bin design";
+  if ((task === "container" || task === "bin") && WS.task === "settings") return "Switching to bin view";
   return "";
 };
 
