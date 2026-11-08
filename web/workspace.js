@@ -418,7 +418,7 @@ WS.settle = tries => {
   setTimeout(() => {
     if (WS.task !== "landing" || !WS.open()) return;
     if (WS.busy || SP.busy) { if (tries < 60) WS.settle(tries + 1); return; }
-    WS.land();
+    WS.land().then(landed => { if (!landed && WS.landingPending) WS.endOpening(); });
   }, 150);
 };
 
@@ -427,20 +427,36 @@ WS.settle = tries => {
 // Open a Space from a row. On the open screen nothing is being edited, so leaving the
 // restored Space must not wait on an editor prompt; if the switch cannot proceed the
 // reason is shown on the screen itself, not only as a toast.
-WS.pickSpace = folder => SP.run(async () => {
+// Opening a Space says so at once, over the middle section, until it is drawn (Story 2719).
+// The message is not held across WS.land: SP.run keeps SP.busy set, and settle waits on that.
+// Instead it is cleared by WS.sync once the view has left "landing" (see WS.endOpening).
+WS.endOpening = () => {
+  WS.landingPending = false;
+  WS.showSwitching("");
+};
+
+WS.pickSpace = (folder, name = "") => SP.run(async () => {
   WS.message = "";
+  WS.landingPending = false;
+  if (name) WS.showSwitching(`Opening ${name}...`);
   let opened = null;
   try {
     opened = await SP.afterPick(folder, WS.task === "picker" ? { visible: false } : undefined);
   } catch (error) {
+    WS.endOpening();
     WS.message = `Could not open that Space: ${friendlyError(error)}`;
     WS.sync();
     throw error;
   }
   if (!opened) {
+    WS.endOpening();
     WS.message = "That Space could not be opened because the Space that is open could not be saved first. Fix the problem there, then try again.";
     WS.sync();
+    return;
   }
+  // Adopted but not yet drawn: keep the message until the landing view is shown.
+  if (name && WS.open() && WS.task === "landing") WS.landingPending = true;
+  else WS.endOpening();
 });
 
 WS.openSpaceRow = button => {
@@ -453,11 +469,11 @@ WS.openSpaceRow = button => {
   }
   if (src === "other") {
     const one = SP.otherSpaces[index];
-    if (one) WS.pickSpace(one.folder);
+    if (one) WS.pickSpace(one.folder, one.name);
     return null;
   }
   const one = SP.recent[index];
-  if (one) WS.pickSpace(state.runtime.hosted ? { handle: one.handle, name: one.folder_name || one.name } : one.folder);
+  if (one) WS.pickSpace(state.runtime.hosted ? { handle: one.handle, name: one.folder_name || one.name } : one.folder, one.name);
   return null;
 };
 
@@ -624,6 +640,8 @@ WS.sync = () => {
     WS.placeSeen = key;
     if (!first && key !== "space-pending") WS.arrive();
   }
+  // The opening message ends once the Space's view has been drawn (or the open did not land).
+  if (WS.landingPending && (WS.task !== "landing" || !WS.open())) WS.endOpening();
   // A task that needs an open Space falls back when that Space is gone.
   if (["landing", "container", "settings", "print"].includes(WS.task) && !WS.open() && state.folderMode !== "space") {
     WS.task = "bin";
