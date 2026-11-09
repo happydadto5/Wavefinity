@@ -294,7 +294,7 @@ SP.resetCabinetSettings = async () => {
 
 // ---- workspace navigator (mounted into the Space canvas host)
 
-SP.cabinetInfo = { key: "", summary: null, status: null, commitSerial: 0 };
+SP.cabinetInfo = { key: "", commitSerial: 0 };
 SP.cabinetWorkspace = null;
 
 SP.cabinetJumpToRow = async rowId => {
@@ -304,10 +304,6 @@ SP.cabinetJumpToRow = async rowId => {
 
 SP.cabinetCallbacks = () => ({
   resetCabinet: () => SP.resetCabinetSettings(),
-  openPrinterSettings: () => SP.openPrinterSettings(),
-  saveCabinet: () => SP.runStructural("save"),
-  printCabinet: event => SP.runStructural("print", event),
-  printCabinetAndBins: event => SP.printCabinetAndBins(event),
   setActiveDrawer: async id => {
     // Fix 1107 (Astra AD-006): the drawer-switch mutation authority. While a
     // cabinet print is in flight the server is generating from the submitted
@@ -342,8 +338,7 @@ SP.updateCabinetWorkspace = () => {
     SP.ensureStorageDrawersRules();
     const data = {
       space: state.activeSpace, layout: DL.layout, editing: Boolean(SP.editing),
-      structuralStatus: SP.cabinetInfo.status, summary: SP.cabinetInfo.summary,
-      printer: PrinterProfile.current(), recovery: state.cabinetRecovery || null,
+      recovery: state.cabinetRecovery || null,
       // Fix 1108: feed the existing structural-operation busy state into the
       // workspace renderer so Save/Print show an immediate pending state and
       // disable while running. Reuses SP.structuralBusy - no second tracker.
@@ -355,81 +350,28 @@ SP.updateCabinetWorkspace = () => {
     } else {
       SP.cabinetWorkspace.update(data);
     }
-    if (!state.cabinetRecovery) SP.refreshCabinetStructural();
+    if (!state.cabinetRecovery) SP.settleCabinetJournal();
   } catch (error) {
     console.error("Storage Drawers workspace", error);
   }
 };
 
-// The cabinet's fit summary and saved-file status. Local status comes from the
-// real files on disk; hosted status is recomputed from the committed browser
-// manifest and the actual files in the chosen folder - never from a server temp.
-SP.refreshCabinetStructural = async () => {
+// Hosted only: a journal left by an interrupted Save Cabinet is settled when the
+// workspace updates (committed leftovers are cleaned, anything else is rolled
+// back) so the folder is never left half-written. Nothing is fetched or stored
+// for display. A recovery failure is surfaced by the next Save Cabinet, which
+// settles the journal itself before comparing ownership.
+SP.settleCabinetJournal = async () => {
   if (!DL.isStorageDrawers() || !state.activeSpace || state.cabinetRecovery) return;
-  const hosted = Boolean(state.runtime.hosted);
-  const profile = PrinterProfile.current();
-  const key = JSON.stringify([state.activeSpace, profile, state.activeSpaceId, SP.cabinetInfo.commitSerial]);
+  if (!state.runtime.hosted) return;
+  const key = JSON.stringify([state.activeSpace, PrinterProfile.current(), state.activeSpaceId, SP.cabinetInfo.commitSerial]);
   if (SP.cabinetInfo.key === key) return;
   SP.cabinetInfo = { ...SP.cabinetInfo, key };
-  try {
-    const result = await api("/api/space/structural-design", {
-      space: clone(state.activeSpace),
-      ...(hosted ? { printer_profile: profile } : { output: state.output, space_id: state.activeSpaceId }),
-    });
-    if (SP.cabinetInfo.key !== key) return;
-    SP.cabinetInfo.summary = result.summary;
-    SP.cabinetInfo.status = hosted ? await SP.hostedCabinetStatus(result.signature, result.orientations, result.expected_components) : result.status;
-  } catch (error) {
-    if (SP.cabinetInfo.key !== key) return;
-    if (error.code === "CABINET_RECOVERY") {
-      // An interrupted save that cannot be settled is a cabinet-recovery
-      // problem, never "changed outside Wavefinity".
-      SP.cabinetInfo.status = { status: "recovery_error", message: error.message };
-    } else {
-      SP.cabinetInfo.summary = { fits_printer: false, first_fit_error: error.message };
-      SP.cabinetInfo.status = { status: "need_save" };
-    }
-  }
-  if (SP.cabinetInfo.key === key) SP.updateCabinetWorkspace();
-};
-
-SP.hostedCabinetStatus = async (signature, orientations = null, expected = null) => {
   const handle = state.browserFolder?.handle;
-  if (!handle) return { status: "need_save" };
-  if (SP._hostedCabinetSaving) return SP.cabinetInfo.status || { status: "need_save" };
-  // A journal left by an interrupted save is settled first: committed leftovers
-  // are cleaned, anything else is rolled back, before ownership is compared.
-  await SP.recoverHostedCabinetJournal(handle, state.activeSpaceId);
-  const { current } = await SP.readMetadata(handle);
-  const manifest = SP.classifyMetadata(current).structural_outputs?.storage_drawers;
-  const rows = manifest?.components;
-  // Fix 1106 (Astra AD-005): a row without a string key is malformed, matching
-  // the backend's _valid_manifest_components shape requirement.
-  if (!Array.isArray(rows) || !rows.length || rows.some(one => typeof one?.filename !== "string" || typeof one?.sha256 !== "string" || typeof one?.key !== "string")) {
-    return { status: "need_save" };
-  }
-  if (manifest.signature !== signature) return { status: "need_update" };
-  // Fix 1106 (Astra AD-005): the manifest must be the complete current plan —
-  // the remaining rows can be self-consistent while a component is missing,
-  // duplicated, or filed under a foreign key/filename. Compared as sorted
-  // "key\0filename" fingerprints so multiplicities must match exactly.
-  // Completeness fails closed (G2M-0400): when the expected plan set is
-  // absent, non-array, or malformed, there is no plan-set proof at all, so a
-  // self-consistent incomplete manifest must never return "saved".
-  // Compatibility avoids a crash — it does not waive completeness.
-  if (!Array.isArray(expected) || !expected.length || expected.some(one => typeof one?.key !== "string" || typeof one?.filename !== "string")) {
-    return { status: "need_save" };
-  }
-  {
-    const fingerprint = list => list.map(one => `${one.key}\0${one.filename}`).sort();
-    const want = fingerprint(expected), have = fingerprint(rows);
-    if (want.length !== have.length || want.some((entry, index) => entry !== have[index])) return { status: "need_save" };
-  }
-  for (const component of rows) {
-    if ((await WFFileSystem.sha256(handle, component.filename)) !== component.sha256) return { status: "need_save" };
-  }
-  if (orientations && rows.some(one => one.orientation !== orientations[one.key])) return { status: "need_update" };
-  return { status: "saved" };
+  if (!handle || SP._hostedCabinetSaving) return;
+  try {
+    await SP.recoverHostedCabinetJournal(handle, state.activeSpaceId);
+  } catch (_error) { /* reported by the next Save Cabinet, which settles the journal first */ }
 };
 
 // ---- structural Save / Print for the cabinet
