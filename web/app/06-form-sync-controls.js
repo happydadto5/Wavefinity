@@ -168,8 +168,13 @@ async function maybeWarnSpaceWallMismatch(newWall) {
       const data = await DL.inventoryCall("/api/drawer/load", {}, { write: false });
       bins = data.bins;
     }
+    // Bins are compared with the OTHER bins only: the bin being edited still
+    // holds its previous wall in its saved row, and a container's own wall
+    // (Storage Box, Storage Drawers) is never a bin thickness.
+    const editedId = state.designInventoryId;
     const differs = (bins || []).some(row => {
       if (row?.kind !== "bin") return false;
+      if (editedId && row.id === editedId) return false;
       const wall = Number(row.wall);
       return row.wall != null && Number.isFinite(wall) && wall > 0 && Math.abs(wall - newWall) > 1e-6;
     });
