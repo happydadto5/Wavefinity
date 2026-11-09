@@ -287,13 +287,14 @@ B4B_FRONT_LABEL_STYLES = ("flat", "wavy")
 # Storage Box label Size choices.  No choice is a font size: each is a multiple of
 # the box-proportional size the label is fitted to today ("default" = 1.0, so a
 # design saved before this existed labels its box exactly as before), stepping
-# down/up by a constant 0.15 either side of it.
+# down by a constant 0.15 below it, and the steps above it spaced evenly from
+# Default up to Extra Large (1.6), about 30% further out than before.
 B4B_LABEL_SIZES = (
     "very_small", "small", "medium", "default", "medium_large", "large", "extra_large",
 )
 B4B_LABEL_SIZE_SCALE = {
     "very_small": 0.55, "small": 0.70, "medium": 0.85, "default": 1.0,
-    "medium_large": 1.15, "large": 1.30, "extra_large": 1.45,
+    "medium_large": 1.2, "large": 1.4, "extra_large": 1.6,
 }
 # Saved-design schema version for B4B intent.  Bumped when the meaning of a
 # field changes rather than inferred from dimensions: v2 moved the carrying
