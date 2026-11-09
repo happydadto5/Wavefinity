@@ -8,7 +8,7 @@
  *
  * API: window.StorageBoxForm.mount({ host, initialSpace, callbacks })
  *   -> { read(), draft(), fill(space), destroy(), isDirty(), markPristine(),
- *        setError(), setInterior(axis, mm), getInterior(), setOutside(mm) }
+ *        setError(), setInterior(axis, mm), getInterior() }
  *
  * Interior sizing (Fix 103 R1): Width/Depth are whole catalog base units (shown in mm);
  * Height is a whole mm at or above the legal minimum and is never snapped to
@@ -103,7 +103,6 @@
     const zLabel = labeled("Interior Height (mm)", zInput);
     sizeRow.append(xLabel, yLabel, zLabel);
     sizeGroup.append(sizeRow);
-    const outside = el("p", "storage-box-capacity");
     form.append(sizeGroup);
 
     // ---- Case Settings ----
@@ -210,11 +209,11 @@
 
     form.append(caseWrap);
 
-    // ---- Compact status last: finished-outside result, then the one general error surface ----
+    // ---- Compact status last: the one general error surface ----
     const errorBox = el("p", "field-error", "");
     errorBox.hidden = true;
     errorBox.setAttribute("role", "alert");
-    form.append(outside, errorBox);
+    form.append(errorBox);
 
     host.append(form);
 
@@ -403,13 +402,6 @@
       errorBox.hidden = !message;
     }
 
-    // The server-derived finished outside size (never computed here).
-    function setOutside(sizeMm) {
-      outside.textContent = Array.isArray(sizeMm) && sizeMm.length >= 3
-        ? `Finished outside ${sizeMm.map(value => String(Math.round(Number(value) * 10) / 10)).join(" × ")} mm`
-        : "";
-    }
-
     function destroy() {
       events.abort();
       form.remove();
@@ -426,7 +418,7 @@
       }
     }
 
-    return { read, draft: read, fill, destroy, isDirty, markPristine, setError, setInterior, getInterior, setOutside, setDisabled };
+    return { read, draft: read, fill, destroy, isDirty, markPristine, setError, setInterior, getInterior, setDisabled };
   }
 
   window.StorageBoxForm = { mount };

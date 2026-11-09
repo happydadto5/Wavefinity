@@ -317,14 +317,6 @@ function structuralWithDrawerIds(space) {
   return next;
 }
 
-function structuralOutsideXYZ(preview, kind) {
-  if (kind === "box") {
-    const envelope = preview?.b4b?.assembled_envelope_mm;
-    return Array.isArray(envelope) && envelope.length >= 3 ? envelope.map(Number) : null;
-  }
-  const bounds = preview?.bounds;
-  return bounds ? [bounds.x, bounds.y, bounds.z].map(Number) : null;
-}
 
 // ---------------------------------------------------------------- preview
 
@@ -431,7 +423,6 @@ async function refreshStructuralPreview() {
       const owners = new Set((result.meshes || []).map(mesh => mesh.owner));
       if (!owners.has(state.structuralHighlightOwner)) state.structuralHighlightOwner = null;
     }
-    record.form?.setOutside?.(structuralOutsideXYZ(result, kind));
     record.form?.setError?.("");
     setStructuralPreviewState("");
     renderPreview3D();
