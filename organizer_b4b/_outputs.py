@@ -35,6 +35,7 @@ from ._labels import (
     _apply_top_label,
     b4b_front_label_eligibility,
     b4b_front_label_geometry,
+    b4b_front_label_holder_min_y,
 )
 from ._compose import b4b_body_with_features
 from ._validation import validate_b4b_design
@@ -95,6 +96,9 @@ def b4b_summary(box: BoxSpec) -> dict:
         min_y = min(min_y, handle.axis_y - handle.eye_radius)
         min_x = min(min_x, handle.centers_x[0] - handle.root_width / 2.0)
         max_x = max(max_x, handle.centers_x[1] + handle.root_width / 2.0)
+    holder_y = b4b_front_label_holder_min_y(box)
+    if holder_y is not None:
+        min_y = min(min_y, holder_y)
     if b4b.stacking:
         top_z += B4B_STACK_PEG_EXPOSED
     summary: dict = {
@@ -389,6 +393,10 @@ def b4b_print_object_bounds(box: BoxSpec) -> list[dict]:
         body_min_y = min(body_min_y, handle.axis_y - handle.profile.pivot_radius)
         body_min_x = min(body_min_x, handle.centers_x[0] - handle.root_width / 2.0)
         body_max_x = max(body_max_x, handle.centers_x[1] + handle.root_width / 2.0)
+    # The front-label holder is fused into the body, not the lid.
+    holder_y = b4b_front_label_holder_min_y(box)
+    if holder_y is not None:
+        body_min_y = min(body_min_y, holder_y)
     body_xy = [body_max_x - body_min_x, max_y - body_min_y]
     rows = []
     for name, kind, make in _print_object_plan(box):

@@ -302,6 +302,20 @@ def b4b_front_label_fit(box: BoxSpec) -> tuple[bool, float, float, float]:
     )
 
 
+def b4b_front_label_holder_min_y(box: BoxSpec) -> float | None:
+    """Frontmost Y the fused front-label holder reaches, or ``None`` when the
+    case carries no front label (or the geometry would refuse to build one).
+    Same reference ``b4b_front_label_geometry`` builds from: the holder
+    projects ``B4B_FRONT_LABEL_HOLDER_DEPTH`` past the structural front."""
+    b4b = b4b_effective_box(box).b4b
+    if b4b.label_location != "front" or not b4b.label_text.strip():
+        return None
+    if not b4b_front_label_fit(box)[0]:
+        return None
+    return (b4b_layout(box).outer_structural_polygon.bounds[1]
+            - B4B_FRONT_LABEL_HOLDER_DEPTH)
+
+
 def b4b_front_label_eligibility(box: BoxSpec) -> tuple[bool, str]:
     """``(eligible, reason)`` - whether this case's front wall can carry a
     top-loading label, mirroring ``b4b_handle_eligibility``'s shape so the UI
