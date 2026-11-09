@@ -37,6 +37,17 @@ PREVIEW_INLAY_LAYER = 2
 def preview_inlay_layer(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     mesh.metadata["wavefinity_preview_layer"] = PREVIEW_INLAY_LAYER
     return mesh
+
+
+def preview_lettering_layer(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Inlay layer plus a note that the preview should paint this as lettering.
+
+    Lettering that belongs to another holder (a Divider's compartment label)
+    would otherwise be drawn in that holder's colour, flush with a surface of
+    the same colour, and disappear. The exported mesh is unaffected.
+    """
+    mesh.metadata["wavefinity_preview_lettering"] = True
+    return preview_inlay_layer(mesh)
 TEXT_ZONE_EPSILON = 0.01     # glyph bounds land exactly on the zone; see _feature_reach
 TEXT_INTERACTION_MARGIN = 0.25
 TEXT_DEPTH_CHOICES = (0.2, 0.4, 0.6, 0.8)

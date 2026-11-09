@@ -318,6 +318,12 @@ def _mesh_preview_geometry(
     """
     layer = int(mesh.metadata.get("wavefinity_preview_layer", 0) or 0)
     preview_kind = mesh.metadata.get("wavefinity_preview_kind")
+    if mesh.metadata.get("wavefinity_preview_lettering") and "invalid" not in kind:
+        # Another holder's lettering (Divider labels) paints as lettering, not
+        # in the holder's own colour where it would vanish into its surface.
+        prefix = kind.split("_", 1)[0]
+        if prefix in ("feature", "insert", "draft"):
+            kind = f"{prefix}_text"
     if preview_kind and "invalid" not in kind and "conflict" not in kind:
         kind = f"{kind}_{preview_kind}"
     mesh = _simplified_for_preview(mesh)

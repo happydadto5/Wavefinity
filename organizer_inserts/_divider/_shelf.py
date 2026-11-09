@@ -20,7 +20,7 @@ from organizer_geometry import (
     intersection,
 )
 from .._core import Feature, Zone, connector_keep_out
-from .._text import preview_inlay_layer
+from .._text import preview_lettering_layer
 from .._divider_cells import (
     DividerCell,
     _divider_cross_centres,
@@ -110,7 +110,7 @@ def _divider_grid_texts(
         )
         require_text_backing(z, DIVISION_TEXT_DEPTH, what="division label")
         try:
-            solid = preview_inlay_layer(text_prism(outline, z, depth=DIVISION_TEXT_DEPTH))
+            solid = preview_lettering_layer(text_prism(outline, z, depth=DIVISION_TEXT_DEPTH))
         except Exception:
             continue
         results.append((text, solid, False))
@@ -279,7 +279,7 @@ def _divider_grid_rim_texts(
                     outline, turn, origin=(0.0, 0.0), use_radians=False,
                 )
             outline = affinity.translate(outline, xoff=cx, yoff=cy)
-            inlay = preview_inlay_layer(text_prism(outline, z_top))
+            inlay = preview_lettering_layer(text_prism(outline, z_top))
         except Exception:
             continue
         # The shelf is plain body material. The lettering is its own recessed
@@ -407,7 +407,7 @@ def _division_side_shelves(
             cy = (span_lo + span_hi) / 2.0
         outline = affinity.translate(outline, xoff=cx, yoff=cy)
         try:
-            inlay = preview_inlay_layer(text_prism(outline, z_top))
+            inlay = preview_lettering_layer(text_prism(outline, z_top))
         except Exception:
             results.append((text, shelf, True))
             continue
@@ -562,7 +562,7 @@ def divider_division_texts(
 
         require_text_backing(z, DIVISION_TEXT_DEPTH, what="division label")
         try:
-            solid = preview_inlay_layer(text_prism(outline, z, depth=DIVISION_TEXT_DEPTH))
+            solid = preview_lettering_layer(text_prism(outline, z, depth=DIVISION_TEXT_DEPTH))
             results.append((text, solid, False))
         except Exception:
             continue
