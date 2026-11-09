@@ -145,15 +145,10 @@ WS.renderSelector = () => {
   // Story 2725: live on any bin view (a bin in a space or a loose bin in My Bins). Greyed only on the
   // container and Layout views, or while a switch/action is in flight. Not tied to the classic form's
   // button state, which is hidden or disabled in states where the header action still works.
-  const binSelected = !locked && WS.task === "bin" && (!here || Boolean(state.designInventoryId));
-  const canDuplicate = binSelected && !DP.designNavBlocked();
-  const selectedBin = state.designInventoryId ? DL.bin(state.designInventoryId) : null;
-  const canDelete = binSelected && Boolean(selectedBin) && DP.editableSourceFor(selectedBin) && !DP.designNavBlocked();
+  // Story 2783: Duplicate and Delete live on the selected bin's own row, so the top keeps New Bin only.
   const actions = `${here ? "" : '<button type="button" class="button secondary dl-small" data-ws-act="new-space-choose">New Space</button>'}
       <button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>New Bin</button>
-      ${layoutPick ? `<button type="button" class="button primary dl-small" data-ws-act="edit-bin" data-id="${wsEsc(layoutPick)}"${DP.designNavBlocked() ? " disabled" : ""}>Edit</button>` : ""}
-      <button type="button" class="button secondary dl-small" data-ws-act="duplicate"${canDuplicate ? "" : " disabled"}>Duplicate</button>
-      <button type="button" class="button danger dl-small" data-ws-act="delete"${canDelete ? "" : " disabled"}>Delete</button>`;
+      ${layoutPick ? `<button type="button" class="button primary dl-small" data-ws-act="edit-bin" data-id="${wsEsc(layoutPick)}"${DP.designNavBlocked() ? " disabled" : ""}>Edit</button>` : ""}`;
   return `<div class="ws-sel">
     <div class="ws-sel-head"><h2>${wsEsc(here ? WS.placeName() : "My Bins")}</h2><span class="ws-sel-actions">${actions}</span></div>
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
@@ -659,8 +654,6 @@ WS.onAction = async (act, button, event) => {
     // Story 2725: call the operations directly (a .click() on a disabled classic button does nothing).
     case "drawer": return WS.openDrawer(button.dataset.id);
     case "edit-bin": return WS.pick("bin", button.dataset.id);
-    case "duplicate": return typeof designerDuplicate === "function" ? designerDuplicate() : null;
-    case "delete": return DP.deleteDesignBin();
     case "print-picked": return WS.printPicked(event);
     case "export-picked": return WS.exportPicked();
     case "pick-all": return WS.pickAll();

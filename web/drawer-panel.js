@@ -1353,7 +1353,7 @@ DP.renderInventory = (force = false) => {
           ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>`
             : sourceMissing ? `<button type="button" class="button secondary dl-small" data-act="edit" disabled title="The original editable design for this row is unavailable, so it can't be edited.">Edit</button>` : ""}
           ${one.id === deleteRowId ? `<button type="button" class="button danger dl-small" data-act="delete" ${DP.designNavBlocked() ? "disabled" : ""}>Delete</button>` : ""}
-          ${designSource ? `<button type="button" class="button secondary dl-small" data-act="duplicate">Duplicate</button>` : ""}
+          ${designSource && one.id === deleteRowId ? `<button type="button" class="button secondary dl-small" data-act="duplicate" ${DP.designNavBlocked() ? "disabled" : ""}>Duplicate</button>` : ""}
           ${eligible ? `<button type="button" class="button secondary dl-small" data-act="save">Save</button>` : ""}
           ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}
           ${statusTracked ? (printed
