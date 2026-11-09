@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import trimesh
 from shapely import affinity
 from shapely.geometry import Polygon
@@ -12,6 +14,7 @@ from organizer_engine import (
     text_outline,
     text_prism,
     wavy_outer_polygon,
+    wall_depth_for,
 )
 from organizer_geometry import (
     _extrude_polygon,
@@ -32,6 +35,7 @@ from .._divider_cells import (
 
 from ._consts import (
     RIB_THICKNESS,
+    DIVIDER_CHAMFER,
     DIVISION_TEXT_DEPTH,
     DIVISION_TEXT_MARGIN,
     DIVISION_SHELF_DEPTH,
@@ -465,6 +469,22 @@ def divider_division_texts(
         )
     z = base_z
 
+    # Half-width of a wall's footprint at the floor, bevel included, on the
+    # face toward the next slot (foot_low: wall below the slot's low edge,
+    # foot_high: wall above its high edge).
+    wavy = options.get("wall_style", "straight") == "wavy"
+    foot = (wall_depth_for(thickness) if wavy else thickness) / 2.0 + DIVIDER_CHAMFER
+    foot_low = foot_high = foot
+    try:
+        lean = height * math.tan(math.radians(float(options.get("angle", 0.0) or 0.0)))
+    except (TypeError, ValueError):
+        lean = 0.0
+    if spec_feature.wedge and math.isfinite(lean):
+        if lean >= 0.0:
+            foot_low += lean
+        else:
+            foot_high += -lean
+
     results = []
     for idx, (slot_low, slot_high) in enumerate(slots):
         if idx >= len(labels):
@@ -472,8 +492,11 @@ def divider_division_texts(
         text = str(labels[idx] or "").strip()
         if not text:
             continue
-        inner_low = slot_low + (0.0 if idx == 0 else thickness / 2.0)
-        inner_high = slot_high - (0.0 if idx == len(slots) - 1 else thickness / 2.0)
+        # The label keeps to the flat floor between the walls' beveled feet:
+        # each wall's base flares DIVIDER_CHAMFER past its face (and a wavy
+        # wall's envelope or a wedge's widened foot reaches further still).
+        inner_low = slot_low + (0.0 if idx == 0 else foot_low)
+        inner_high = slot_high - (0.0 if idx == len(slots) - 1 else foot_high)
         # Pull the label band in on every side: off the divider wall faces
         # across the compartment, and off the bin walls at the run-axis ends.
         inner_low += DIVISION_TEXT_MARGIN
