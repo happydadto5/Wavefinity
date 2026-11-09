@@ -410,6 +410,7 @@ const LID_DEFAULTS = {
   handle_size: "medium", handle_position: "middle", fit: "standard",
   flip_enabled: false,
   snap_enabled: false,
+  stack_rim: false,
   alignment: "off",
 };
 
@@ -419,7 +420,8 @@ function lidThicknessKey(design = state.design) {
   const box = design?.box || {};
   return JSON.stringify([box.x, box.y, box.wall, box.corner_fillet, box.flat_inside,
     Boolean(box.lid?.enabled), (box.stack?.mode || "none"),
-    box.z, Boolean(box.lid?.snap_enabled), Boolean(box.lid?.flip_enabled)]);
+    box.z, Boolean(box.lid?.snap_enabled), Boolean(box.lid?.flip_enabled), Boolean(box.lid?.stack_rim),
+    Boolean(box.lid?.handle_enabled), box.lid?.label_enabled ? box.lid.label_style : ""]);
 }
 
 // Inlay depth / Raised height as shown: an explicit saved value wins; an older
@@ -659,6 +661,7 @@ function syncLidForm() {
   populateLidChoices();
   $("#bin-stackable").value = String(state.design?.box?.stack?.mode === "direct");
   $("#lid-choice").value = !lid.enabled ? "none" : lid.flip_enabled ? "hinged" : lid.snap_enabled ? "snap" : "resting";
+  $("#lid-stack-rim").value = String(Boolean(lid.stack_rim));
   $("#lid-thickness").value = ({ thin: "1.2", medium: "1.4", thick: "1.6" })[lid.thickness] || lid.thickness;
   renderLidThicknessOptions();
   $("#lid-fit").value = lid.fit || "standard";
@@ -682,6 +685,9 @@ function syncLidForm() {
   $("#lid-option-panel").hidden = !hasLid;
   $("#lid-fit-row").hidden = lid.flip_enabled || !lid.snap_enabled;
   $("#lid-flip-note").hidden = !(hasLid && lid.flip_enabled);
+  // Only a resting lid can carry the stack rim; the knob needs the same space.
+  $("#lid-stack-rim-row").hidden = !(hasLid && !lid.flip_enabled && !lid.snap_enabled);
+  $("#lid-stack-rim-note").hidden = !(hasLid && lid.stack_rim && !lid.flip_enabled && !lid.snap_enabled && lid.handle_enabled);
   $("#lid-alignment-row").hidden = !(hasLid && lid.flip_enabled);
   $("#lid-alignment-note").hidden = !(hasLid && lid.flip_enabled && (lid.alignment || "off") !== "off");
   const handleOn = hasLid && Boolean(lid.handle_enabled);
@@ -692,7 +698,7 @@ function syncLidForm() {
   $("#lid-label-details").hidden = !labelOn;
   $("#lid-label-orientation-row").hidden = !labelOn;
   // Raised lettering stands proud of the lid top, so a lid that has it takes
-  // no stack seat; Level-with-top keeps the seat.
+  // no stack; Level-with-top keeps the rim usable.
   $("#lid-label-style-row").hidden = !labelOn;
   $("#lid-label-size-row").hidden = !labelOn;
   // Inlay depth / Raised height follows the active style.
@@ -845,6 +851,7 @@ function readStackForm(design) {
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
     flip_enabled: $("#lid-choice").value === "hinged",
     snap_enabled: $("#lid-choice").value === "snap",
+    stack_rim: $("#lid-choice").value === "resting" && $("#lid-stack-rim").value === "true",
     // Written explicitly on every save, so a missing value only ever means an
     // older file.
     fit: $("#lid-fit")?.value || remembered.fit || "standard",

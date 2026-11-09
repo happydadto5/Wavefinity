@@ -291,10 +291,10 @@ def stack_wall(one: dict[str, Any], specs: dict[str, Any]) -> float | None:
 def lid_refusal(lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
     """Why the lid on ``lower`` cannot take a stack, or None.
 
-    Read from the lower bin's saved design: a snap or resting lid carries the
-    stack seat; anything standing proud of the lid top (a hinged lid's hardware,
-    the pull knob, raised lettering) means it does not. A bin with no saved
-    design or no lid places no restriction.
+    Read from the lower bin's saved design: only a resting lid with its stack
+    rim on receives a bin. Snap and hinged lids never do, and the knob or raised
+    lettering needs the same space as the rim's bin. A bin with no saved design
+    or no lid places no restriction.
     """
     lid = (((specs.get(lower["id"]) or {}).get("box") or {}).get("lid"))
     if not isinstance(lid, dict) or not lid.get("enabled"):
@@ -302,6 +302,10 @@ def lid_refusal(lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
     name = _label(lower)
     if lid.get("flip_enabled"):
         return f"{name} has a hinged lid, which cannot take a stack"
+    if lid.get("snap_enabled"):
+        return f"{name} has a snap lid, which cannot take a stack"
+    if not lid.get("stack_rim"):
+        return f"{name} has a resting lid without a stack rim, which cannot take a stack"
     if lid.get("handle_enabled"):
         return f"{name} has a lid with a knob, which stands too proud to take a stack"
     if lid.get("label_enabled") and lid.get("label_style") == "raised":

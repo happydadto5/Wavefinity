@@ -350,7 +350,7 @@ LID_HANDLE_TYPES = ("knob",)      # one handle: the knob (a saved Pull opens as 
 LID_HANDLE_SIZES = ("small", "medium", "large")
 LID_HANDLE_POSITIONS = ("left", "right", "front", "back", "middle")
 # Removable-lid plug clearance per side. Only the lid's own bottom plug uses
-# this; the direct stack foot and a lid's top stack seat keep STACK_FIT.
+# this; the direct stack foot and a lid's stack rim keep STACK_FIT.
 LID_FITS = ("tight", "standard", "loose")
 LID_FIT_MM = {"tight": 0.15, "standard": 0.25, "loose": 0.35}
 LID_FIT_NAMES = {"tight": "Tight", "standard": "Standard", "loose": "Loose"}
@@ -393,6 +393,8 @@ class LidSpec:
     # independent of handle and label.
     flip_enabled: bool = False
     snap_enabled: bool = False
+    # Resting lid only: a ~2 mm rim on the lid top that the bin above sits into.
+    stack_rim: bool = False
     alignment: str = "off"            # hinged lid only; a missing value is an older file: Off
     # None is the legacy "no saved value" signal: an old inlaid label was
     # 0.4 mm and an old raised label 0.6 mm. Canonical saves always write it.
@@ -461,14 +463,15 @@ def lid_enabled(box: "BoxSpec") -> bool:
 
 
 def lid_receives_stack(box: "BoxSpec") -> bool:
-    """Whether the lid carries the stack seat another bin can stand in.
+    """Whether the lid carries the stack rim another bin can sit into.
 
-    Every snap and resting lid does. Anything standing proud of the lid top
-    means it does not: the hinge hardware of a hinged lid, the pull knob, and
-    raised lettering.
+    Only a resting lid whose rim option is on. A snap lid has no such option, a
+    hinged lid never receives, and anything standing proud of the lid top (the
+    knob, raised lettering) needs the same space as the rim's bin.
     """
     spec = lid_spec(box)
-    return (spec.enabled and not spec.flip_enabled and not spec.handle_enabled
+    return (spec.enabled and spec.stack_rim and not spec.snap_enabled
+            and not spec.flip_enabled and not spec.handle_enabled
             and not (spec.label_enabled and spec.label_style == "raised"))
 
 

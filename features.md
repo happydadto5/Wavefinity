@@ -765,7 +765,7 @@ Fit changes the lid plug clearance without changing the accepted direct-stack fi
 
 ### Handle
 
-A handle is optional and starts at **None**. A lid with a handle has no stack seat: it stands proud of the lid top, so nothing can be stacked on it.
+A handle is optional and starts at **None**. A lid with a handle cannot receive a stacked bin: it stands proud of the lid top, so nothing can be stacked on it.
 
 When on, the handle is the Knob: a square post with a diamond head. Every lid and bin builds it from one shared builder. Older Pull and Dome/Mushroom designs open as the Knob.
 

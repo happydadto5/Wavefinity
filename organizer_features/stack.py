@@ -2,10 +2,9 @@
 
 Two same-mode interfaces:
 
-``lid``     the bin is closed by its own printed lid.  The lid plugs into the
-            bin mouth and snaps into a groove just under the rim; its top face
-            is recessed, and that recess is the seat the next bin's stepped
-            base drops into.
+``lid``     the bin is closed by its own printed lid.  A resting lid can carry
+            a 2 mm rim on its top face; the next bin's stepped base drops into
+            that rim.
 ``direct``  no lid at all - a straight-sided skirt under the bin's base drops
             into the mouth of the bin below and stops the stack sliding.  It
             only locates: nothing snaps, clicks or grips, and the receiving
@@ -86,7 +85,8 @@ from organizer_geometry import (
 # lands exactly on the plug's top face and the lid unions as two loose pieces
 # instead of one - and the bin above would be standing on nothing.
 STACK_LID_SKIN = 2.0      # minimum lid rise above the rim
-STACK_SEAT_DEPTH = 2.0    # lid top stack seat depth == the skirt that drops into it (STACK_SKIRT_DEPTH)
+STACK_SEAT_DEPTH = 2.0    # resting-lid stack rim height == the skirt depth of the bin that sits in it
+STACK_LID_RIM_WIDTH = 1.2  # radial width of the resting-lid stack rim
 STACK_PLUG_DEPTH = 3.0    # how far a lid plug reaches into the mouth it closes
 STACK_INTERIOR_MARGIN = 0.5  # lidded bins: interior parts stop this far below the plug bottom
 STACK_SKIRT_DEPTH = 2.0   # direct mode: how far the skirt drops into the bin below
@@ -134,9 +134,9 @@ def stack_lid_rise(box: BoxSpec) -> float:
     if not lid_enabled(box):
         return 0.0
     plate = float(lid_spec(box).thickness)
-    # The lid's top stack seat is cut into the plate, so the chosen thickness
-    # is the plate left under the seat floor. The seat's rise is counted here,
-    # once, and every stack height is built from this rise.
+    # A rimmed resting lid is its plate (the chosen thickness) plus the rim
+    # standing on it. The rim's height is counted here, once, and every stack
+    # height and fit check is built from this rise.
     return plate + (STACK_SEAT_DEPTH if lid_receives_stack(box) else 0.0)
 
 
@@ -664,7 +664,7 @@ def lid_label_backing(box: BoxSpec) -> float:
     """Lid material under an inlaid label's surface before the pocket is cut.
 
     A label on a lid that does not receive a stack sits on the lid top; on a
-    receiving lid it sits on the floor of the stack seat.
+    rimmed lid it sits on the plate inside the rim.
     """
     return stack_lid_rise(box) - (STACK_SEAT_DEPTH if lid_receives_stack(box) else 0.0)
 
@@ -711,13 +711,17 @@ def _lid_text_parts(
     return parts
 
 
-def _lid_stack_seat(eff: BoxSpec) -> trimesh.Trimesh:
-    """The stack seat cutter: a shallow recess in the lid's top face."""
-    seat = _extrude_polygon(
-        _plug_polygon(eff).buffer(STACK_FIT), STACK_SEAT_DEPTH + 1.0
-    )
-    seat.apply_translation((0.0, 0.0, eff.z + stack_lid_rise(eff) - STACK_SEAT_DEPTH))
-    return seat
+def _lid_stack_rim(eff: BoxSpec) -> trimesh.Trimesh:
+    """The rim a resting lid carries: a ring on the plate top around the seat.
+
+    Its inside is the mouth outline, so the skirt of the bin above drops in with
+    the direct-foot fit; the bin's wall bottom bears on the rim top.
+    """
+    inner = _plug_polygon(eff).buffer(STACK_FIT)
+    ring = inner.buffer(STACK_LID_RIM_WIDTH).intersection(wavy_outer_polygon(eff)).difference(inner)
+    rim = _extrude_polygon(ring, STACK_SEAT_DEPTH + 0.2)       # 0.2 mm into the plate: one solid
+    rim.apply_translation((0.0, 0.0, eff.z + stack_lid_rise(eff) - STACK_SEAT_DEPTH - 0.2))
+    return rim
 
 
 def make_lid_parts(
@@ -757,9 +761,9 @@ def make_lid_parts(
     lid = union([*parts, *bumps, *snap_fingers(eff), *_lid_alignment_tabs(eff, rim)])
 
     if lid_receives_stack(eff):
-        # Seat accepting the skirt of the bin stacked on this one. It keeps
-        # the direct-foot fit, whatever the lid own plug fit is.
-        lid = difference([lid, _lid_stack_seat(eff)])
+        # Rim the bin stacked on this one sits into. It keeps the direct-foot
+        # fit, whatever the lid own plug fit is.
+        lid = union([lid, _lid_stack_rim(eff)])
     elif lid_has_handle(eff):
         handle = _lid_handle_mesh(eff)
         handle.apply_translation((0.0, 0.0, rim + rise))
@@ -916,7 +920,7 @@ def validate_stack_design(box: BoxSpec) -> None:
     eff = stack_effective_box(box)
     if lid_enabled(box):
         if lid_receives_stack(box) and stack_lid_rise(eff) - STACK_SEAT_DEPTH < STACK_MIN_FLOOR_SKIN - _EPS:
-            raise ValueError("the lid does not leave enough material under its stack seat")
+            raise ValueError("the lid plate is too thin to carry its stack rim")
         if lid_has_flip(box):
             _lid_hinge(eff)        # raises if the bin is too small to hinge
         else:

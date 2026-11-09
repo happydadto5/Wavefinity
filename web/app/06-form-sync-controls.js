@@ -666,7 +666,7 @@ function wireControls() {
     syncPegboardMountForm();
     changedDesign();
   }));
-  ["#bin-stackable", "#lid-choice", "#lid-thickness", "#lid-fit", "#lid-alignment", "#lid-handle-type", "#lid-handle-size",
+  ["#bin-stackable", "#lid-choice", "#lid-stack-rim", "#lid-thickness", "#lid-fit", "#lid-alignment", "#lid-handle-type", "#lid-handle-size",
    "#lid-handle-position", "#lid-label-orientation", "#lid-label-style", "#lid-label-size", "#lid-label-depth"]
     .forEach(selector => $(selector).addEventListener("change", () => {
       const previous = clone(state.design);

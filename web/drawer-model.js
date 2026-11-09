@@ -402,14 +402,16 @@ DL.stackWall = one => {
   return raw !== null && raw !== undefined && Number.isFinite(wall) && wall > 0 ? wall : null;
 };
 
-// Story 2804: every snap and resting lid carries a stack seat in its top face.
-// Anything standing proud of the lid top (a hinged lid's hardware, the pull
-// knob, raised lettering) means the lid takes no stack. Read from the saved
-// design; a bin with no saved design or no lid places no restriction.
+// Story 2814: only a resting lid with its stack rim on receives a bin. Snap and
+// hinged lids never do, and the knob or raised lettering needs the same space as
+// the rim's bin. Read from the saved design; a bin with no saved design or no
+// lid places no restriction.
 DL.lidRefusalFor = (box, name) => {
   const lid = box?.lid;
   if (!lid?.enabled) return "";
   if (lid.flip_enabled) return `${name} has a hinged lid, which cannot take a stack.`;
+  if (lid.snap_enabled) return `${name} has a snap lid, which cannot take a stack.`;
+  if (!lid.stack_rim) return `${name} has a resting lid without a stack rim, which cannot take a stack.`;
   if (lid.handle_enabled) return `${name} has a lid with a knob, which stands too proud to take a stack.`;
   if (lid.label_enabled && lid.label_style === "raised") return `${name} has raised lettering on its lid, which stands too proud to take a stack.`;
   return "";
@@ -998,7 +1000,7 @@ DL.unstackResized = previous => {
   return count;
 };
 
-// Story 2804: giving a bin a lid that cannot take a stack (hinged, knob, raised
+// Story 2804: giving a bin a lid that cannot take a stack (hinged, snap, no rim, knob, raised
 // lettering) while other bins stand on it takes everything above it out of the
 // stack and back to Unplaced bins, as a resize does. Returns how many left.
 DL.unstackBlockedLids = previousSpecs => {
