@@ -206,7 +206,7 @@ B4B_HW_M2 = HardwareProfile(
     hinge_standoff=2.75,
     strap_thickness=2.0,
     hook_wall=1.4,
-    hook_mouth=1.8,
+    hook_mouth=1.75,
     hook_lead_in=0.6,
     lip_out=1.2,
     lip_length=2.5,
@@ -242,7 +242,7 @@ B4B_HW_M3 = HardwareProfile(
     hinge_standoff=3.65,
     strap_thickness=2.4,
     hook_wall=1.6,
-    hook_mouth=2.8,
+    hook_mouth=2.75,
     hook_lead_in=0.8,
     lip_out=1.5,
     lip_length=3.0,
@@ -331,7 +331,12 @@ B4B_PIANO_STOP_ANGLE = 105.0       # the lid rests open here on a flat stop
 # Latch layout and hardware limits.
 B4B_LATCH_RELEASE_ANGLE = 25.0   # hook must be off the pin by here
 B4B_LATCH_OPEN_ANGLE = 75.0      # full sampled swing
-B4B_LATCH_DETENT = 0.20          # hook-mouth interference against the pin
+B4B_LATCH_DETENT = 0.25          # Default hook-mouth interference against the pin
+                                 # (was 0.20 before the Latch tightness setting)
+# Latch tightness: one 0.05 mm step of catch engagement (the validation band
+# around the detent) each way from Default.  Loose lands on the old 0.20 mm.
+B4B_LATCH_TIGHTNESS_STEP = 0.05
+B4B_LATCH_TIGHTNESS_STEPS = {"loose": -1, "default": 0, "tight": 1}
 B4B_LATCH_MAX_PROJECTION = {"M2": 6.0, "M3": 9.0}
 
 # --- folding front handle -------------------------------------------------- #

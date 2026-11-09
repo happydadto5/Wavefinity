@@ -53,7 +53,7 @@
   function defaults(catalog) {
     const rules = catalog?.b4b_rules || {};
     return {
-      secure_lid: true, latch_count: "1", hinge_count: "2", hinge_type: "screw", lid_headroom_mm: 1,
+      secure_lid: true, latch_count: "1", hinge_count: "2", hinge_type: "screw", lid_headroom_mm: 1, latch_tightness: "default",
       edge_bevel: "default",
       label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat", label_size: "default",
       stacking: false, handle: false,
@@ -140,6 +140,12 @@
     for (const eventName of ["input", "change"]) {
       xInput.addEventListener(eventName, () => syncLatchChoices(), { signal: events.signal });
     }
+    const LATCH_TIGHTNESS = ["loose", "default", "tight"];
+    const tightnessOf = value => (LATCH_TIGHTNESS.includes(value) ? value : "default");
+    const latchTightness = select([["loose", "Loose"], ["default", "Default"], ["tight", "Tight"]],
+      tightnessOf(box.latch_tightness));
+    latchTightness.id = id("latch-tightness");
+    const latchTightnessRow = labeled("Latch tightness", latchTightness);
     const latchRow = labeled("Number of latches", latchCount);
     const hingeCount = select([["2", "2"], ["1", "1"]], String(box.hinge_count) === "1" ? "1" : "2");
     hingeCount.id = id("hinge-count");
@@ -149,7 +155,7 @@
     hingeType.id = id("hinge-type");
     const hingeTypeRow = labeled("Hinge type", hingeType);
     const snugnessRow = labeled("Lid snugness", snugness);
-    lidRow.append(labeled("Lid type", lidType), snugnessRow, latchRow, hingeTypeRow, hingeRow);
+    lidRow.append(labeled("Lid type", lidType), snugnessRow, latchRow, latchTightnessRow, hingeTypeRow, hingeRow);
     lidGroup.append(lidRow);
     caseWrap.append(lidGroup);
 
@@ -292,6 +298,7 @@
     function syncVisibility() {
       const latched = lidType.value === "latched";
       latchRow.hidden = !latched;
+      latchTightnessRow.hidden = !latched;
       hingeTypeRow.hidden = !latched;
       // a piano hinge runs the full width, so there is no count to choose
       hingeRow.hidden = !latched || hingeType.value === "piano";
@@ -332,6 +339,7 @@
             hinge_count: latched ? hingeCount.value : "2",
             hinge_type: latched ? hingeType.value : "screw",
             lid_headroom_mm: latched ? Number(snugness.value) : 1,
+            latch_tightness: tightnessOf(latchTightness.value),
             edge_bevel: bevel.value,
             label_enabled: labelOn,
             label_text: labelOn ? labelText.value.trim() : "",
@@ -356,7 +364,7 @@
       if (callbacks.onChange) callbacks.onChange(read());
     }
     hingeType.addEventListener("change", syncVisibility, { signal: events.signal });
-    for (const input of [lidType, snugness, latchCount, hingeCount, hingeType, stacking, handle, labelLoc, labelText, labelSize, labelStyle, wallSel, baseSel, bevel]) {
+    for (const input of [lidType, snugness, latchCount, hingeCount, hingeType, latchTightness, stacking, handle, labelLoc, labelText, labelSize, labelStyle, wallSel, baseSel, bevel]) {
       input.addEventListener("input", onChange, { signal: events.signal });
       input.addEventListener("change", onChange, { signal: events.signal });
     }
@@ -373,6 +381,7 @@
       for (const axis of ["x", "y", "z"]) displayAxis(axis, inputFor(axis));
       lidType.value = b.secure_lid ? "latched" : "lid_only";
       snugness.value = String(b.lid_headroom_mm ?? 1);
+      latchTightness.value = tightnessOf(b.latch_tightness);
       bevel.value = bevelOf(space);
       syncLatchChoices(b.latch_count || "1");
       hingeCount.value = String(b.hinge_count) === "1" ? "1" : "2";
@@ -412,7 +421,7 @@
     // cannot be silently superseded by newer input.
     function setDisabled(value) {
       const frozen = !!value;
-      for (const input of [xInput, yInput, zInput, lidType, snugness, latchCount, stacking, handle, labelLoc, labelText, labelSize, labelStyle, wallSel, baseSel, bevel]) {
+      for (const input of [xInput, yInput, zInput, lidType, snugness, latchCount, latchTightness, stacking, handle, labelLoc, labelText, labelSize, labelStyle, wallSel, baseSel, bevel]) {
         input.disabled = frozen;
       }
     }

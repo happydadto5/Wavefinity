@@ -22,6 +22,8 @@ from ._constants import (
     B4B_LATCH_RELEASE_ANGLE,
     B4B_LATCH_OPEN_ANGLE,
     B4B_LATCH_DETENT,
+    B4B_LATCH_TIGHTNESS_STEP,
+    B4B_LATCH_TIGHTNESS_STEPS,
     B4B_LATCH_MAX_PROJECTION,
     B4B_HANDLE_GRIP_ABS_MIN,
     B4B_HANDLE_MAX_PROJECTION,
@@ -784,12 +786,15 @@ def validate_b4b_design(
                         f"latches at once"
                     )
         if plan.latch_count_resolved:
-            detent = profile.nominal - profile.hook_mouth
-            if abs(detent - B4B_LATCH_DETENT) > 0.05 + _EPS:
+            detent = profile.nominal - plan.latch_hook_mouth
+            target = B4B_LATCH_DETENT + (
+                B4B_LATCH_TIGHTNESS_STEPS[plan.latch_tightness] * B4B_LATCH_TIGHTNESS_STEP
+            )
+            if abs(detent - target) > 0.025 + _EPS:
                 raise ValueError(
                     f"the {profile.name} hook mouth gives {detent:.2f} mm of pin "
-                    f"interference, away from the {B4B_LATCH_DETENT:.2f} mm detent "
-                    f"the latch is tuned around (band 0.15-0.25 mm)"
+                    f"interference, away from the {target:.2f} mm detent the "
+                    f"{plan.latch_tightness} latch is tuned around"
                 )
             _validate_latch_release(plan)
 

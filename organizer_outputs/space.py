@@ -71,6 +71,7 @@ def storage_box_design(space: dict[str, Any]) -> dict[str, Any]:
         hinge_type=settings.get("hinge_type", "screw"),
         latch_strength=settings["latch_strength"],
         lid_headroom_mm=settings["lid_headroom_mm"],
+        latch_tightness=settings["latch_tightness"],
         edge_bevel=settings["edge_bevel"],
         label_enabled=settings["label_enabled"],
         label_text=settings["label_text"] if settings["label_enabled"] else "",

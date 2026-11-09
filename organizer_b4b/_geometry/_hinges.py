@@ -488,7 +488,7 @@ def b4b_latch_lever_profile(plan: B4BHardwarePlan) -> Polygon:
 
     # the mouth opens toward the case, so closing rotation guides the hook onto
     # the pin and ordinary lid load pulls the upper jaw down onto it
-    mouth = profile.hook_mouth / 2.0
+    mouth = plan.latch_hook_mouth / 2.0
     lead = mouth + profile.hook_lead_in
     reach = hook_r * 2.5
     opening = Polygon([

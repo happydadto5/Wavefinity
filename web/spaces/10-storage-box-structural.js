@@ -7,7 +7,7 @@
 // case settings on the Space setup/Edit form.
 
 SP.storageBoxDefaults = () => ({
-  secure_lid: true, latch_count: "1", hinge_count: "2", lid_headroom_mm: 1,
+  secure_lid: true, latch_count: "1", hinge_count: "2", lid_headroom_mm: 1, latch_tightness: "default",
   label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat", label_size: "default",
   stacking: false, handle: false,
   wall_mm: Number(state.catalog?.b4b_rules?.default_wall_mm ?? 1.6),
@@ -38,6 +38,7 @@ SP.fillStorageBoxForm = box => {
   const set = (id, value) => { const node = document.getElementById(id); if (node) node.value = String(value); };
   set("portable-lid-type", one.secure_lid === false ? "lid_only" : "latched");
   set("portable-lid-snugness", one.lid_headroom_mm);
+  set("portable-latch-tightness", ["loose", "default", "tight"].includes(one.latch_tightness) ? one.latch_tightness : "default");
   set("portable-stacking", Boolean(one.stacking));
   set("portable-latch-count", ["1", "2"].includes(String(one.latch_count)) ? String(one.latch_count) : "1");
   set("portable-hinge-count", String(one.hinge_count) === "1" ? "1" : "2");
@@ -56,6 +57,7 @@ SP.syncStorageBoxForm = () => {
   const hide = (id, hidden) => { const node = document.getElementById(id); if (node) node.hidden = hidden; };
   const latched = value("portable-lid-type") !== "lid_only";
   hide("portable-latch-count-row", !latched);
+  hide("portable-latch-tightness-row", !latched);
   hide("portable-hinge-count-row", !latched);
   hide("portable-handle-row", !latched);
   if (!latched) {
@@ -130,6 +132,7 @@ SP.readStorageBoxForm = () => {
     hinge_count: latched ? (value("portable-hinge-count") === "1" ? "1" : "2") : "2",
     hinge_type: latched ? SP.storageBoxHingeType : "screw",
     lid_headroom_mm: parseFloat(value("portable-lid-snugness")) || 1,
+    latch_tightness: ["loose", "default", "tight"].includes(value("portable-latch-tightness")) ? value("portable-latch-tightness") : "default",
     edge_bevel: SP.storageBoxEdgeBevel,
     label_enabled: labelled,
     label_text: labelled ? String(value("portable-label-text") || "").trim() : "",

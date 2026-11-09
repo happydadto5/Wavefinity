@@ -37,6 +37,8 @@ from ._constants import (
     B4B_HANDLE_DETENT,
     B4B_HANDLE_DETENT_BUMP,
     B4B_HANDLE_EDGE_CHAMFER,
+    B4B_LATCH_TIGHTNESS_STEP,
+    B4B_LATCH_TIGHTNESS_STEPS,
     _EPS,
 )
 from ._layout import (
@@ -91,6 +93,15 @@ class B4BHardwarePlan:
     latch_root_face_y: float
     fillet_radius: float = 0.0
     piano: "B4BPianoHinge | None" = None
+    latch_tightness: str = "default"
+
+    @property
+    def latch_hook_mouth(self) -> float:
+        """Hook mouth for the chosen Latch tightness: one step of pin
+        interference narrower (Tight) or wider (Loose) than Default."""
+        return self.profile.hook_mouth - (
+            B4B_LATCH_TIGHTNESS_STEPS[self.latch_tightness] * B4B_LATCH_TIGHTNESS_STEP
+        )
 
     # -- derived reporting ------------------------------------------------- #
     @property
@@ -604,6 +615,7 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         latch_root_face_y=latch_root_face_y,
         fillet_radius=fillet,
         piano=piano,
+        latch_tightness=eff.b4b.latch_tightness,
     )
 
 

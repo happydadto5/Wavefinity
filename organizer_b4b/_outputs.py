@@ -116,6 +116,7 @@ def b4b_summary(box: BoxSpec) -> dict:
         "lid": b4b.lid,
         "secure_lid": b4b.secure_lid,
         "lid_headroom_mm": b4b.lid_headroom_mm,
+        "latch_tightness": b4b.latch_tightness,
         "stacking": b4b.stacking,
         "handle": handle is not None,
         "handle_requested": b4b.handle,

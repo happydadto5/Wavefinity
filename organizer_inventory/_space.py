@@ -17,7 +17,7 @@ from organizer_engine import (
     BASE_UNIT,
     MIN_HEIGHT_ABOVE_BASE,
 )
-from organizer_engine._specs import B4B_LATCH_TWO_ABOVE_FIELD_X, B4B_EDGE_BEVELS, B4B_HINGE_COUNTS, B4B_HINGE_TYPES
+from organizer_engine._specs import B4B_LATCH_TWO_ABOVE_FIELD_X, B4B_EDGE_BEVELS, B4B_LATCH_TIGHTNESS, B4B_HINGE_COUNTS, B4B_HINGE_TYPES
 from organizer_engine.product_rules import (
     B4B_LATCHED_MIN_HEIGHT,
     B4B_MIN_FIELD_XY,
@@ -94,6 +94,7 @@ def storage_box_defaults() -> dict[str, Any]:
         "hinge_type": "screw",
         "latch_strength": "standard",
         "lid_headroom_mm": 1.0,
+        "latch_tightness": "default",
         "edge_bevel": "default",
         "label_enabled": False,
         "label_text": "",
@@ -186,6 +187,7 @@ def normalise_storage_box(raw: Any, width_mm: Any = None) -> dict[str, Any]:
         "hinge_type": _storage_box_choice(merged["hinge_type"], B4B_HINGE_TYPES, "hinge type"),
         "latch_strength": _storage_box_choice(merged["latch_strength"], B4B_LATCH_STRENGTHS, "latch strength"),
         "lid_headroom_mm": match,
+        "latch_tightness": _storage_box_choice(merged["latch_tightness"], B4B_LATCH_TIGHTNESS, "latch tightness"),
         "edge_bevel": _storage_box_choice(merged["edge_bevel"], B4B_EDGE_BEVELS, "edge bevel"),
         "label_enabled": _storage_box_flag(merged["label_enabled"], "label"),
         "label_text": label_text,
