@@ -774,44 +774,15 @@ function syncStackDependencyControls() {
 }
 
 function applyStackVisibility() {
+  // Story 2813: the stacking explainer paragraph above the bin form is gone.
+  // Its numbers live in the wall, base and height fields.
   const b4b = b4bEnabled();
-  const mode = stackMode();
-  const hasLid = Boolean(state.design?.box?.lid?.enabled);
-  const note = $("#stack-note");
-  if (!note) return;
   const connectorSection = document.querySelector('.control-section[data-section="connector"]');
   // Fix 111 N10: one eligibility contract - a lid locks ordinary side
   // connectors everywhere. The section stays visible with a compact reason
   // (rendered by renderConnectorReadout); only the actions hide.
   if (connectorSection) connectorSection.hidden = b4b || baseTrimEnabled();
   syncPrintChoiceAvailability();
-  const info = state.preview?.stack;
-  // Story 2714: the handled-lid explanation (mode "none") is no longer shown.
-  // Its values below are still computed; only the visible line is suppressed.
-  if (b4b || mode === "none") {
-    note.hidden = true;
-    return;
-  }
-  const values = stackRuleValues(mode);
-  const moduleHeight = info?.mode === mode
-    ? info.module_height_mm
-    : state.design?.box?.z - (mode === "direct" ? STACK_SKIRT_DEPTH_MM : 0);
-  const bits = mode === "none"
-    ? [`The handled lid uses at least ${fmt(values.minWall)} mm walls for its retention clips. It does not add stacking geometry.`]
-    : [
-        hasLid
-          ? `Stacking requires at least ${fmt(values.minWall)} mm walls and a ${fmt(values.minBase)} mm base.`
-          : `Stacking requires a ${fmt(values.minBase)} mm base.`,
-        `Stack height contribution: ${fmt(moduleHeight)} mm.`,
-      ];
-  if (info?.mode === mode) {
-    bits.push(mode === "direct"
-      ? `Bin height: ${fmt(info.closed_height_mm)} mm, with the ${fmt(info.engagement_mm)} mm locating skirt inside it.`
-      : `Detached closed part: ${fmt(info.closed_height_mm)} mm including the ${fmt(info.engagement_mm)} mm interlock.`);
-    if (info.parts.length > 1) bits.push(`Prints as ${info.parts.join(" + ")}.`);
-  }
-  note.textContent = bits.join(" ");
-  note.hidden = false;
 }
 
 function readStackForm(design) {

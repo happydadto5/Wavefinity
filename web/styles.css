@@ -1837,12 +1837,6 @@ body.relocating > :not(dialog) { pointer-events: none; }
   .part-name-block { grid-template-columns: 1fr; }
   .designer-major-actions { justify-content: flex-start; }
 }
-.stack-note {
-  grid-column: 1 / -1;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--teal-dark);
-}
 /* Fix 1122: Bin Name used an inline label + input row while every other
    designer field (Width / Depth / Height, mode selects) is label-above-input,
    so its label baseline and input alignment never matched the header. Use the
@@ -1897,7 +1891,6 @@ body.structural-design-active #ordinary-size-row,
 body.structural-design-active #design-first-size-help,
 body.structural-design-active #pegboard-mount-row,
 body.structural-design-active .mode-and-bin-options,
-body.structural-design-active #stack-note,
 body.structural-design-active #designer-duplicate,
 body.structural-design-active #ai-help-open,
 

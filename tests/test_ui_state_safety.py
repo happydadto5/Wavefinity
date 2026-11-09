@@ -1867,7 +1867,7 @@ process.stdout.write(JSON.stringify({distinct:new Set(keys).size}));
 
     def test_ai_help_ui_is_wired_without_a_provider_and_dictation_is_optional(self):
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
-        actions = html[html.index('id="bin-actions"'):html.index('id="stack-note"')]
+        actions = html[html.index('id="bin-actions"'):html.index('class="bin-name-mode-row"')]
         self.assertIn('id="designer-duplicate"', actions)
         # Fix 081 B: AI Design now lives in the same Bin Actions group as
         # New Bin / Duplicate Bin, not inside the Options section.
