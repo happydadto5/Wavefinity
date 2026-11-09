@@ -530,6 +530,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .bin-name-mode-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, 1fr); gap: 10px; align-items: end; }
 #ordinary-size-row.bin-dimensions-row { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 6px; }
 .bin-dimensions-row label { min-width: 0; }
+.bin-dimensions-row .thickness-pair { grid-column: span 2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; min-width: 0; }
 .bin-dimensions-row input, .bin-dimensions-row select { min-width: 0; width: 100%; }
 .field-grid.two { grid-template-columns: repeat(2, 1fr); }
 .surface-bin-help { grid-column: 1 / -1; }
