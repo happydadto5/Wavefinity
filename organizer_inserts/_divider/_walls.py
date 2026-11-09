@@ -27,6 +27,33 @@ from .._core import Feature, Zone
 from ._consts import MAX_DIVIDER_ANGLE, MIN_WEDGE_EDGE, DIVIDER_CHAMFER
 
 
+_PRISM_CACHE: dict = {}
+_PRISM_CACHE_MAX = 16
+
+
+def _cavity_prism(kind: str, box: BoxSpec, z0: float, height: float) -> trimesh.Trimesh:
+    """The box's flat or wavy cavity extruded ``height`` up from ``z0``.
+
+    Every leaning/wavy divider of a bin is trimmed against the same prism,
+    and building it (a wavy outline extrusion) dwarfs the trim itself, so it
+    is built once and shared. The boolean only reads it.
+    """
+    key = (kind, box, z0, height)
+    try:
+        hit = _PRISM_CACHE.get(key)
+    except TypeError:
+        hit, key = None, None
+    if hit is None:
+        polygon = flat_cavity_polygon(box) if kind == "flat" else wavy_cavity_polygon(box)
+        hit = _extrude_polygon(polygon, height)
+        hit.apply_translation((0.0, 0.0, z0))
+        if key is not None:
+            if len(_PRISM_CACHE) >= _PRISM_CACHE_MAX:
+                _PRISM_CACHE.clear()
+            _PRISM_CACHE[key] = hit
+    return hit
+
+
 def _divider_wall(
     box: BoxSpec, spec_feature: Feature, thickness: float, height: float,
     angle: float, base_z: float,
@@ -206,13 +233,11 @@ def _full_span_leaning_divider(
     flat_top = box.base_thickness + box.flat_inside
     pieces: list[trimesh.Trimesh] = []
     if box.flat_inside > 0.0 and z0 < flat_top:
-        band = _extrude_polygon(flat_cavity_polygon(box), min(z1, flat_top) - z0)
-        band.apply_translation((0.0, 0.0, z0))
+        band = _cavity_prism("flat", box, z0, min(z1, flat_top) - z0)
         pieces.append(intersection([wedge, band]))
     wavy_z0 = max(z0, flat_top) if box.flat_inside > 0.0 else z0
     if wavy_z0 < z1:
-        above = _extrude_polygon(wavy_cavity_polygon(box), z1 - wavy_z0)
-        above.apply_translation((0.0, 0.0, wavy_z0))
+        above = _cavity_prism("wavy", box, wavy_z0, z1 - wavy_z0)
         pieces.append(intersection([wedge, above]))
     if not pieces or any(len(piece.faces) == 0 for piece in pieces):
         raise ValueError("no room for a leaning full-width divider at this position")

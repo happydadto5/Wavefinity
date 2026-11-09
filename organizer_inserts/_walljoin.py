@@ -82,6 +82,34 @@ def _footprint_from_solids(solids) -> "Polygon":
     return unary_union(np.concatenate(batches))
 
 
+def _footprint_bounds(solids) -> "Polygon":
+    """Bounding box of :func:`_footprint_from_solids` without building the union.
+
+    ``_joined_sides`` reads only the material's emptiness and bounds, and the
+    bounds of a union are the bounds of its non-degenerate projected
+    triangles, so this gives it identical input at a fraction of the cost.
+    """
+    lows, highs = [], []
+    for s in solids:
+        tris = np.asarray(s.triangles, dtype=float)
+        if tris.shape[0] == 0:
+            continue
+        xy = tris[:, :, :2]
+        x0, y0 = xy[:, 0, 0], xy[:, 0, 1]
+        x1, y1 = xy[:, 1, 0], xy[:, 1, 1]
+        x2, y2 = xy[:, 2, 0], xy[:, 2, 1]
+        twice_area = abs(
+            x0 * (y1 - y2) + x1 * (y2 - y0) + x2 * (y0 - y1))
+        kept = xy[twice_area >= 2e-12]
+        if len(kept):
+            lows.append(kept.reshape(-1, 2).min(axis=0))
+            highs.append(kept.reshape(-1, 2).max(axis=0))
+    if not lows:
+        return Polygon()
+    (lx, ly), (hx, hy) = np.min(lows, axis=0), np.max(highs, axis=0)
+    return shapely_box(lx, ly, hx, hy)
+
+
 def _joined_sides(box, material, kind, along, hug=False, allowed_sides=None) -> tuple:
     """Side names whose wall the plan-view ``material`` actually reaches.
 
