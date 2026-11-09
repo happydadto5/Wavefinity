@@ -135,7 +135,8 @@ WS.renderSelector = () => {
   const items = WS.items();
   const here = WS.open();
   const now = WS.current();
-  const locked = WS.task === "print" || WS.task === "newspace";
+  // Story 2816: Print Space (the layout preview) keeps the tree live; only New Space locks it.
+  const locked = WS.task === "newspace";
   // Story 2736: in Layout, the bin clicked in the preview is the selected row, and can be opened with Edit.
   const layoutBin = !locked && WS.task === "settings" && DL.selectedRow ? DL.bin(DL.selectedRow) : null;
   const layoutPick = layoutBin && DL.isOrdinary(layoutBin) ? String(layoutBin.id) : "";
@@ -411,6 +412,7 @@ WS.transition = async (task, arg) => {
   }
   if (!WS.open()) return false;
   if (from === "settings" && task !== "settings" && !(await WS.closeSettings())) return false;
+  if (from === "print" && task !== "print") WS.prior = null; // Story 2816: picking from the tree leaves Print Space
   if (task === "settings") {
     // Story 2818: the left side swaps to the space details screen at once; the mode switch and
     // the form load below (the heavy part) fill it in. A failed switch puts the old screen back.
@@ -630,7 +632,7 @@ WS.newBin = async () => {
 
 // A row click selects the item and shows its form at once.
 WS.pick = (kind, id) => {
-  if (WS.busy || WS.task === "print" || WS.task === "newspace") return null;
+  if (WS.busy || WS.task === "newspace") return null;
   if (!WS.open()) return WS.go("bin");
   if (kind === "settings") return WS.task === "settings" ? null : WS.go("settings");
   if (kind === "container") return WS.task === "container" ? null : WS.go("container");
