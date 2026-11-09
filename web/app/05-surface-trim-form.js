@@ -405,7 +405,7 @@ function stackMode() {
 
 const LID_DEFAULTS = {
   enabled: false, thickness: "1.6",
-  label_enabled: false, label_style: "flush", label_orientation: "horizontal",
+  label_enabled: false, label_style: "flush", label_orientation: "horizontal", label_size: "default",
   label_text: "", division_labels: [], handle_enabled: false, handle_type: "knob",
   handle_size: "medium", handle_position: "middle", fit: "standard",
   flip_enabled: false,
@@ -668,6 +668,7 @@ function syncLidForm() {
   $("#lid-handle-position").value = lid.handle_position;
   $("#lid-label-orientation").value = lid.label_orientation;
   $("#lid-label-style").value = lid.label_style;
+  $("#lid-label-size").value = lid.label_size || "default";
   $("#lid-label-text").value = lid.label_text || "";
   const depthField = $("#lid-label-depth");
   if (depthField) {
@@ -693,6 +694,7 @@ function syncLidForm() {
   // Raised lettering stands proud of the lid top, so a lid that has it takes
   // no stack seat; Level-with-top keeps the seat.
   $("#lid-label-style-row").hidden = !labelOn;
+  $("#lid-label-size-row").hidden = !labelOn;
   // Inlay depth / Raised height follows the active style.
   const depthRow = $("#lid-label-depth-row");
   if (depthRow) {
@@ -834,6 +836,7 @@ function readStackForm(design) {
     label_enabled: labelEnabled,
     label_style: labelStyle,
     label_orientation: $("#lid-label-orientation").value,
+    label_size: $("#lid-label-size").value || "default",
     label_text: $("#lid-label-text").value,
     division_labels: divisionLabels,
     handle_enabled: ($("#lid-handle-type").value || "none") !== "none",

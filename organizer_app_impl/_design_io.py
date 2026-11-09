@@ -653,6 +653,7 @@ def design_to_dict(
             "label_enabled": lid.label_enabled,
             "label_style": lid.label_style,
             "label_orientation": lid.label_orientation,
+            "label_size": lid.label_size,
             "label_text": lid.label_text,
             "division_labels": list(lid.division_labels),
             "handle_enabled": bool(lid.handle_enabled),
@@ -794,6 +795,8 @@ def design_from_dict(
             label_enabled=bool(lid_raw.get("label_enabled", False)),
             label_style=str(lid_raw.get("label_style", "flush")),
             label_orientation=str(lid_raw.get("label_orientation", "horizontal")),
+            # A missing label_size is an older file: Default, the exact old lettering.
+            label_size=str(lid_raw.get("label_size", "default")),
             label_text=str(lid_raw.get("label_text", "")),
             division_labels=tuple(str(value or "") for value in raw_labels),
             # A missing handle_enabled is an older file: the forced knob was never a choice.

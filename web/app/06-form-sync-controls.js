@@ -667,7 +667,7 @@ function wireControls() {
     changedDesign();
   }));
   ["#bin-stackable", "#lid-choice", "#lid-thickness", "#lid-fit", "#lid-alignment", "#lid-handle-type", "#lid-handle-size",
-   "#lid-handle-position", "#lid-label-orientation", "#lid-label-style", "#lid-label-depth"]
+   "#lid-handle-position", "#lid-label-orientation", "#lid-label-style", "#lid-label-size", "#lid-label-depth"]
     .forEach(selector => $(selector).addEventListener("change", () => {
       const previous = clone(state.design);
       readStackForm(state.design);
@@ -686,6 +686,7 @@ function wireControls() {
     $("#lid-label-details").hidden = !state.lidLabelEnabled;
     $("#lid-label-orientation-row").hidden = !state.lidLabelEnabled;
     $("#lid-label-style-row").hidden = !state.lidLabelEnabled;
+    $("#lid-label-size-row").hidden = !state.lidLabelEnabled;
     $("#lid-label-depth-row").hidden = !state.lidLabelEnabled;
     renderLidLabelEditor();
     seedPartNameFromLabel($("#lid-label-text").value);
