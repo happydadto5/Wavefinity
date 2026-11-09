@@ -964,8 +964,39 @@ DL.inventoryCall = async (path, payload = {}, options = {}) => {
   return data;
 };
 
+// Story 2786: a stacked bin whose footprint (width or length) was changed by an
+// edit leaves its stack and goes to Unplaced bins. Whatever stood directly on it
+// closes the gap (DL.detach); the rest of the stack stays as it was. A height
+// change never unstacks, and unstacked bins are never touched. Returns how many
+// placements were taken out.
+DL.unstackResized = previous => {
+  if (!DL.layout?.drawers || !Array.isArray(previous) || !previous.length) return 0;
+  const before = new Map(previous.map(one => [one.id, one]));
+  const resized = new Set(DL.bins.filter(one => {
+    const old = before.get(one.id);
+    return old && (Math.abs(Number(old.x) - Number(one.x)) > 1e-6 || Math.abs(Number(old.y) - Number(one.y)) > 1e-6);
+  }).map(one => one.id));
+  if (!resized.size) return 0;
+  let count = 0;
+  DL.change(() => {
+    for (const drawer of DL.layout.drawers) {
+      const carriers = new Set(drawer.placements.filter(p => p.on !== undefined).map(p => p.on));
+      const leaving = drawer.placements.filter(p => resized.has(p.bin) && (p.on !== undefined || carriers.has(DL.key(p))));
+      for (const placement of leaving) {
+        DL.detach(drawer, placement);
+        drawer.placements = drawer.placements.filter(p => p !== placement);
+        if (DL.selected === DL.key(placement)) DL.selected = null;
+        count += 1;
+      }
+    }
+  });
+  return count;
+};
+
 DL.adopt = data => {
+  const previousBins = DL.bins;
   DL.bins = data.bins || DL.bins;
+  if (data.bins && DL.unstackResized(previousBins)) toast("This bin was stacked and will be move to unplaced bins.");
   DL.file = data.file || DL.file;
   if (data.stack_steps) DL.stackSteps = data.stack_steps;
   if (data.stack_metrics) DL.stackMetrics = data.stack_metrics;

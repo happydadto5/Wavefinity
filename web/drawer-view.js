@@ -872,6 +872,18 @@ DV.binLabelInfo = (one, stackCount = 1) => {
   };
 };
 
+// Story 2786: a stack reads as one unit - heading, the shared footprint, then
+// each bin's height from bottom to top ("50mm (Bottom)", "40mm (Top)").
+DV.stackSummary = bins => {
+  const last = bins.length - 1;
+  return {
+    heading: "Stacked Bins",
+    sizeLine: `${fmt(bins[0].x)} × ${fmt(bins[0].y)} mm`,
+    heightLines: bins.map((one, at) =>
+      `${fmt(one.z)}mm (${at === 0 ? "Bottom" : at === last ? "Top" : "Middle"})`),
+  };
+};
+
 // The stackable glyph (two stacked squares) with its top-left corner at (x, y).
 DV.drawStackIcon = (ctx, x, y, size, ink) => {
   const s = size * 0.62, o = size - s;
@@ -917,6 +929,24 @@ DV.drawLabel = (ctx, entry, topFace, ink) => {
     DV.drawStackIcon(ctx, Math.min(p0[0], p3[0]) + 4, Math.min(p0[1], p1[1], p2[1], p3[1]) + 4, 11, ink);
   }
   const stackCount = entry.layers.length;
+  if (stackCount > 1) {
+    const summary = DV.stackSummary(entry.layers.map(layer => layer.bin));
+    const lines = [summary.heading, summary.sizeLine, ...summary.heightLines];
+    const gap = Math.max(8, Math.min(12, height / (lines.length + 1)));
+    const fit = Math.min(lines.length, Math.floor(height / gap));
+    if (fit >= 1 && gap >= 8 && width >= 36) {
+      const shown = lines.slice(0, Math.max(fit, 1));
+      const size = Math.max(7, Math.min(10, gap * 0.85));
+      ctx.fillStyle = ink;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      shown.forEach((text, at) => {
+        ctx.font = `${at === 0 ? 700 : 500} ${size}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
+        ctx.fillText(DV.fitText(ctx, text, width - 6), cx, cy + (at - (shown.length - 1) / 2) * gap);
+      });
+      return;
+    }
+  }
   const info = DV.binLabelInfo(top, stackCount);
   const size = Math.min(13, height * 0.28, width / Math.max(3, info.name.length * 0.55));
   if (size < 6) return;
@@ -1108,7 +1138,10 @@ DV.wire = () => {
         const standing = found ? DL.layerOf(key, found.drawer) : null;
         const levels = standing ? Math.max(...standing.item.layers.map(layer => layer.depth)) + 1 : 1;
         const info = one ? DV.binLabelInfo(one, levels) : null;
-        canvas.title = info ? `${info.name} — ${info.detailLine}` : "";
+        if (standing && standing.item.layers.length > 1) {
+          const summary = DV.stackSummary(standing.item.layers.map(layer => layer.bin));
+          canvas.title = [summary.heading, summary.sizeLine, ...summary.heightLines].join("\n");
+        } else canvas.title = info ? `${info.name} — ${info.detailLine}` : "";
         DV.paint();
       }
     }
