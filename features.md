@@ -283,6 +283,7 @@ Pegboard bins use a Space-controlled mounting system.
 - Auto mode can choose fewer receivers when needed to keep a legal fit.
 - Rear support ribs are added where needed to prevent unsupported spans.
 - Standard Pegboard and SKÅDIS use different board-side adapter geometry while sharing the bin-side receiver concept.
+- A mounted bin is positively retained: the adapter has a small catch at the low end of its slope and the bin's receiver has a matching notch, so a loaded bin cannot slide down-and-out. Lifting the bin slightly while pulling it off (the normal removal motion) releases it; no tool is needed.
 
 Pegboard mounting metadata is controlled by the Space and should not be casually overwritten by unrelated bin edits.
 

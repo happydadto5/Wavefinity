@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import trimesh
 
-from organizer_geometry import union
+from organizer_geometry import difference, union
 
 
 @dataclass(frozen=True)
@@ -57,6 +57,14 @@ PEGBOARD_AUTO_SUPPORT_X = 72.0
 PEGBOARD_AUTO_SUPPORT_Y = 64.0
 PEGBOARD_CLEAT_BELOW_SEAT = 28.4
 PEGBOARD_RECEIVER_ABOVE_SEAT = 7.0
+# Positive retention: a short catch on the bin-side (low) end of the cleat
+# slope.  The receiver's notch drops over it when the bin is lowered on, and
+# its board-side wall then stops the bin travelling down-and-out along the
+# slope.  Lifting the bin ~1 mm (the normal removal motion) clears it.
+PEGBOARD_LATCH_DEPTH = 1.2          # catch length along the projection
+PEGBOARD_LATCH_ABOVE_CENTER = 0.2   # catch top, above the cleat centre line
+PEGBOARD_LATCH_CLEARANCE = 0.4      # receiver notch play around the catch
+PEGBOARD_LATCH_WIDTH = 10.0         # same as the cleat body
 
 
 @dataclass(frozen=True)
@@ -435,6 +443,17 @@ def _adapter_body_profile(center: float) -> list[tuple[float, float]]:
     ]
 
 
+def _latch_mesh(center: float) -> trimesh.Trimesh:
+    """Catch across the low end of the cleat slope (adapter coordinates)."""
+    start = PEGBOARD_PROJECTION - PEGBOARD_LATCH_DEPTH
+    top = center + PEGBOARD_LATCH_ABOVE_CENTER
+    # Bottom sits inside the cleat body so the catch fuses to it.
+    return _box(
+        (PEGBOARD_LATCH_WIDTH, PEGBOARD_LATCH_DEPTH, top - (center - 2.6)),
+        (0.0, start + PEGBOARD_LATCH_DEPTH / 2.0, (top + center - 2.6) / 2.0),
+    )
+
+
 def _receiver_mesh(cx: float, back_y: float, cz: float) -> trimesh.Trimesh:
     rail = 1.4
     side = (PEGBOARD_RECEIVER_WIDTH - rail) / 2.0
@@ -446,14 +465,30 @@ def _receiver_mesh(cx: float, back_y: float, cz: float) -> trimesh.Trimesh:
                  cx + PEGBOARD_RECEIVER_WIDTH / 2),
         # The underside mates with the entire narrow cleat body's sloped top.
         # The outside top stays flat; there is no decorative cap.
-        _prism_x([
-            (back_y - 0.35, cz - 2.1),
-            (back_y + PEGBOARD_PROJECTION, cz + 3.4),
-            (back_y + PEGBOARD_PROJECTION, cz + PEGBOARD_RECEIVER_ABOVE_SEAT),
-            (back_y - 0.35, cz + PEGBOARD_RECEIVER_ABOVE_SEAT),
-        ], cx - PEGBOARD_RECEIVER_WIDTH / 2, cx + PEGBOARD_RECEIVER_WIDTH / 2),
+        _bridge_with_latch_notch(cx, back_y, cz),
     ]
     return union(pieces)
+
+
+def _bridge_with_latch_notch(cx: float, back_y: float, cz: float) -> trimesh.Trimesh:
+    """Receiver top, notched on its underside to take the cleat's catch."""
+    bridge = _prism_x([
+        (back_y - 0.35, cz - 2.1),
+        (back_y + PEGBOARD_PROJECTION, cz + 3.4),
+        (back_y + PEGBOARD_PROJECTION, cz + PEGBOARD_RECEIVER_ABOVE_SEAT),
+        (back_y - 0.35, cz + PEGBOARD_RECEIVER_ABOVE_SEAT),
+    ], cx - PEGBOARD_RECEIVER_WIDTH / 2, cx + PEGBOARD_RECEIVER_WIDTH / 2)
+    # The catch spans the low (bin-side) end of the slope; the notch's
+    # board-side wall sits just beyond the catch's board-side face.
+    wall_y = back_y + PEGBOARD_LATCH_DEPTH + PEGBOARD_LATCH_CLEARANCE
+    roof_z = (cz + PEGBOARD_LATCH_ABOVE_CENTER + 0.2 + PEGBOARD_LATCH_CLEARANCE)
+    half = PEGBOARD_LATCH_WIDTH / 2.0 + PEGBOARD_LATCH_CLEARANCE
+    floor_z = cz - 4.0
+    notch = _box(
+        (2.0 * half, wall_y - (back_y - 1.0), roof_z - floor_z),
+        (cx, (wall_y + back_y - 1.0) / 2.0, (roof_z + floor_z) / 2.0),
+    )
+    return difference([bridge, notch])
 
 
 def apply_pegboard_mount_structure(box_spec: Any, body: trimesh.Trimesh) -> trimesh.Trimesh:
@@ -484,7 +519,7 @@ def make_board_adapter(standard_id: Any, thickness_mm: Any = 3.2) -> trimesh.Tri
     # One universal narrow body IS the cleat. Its top falls 5.5 mm over
     # 5.5 mm projection; only the board-facing (-Y) pegs/tabs vary.
     center = 42.4 if standard.id == "standard" else 8.0
-    body = _prism_x(_adapter_body_profile(center), -5.0, 5.0)
+    body = union([_prism_x(_adapter_body_profile(center), -5.0, 5.0), _latch_mesh(center)])
     if standard.id == "standard":
         straight = _cylinder_y(2.65, 8.0 + extension, (0.0, -3.65 - extension / 2, 17.0))
         hooked = _cylinder_y(2.65, 8.0 + extension, (0.0, -3.65 - extension / 2, 42.4))
