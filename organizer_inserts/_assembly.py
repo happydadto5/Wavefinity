@@ -53,7 +53,7 @@ from ._text import (
     text_of,
     text_placed_outline,
 )
-from ._divider import divider_division_texts
+from ._divider import divider_division_texts, divider_labels_present
 from ._nest import build_recessed_nest_group, resolve_nest_settings
 
 # Physical assembly policy, not a user-facing capability: only these feature
@@ -278,6 +278,19 @@ def build_features(
                 if not raised:
                     solids.append(text_solid)
     return solids
+
+
+def labels_yielding_to_dividers(features: Iterable[Feature]) -> frozenset[int]:
+    """Indexes of the bin's own Label parts that divider labels take over from.
+
+    While any divider carries a label, every Label part is ignored (not built,
+    not previewed); the stored text stays, so removing the divider labels
+    makes the bin's Label apply again.
+    """
+    features = list(features)
+    if not divider_labels_present(features):
+        return frozenset()
+    return frozenset(i for i, one in enumerate(features) if is_text(one))
 
 
 def build_texts(

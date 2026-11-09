@@ -139,6 +139,7 @@ from organizer_inserts import (
     normalize_bore_modes,
     build_features,
     build_texts,
+    labels_yielding_to_dividers,
     connector_keep_out,
     divider_cells,
     divider_division_texts,
@@ -491,6 +492,12 @@ def generate_organizer_files(
     box = stack_effective_box(box)
     validate_inside_handles_mode(box, layout.mode)
     layout, label, label_location = _canonical_rim_label(box, layout, label, label_location)
+    # Divider labels take over from the bin's own Label: it is not printed
+    # (its stored text stays in the design).
+    _yielding = labels_yielding_to_dividers(layout.features)
+    if _yielding:
+        layout = replace(layout, features=tuple(
+            one for index, one in enumerate(layout.features) if index not in _yielding))
     rim_features = tuple(one for one in layout.features if is_text(one) and one.options.get("level") == "rim")
     validate_scoop_lift_grabbers(box, scoop)
     validate_side_openings(box)

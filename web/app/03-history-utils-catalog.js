@@ -692,6 +692,34 @@ function renderCatalog() {
   });
 }
 
+// True while any divider (the saved ones, with the live draft standing in for
+// its selected part) carries at least one non-blank division label. The bin's
+// own Label then yields to them; its stored text is kept, only ignored.
+// Mirrors organizer_inserts divider_labels_present on the server.
+function dividerLabelsPresent() {
+  const features = [...(state.design?.layout?.features || [])];
+  if (state.draft) {
+    if (state.selected !== null && state.selected !== undefined && state.selected < features.length) {
+      features[state.selected] = state.draft;
+    } else {
+      features.push(state.draft);
+    }
+  }
+  return features.some(feature => {
+    if (feature?.kind !== "divider") return false;
+    const options = feature.options || {};
+    const flag = options.label_divisions;
+    const on = typeof flag === "string"
+      ? !["", "false", "0", "no", "off"].includes(flag.trim().toLowerCase()) : Boolean(flag);
+    if (!on) return false;
+    let labels = options.division_labels;
+    if (typeof labels === "string") {
+      try { labels = JSON.parse(labels); } catch { labels = labels.split(","); }
+    }
+    return Array.isArray(labels) && labels.some(value => String(value ?? "").trim());
+  });
+}
+
 function ensureRimFeatureInLayout() {
   if (!state.design) return;
   const tidy = (state.design.label || "").trim();

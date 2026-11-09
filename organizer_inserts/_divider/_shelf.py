@@ -423,11 +423,8 @@ def _division_side_shelves(
     return results
 
 
-def divider_division_texts(
-    box: BoxSpec, spec_feature: Feature, base_z: float
-) -> list[tuple[str, trimesh.Trimesh, bool]]:
-    """(label, text_solid, raised) for each division label on a divider."""
-    options = spec_feature.options or {}
+def _division_label_list(options: dict) -> list:
+    """The division label texts a divider carries (empty when labelling is off)."""
     if not _option_flag(options.get("label_divisions")):
         return []
     raw_labels = options.get("division_labels")
@@ -442,6 +439,29 @@ def divider_division_texts(
     elif isinstance(raw_labels, (list, tuple)):
         labels = list(raw_labels)
     else:
+        return []
+    return labels if isinstance(labels, list) else []
+
+
+def divider_labels_present(features) -> bool:
+    """True when any divider carries at least one non-blank division label.
+
+    The bin's own Label yields to divider labels while this holds.
+    """
+    return any(
+        one.kind == "divider"
+        and any(str(label or "").strip() for label in _division_label_list(one.options or {}))
+        for one in features
+    )
+
+
+def divider_division_texts(
+    box: BoxSpec, spec_feature: Feature, base_z: float
+) -> list[tuple[str, trimesh.Trimesh, bool]]:
+    """(label, text_solid, raised) for each division label on a divider."""
+    options = spec_feature.options or {}
+    labels = _division_label_list(options)
+    if not labels:
         return []
 
     grid_x, grid_y = divider_grid_counts(options)

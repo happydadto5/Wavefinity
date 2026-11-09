@@ -86,6 +86,7 @@ from ._shelf import (
     _divider_grid_rim_texts,
     _division_side_shelves,
     divider_division_texts,
+    divider_labels_present,
 )
 from ._walls import (
     _divider_wall,

@@ -50,6 +50,7 @@ from organizer_inserts import (
     build_features,
     connector_keep_out,
     divider_division_texts,
+    labels_yielding_to_dividers,
     feature_footprint,
     insert_footprint,
     is_text,
@@ -118,6 +119,57 @@ from ._helpers import (
 )
 
 def preview_geometry(
+    box: BoxSpec, label: str = "", features: Iterable[Feature] = (),
+    mode: str = "fused", label_location: str = "bottom", scoop: bool = False,
+    draft: Feature | None = None, selected: int | None = None,
+    layout: Layout | None = None,
+) -> dict[str, object]:
+    """Preview geometry; the bin's own Label yields while dividers carry labels.
+
+    The Label parts stay in the design but are left out of the build, so the
+    indexes the browser holds are mapped back onto the full feature list.
+    """
+    migrated, label, label_location = _canonical_rim_label(
+        box, Layout(tuple(features), mode), label, label_location,
+    )
+    saved = list(migrated.features)
+    effective = list(saved)
+    if draft is not None:
+        if selected is not None and 0 <= selected < len(effective):
+            effective[selected] = draft
+        else:
+            effective.append(draft)
+    yielding = labels_yielding_to_dividers(effective)
+    if not yielding:
+        return _preview_geometry(box, label, saved, mode, label_location, scoop,
+                                 draft, selected, layout)
+    kept = [i for i in range(len(saved)) if i not in yielding]
+    new_selected = kept.index(selected) if selected in kept else None
+    draft_index = selected if (selected is not None and 0 <= selected < len(saved)) else len(saved)
+    new_draft = None if draft_index in yielding else draft
+    if new_draft is None:
+        new_selected = None
+    scene = _preview_geometry(box, label, [saved[i] for i in kept], mode,
+                              label_location, scoop, new_draft, new_selected, layout)
+    scene["pick_faces"] = {
+        face: ({**pick, "index": kept[pick["index"]]} if pick.get("type") == "saved" else pick)
+        for face, pick in scene["pick_faces"].items()
+    }
+    for key in ("invalid_feature_indexes", "conflicting_feature_indexes"):
+        scene[key] = tuple(kept[i] for i in scene[key] if i < len(kept))
+    overhang = [0.0] * len(saved)
+    for new_index, old_index in enumerate(kept):
+        if new_index < len(scene["feature_overhang_mm"]):
+            overhang[old_index] = scene["feature_overhang_mm"][new_index]
+    scene["feature_overhang_mm"] = tuple(overhang)
+    scene["text_meta"] = tuple(
+        {**meta, "index": kept[meta["index"]]} for meta in scene["text_meta"]
+        if meta["index"] < len(kept)
+    )
+    return scene
+
+
+def _preview_geometry(
     box: BoxSpec, label: str = "", features: Iterable[Feature] = (),
     mode: str = "fused", label_location: str = "bottom", scoop: bool = False,
     draft: Feature | None = None, selected: int | None = None,
