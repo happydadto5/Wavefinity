@@ -23,7 +23,9 @@ STRUCTURAL_OUTPUT_KEY = "storage_drawers"
 # Version 5: Fix 2765 — Story 2754 added SD_BIN_CLEARANCE_MM to every drawer pitch
 # and the cabinet height, so pre-2754 saved manifests must report needs-update; the
 # signature now carries the clearance, pitches and cabinet height.
-STRUCTURAL_GENERATOR_VERSION = 5
+# Version 6: Story 2768 — the rear tabs gained hook lugs and the sides hook pockets,
+# so cabinet files printed before the retention change must report needs-update.
+STRUCTURAL_GENERATOR_VERSION = 6
 # The exact app-owned namespace for temp files and rollback backups in a Space folder.
 CABINET_DEBRIS_PREFIX = ".wavefinity-cabinet-"
 # (Fix 096 A7) The local transaction namespace: only files under this prefix

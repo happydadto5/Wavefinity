@@ -47,6 +47,13 @@ SD_TOP_DETENT_BUMP_MM = 0.4
 SD_TOP_DETENT_INTERFERENCE_MM = 0.2
 SD_TOP_DETENT_LENGTH_MM = 6.0
 SD_REAR_PANEL_INSET_MM = 0.1
+# Story 2768: each rear tab carries a hook lug that rides, during the vertical
+# drop-in, in a pocket cut outward from the side groove. The pocket keeps a
+# backing wall behind the lug, so a forward cabinet pull cannot withdraw the
+# tabs through the groove's open rear edge. Lifting the panel straight up (Top
+# removed) still separates it. Needs this much backing wall to count as a hook.
+SD_REAR_HOOK_DEPTH_MM = 1.2
+SD_REAR_HOOK_MIN_BACKING_MM = 0.4
 # Fix 1114 (Opus M1): the rear panel's top edge sat at exactly the Top plate
 # underside (outer_z - top); the Top slides ~body depth over it during
 # assembly, and a +0.1 mm flat-print tolerance scrapes or blocks seating.
@@ -224,6 +231,13 @@ def _wall_mount_plan(block: dict, datum: _Datum) -> dict | None:
 
 def _keyhole_panel_mm(rear_t: float) -> float:
     return max(rear_t, SD_KEYHOLE_REINFORCEMENT_MM)
+
+
+def _rear_hook_mm(rear_t: float) -> tuple[float, float] | None:
+    """(lug length along Y from the tab's front face, backing wall behind the pocket)."""
+    lug = rear_t / 2.0
+    backing = rear_t - lug - SD_JOINT_CLEARANCE_MM
+    return (lug, backing) if backing >= SD_REAR_HOOK_MIN_BACKING_MM else None
 
 
 def _keyhole_land_mm(rear_t: float) -> float:
@@ -794,7 +808,20 @@ def _datum_components(space, datum):
                         datum.base+SD_JOINT_LAND_MIN_MM-SD_JOINT_CLEARANCE_MM, slot_x1,
                         datum.rear+SD_JOINT_CLEARANCE_MM,
                         datum.outer_z-datum.top+1.0)
-            return difference([solid, slot])
+            cuts = [slot]
+            hook = _rear_hook_mm(block["cabinet_wall_mm"])
+            if hook is not None:
+                # Hook pocket: opens outward from the groove into the land, with
+                # the backing wall left between it and the side's rear face.
+                lug, backing = hook
+                out0, out1 = ((slot_x0-SD_REAR_HOOK_DEPTH_MM, slot_x0)
+                              if left else
+                              (slot_x1, slot_x1+SD_REAR_HOOK_DEPTH_MM))
+                cuts.append(_box(out0, datum.rear-block["cabinet_wall_mm"]-SD_JOINT_CLEARANCE_MM,
+                                 datum.base+SD_JOINT_LAND_MIN_MM-SD_JOINT_CLEARANCE_MM, out1,
+                                 datum.rear-backing,
+                                 datum.outer_z-datum.top+1.0))
+            return difference([solid, *cuts])
         side_reach = (datum.track_reach + SD_RAIL_CAPTURE_MM + datum.fit
                       + SD_RAIL_LEDGE_MM - 0.2)
         add(key, name, (side_reach, datum.body_depth,
@@ -813,9 +840,17 @@ def _datum_components(space, datum):
     back = _keyhole_land_mm(rear_t) if wall_mount is not None else 0.0
     def rear_keys():
         tabs = []
-        for x0 in (datum.track_reach-rear_t/2, datum.outer_x-datum.track_reach-rear_t/2):
-            tabs.append(_box(x0, datum.rear-rear_t, datum.base+SD_JOINT_LAND_MIN_MM,
-                             x0+rear_t, datum.rear+back, datum.outer_z-datum.top-SD_JOINT_LAND_MIN_MM))
+        hook = _rear_hook_mm(rear_t)
+        for left, x0 in ((True, datum.track_reach-rear_t/2),
+                         (False, datum.outer_x-datum.track_reach-rear_t/2)):
+            z0, z1 = datum.base+SD_JOINT_LAND_MIN_MM, datum.outer_z-datum.top-SD_JOINT_LAND_MIN_MM
+            tabs.append(_box(x0, datum.rear-rear_t, z0, x0+rear_t, datum.rear+back, z1))
+            if hook is not None:
+                # Hook lug on the tab's outer face (toward the side panel), at
+                # its front part; it overlaps the tab so it is one component.
+                lx0, lx1 = ((x0-SD_REAR_HOOK_DEPTH_MM, x0+0.2) if left else
+                            (x0+rear_t-0.2, x0+rear_t+SD_REAR_HOOK_DEPTH_MM))
+                tabs.append(_box(lx0, datum.rear-rear_t, z0, lx1, datum.rear-rear_t+hook[0], z1))
         tabs.append(_box(rear_lo, datum.rear-rear_t, datum.base/2,
                          rear_hi, datum.rear+back, datum.base+SD_JOINT_LAND_MIN_MM))
         return tabs
