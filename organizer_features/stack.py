@@ -879,8 +879,7 @@ def stack_summary(box: BoxSpec) -> dict:
     if lid_enabled(box) and lid_spec(eff).snap_enabled:
         from organizer_features.lid_snap import snap_status, snap_fingers
         summary["lid_snap_note"] = snap_status(eff) or (
-            "Light retention on the existing connector ridges. Pull upward to remove."
-            if snap_fingers(eff) else "No reachable connector ridges; snap fit adds nothing on this bin.")
+            None if snap_fingers(eff) else "No reachable connector ridges; snap fit adds nothing on this bin.")
     return summary
 
 
