@@ -50,6 +50,24 @@ def _part_result(output: Path, report: dict, fit: object = None) -> dict[str, ob
     return result
 
 
+BIN_SERIAL = re.compile(r"B[0-9]+")
+
+
+def with_serial(filename: str, serial: str) -> str:
+    """``Box 16 x 48 x 40 Driver Rack.3mf`` -> ``Box 16 x 48 x 40 Driver Rack B7.3mf``.
+
+    The bin's unique id always ends the name, before the extension, so a
+    bin's files are identifiable as that bin's and two bins can never share
+    a file name even when their names match. An empty serial changes nothing.
+    """
+    if not serial:
+        return filename
+    if not BIN_SERIAL.fullmatch(serial):
+        raise ValueError(f"not a bin serial: {serial!r}")
+    path = Path(filename)
+    return f"{path.stem} {serial}{path.suffix}"
+
+
 def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
     """``Box 16 x 48 x 40 Driver Rack.3mf``.
 

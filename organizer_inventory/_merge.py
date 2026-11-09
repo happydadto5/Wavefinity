@@ -139,6 +139,74 @@ def _stale_files(layout: dict[str, Any] | None) -> dict[str, list[str]]:
             for key, value in raw.items() if isinstance(value, list)}
 
 
+def _track_previous_files(
+    folder: Path, row: dict[str, Any], layout: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Remember a row's currently recorded, provably its own files as superseded.
+
+    Called just before a Save/Print records a new file set on the row. The
+    reaper then deletes whichever of them the new set no longer uses (and no
+    other row claims), so re-outputting a bin leaves one current set - this is
+    how a bin's older plain-named files converge onto the serial naming.
+    """
+    if not isinstance(layout, dict):
+        return layout
+    previous = _row_file_names(folder, row)
+    if not previous:
+        return layout
+    stale = _stale_files(layout)
+    stale[row["id"]] = list(dict.fromkeys(stale.get(row["id"], []) + previous))
+    return {**layout, "stale_files": stale}
+
+
+def _carry_rename(
+    folder: Path, bins: list[dict[str, Any]], row: dict[str, Any], old_name: Any, new_name: Any,
+) -> str | None:
+    """Rename a row's files to its new name; the new File cell, or None if not provably safe.
+
+    Only files the row provably owns (the deletion standard) whose names end
+    ``<old name> <serial>.3mf`` are renamed, and only when every one of them
+    can move - all or nothing - to a free name no other row claims.
+    """
+    from organizer_app_impl._common import clean_label
+    from organizer_app_impl._filenames import check_filename_bytes
+
+    old, new, serial = clean_label(str(old_name or "")), clean_label(str(new_name or "")), str(row["id"])
+    if not old or not new or old == new:
+        return None
+    owned = _row_file_names(folder, row)
+    if not owned:
+        return None
+    ending = f" {old} {serial}"
+    others = _referenced_names(folder, bins, serial)
+    plan: list[tuple[Path, Path]] = []
+    for name in owned:
+        path = Path(name)
+        if path.suffix.lower() != ".3mf" or not path.stem.endswith(ending) or name in others:
+            return None
+        target_name = f"{path.stem[:-len(ending)]} {new} {serial}{path.suffix}"
+        try:
+            check_filename_bytes(target_name)
+        except ValueError:
+            return None
+        if (folder / target_name).exists() or target_name in others:
+            return None
+        plan.append((folder / name, folder / target_name))
+    done: list[tuple[Path, Path]] = []
+    try:
+        for source, target in plan:
+            source.rename(target)
+            done.append((source, target))
+    except OSError:
+        for source, target in reversed(done):
+            try:
+                target.rename(source)
+            except OSError:
+                pass
+        return None
+    return ", ".join(target.name for _source, target in plan)
+
+
 def _reap_superseded(
     folder: Path, bins: list[dict[str, Any]], layout: dict[str, Any] | None, row_id: str,
 ) -> tuple[dict[str, Any] | None, list[Path]]:
@@ -295,8 +363,20 @@ def _merge_design_source(
     changed = previous != canonical
     files_became_stale = False
     stale = _stale_files(layout)
+    carried: str | None = None
+    if (target is not None and changed and folder is not None and isinstance(previous, dict)
+            and {k: v for k, v in previous.items() if k != "part_name"}
+            == {k: v for k, v in canonical.items() if k != "part_name"}
+            and str(target.get("file") or "").strip()):
+        # Only the bin's name changed: its files are the same files, so they
+        # follow the new name (same serial) instead of going stale.
+        carried = _carry_rename(
+            folder, bins, target, previous.get("part_name"), canonical.get("part_name"))
     if target is not None:
-        if changed:
+        if carried is not None:
+            target.update(row_fields)
+            target["file"] = carried
+        elif changed:
             if str(target.get("file") or "").strip():
                 files_became_stale = True
                 # Remember the old outputs so a later successful refresh can

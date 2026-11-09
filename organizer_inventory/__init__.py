@@ -119,6 +119,7 @@ from ._merge import (
     _referenced_names,
     _stale_files,
     _reap_superseded,
+    _track_previous_files,
     _reap_superseded_names,
     _delete_files,
     _deletion_file_names,
@@ -181,8 +182,9 @@ def update_bin_file(output_dir: Path | str, row_id: str, file_text: str,
             raise ValueError(f"no bin {row_id!r} in the inventory")
         if expected_design is not None and design_specs(current["layout"]).get(row_id) != expected_design:
             raise ValueError("This bin changed while its files were being prepared")
+        tracked = _track_previous_files(path.parent, target, current["layout"])
         target.update({"file": file_text, "status": "saved", "qty": 0})
-        layout, superseded = _reap_superseded(path.parent, bins, current["layout"], row_id)
+        layout, superseded = _reap_superseded(path.parent, bins, tracked, row_id)
         _write(path, bins, layout, current["legacy"])
         _delete_files(superseded)
         return _payload(path, _read(path))
@@ -224,7 +226,13 @@ def change_design_status(output_dir: Path | str, row_id: str, action: str,
     with INVENTORY_LOCK:
         path = resolve_inventory_path(output_dir, migrate=True)
         current = _read(path)
+        before = next((one for one in current["bins"] if one["id"] == row_id), None)
+        previous_layout = (_track_previous_files(path.parent, before, current["layout"])
+                           if before is not None and action in ("saved", "printed") and file_text
+                           else current["layout"])
         bins, layout = _change_design_status(current, row_id, action, file_text, expected_design)
+        if previous_layout is not current["layout"] and isinstance(previous_layout, dict) and isinstance(layout, dict):
+            layout = {**layout, "stale_files": _stale_files(previous_layout)}
         if action == "mark_not_printed":
             target = next(one for one in bins if one["id"] == row_id)
             if target["file"]:
@@ -329,6 +337,7 @@ def append_bin(
     cleat_x: str | int = "auto",
     cleat_y: str | int = "auto",
     design_spec: dict[str, Any] | None = None,
+    row_id: str | None = None,
 ) -> Path:
     """Log one generated bin as a new row, keeping everything else intact.
 
@@ -352,6 +361,12 @@ def append_bin(
             if int(qty) > 0 and design_spec["layout"].get("surface_base_mode") == "edge":
                 design_spec["layout"]["surface_base_mode"] = "custom"
         new_id = next_bin_id(bins)
+        if row_id is not None:
+            # The id was reserved before the files were written (their names
+            # end with it); a row can only take that exact id.
+            if any(one.get("id") == row_id for one in bins):
+                raise ValueError(f"bin id {row_id} is already in use; nothing was recorded")
+            new_id = row_id
         # Fix 096 A2: an ordinary bin or B4B row must never be recorded without
         # its canonical editable source - a missing source is an operation
         # failure, not a silent gap.

@@ -194,6 +194,8 @@ from organizer_spaces import (
     structural_output_manifest,
 )
 from organizer_app_impl._design_io import MODULE_MARKER_KEY, MODULE_MARKER_MM
+from organizer_app_impl._filenames import BIN_SERIAL
+from organizer_app_impl._generation import next_bin_serial
 from organizer_app import (
     LABEL_POSITIONS,
     APP_DIR,
@@ -1681,6 +1683,25 @@ def _block_storage_box_overheight(raw_space, box, layout, label, part_name, scoo
         )
 
 
+def _bin_serial_for(payload: dict[str, Any], output: Path, will_log: bool) -> str:
+    """The unique id every file of this bin ends with, else "" (plain names).
+
+    A bin bound to an Inventory row in this folder uses that row's id. A bin
+    about to be logged as a new row reserves the id the row will take. Nothing
+    else (hosted, unlogged, unbound) carries a serial.
+    """
+    if HOSTED:
+        return ""
+    row_id = str(payload.get("design_row_id") or "")
+    try:
+        if row_id:
+            row = next((one for one in load_inventory(output)["bins"] if one.get("id") == row_id), None)
+            return row_id if row is not None and row.get("kind") == "bin" and BIN_SERIAL.fullmatch(row_id) else ""
+        return next_bin_serial(output) if will_log else ""
+    except (OSError, ValueError):
+        return ""
+
+
 def generate_payload(
     payload: dict[str, Any],
     *,
@@ -1713,6 +1734,11 @@ def generate_payload(
     else:
         keep_log = requested_inventory and inventory_enabled(output, load_preferences())
     with GEOMETRY_LOCK:
+        serial = "" if box.b4b.enabled else _bin_serial_for(
+            payload, output,
+            will_log=requested_inventory and not HOSTED and (
+                keep_log or inventory_enabled(output, load_preferences())),
+        )
         # Fix 096 A1: the whole ordinary-bin file set installs as one unit -
         # staged, validated, then promoted - and inventory logging runs only
         # after the complete set promoted, so a row is never recorded for a
@@ -1722,8 +1748,12 @@ def generate_payload(
             auto_timestamp=auto_timestamp,
             keep_log=keep_log and not HOSTED,
             pegboard_thickness_mm=(payload.get("space") or {}).get("pegboard_thickness_mm", 3.2),
+            serial=serial,
         )
-    reply = _generation_reply(result=result, output=output)
+    reply = _generation_reply(
+        result=result, output=output,
+        extra={"bin_serial": serial} if serial and not HOSTED else None,
+    )
     if HOSTED and requested_inventory:
         record = inventory_bin_record(
             box, layout, _extract_generated_files(result), label,
@@ -1968,7 +1998,9 @@ def pegboard_hooks_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return _generation_reply(result=result, output=output)
 
 
-def _generate_bin_from_design_spec(output_dir: Path, design_spec: dict[str, Any]) -> list[Path]:
+def _generate_bin_from_design_spec(
+    output_dir: Path, design_spec: dict[str, Any], row_id: str | None = None,
+) -> list[Path]:
     """Fix 034 F2: generate a spec-only Inventory row's files on demand.
 
     Uses the same generator as a normal Generate action, with Inventory
@@ -1985,6 +2017,7 @@ def _generate_bin_from_design_spec(output_dir: Path, design_spec: dict[str, Any]
             box, layout, output_dir, label, part_name, label_location, scoop,
             auto_timestamp=False, keep_log=False,
             pegboard_thickness_mm=space.get("pegboard_thickness_mm", 3.2),
+            serial=(row_id or "") if not box.b4b.enabled and BIN_SERIAL.fullmatch(row_id or "") else "",
         )
     return _extract_generated_files(result)
 
@@ -2163,6 +2196,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
             append_bin(
                 output_dir, **record, qty=1,
                 design_spec=design_to_dict(box, layout, label, part_name, location, scoop),
+                row_id=gen_result.get("bin_serial") or None,
             )
     return {
         "result": gen_result.get("result"),

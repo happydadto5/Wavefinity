@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -91,6 +92,16 @@ def _copy_count(one: dict[str, Any], raw: Any) -> int:
     return raw
 
 
+def _call_generator(generate_from_design: Callable[..., list[Path]], root: Path,
+                    spec: dict[str, Any], row_id: str) -> list[Path]:
+    """Hand the generator the row id (the serial its files end with) when it takes one."""
+    try:
+        takes_row = len(inspect.signature(generate_from_design).parameters) >= 3
+    except (TypeError, ValueError):
+        takes_row = False
+    return generate_from_design(root, spec, row_id) if takes_row else generate_from_design(root, spec)
+
+
 def prepare_inventory_bins(
     output_dir: Path | str,
     row_ids: Iterable[str],
@@ -146,7 +157,7 @@ def prepare_inventory_bins(
             reused.append(row_id)
             continue
         try:
-            made = generate_from_design(root, spec)
+            made = _call_generator(generate_from_design, root, spec, row_id)
             if not made:
                 raise ValueError("generating its files did not produce any")
             if any(not Path(path).is_file() for path in made):

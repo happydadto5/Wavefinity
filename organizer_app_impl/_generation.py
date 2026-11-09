@@ -26,7 +26,7 @@ from organizer_engine import (
     validate_side_fit,
 )
 from organizer_b4b import b4b_effective_box
-from organizer_inventory import append_bin
+from organizer_inventory import append_bin, load_inventory, next_bin_id
 from organizer_inserts import (
     Feature,
     Layout,
@@ -230,6 +230,11 @@ def _rewrite_staged_paths(node, mapping: dict[str, str]):
     return node
 
 
+def next_bin_serial(output_dir: Path) -> str:
+    """The id the folder's next logged bin row will take - the serial its files end with."""
+    return next_bin_id(load_inventory(output_dir)["bins"])
+
+
 def log_bin_to_folder(
     output_dir: Path,
     box: BoxSpec,
@@ -241,8 +246,12 @@ def log_bin_to_folder(
     b4b_note: str = "",
     physical_size_mm: tuple[float, float, float] | None = None,
     design_spec: dict[str, Any] | None = None,
+    row_id: str | None = None,
 ) -> Path:
     """Record a generated bin in the save folder's inventory.
+
+    ``row_id`` is the id already reserved for the row (the serial its files
+    end with); without it the next free id is used.
 
     ``design_spec`` is the canonical design JSON (see ``design_source_payload``)
     for the *original* box the user configured - distinct from ``box`` here,
@@ -250,7 +259,7 @@ def log_bin_to_folder(
     physical inventory row. Passing it means Generate/Print, even without an
     explicit Save to Space first, still leaves the new row reloadable.
     """
-    return append_bin(output_dir, design_spec=design_spec, **inventory_bin_record(
+    return append_bin(output_dir, design_spec=design_spec, row_id=row_id, **inventory_bin_record(
         box, layout, generated_files, label, part_name, scoop, b4b_note,
         physical_size_mm,
     ))

@@ -236,6 +236,7 @@ from organizer_app_impl._filenames import (
     _part_result,
     check_filename_bytes,
     box_filename,
+    with_serial,
     edge_mount_label_filename,
     pegboard_adapter_filename,
     lid_filename,
@@ -269,6 +270,7 @@ from organizer_app_impl._generation import (
     _promote_staged_set,
     _rewrite_staged_paths,
     log_bin_to_folder,
+    next_bin_serial,
     generate_side_file,
     generate_kit_files,
 )
@@ -373,6 +375,7 @@ def generate_organizer_files_transactional(
     auto_timestamp: bool = False,
     keep_log: bool = False,
     pegboard_thickness_mm: float = 3.2,
+    serial: str = "",
 ) -> dict[str, object]:
     """Build one ordinary-bin output set as a single install unit.
 
@@ -386,6 +389,11 @@ def generate_organizer_files_transactional(
     B4B keeps its existing direct path (out of scope for M09). When keep_log
     is true, the inventory row is recorded only AFTER the complete set
     promoted - a row is never recorded for a partial set.
+
+    ``serial`` is the bin's unique inventory id. Every file of the set ends
+    with it, so the bin's own earlier files are replaced in place (never a
+    timestamped copy). A bin that is about to be logged and has no serial yet
+    reserves the id its new row will take.
     """
     if box.b4b.enabled:
         return generate_organizer_files(
@@ -394,6 +402,10 @@ def generate_organizer_files_transactional(
         )
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    if keep_log and not serial:
+        serial = next_bin_serial(output_dir)
+    if serial:
+        auto_timestamp = False
     # Canonicalize once here. The inner call re-runs _canonical_rim_label on
     # these already-canonical values, which is a no-op, so generation and the
     # logging below see identical values.
@@ -404,6 +416,7 @@ def generate_organizer_files_transactional(
         result = generate_organizer_files(
             box, canon_layout, staging, canon_label, part_name, canon_location, scoop,
             auto_timestamp=False, keep_log=False, pegboard_thickness_mm=pegboard_thickness_mm,
+            serial=serial,
         )
         staged = sorted(
             (one for one in staging.iterdir() if one.is_file() and one.suffix.lower() == ".3mf"),
@@ -443,6 +456,7 @@ def generate_organizer_files_transactional(
                 scoop=scoop,
                 # The editable design is the request, never the shortened effective body.
                 design_spec=design_to_dict(box, canon_layout, canon_label, part_name, canon_location, scoop),
+                row_id=serial or None,
             )
             result["log_file"] = str(log_file)
         return result
@@ -461,6 +475,7 @@ def generate_organizer_files(
     auto_timestamp: bool = False,
     keep_log: bool = False,
     pegboard_thickness_mm: float = 3.2,
+    serial: str = "",
 ) -> dict[str, object]:
     """Export an editor design as fused, fitted-removable, or cartridge parts.
 
@@ -549,8 +564,8 @@ def generate_organizer_files(
 
     def _resolve_file(filename_fn, *args, **kwargs) -> Path:
         base_name = filename_fn(*args, **kwargs)
-        target = output_dir / base_name
-        if auto_timestamp:
+        target = output_dir / with_serial(base_name, serial)
+        if auto_timestamp and not serial:
             has_name = bool(clean_label(part_name))
             if not has_name or target.exists():
                 ts = datetime.now().strftime("%m%d%y%H%M%S")

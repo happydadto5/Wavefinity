@@ -98,6 +98,7 @@ async function generateParts(target) {
       output: state.output,
       connector: state.connector,
       keep_log: designRowId ? false : state.keepLog,
+      design_row_id: designRowId || undefined,
       // Fix 1069: carry the active Space so direct Save in a Storage Box Space
       // is hard-blocked when the bin/closed stack exceeds the interior Z.
       // Standalone designs (no Space) send null and are unaffected.
