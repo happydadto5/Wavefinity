@@ -22,14 +22,7 @@
 .ws-card-text { display: grid; min-width: 0; }
 .ws-card-text small { color: var(--muted); font-size: 12px; }
 body.ws-on #bin-actions { display: none !important; }
-/* Story 2714: every control in the Bin controls box lives elsewhere in the unified UI; hide the empty bordered strip. */
-body.ws-on #bin-controls-box { display: none !important; }
 
-/* The tabs and the old bin/drawer pickers give way to the selector. */
-body.ws-on #space-mode-row { display: none; }
-/* Story 2701: Print Bin / Export live in the top bar; the bin form's bottom bar stays only for Classic. */
-body.ws-on .bin-save-bar { display: none !important; }
-body.ws-on #design-bin-nav { display: none !important; }
 body.ws-on #space-cancel-edit { display: none; }
 
 /* Two persistent panes beneath the bar: about 40% left, the preview keeps the rest. */

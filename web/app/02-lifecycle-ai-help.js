@@ -203,7 +203,7 @@ async function installLoadedDesignSource(rowId, spec, {
     state.spaceStarterPreviewPending = false;
     state.designInventoryId = rowId;
     state.designTarget = null; // Fix 103
-    if (typeof DP !== "undefined") { DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin(); }
+    if (typeof DP !== "undefined") { DP.refreshDesignerDeleteBin(); }
     state.surfaceHeightPromptSkipped = false;
     state.drafts = {};
     state.binResizePending = false;

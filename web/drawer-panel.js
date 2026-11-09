@@ -564,43 +564,6 @@ DP.designNavBusy = false;
 // entry checks; never check DP.designNavBusy alone for those.
 DP.designNavBlocked = () => DP.designNavBusy || state.designMutationBusy;
 
-DP.refreshDesignBinNav = () => {
-  const host = $("#design-bin-nav"), select = $("#design-bin-select");
-  if (!host || !select) return;
-  // Fix 103: the Design target model. A Storage Drawers / Storage Box Space
-  // offers its structural object as the first navigator option.
-  const target = DP.getDesignTarget();
-  const structuralSpace = typeof DL !== "undefined" && Boolean(DP.structuralPreviewTargetKindFor(state.activeSpace));
-  const structuralShown = structuralSpace && (DP.structuralTargetEnabled || target.kind === "structural");
-  const structuralSelected = target.kind === "structural";
-  const show = DP.mode === "design" && DL.active && (DP.designNavRows().length > 0 || structuralShown);
-  host.hidden = !show;
-  if (!show) return;
-  const currentId = target.kind === "bin" ? target.rowId : null;
-  // Fix 1000: dropdown-only navigation. Destinations are other editable bins
-  // plus the structural target when available; never the current target and
-  // never "New Bin".
-  const alternates = DP.designNavEditableRows().filter(one => one.id !== currentId);
-  const showStructural = structuralShown && !structuralSelected;
-  if (!alternates.length && !showStructural) { host.hidden = true; return; }
-  select.innerHTML = "";
-  // H8: show the current bin's name instead of generic placeholder.
-  // The value stays empty so it's inert (the change handler returns on empty id).
-  const currentBin = target.kind === "bin" && currentId ? DL.bin(currentId) : null;
-  // Fix 2646: when the structural object is the current target, the current-target
-  // entry names it (Storage Box / Storage Drawers / Base Trim) instead of "Switch bin…".
-  const previewKind = DP.structuralPreviewTargetKindFor(state.activeSpace);
-  const structuralName = previewKind === "storage_drawers" ? "Storage Drawers"
-    : previewKind === "base_trim" ? "Base Trim" : "Storage Box";
-  const currentLabel = currentBin ? DL.label(currentBin) : structuralSelected ? structuralName : "Switch bin…";
-  const placeholder = new Option(currentLabel, "");
-  placeholder.selected = true;
-  select.append(placeholder);
-  if (showStructural) select.append(new Option(structuralName, "__structural__"));
-  for (const one of alternates) select.append(new Option(DL.label(one), one.id));
-  select.disabled = DP.designNavBlocked();
-};
-
 // Story 2782: Delete lives on the selected bin's own Inventory row. This hook
 // keeps that row current: the list re-renders, and renderInventory draws Delete
 // only on the row being edited in Design.
@@ -613,35 +576,6 @@ DP.designDeleteRowId = () => {
   return one && DP.editableSourceFor(one) ? one.id : null;
 };
 
-$("#design-bin-select").addEventListener("change", async event => {
-  const id = event.target.value;
-  DP.refreshDesignBinNav();
-  if (DP.designNavBlocked() || DP.mode !== "design") return;
-  // Fix 103: structural activation path.
-  if (id === "__structural__") {
-    DP.designNavBusy = true;
-    DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
-    try {
-      await DP.openStructuralTarget();
-    } finally {
-      DP.designNavBusy = false;
-      DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
-    }
-    return;
-  }
-  // Fix 1000: the "Switch bin…" placeholder is inert.
-  if (!id) return;
-  const one = DL.bin(id);
-  if (!one || !DP.editableSourceFor(one)) return;
-  DP.designNavBusy = true;
-  DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
-  try {
-    await DP.openInventoryRow(id);
-  } finally {
-    DP.designNavBusy = false;
-    DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
-  }
-});
 // Story 2725: the one Delete-the-open-bin operation. The selected bin's Inventory
 // row calls it (Story 2782), so the Design-side delete path has one owner.
 DP.deleteDesignBin = async () => {
@@ -649,12 +583,12 @@ DP.deleteDesignBin = async () => {
   const one = state.designInventoryId && DL.bin(state.designInventoryId);
   if (!one || !DP.editableSourceFor(one)) return;
   DP.designNavBusy = true;
-  DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+  DP.refreshDesignerDeleteBin();
   try {
     await DP.deleteRow(one, { fromDesign: true });
   } finally {
     DP.designNavBusy = false;
-    DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+    DP.refreshDesignerDeleteBin();
   }
 };
 
@@ -666,21 +600,16 @@ DP.openInventoryRow = async id => {
   const spaceContext = DL.spaceContext();
   const acceptTransition = () => request === DP.modeRequest &&
     state.folderMode === "space" && DL.active && DL.spaceContextCurrent(spaceContext);
-  DP.showPendingMode("design");
-  try {
-    // A row placed in another physical drawer switches to it first, keeping
-    // the row selected.
-    if (DL.isStorageDrawers()) await SP.cabinetJumpToRow(id);
-    if (!(await designerEditInventoryRow(id, acceptTransition)) || !acceptTransition()) return false;
-    DP.clearDesignTarget(); // Fix 103
-    DL.selectRow(id);
-    DP.setMode("design");
-    activatePreviewView(preferredDesignView());
-    DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
-    return true;
-  } finally {
-    if (request === DP.modeRequest) DP.showPendingMode(null);
-  }
+  // A row placed in another physical drawer switches to it first, keeping
+  // the row selected.
+  if (DL.isStorageDrawers()) await SP.cabinetJumpToRow(id);
+  if (!(await designerEditInventoryRow(id, acceptTransition)) || !acceptTransition()) return false;
+  DP.clearDesignTarget(); // Fix 103
+  DL.selectRow(id);
+  DP.setMode("design");
+  activatePreviewView(preferredDesignView());
+  DP.refreshDesignerDeleteBin();
+  return true;
 };
 
 // Fix 103: structural activation path. It never touches state.design /
@@ -718,7 +647,7 @@ DP.openStructuralTarget = async () => {
   // the view-only Space canvas instead of the 3D overview). Other structural
   // subjects keep the remembered-view behavior. The 2D tab stays reachable.
   activatePreviewView(DP.structuralPreviewTargetKindFor(state.activeSpace) === "storage_drawers" ? "3d" : preferredDesignView());
-  DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+  DP.refreshDesignerDeleteBin();
   return true;
 };
 
@@ -828,12 +757,9 @@ DP.newBinFromSpace = async () => {
   const spaceContext = DL.spaceContext();
   const acceptTransition = () => request === DP.modeRequest &&
     state.folderMode === "space" && DL.active && DL.spaceContextCurrent(spaceContext);
-  DP.showPendingMode("design");
-  try {
-    if (!(await designerNewBin(acceptTransition)) || !acceptTransition()) return false;
-    DP.setMode("design");
-    return true;
-  } finally { if (request === DP.modeRequest) DP.showPendingMode(null); }
+  if (!(await designerNewBin(acceptTransition)) || !acceptTransition()) return false;
+  DP.setMode("design");
+  return true;
 };
 
 // A normal typed one-drawer Space: name and size are owned by the Space.
@@ -1279,7 +1205,6 @@ DP.filteredBins = () => {
 };
 
 DP.renderInventory = (force = false) => {
-  if (DP.mode === "design") DP.refreshDesignBinNav();
   DP.syncFilterSpace();
   const drawer = DL.drawer();
   const list = $("#dl-inv-list");
@@ -1411,11 +1336,6 @@ DP.renderSave = () => {
 
 DP.mode = "design";
 DP.modeRequest = 0;
-DP.showPendingMode = mode => {
-  $$("[data-space-mode]").forEach(button => button.classList.toggle("pending", mode === button.dataset.spaceMode));
-  const busy = $("#space-mode-busy");
-  if (busy) busy.hidden = !mode;
-};
 
 // The layout tools own the left panel (keys and the header buttons act on
 // the layout only then).
@@ -1430,13 +1350,6 @@ DP.applyMode = () => {
   $("#drawer-panel").hidden = !space;
   $(".view-tabs").hidden = space;
   if (typeof syncStructuralEditor === "function") syncStructuralEditor(); // Fix 103
-  $$("[data-space-mode]").forEach(button => {
-    const on = button.dataset.spaceMode === DP.mode;
-    button.classList.toggle("active", on);
-    button.setAttribute("aria-selected", String(on));
-    button.setAttribute("aria-pressed", String(on));
-    button.tabIndex = on ? 0 : -1;
-  });
   if (typeof SP !== "undefined" && SP.renderSpaceInfo) SP.renderSpaceInfo();
 };
 
@@ -1444,7 +1357,7 @@ DP.setMode = mode => {
   if (!DL.active || (mode !== "space" && mode !== "design") || DP.mode === mode) return;
   DP.mode = mode;
   DP.applyMode();
-  DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
+  DP.refreshDesignerDeleteBin();
   if (mode === "space") DP.update();
 };
 
@@ -1473,29 +1386,24 @@ DP.selectMode = async mode => {
   if (mode === "space" && DP.mode === "design" && typeof designTargetIsStructural === "function" && designTargetIsStructural() &&
       !(await SP.confirmLeaveStructuralEditor())) return false;
   const request = ++DP.modeRequest;
-  DP.showPendingMode(mode);
-  try {
-    if (DP.mode === "design" && mode === "space") {
-      if (!(typeof typedSpaceOrdinaryBin === "function" && typedSpaceOrdinaryBin()) &&
-          typeof flushVisibleDesignEditsBeforeModeSwitch === "function" &&
-          !(await flushVisibleDesignEditsBeforeModeSwitch())) return false;
-      if (typeof flushSpaceDesignAutosave === "function" &&
-          !(await flushSpaceDesignAutosave({ deferDraftPreview: true, leavingDesign: true }))) return false;
-    }
-    if (request !== DP.modeRequest) return false;
-    if (mode === "space") {
-      if (!(await DP.ensureInventoryLoaded()) || request !== DP.modeRequest) return false;
-      if (DL.pegboardRefreshError) await DL.retryPegboardLayouts();
-      if (request !== DP.modeRequest) return false;
-      if (!DL.active) { DL.active = true; DP.build(); DP.applyMode(); }
-    }
-    DP.setMode(mode);
-    activatePreviewView(mode === "space" ? "drawer" : preferredDesignView());
-    if (mode === "space") DP.update();
-    return true;
-  } finally {
-    if (request === DP.modeRequest) DP.showPendingMode(null);
+  if (DP.mode === "design" && mode === "space") {
+    if (!(typeof typedSpaceOrdinaryBin === "function" && typedSpaceOrdinaryBin()) &&
+        typeof flushVisibleDesignEditsBeforeModeSwitch === "function" &&
+        !(await flushVisibleDesignEditsBeforeModeSwitch())) return false;
+    if (typeof flushSpaceDesignAutosave === "function" &&
+        !(await flushSpaceDesignAutosave({ deferDraftPreview: true, leavingDesign: true }))) return false;
   }
+  if (request !== DP.modeRequest) return false;
+  if (mode === "space") {
+    if (!(await DP.ensureInventoryLoaded()) || request !== DP.modeRequest) return false;
+    if (DL.pegboardRefreshError) await DL.retryPegboardLayouts();
+    if (request !== DP.modeRequest) return false;
+    if (!DL.active) { DL.active = true; DP.build(); DP.applyMode(); }
+  }
+  DP.setMode(mode);
+  activatePreviewView(mode === "space" ? "drawer" : preferredDesignView());
+  if (mode === "space") DP.update();
+  return true;
 };
 
 // Open the Space workspace. Starts in Space mode unless a caller asks for Design.
@@ -1521,7 +1429,6 @@ DP.leave = () => {
   DL.active = false;
   DP.modeRequest += 1;
   DP.mode = "design";
-  DP.showPendingMode(null);
   if (typeof SP !== "undefined" && SP.cancelInlineEdit) SP.cancelInlineEdit();
   DP.applyMode();
   DV.drag = null;
@@ -1537,7 +1444,6 @@ DP.leave = () => {
   if (!wrap) return;
   DV.wire();
   DL.on(DP.update);
-  $$("[data-space-mode]").forEach(button => button.addEventListener("click", () => DP.selectMode(button.dataset.spaceMode)));
   window.addEventListener("beforeunload", event => {
     if (DL.dirty && DL.layout && !DL.layout.settings.autosave) {
       event.preventDefault();

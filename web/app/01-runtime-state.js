@@ -947,5 +947,5 @@ async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
   await refreshPreview();
   state.starterHintActive = state.folderMode !== "space";
   syncStarterSizeHint();
-  if (typeof DP !== "undefined") { DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin(); }
+  if (typeof DP !== "undefined") { DP.refreshDesignerDeleteBin(); }
 }

@@ -42,13 +42,6 @@
 
   <main class="app-shell" id="app-shell">
     <aside class="controls" aria-label="Bin controls">
-      <nav id="space-mode-row" class="space-mode-row" aria-label="Work area">
-        <div id="space-mode-toggle" class="space-mode-toggle" role="tablist" aria-label="Work area">
-          <button type="button" role="tab" data-space-mode="space" aria-selected="false" aria-pressed="false" tabindex="-1">Space</button>
-          <button type="button" role="tab" data-space-mode="design" class="active" aria-selected="true" aria-pressed="true" tabindex="0">Bins</button>
-        </div>
-        <span id="space-mode-busy" role="status" hidden>Loading…</span>
-      </nav>
       <section id="space-head" class="space-head" aria-label="Space" hidden>
         <div id="space-head-view" class="space-head-view">
           <div class="space-head-title"><strong id="space-head-name"></strong><span class="space-head-type-wrap"><span class="space-head-type-label">Type</span><span id="space-head-type" class="space-head-type"></span></span></div>
@@ -77,18 +70,12 @@
       <section class="control-section open" data-section="build">
         <div class="section-body">
           <div class="part-name-block">
-            <div id="bin-controls-box" class="bin-controls-box" role="group" aria-label="Bin controls">
-              <div id="design-bin-nav" class="design-bin-nav" role="group" aria-label="Switch bin" hidden>
-                <span class="design-bin-select-label design-bin-select-label-primary">Select Bin</span>
-                <select id="design-bin-select" class="design-bin-select" aria-label="Switch to another bin"></select>
-              </div>
-              <div id="bin-actions" class="designer-major-actions" role="group" aria-label="Bin actions">
-                <button type="button" id="designer-new-bin" class="button secondary major-action">New Bin</button>
-                <button type="button" id="designer-make-drawer-bin" class="button secondary major-action" hidden>Make full interior bin</button>
-                <button type="button" id="designer-duplicate" class="button secondary major-action">Duplicate Bin</button>
-                <span class="bin-actions-spacer"></span>
-                <button type="button" id="ai-help-open" class="button secondary major-action">AI Design</button>
-              </div>
+            <div id="bin-actions" class="designer-major-actions" role="group" aria-label="Bin actions">
+              <button type="button" id="designer-new-bin" class="button secondary major-action">New Bin</button>
+              <button type="button" id="designer-make-drawer-bin" class="button secondary major-action" hidden>Make full interior bin</button>
+              <button type="button" id="designer-duplicate" class="button secondary major-action">Duplicate Bin</button>
+              <span class="bin-actions-spacer"></span>
+              <button type="button" id="ai-help-open" class="button secondary major-action">AI Design</button>
             </div>
             <span id="stack-note" class="stack-note" hidden></span>
           </div>
@@ -441,16 +428,6 @@
           <label class="button secondary file-button" id="designer-open-file-label">Open design file<input id="designer-open-file" type="file" accept=".json,.wavefinity.json"></label>
         </div>
       </section>
-      <!-- Bin print and save actions are pinned to the bottom of the controls
-           column so they stay reachable however long the form above is. -->
-      <div id="bin-save-bar" class="bin-save-bar" role="region" aria-label="Print bin">
-        <div class="print-button-wrap">
-          <div class="print-choice-row">
-            <button id="export-individual-bin" class="button secondary print-button" data-output="export">Export</button>
-            <button id="print-individual-bin" class="button primary print-button">Print</button>
-          </div>
-        </div>
-      </div>
       <!-- Fix 103 (Section C): structural editor host. Hidden unless a
            structural target is selected; the mountable form (Box or Drawers)
            is built here by syncStructuralEditor(). -->

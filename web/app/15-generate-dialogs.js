@@ -299,10 +299,8 @@ async function printModel(target = "bin", initiatingButton = null) {
     ? state.designInventoryId : null;
   const designSpaceContext = designRowId ? DL.spaceContext() : null;
   if (!beginDesignMutation()) return;
-  const button = initiatingButton || $("#print-individual-bin");
+  const button = initiatingButton;
   const old = button.textContent;
-  const printButtons = [$("#print-individual-bin")].filter(Boolean);
-  printButtons.forEach(one => { one.disabled = true; });
   const slicerName = state.slicer?.name || "the slicer";
   button.textContent = `Sending to ${slicerName}…`;
   setError();
@@ -468,16 +466,6 @@ function chooseIndividualBinPrint(button) {
 }
 
 function updatePrimaryPrintButtonLabel() {
-  const button = $("#print-individual-bin");
-  if (!button) return;
-  const wrap = $(".print-button-wrap");
-  if (wrap) wrap.hidden = false;
-  button.textContent = "Print Bin";
-  button.title = state.runtime.hosted
-    ? "Printing needs local Wavefinity and a slicer"
-    : !state.slicer?.available
-      ? "Bambu Studio is not installed - click 'Change slicer' to locate executable"
-      : `Send the bin to ${state.slicer.name || "the slicer"}`;
   $("#settings-slicer-picker").hidden = Boolean(state.runtime.hosted);
   $("#print-dialog-slicer-picker").hidden = Boolean(state.runtime.hosted);
 }

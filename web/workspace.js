@@ -1001,7 +1001,9 @@ SP.openTypedSpacePreferredView = async () => {
   $("#part-name")?.addEventListener("input", () => WS.sync());
 
   // Every owner that changes what is open reports through one of these.
-  for (const name of ["applyMode", "setMode", "setDesignTarget", "clearDesignTarget", "refreshDesignBinNav"]) {
+  // The pre-unified bin selector's refresh used to carry this hook; the delete-row refresh (always paired
+  // with it) and the Design-mode inventory render now report the same changes.
+  for (const name of ["applyMode", "setMode", "setDesignTarget", "clearDesignTarget", "refreshDesignerDeleteBin"]) {
     const original = DP[name];
     DP[name] = (...args) => {
       const result = original(...args);
@@ -1009,6 +1011,12 @@ SP.openTypedSpacePreferredView = async () => {
       return result;
     };
   }
+  const renderInventory = DP.renderInventory;
+  DP.renderInventory = (...args) => {
+    const result = renderInventory(...args);
+    if (DP.mode === "design") WS.sync();
+    return result;
+  };
   DL.on(WS.sync);
   if (window.ResizeObserver) {
     const observer = new ResizeObserver(() => { WS.measure(); if (typeof DV !== "undefined") DV.render(); });
