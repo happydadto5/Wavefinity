@@ -135,8 +135,7 @@ def normalise_storage_drawers_block(raw: object) -> dict:
             raise ValueError("Duplicate drawer ID")
         seen.add(drawer_id)
         height = _number(row.get("height_mm"), "Drawer height", ORDINARY_BIN_MIN_HEIGHT_MM)
-        # Fix 1098 (G2M-0360): usable height must fit one minimum-legal bin
-        # under the hard 2 mm running-clearance cap.
+        # Story 2763: usable height must be at least the ordinary-bin minimum.
         if height + fit < STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM:
             raise ValueError(f"Drawer usable height must be at least {STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM:g} mm")
         drawers.append({"id": drawer_id, "height_mm": _usable_drawer_height(height, fit), "label_text": _label(row.get("label_text", ""), "Drawer label")})

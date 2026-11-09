@@ -50,9 +50,8 @@
       if (!UUID.test(row?.id || "") || seen.has(row.id)) throw new Error("Drawer ID is missing, malformed, or duplicated");
       seen.add(row.id);
       if (typeof row.height_mm !== "number" || !Number.isFinite(row.height_mm) || row.height_mm < minDrawerHeight) throw new Error("Invalid drawer height");
-      // Fix 1098 (G2M-0360): usable height (stored height + fit) must fit
-      // one minimum-legal ordinary bin under the hard 2 mm
-      // running-clearance cap — i.e. usable >= minUsableDrawerHeight (8 mm).
+      // Story 2763: usable height (stored height + fit) must be at least
+      // minUsableDrawerHeight, the server's ordinary-bin minimum (no added 2 mm).
       if (row.height_mm + fit < minUsableDrawerHeight) throw new Error("Invalid drawer height");
       if (row.height_mm + fit > maxUsableHeight) throw new Error(`Drawer usable height must be at most ${maxUsableHeight} mm`);
     }

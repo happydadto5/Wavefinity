@@ -25,12 +25,9 @@ ORDINARY_BIN_MIN_HEIGHT_MM = math.ceil(
     DEFAULT_BASE_THICKNESS + MIN_HEIGHT_ABOVE_BASE
 )
 
-# Fix 1098 (G2M-0360 authority edge case): the hard 2 mm running-clearance
-# cap makes a 6 mm-minimum drawer unusable for any legal ordinary bin
-# (cap 4 mm < 6 mm bin minimum). A Storage Drawers drawer intended to hold
-# ordinary bins must have usable height >= bin minimum + clearance, so one
-# minimum-legal bin always fits under the hard cap.
-STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM = ORDINARY_BIN_MIN_HEIGHT_MM + 2.0
+# Story 2763: the running clearance now lives in the printed drawer (Story
+# 2754), so the minimum usable height is the ordinary-bin minimum itself.
+STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM = ORDINARY_BIN_MIN_HEIGHT_MM
 
 B4B_MIN_FIELD_XY = 48.0
 B4B_LATCHED_MIN_HEIGHT = 16.0
