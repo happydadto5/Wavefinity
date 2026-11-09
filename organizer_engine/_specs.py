@@ -284,17 +284,18 @@ B4B_LABEL_LOCATIONS = ("none", "top", "front")
 # Cosmetic style of the removable front label only; meaningless for the top
 # label or when there is no label at all.
 B4B_FRONT_LABEL_STYLES = ("flat", "wavy")
-# Storage Box label Size choices.  No choice is a font size: each is a multiple of
-# the box-proportional size the label is fitted to today ("default" = 1.0, so a
-# design saved before this existed labels its box exactly as before), stepping
-# down by a constant 0.15 below it, and the steps above it spaced evenly from
-# Default up to Extra Large (1.6), about 30% further out than before.
+# Storage Box label Size choices.  No choice is a font size: each is the share of
+# the box width the label's width is sized to - Very small 1/8, Default 1/4,
+# Extra Large 1/2, with the steps between spaced evenly.  The label still
+# shrinks below its target when its face (margins, height) cannot carry it.
 B4B_LABEL_SIZES = (
     "very_small", "small", "medium", "default", "medium_large", "large", "extra_large",
 )
-B4B_LABEL_SIZE_SCALE = {
-    "very_small": 0.55, "small": 0.70, "medium": 0.85, "default": 1.0,
-    "medium_large": 1.2, "large": 1.4, "extra_large": 1.6,
+B4B_LABEL_SIZE_WIDTH_SHARE = {
+    "very_small": 1.0 / 8.0, "small": 1.0 / 8.0 + 1.0 / 24.0,
+    "medium": 1.0 / 8.0 + 2.0 / 24.0, "default": 1.0 / 4.0,
+    "medium_large": 1.0 / 4.0 + 1.0 / 12.0, "large": 1.0 / 4.0 + 2.0 / 12.0,
+    "extra_large": 1.0 / 2.0,
 }
 # Saved-design schema version for B4B intent.  Bumped when the meaning of a
 # field changes rather than inferred from dimensions: v2 moved the carrying
