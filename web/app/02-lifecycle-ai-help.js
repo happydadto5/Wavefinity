@@ -255,7 +255,11 @@ async function designerInstallInventorySpec(rowId, spec, acceptTransition = null
     if (!acceptTransition) activatePreviewView(preferredDesignView());
     return true;
   }
-  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return false;
+  // Story 2808: picking another bin shows its stored details at once. A geometry build
+  // still running for the outgoing bin is dropped (as New Bin does, Story 2777), not awaited;
+  // only its settings are saved, and the new bin's preview builds in the background.
+  if (typedSpaceOrdinaryBin() &&
+      !(await flushSpaceDesignAutosave({ deferDraftPreview: true, abandonBuild: true }))) return false;
   if (acceptTransition && !acceptTransition()) return false;
   return installLoadedDesignSource(rowId, spec, { acceptTransition });
 }
