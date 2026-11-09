@@ -319,9 +319,13 @@ B4B_HINGE_MAX_PROJECTION = {"M2": 5.75, "M3": 7.0}
 # --- rear piano hinge (Hinge type: Piano) ---------------------------------- #
 # One full-width hinge behind the back wall on a strand of 1.75 mm filament.
 # It stands out behind the case instead of cutting into it: the child field
-# is never touched.  The bore is open at both ends for the filament.
+# is never touched.  The bore is closed by a solid cap at the first (left)
+# end and open at the other, so the filament is pushed in from one end only
+# and cannot work out of the far one.
 B4B_PIANO_PIN_DIAMETER = 1.75
 B4B_PIANO_PIN_CLEARANCE = 0.2      # radial: a 2.15 mm bore
+B4B_PIANO_END_CAP = 2.0            # solid cap closing the bore at the first end
+B4B_PIANO_PIN_END_GAP = 0.2        # the pin stops this far short of the open end
 B4B_PIANO_SHELL = 1.0              # printed shell round the bore at its thinnest
 B4B_PIANO_KNUCKLE_TARGET = 10.0
 B4B_PIANO_KNUCKLE_MIN = 4.0

@@ -14,6 +14,7 @@ from organizer_geometry import (
 from organizer_engine import WAVE_AMPLITUDE
 from shapely.affinity import translate as translate_polygon
 from .._constants import (
+    B4B_PIANO_END_CAP,
     B4B_SUPPORT_FREE_FLAT,
     B4B_RUNNING_GAP,
     B4B_HW_RELIEF_CLEARANCE,
@@ -228,10 +229,11 @@ def _piano_keeper(box: BoxSpec, p) -> trimesh.Trimesh:
 
 
 def _piano_bore(p) -> trimesh.Trimesh:
-    """Straight bore, open at both ends for the filament."""
+    """Straight bore, closed by a solid ``B4B_PIANO_END_CAP`` wall inside the
+    first case knuckle and open at the other end for the filament."""
     x0, x1 = p.span
     return _piano_prism(Point(p.axis_y, p.axis_z).buffer(p.bore_radius, quad_segs=32),
-                        x0 - 2.0, x1 + 2.0)
+                        x0 + B4B_PIANO_END_CAP, x1 + 2.0)
 
 
 def _piano_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
@@ -287,9 +289,9 @@ def make_b4b_hinge_pin(box: BoxSpec) -> trimesh.Trimesh | None:
     if p is None:
         return None
     from .._constants import B4B_PIANO_PIN_DIAMETER
-    x0, x1 = p.span
+    x0, x1 = p.pin_x_range
     return _piano_prism(Point(p.axis_y, p.axis_z).buffer(B4B_PIANO_PIN_DIAMETER / 2.0, quad_segs=32),
-                        x0 + 0.2, x1 - 0.2)
+                        x0, x1)
 
 
 # --------------------------------------------------------------------------- #

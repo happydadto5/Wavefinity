@@ -22,6 +22,8 @@ from ._constants import (
     B4B_PIANO_PIN_DIAMETER,
     B4B_PIANO_PIN_CLEARANCE,
     B4B_PIANO_SHELL,
+    B4B_PIANO_END_CAP,
+    B4B_PIANO_PIN_END_GAP,
     B4B_PIANO_KNUCKLE_TARGET,
     B4B_PIANO_KNUCKLE_MIN,
     B4B_PIANO_STOP_ANGLE,
@@ -138,7 +140,8 @@ class B4BHardwarePlan:
         if self.piano is not None:
             lines.append(
                 f"1 x {B4B_PIANO_PIN_DIAMETER:g} mm filament, "
-                f"{self.piano.pin_length_mm:.0f} mm long (hinge pin)"
+                f"{self.piano.pin_length_mm:.0f} mm long (hinge pin: push it in "
+                f"from the open right-hand end until it stops at the closed left end)"
             )
         elif self.hinge_count:
             lines.append(
@@ -400,8 +403,14 @@ class B4BPianoHinge:
         return self.swing_radius + self.half
 
     @property
+    def pin_x_range(self) -> tuple[float, float]:
+        """The installed pin: against the end cap, just short of the open end."""
+        return (self.span[0] + B4B_PIANO_END_CAP, self.span[1] - B4B_PIANO_PIN_END_GAP)
+
+    @property
     def pin_length_mm(self) -> float:
-        return self.span[1] - self.span[0]
+        x0, x1 = self.pin_x_range
+        return x1 - x0
 
     def stop_z(self, y: float) -> float:
         """Height of the stop plane at ``y``: where the lid knuckle's back face
