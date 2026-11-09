@@ -295,7 +295,7 @@ def _wall_mount_reinforcement(
         for z in sorted(set(plan["bridge_rows"])):
             pieces.append(_box(
                 rear_lo, y0, z - half,
-                rear_hi, datum.rear,
+                rear_hi, datum.rear + land,
                 z + SD_KEYHOLE_CAPTURE_TRAVEL_MM + shank_r + SD_KEYHOLE_EDGE_MARGIN_MM,
             ))
     return pieces
@@ -807,19 +807,23 @@ def _datum_components(space, datum):
     rear_lo = datum.track_reach+SD_REAR_PANEL_INSET_MM
     rear_hi = datum.outer_x-datum.track_reach-SD_REAR_PANEL_INSET_MM
     wall_mount = _wall_mount_plan(block, datum)
+    # Print bed plane: the parts print rear-face-down, so with wall-mount
+    # keyholes the whole rear face (panel, tabs, braces) sits on the keyhole
+    # land's plane, not the pads alone (a real first layer, no support).
+    back = _keyhole_land_mm(rear_t) if wall_mount is not None else 0.0
     def rear_keys():
         tabs = []
         for x0 in (datum.track_reach-rear_t/2, datum.outer_x-datum.track_reach-rear_t/2):
             tabs.append(_box(x0, datum.rear-rear_t, datum.base+SD_JOINT_LAND_MIN_MM,
-                             x0+rear_t, datum.rear, datum.outer_z-datum.top-SD_JOINT_LAND_MIN_MM))
+                             x0+rear_t, datum.rear+back, datum.outer_z-datum.top-SD_JOINT_LAND_MIN_MM))
         tabs.append(_box(rear_lo, datum.rear-rear_t, datum.base/2,
-                         rear_hi, datum.rear, datum.base+SD_JOINT_LAND_MIN_MM))
+                         rear_hi, datum.rear+back, datum.base+SD_JOINT_LAND_MIN_MM))
         return tabs
     if block["rear_support"] == "solid":
         def rear_mesh():
             # Fix 1114: top edge 0.4 mm below the Top plate underside.
             panel = _box(rear_lo, datum.rear-rear_t, datum.base,
-                         rear_hi, datum.rear, datum.outer_z-datum.top-SD_REAR_TOP_CLEAR_MM)
+                         rear_hi, datum.rear+back, datum.outer_z-datum.top-SD_REAR_TOP_CLEAR_MM)
             body = union([
                 panel, *rear_keys(),
                 *_wall_mount_reinforcement(wall_mount, datum, rear_t, cross=False),
@@ -848,7 +852,7 @@ def _datum_components(space, datum):
             # The clip repeats the box corners; a doubled vertex leaves the
             # extrusion non-watertight, so the outline is cleaned first.
             poly = poly.simplify(1e-6)
-            mesh = _extrude_polygon(poly, rear_t)
+            mesh = _extrude_polygon(poly, rear_t+back)
             mesh.apply_transform(np.array([[1,0,0,0],[0,0,1,datum.rear-rear_t],[0,1,0,0],[0,0,0,1]], float))
             body = union([
                 mesh, *rear_keys(),
