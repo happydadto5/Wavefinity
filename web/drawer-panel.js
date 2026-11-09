@@ -494,7 +494,11 @@ DP.onInventoryClick = async event => {
   else if (action === "printed") DL.markPrinted(one);
   else if (action === "not-printed") DL.markNotPrinted(one);
   else if (action === "edit") DP.openInventoryRow(one.id);
-  else if (action === "delete") DP.deleteRow(one);
+  else if (action === "delete") {
+    // Story 2782: a bin row's Delete is the open-bin delete (stays in Design, as the header button did).
+    if (one.id === DP.designDeleteRowId()) await DP.deleteDesignBin();
+    else DP.deleteRow(one);
+  }
   else if (!action && !event.target.closest("button, input, select, a, textarea")) {
     await DP.activateInventoryRow(one);
   }
@@ -597,14 +601,16 @@ DP.refreshDesignBinNav = () => {
   select.disabled = DP.designNavBlocked();
 };
 
-DP.refreshDesignerDeleteBin = () => {
-  const btn = $("#designer-delete-bin");
-  if (!btn) return;
-  // Fix 103: the structural target is never deletable; it has no Inventory row.
+// Story 2782: Delete lives on the selected bin's own Inventory row. This hook
+// keeps that row current: the list re-renders, and renderInventory draws Delete
+// only on the row being edited in Design.
+DP.refreshDesignerDeleteBin = () => DP.renderInventory();
+// The Inventory row being edited in Design, or null. The structural target has no row.
+DP.designDeleteRowId = () => {
+  if (DP.mode !== "design") return null;
   const target = DP.getDesignTarget();
   const one = target.kind === "bin" && target.rowId ? DL.bin(target.rowId) : null;
-  btn.hidden = !(DP.mode === "design" && one && DP.editableSourceFor(one));
-  btn.disabled = DP.designNavBlocked();
+  return one && DP.editableSourceFor(one) ? one.id : null;
 };
 
 $("#design-bin-select").addEventListener("change", async event => {
@@ -636,8 +642,8 @@ $("#design-bin-select").addEventListener("change", async event => {
     DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
   }
 });
-// Story 2725: the one Delete-the-open-bin operation. The classic button and the
-// selector header both call it, so a disabled classic button cannot block the header.
+// Story 2725: the one Delete-the-open-bin operation. The selected bin's Inventory
+// row calls it (Story 2782), so the Design-side delete path has one owner.
 DP.deleteDesignBin = async () => {
   if (DP.designNavBlocked() || DP.mode !== "design") return;
   const one = state.designInventoryId && DL.bin(state.designInventoryId);
@@ -651,7 +657,6 @@ DP.deleteDesignBin = async () => {
     DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin();
   }
 };
-$("#designer-delete-bin").addEventListener("click", () => DP.deleteDesignBin());
 
 DP.openInventoryRow = async id => {
   // Fix 103 (R6): structural -> Inventory bin settles an unsaved structural
@@ -1274,7 +1279,7 @@ DP.filteredBins = () => {
 };
 
 DP.renderInventory = (force = false) => {
-  if (DP.mode === "design") { DP.refreshDesignBinNav(); DP.refreshDesignerDeleteBin(); }
+  if (DP.mode === "design") DP.refreshDesignBinNav();
   DP.syncFilterSpace();
   const drawer = DL.drawer();
   const list = $("#dl-inv-list");
@@ -1283,10 +1288,11 @@ DP.renderInventory = (force = false) => {
   DP.prunePrintSelection();
   DP.renderBatch();
   const selectedRow = DL.selectedRow && DL.bin(DL.selectedRow) ? DL.selectedRow : null;
+  const deleteRowId = DP.designDeleteRowId();
   const counts = DL.bins.map(one => [one.id, DL.placedCount(one.id)]);
   const signature = JSON.stringify([DL.bins, counts, Object.keys(DL.layout.design_specs || {}), DL.report?.planning_heights,
     Boolean(state.runtime.hosted), Boolean(state.slicer?.available),
-    DP.filter, selectedRow, drawer.id, drawer.height, [...DP.printSelected],
+    DP.filter, selectedRow, deleteRowId, DP.designNavBlocked(), drawer.id, drawer.height, [...DP.printSelected],
     DL.isStorageDrawers() ? DL.layout.drawers.map(one => [one.id, one.height, one.placements.map(p => p.bin)]) : null]);
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
@@ -1346,7 +1352,7 @@ DP.renderInventory = (force = false) => {
     const actions = spacer ? "" : `<div class="dl-row-actions">
           ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>`
             : sourceMissing ? `<button type="button" class="button secondary dl-small" data-act="edit" disabled title="The original editable design for this row is unavailable, so it can't be edited.">Edit</button>` : ""}
-          <button type="button" class="button danger dl-small" data-act="delete">Delete</button>
+          ${one.id === deleteRowId ? `<button type="button" class="button danger dl-small" data-act="delete" ${DP.designNavBlocked() ? "disabled" : ""}>Delete</button>` : ""}
           ${designSource ? `<button type="button" class="button secondary dl-small" data-act="duplicate">Duplicate</button>` : ""}
           ${eligible ? `<button type="button" class="button secondary dl-small" data-act="save">Save</button>` : ""}
           ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}
