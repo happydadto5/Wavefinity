@@ -146,7 +146,7 @@ WS.renderSelector = () => {
     const drawerButtons = one.kind === "settings" ? WS.drawerButtons(locked) : "";
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked || layoutPicked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked || layoutPicked}"${locked ? " disabled" : ""}>
-      <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${drawerButtons}${WS.rowOutputs(one, picked && !locked)}</li>`;
+      <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${drawerButtons}${WS.rowOutputs(one, picked && !locked)}${WS.rowBinActions(one, picked || layoutPicked, locked)}</li>`;
   }).join("");
   // Story 2725: live on any bin view (a bin in a space or a loose bin in My Bins). Greyed only on the
   // container and Layout views, or while a switch/action is in flight. Not tied to the classic form's
@@ -659,6 +659,12 @@ WS.onAction = async (act, button, event) => {
     // Story 2725: call the operations directly (a .click() on a disabled classic button does nothing).
     case "drawer": return WS.openDrawer(button.dataset.id);
     case "edit-bin": return WS.pick("bin", button.dataset.id);
+    case "duplicate-bin": { const one = DL.bin(button.dataset.id); return one ? DP.duplicateRow(one) : null; }
+    case "delete-bin": {
+      const one = DL.bin(button.dataset.id);
+      if (!one) return null;
+      return one.id === DP.designDeleteRowId() ? DP.deleteDesignBin() : DP.deleteRow(one);
+    }
     case "print-picked": return WS.printPicked(event);
     case "export-picked": return WS.exportPicked();
     case "pick-all": return WS.pickAll();
@@ -731,6 +737,19 @@ WS.rowOutputs = (one, picked) => {
     : `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live ? "" : " disabled"} title="${wsEsc(printTitle)}">Print</button>`;
   return printButton
     + `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live ? "" : " disabled"} title="${wsEsc(exportTitle)}">Export</button>`;
+};
+
+// Story 2807: Duplicate and Delete sit on the selected bin's own row (and no other row). They are the same
+// operations as the Inventory row's (Stories 2782 / 2783), confirmation included.
+WS.rowBinActions = (one, selected, locked) => {
+  if (one.kind !== "bin" || !selected || !WS.open() || !one.id) return "";
+  const bin = DL.bin(one.id);
+  if (!bin || !DL.isOrdinary(bin)) return "";
+  const off = locked || WS.busy || DP.designNavBlocked() ? " disabled" : "";
+  const attrs = `data-ws-act="%A" data-id="${wsEsc(one.id)}"${off}`;
+  const duplicate = ["bin", "b4b"].includes(bin.kind) && Boolean(DL.layout?.design_specs?.[bin.id])
+    ? `<button type="button" class="ws-out" ${attrs.replace("%A", "duplicate-bin")} title="Duplicate this bin">Duplicate</button>` : "";
+  return `${duplicate}<button type="button" class="ws-out" ${attrs.replace("%A", "delete-bin")} title="Delete this bin">Delete</button>`;
 };
 
 // Layout: every printable bin's file, and the container's, brought up to date.
