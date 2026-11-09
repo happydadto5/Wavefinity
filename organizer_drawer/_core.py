@@ -17,7 +17,7 @@ from organizer_engine import BASE_UNIT, MAX_BOX_SIZE, WAVE_AMPLITUDE, WAVE_MATIN
 from organizer_inventory import design_specs, normalise_storage_box
 from organizer_b4b import B4B_STACK_PEG_EXPOSED, b4b_summary
 from organizer_engine.product_rules import DRAWER_HARD_CLEARANCE_MM, DRAWER_LAYER_MAX_USABLE_HEIGHT_MM
-from organizer_features.stack import STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
+from organizer_features.stack import STACK_SEAT_DEPTH, STACK_SKIRT_DEPTH
 from organizer_features.pegboard import pegboard_standard
 from organizer_features.edge_mount import edge_mount_projection_envelope
 from organizer_outputs.printer_profile import (
@@ -65,7 +65,7 @@ HEIGHT_TOLERANCE = 0.5          # mm; "taller" means taller by more than this
 # How far a stacked bin's foot sinks into the one below, by stacking style.
 STACK_STEPS = {
     "lid": STACK_SEAT_DEPTH,
-    "direct": STACK_PLUG_DEPTH,
+    "direct": STACK_SKIRT_DEPTH,
     "b4b": B4B_STACK_PEG_EXPOSED,
 }
 
@@ -246,15 +246,14 @@ def stack_pitch(one: dict[str, Any]) -> float:
     if one.get("stack") == "b4b":
         return float(one["z"]) - B4B_STACK_PEG_EXPOSED
     if one.get("stack") == "direct":
-        return float(one["z"]) - STACK_PLUG_DEPTH     # the skirt overlaps the bin below
+        return float(one["z"]) - STACK_SKIRT_DEPTH     # the skirt overlaps the bin below
     return float(one["z"])
 
 
 def stack_part_height(one: dict[str, Any]) -> float:
-    """Detached physical height, including a lid bin's interlocking foot depth."""
-    if one.get("stack") in ("b4b", "direct"):     # a direct skirt is inside the height
-        return float(one["z"])
-    return float(one["z"]) + STACK_STEPS.get(one.get("stack", "none"), 0.0)
+    """Detached physical height: the typed height. A direct skirt and a lid
+    bin's closed lid are both inside it (the builder shortens the body)."""
+    return float(one["z"])
 
 
 def is_surface_layout(layout: dict[str, Any] | None) -> bool:

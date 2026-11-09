@@ -20,7 +20,7 @@
 
 const DL = {
   UNIT: 7,
-  stackSteps: { lid: 1, direct: 3, b4b: 2 },   // replaced by the server's values on load
+  stackSteps: { lid: 1, direct: 2, b4b: 2 },   // replaced by the server's values on load
   stackMetrics: {},
   storageBoxHeadroomDefault: 1, // replaced by the server's canonical default on load
   active: false,
@@ -395,7 +395,7 @@ DL.pitch = one => DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.i
   : one.stack === "b4b" || one.stack === "direct" ? Number(one.z) - (DL.stackSteps[one.stack] ?? 0) : Number(one.z);
 DL.partHeight = one => DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.id]?.physical_mm)
   ? DL.stackMetrics[one.id].physical_mm
-  : one.stack === "b4b" || one.stack === "direct" ? Number(one.z) : Number(one.z) + (DL.stackSteps[one.stack] ?? 0);
+  : Number(one.z);   // the skirt and a closed stackable lid are inside the typed height
 DL.stackHeight = bins => DL.usesStackMetrics()
   ? bins.reduce((sum, one, index) => index
     ? sum - DL.partHeight(bins[index - 1]) + DL.pitch(bins[index - 1]) + DL.partHeight(one)
