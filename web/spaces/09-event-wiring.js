@@ -5,7 +5,7 @@ SP.wire = () => {
   $("#space-cancel-edit")?.addEventListener("click", async () => {
     if (await SP.flushSetupAutosave()) SP.cancelInlineEdit();
   });
-  document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-type-cards-close, #space-tutorial-close")
+  document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close")
     .forEach(el => el?.addEventListener("click", SP.close));
   // A changed cabinet setup asks before it is discarded: X, backdrop, Escape and Back.
   document.getElementById("space-form-close")?.addEventListener("click", SP.requestClose);
@@ -33,10 +33,6 @@ SP.wire = () => {
   document.getElementById("space-storage-use-existing")?.addEventListener("click", () => SP.applyStorageChange("use_existing"));
   const welcomeDesign = document.getElementById("welcome-design");
   if (welcomeDesign) welcomeDesign.addEventListener("click", SP.startNoSpace);
-  const tutorialOpen = document.getElementById("space-tutorial-open");
-  if (tutorialOpen) tutorialOpen.addEventListener("click", SP.showTutorial);
-  const tutorialBack = document.getElementById("space-tutorial-back");
-  if (tutorialBack) tutorialBack.addEventListener("click", SP.showTypeCards);
   const resumeLastSpace = () => SP.run(SP.confirmResume);
   document.querySelectorAll("#welcome-resume-card, #welcome-resume-continue")
     .forEach(el => el.addEventListener("click", resumeLastSpace));
@@ -47,28 +43,6 @@ SP.wire = () => {
     // reached from the trusted click.
     SP.run(SP.openExisting);
   });
-  document.querySelectorAll(".type-card").forEach(el => {
-      el.addEventListener("click", () => {
-          // A stale inventory candidate may prefill only its own card type;
-          // choosing a different type never inherits its dimensions.
-          const kind = el.dataset.kind;
-          if (kind === "storage_drawers" && SP.configureData) return;
-          const candidate = SP.setupPrefillSpace;
-          const candidateKind =
-            candidate?.kind === "box" ? "portable" : candidate?.kind;
-          SP.showSetup(kind, candidateKind === kind ? candidate : null);
-      });
-  });
-  const untypedStart = document.getElementById("space-untyped-start");
-  if (untypedStart) untypedStart.addEventListener("click", () => {
-    // Fix 1018: with a folder already chosen (via enterSetupFor), adopt it as
-    // untyped; with no folder (Create New Space straight to type cards), go
-    // memory-only instead of asking for a folder.
-    if (SP.configureData) SP.run(SP.startUntyped);
-    else SP.startMemoryOnly();
-  });
-  const typeCardsBack = document.getElementById("space-type-cards-back");
-  if (typeCardsBack) typeCardsBack.addEventListener("click", () => { SP.configureData = null; SP.showHome(); });
   const spaceBack = document.getElementById("space-back");
   if (spaceBack) spaceBack.addEventListener("click", async () => {
     if (await SP.confirmDiscardSetup()) SP.showTypeCards();

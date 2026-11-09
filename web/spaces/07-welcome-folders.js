@@ -209,64 +209,6 @@ SP.welcomeOtherSpaces = () => {
   SP.otherSpacesFresh = false;
 };
 
-SP.showResume = info => {
-  SP.showOnly("welcome-resume");
-  const space = info.space || {};
-  const kind = SP_KINDS[space.kind] || SP_KINDS.drawer;
-  $("#welcome-resume-icon").innerHTML = SP.compactKindIcon(space.kind);
-  $("#welcome-resume-name").textContent = space.name || info.folder_name;
-  $("#welcome-resume-meta").textContent = [kind.label, space.kind === "storage_drawers" ? SP.storageDrawersSummaryText(space) : SP.sizeText([space.x, space.y, space.z])].filter(Boolean).join(" · ");
-  $("#welcome-resume-folder").textContent = info.folder;
-  $("#welcome-resume-folder").title = info.folder;
-  SP.renderStorageCard();
-  SP.refreshStorage();
-  SP.welcomeOtherSpaces();
-  SP.showDialog();
-};
-
-// An existing Space lands by its loaded Inventory, without changing its
-// restored design or making a second inventory parser.
-SP.openTypedSpacePreferredView = async () => {
-  try {
-    if (!(await DL.ensureLoaded())) return false;
-  } catch (error) {
-    toast(`Could not read this Space's inventory: ${error.message}`, true, 7000);
-    return false;
-  }
-  // Fix 103 (Section F): a structural Space opens on its structural Design.
-  // Fix 1019: DP (drawer-panel.js) may be unavailable if its script failed to
-  // load — degrade gracefully instead of throwing "DP is not defined".
-  const dpAvailable = typeof DP !== "undefined";
-  const structuralKind = dpAvailable && DP.structuralTargetEnabled ? DP.structuralKindFor(state.activeSpace) : null;
-  if (structuralKind) {
-    if (!designTargetIsStructural()) {
-      DP.setDesignTarget({ kind: "structural", structural: true, structuralKind, rowId: null, drawerId: null });
-    }
-    return DP.enter("design", true);
-  }
-  // Fix 1019 (Breaker): do NOT silently return true here. The app cannot run
-  // without DP (unguarded DP.mode / DP.getDesignTarget downstream), so a
-  // silent "success" just moves the cryptic ReferenceError to the user's next
-  // click. Surface Change 4's honest error instead and abort the open.
-  if (!dpAvailable) {
-    SP.showHome("Something didn't load properly. Try reloading the page.");
-    return false;
-  }
-  if (!(await DP.enter("space", true))) return false;
-  const ordinary = DL.bins.filter(DL.isOrdinary);
-  if (ordinary.length !== 1) return true;
-  const row = ordinary[0];
-  if (!DP.editableSourceFor(row)) return true;
-  try {
-    if (!(await DP.openInventoryRow(row.id))) {
-      toast("Could not open this bin in Design. The Space is still open.", true, 7000);
-    }
-  } catch (error) {
-    toast(`Could not open this bin in Design: ${error.message}`, true, 7000);
-  }
-  return true;
-};
-
 SP.confirmResume = async () => {
   if (await SP.openTypedSpacePreferredView()) SP.close();
 };
@@ -342,45 +284,6 @@ SP.open = () => {
 // `message`, when given, is a startup recovery error (Fix 019 Item 6) shown
 // in #welcome-startup-error. Ordinary navigation to Welcome (no message)
 // clears any previously-shown error.
-SP.showHome = (message = null) => {
-  SP.showOnly("welcome-home");
-  const errorEl = document.getElementById("welcome-startup-error");
-  if (errorEl) {
-    // Fix 1019: never show a raw engine error ("X is not defined") — it means
-    // a script didn't load. Say so in plain language. Anchored to the
-    // engine's ReferenceError shape so a legitimate message that merely ends
-    // with those words is never swallowed.
-    const friendly = /^\w+ is not defined$/.test(String(message || "").trim())
-      ? "Something didn't load properly. Try reloading the page."
-      : message;
-    errorEl.textContent = friendly || "";
-    errorEl.hidden = !friendly;
-  }
-  const reconnect = document.getElementById("welcome-reconnect");
-  if (reconnect) {
-    reconnect.hidden = !SP.pendingReconnect;
-    if (SP.pendingReconnect) reconnect.textContent = `Reconnect "${SP.pendingReconnect.handle.name}"`;
-    if (!reconnect.dataset.wired) {
-      reconnect.dataset.wired = "1";
-      reconnect.addEventListener("click", () => SP.reconnectSavedFolder());
-    }
-  }
-  SP.renderRecent();
-  // Proactive, not just reactive: on a browser that cannot give writable
-  // folder access, the Spaces screen itself says so up front — Spaces and
-  // Inventory are unavailable here, but designing still works.
-  const folderNotice = document.getElementById("welcome-folder-notice");
-  if (folderNotice) {
-    folderNotice.hidden = !(state.runtime.hosted && !window.WFFileSystem?.supportsDirectoryPicker());
-  }
-  const hasRecent = SP.recent.length > 0;
-  document.getElementById("welcome-recent-container").hidden = !state.runtime.hosted || !hasRecent;
-  SP.renderStorageCard();
-  SP.refreshStorage();
-  SP.welcomeOtherSpaces();
-  SP.showDialog();
-};
-
 // Open Space... in the design area: the same launch selection screen as at
 // startup. It is a modal over the design, so closing it without a choice
 // (X, backdrop, Escape) leaves the design untouched, and every choice on it
@@ -437,12 +340,10 @@ SP.refreshStorage = async () => {
 // Move existing data or Use new location; a folder that already exists there
 // is never merged or replaced (see SP.renderStoragePlan).
 SP.storagePlan = null;
-SP.storageReturn = "welcome-home";
 
 SP.changeStorageParent = () => SP.run(SP.startStorageChange);
 
 SP.startStorageChange = async () => {
-  SP.storageReturn = $("#welcome-resume").hidden ? "welcome-home" : "welcome-resume";
   await SP.pickStorageParent();
 };
 
@@ -480,10 +381,9 @@ SP.renderStoragePlan = () => {
 
 SP.cancelStorageChange = () => {
   SP.storagePlan = null;
-  SP.showOnly(SP.storageReturn);
-  SP.renderStorageCard();
-  SP.welcomeOtherSpaces();
-  SP.showDialog();
+  // The unified workspace is still underneath the dialog: closing it lands back where the user was.
+  SP.close();
+  if (typeof WS !== "undefined") WS.sync();
 };
 
 SP.applyStorageChange = mode => SP.run(() => SP.doStorageChange(mode));
@@ -540,22 +440,5 @@ SP.doStorageChange = async mode => {
       if (typeof DL !== "undefined" && DL.dirty) DL.saveSoon();
     }
   }
-};
-
-SP.showTypeCards = () => {
-  SP.destroyStorageDrawersForm?.();
-  // An arbitrary existing folder can never be converted into a Storage Drawers
-  // Space: the card is not offered while a folder is being given a type.
-  const arbitrary = Boolean(SP.configureData);
-  document.querySelectorAll('.type-card[data-kind="storage_drawers"]').forEach(card => { card.hidden = arbitrary; });
-  SP.showOnly("space-type-cards");
-  SP.showDialog();
-  SP.dialog().scrollTop = 0;
-};
-
-SP.showTutorial = () => {
-  SP.showOnly("space-tutorial");
-  SP.showDialog();
-  SP.dialog().scrollTop = 0;
 };
 

@@ -67,7 +67,7 @@ SP.close = () => {
 SP.showOnly = id => {
   SP.cancelInlineEdit();
   if (id !== "space-form") SP.dialog().classList.remove("storage-drawers-config");
-  ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-tutorial", "space-form", "space-configure-prompt", "space-collision-prompt", "space-existing-inventory-prompt", "space-storage-change"]
+  ["welcome-home", "welcome-resume", "space-unsupported", "space-form", "space-configure-prompt", "space-collision-prompt", "space-existing-inventory-prompt", "space-storage-change"]
     .forEach(one => { $("#" + one).hidden = one !== id; });
 };
 SP.showDialog = () => { if (!SP.dialog().open) SP.dialog().showModal(); };
