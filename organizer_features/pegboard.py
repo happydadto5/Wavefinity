@@ -542,6 +542,62 @@ def make_board_adapter(standard_id: Any, thickness_mm: Any = 3.2) -> trimesh.Tri
     return union([body, *board_parts])
 
 
+PEGBOARD_SUPPORT_BASE_WIDTH = 1.0   # break-away web, bed end
+PEGBOARD_SUPPORT_NECK_WIDTH = 0.6   # break-away web, thin neck where it meets the pin/tab
+PEGBOARD_SUPPORT_NECK_HEIGHT = 0.8
+
+
+def _board_feature_undersides(standard: PegboardStandard, extension: float,
+                              ) -> list[tuple[float, float, float, float]]:
+    """(z, y0, y1, x_underside) for each board-facing pin/tab surface.
+
+    Mirrors make_board_adapter.  x_underside is the lowest-x material at that
+    z, i.e. the surface that faces the bed when the hook is laid on its side.
+    """
+    pin_y0 = -7.65 - extension
+    if standard.id == "standard":
+        pin_r = 2.65
+        result = []
+        for pin_z in (17.0, 42.4):
+            for dz in (-1.3, 1.3):
+                reach = math.sqrt(pin_r ** 2 - (abs(dz) + 0.3) ** 2)
+                result.append((pin_z + dz, pin_y0, 0.35, -reach))
+        result.append((40.2, -8.5 - extension, -5.5 - extension, -2.4))
+        return result
+    result = [(8.0 + dz, pin_y0, 0.35, -2.2) for dz in (-4.0, 0.0, 4.0)]
+    result.append((3.0, -8.5 - extension, -5.5 - extension, -2.2))
+    return result
+
+
+def _hook_print_supports(standard: PegboardStandard, extension: float, bed_x: float) -> trimesh.Trimesh:
+    """Thin break-away webs from the print bed up to each pin/tab underside.
+
+    In the hook's printed orientation (width axis = build Z) the pins and tabs
+    float above the bed; these webs make every one of them a supported span.
+    Each web ends in a narrow neck so it snaps off with pliers; it must be
+    removed before the hook goes into the board.  Webs stop at the adapter
+    body (y ~ 0), so the board-facing envelope of the hook is unchanged.
+    """
+    webs = []
+    y_end = 0.2                                  # fuses into the adapter body
+    for z, y0, _y1, x_under in _board_feature_undersides(standard, extension):
+        top = x_under + 0.3                      # neck tip, inside the pin/tab
+        neck_bottom = top - PEGBOARD_SUPPORT_NECK_HEIGHT
+        y_mid = (y0 + y_end) / 2.0
+        length = y_end - y0
+        # Webs are tall in X (toward the bed) and thin in Z (the width axis).
+        base_top = neck_bottom + 0.1
+        webs.append(_box(
+            (base_top - bed_x, length, PEGBOARD_SUPPORT_BASE_WIDTH),
+            ((base_top + bed_x) / 2.0, y_mid, z),
+        ))
+        webs.append(_box(
+            (top - neck_bottom, length, PEGBOARD_SUPPORT_NECK_WIDTH),
+            ((top + neck_bottom) / 2.0, y_mid, z),
+        ))
+    return union(webs)
+
+
 def adapter_print_transform() -> np.ndarray:
     """Board-facing -Y becomes build +Z; the broad face rests on the bed."""
     return trimesh.transformations.rotation_matrix(-math.pi / 2.0, (1.0, 0.0, 0.0))
@@ -592,6 +648,8 @@ def _hook_parts(standard_id: Any, arm_length_mm: float, thickness_mm: Any = 3.2)
             f"Hook arm length must be {PEGBOARD_HOOK_MIN_ARM_LENGTH:g}-{PEGBOARD_HOOK_MAX_ARM_LENGTH:g} mm."
         )
     base = make_board_adapter(standard.id, thickness_mm)
+    extension = max(0.0, _positive(thickness_mm, "board thickness") - 3.2)
+    support = _hook_print_supports(standard, extension, float(base.bounds[0][0]))
     center = 42.4 if standard.id == "standard" else 8.0
     profile = _adapter_body_profile(center)
     front_y = max(y for y, _z in profile)
@@ -626,7 +684,7 @@ def _hook_parts(standard_id: Any, arm_length_mm: float, thickness_mm: Any = 3.2)
         (arm_y1 + run - thick * lean, low_z + run + thick * lean),
         (arm_y1 - overlap, low_z + thick),
     ], -half, half)
-    return {"base": base, "root": root, "arm": arm, "upturn": upturn}
+    return {"base": base, "root": root, "arm": arm, "upturn": upturn, "support": support}
 
 
 def make_pegboard_hook(standard_id: Any, arm_length_mm: float = PEGBOARD_HOOK_DEFAULT_ARM_LENGTH, thickness_mm: Any = 3.2) -> trimesh.Trimesh:
