@@ -257,8 +257,6 @@ SP.updateReadouts = () => {
         // readout only mean anything in Physical size mode - in Hole/slot
         // count mode the board is derived directly from an exact count and
         // the residual is always 0, so both leak meaningless state.
-        const physicalHelp = document.getElementById("pegboard-physical-help");
-        if (physicalHelp) physicalHelp.hidden = !isPhysical;
         const borderRow = document.getElementById("pegboard-border-row");
         if (borderRow) borderRow.hidden = !isPhysical;
         const resolved = SP.resolvePegboard();

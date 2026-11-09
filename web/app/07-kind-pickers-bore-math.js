@@ -69,7 +69,7 @@ function clearDraftSelection(resetLocks = true) {
   $(".support-editor").hidden = true;
   $("#draft-fields").hidden = false;
   $("#edge-mount-editor").hidden = true;
-  ["#lid-option", "#inside-handles-option", "#side-openings-option"].forEach(
+  ["#inside-handles-option", "#side-openings-option"].forEach(
     selector => { const panel = $(selector); if (panel) panel.hidden = true; },
   );
   $("#draft-status").textContent = "";
@@ -116,10 +116,6 @@ function pickKind(kind) {
   selectKind(kind);
 }
 
-async function selectEdgeMount(fromPlaced = false) {
-  return openModifier("edge_mount", fromPlaced);
-}
-
 function insideHandlesActive(design = state.design) {
   return Boolean(design?.box?.lift_grabbers?.enabled);
 }
@@ -154,7 +150,6 @@ async function openModifier(kind, fromPlaced = false) {
   $("#draft-fields").hidden = true;
   $("#edge-mount-editor").hidden = kind !== "edge_mount";
   const panelByKind = {
-    lid_stacking: "#lid-option",
     inside_handles: "#inside-handles-option",
     side_openings: "#side-openings-option",
   };
@@ -837,17 +832,6 @@ function resolvedDraftCount(one) {
     return Math.max(1, Math.floor((across - 2 * wall - thickness / Math.cos(angle) + 1e-6) / pitch) + 1);
   }
   return Math.max(1, Math.round(number(options.count ?? resolved.count, 3)));
-}
-
-function plainCheckbox(key, title, on, options = {}) {
-  const classes = ["checkbox-row"];
-  if (options.wide) classes.push("wide");
-  const tip = options.help ? ` title="${escapeHtml(options.help)}"` : "";
-  const attribute = options.dataAttribute || "data-draft";
-  return `<label class="${classes.join(" ")}"${tip}>
-    <input type="checkbox" ${attribute}="${escapeHtml(key)}" ${on ? "checked" : ""}>
-    <span>${escapeHtml(title)}</span>
-  </label>`;
 }
 
 // Photo Nest Access state has exactly one writer per value. Finger access owns

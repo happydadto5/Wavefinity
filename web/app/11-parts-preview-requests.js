@@ -75,10 +75,6 @@ async function deleteCurrentPart() {
   refreshPreview();
 }
 
-async function deleteEdgeMountPart(fromPlaced = false) {
-  return removeModifier("edge_mount");
-}
-
 async function deleteSupportAt(index) {
   if (index === null || index === undefined) return;
   const target = state.design.layout.features[index];

@@ -1015,32 +1015,6 @@ async function openDesign(event) {
   }
 }
 
-async function newDesign() {
-  if (typedSpaceOrdinaryBin()) return designerNewBin();
-  if (designHasChanges() && !(await appConfirmAction({
-    title: "Start a new design?",
-    message: "Start a new design and discard the current changes?",
-    actionLabel: "Discard Changes",
-    danger: true,
-  }))) return;
-  if (!beginDesignMutation()) return;
-  state.design = freshDesignForCurrentFolder();
-  state.surfaceHeightPromptSkipped = false;
-  resetNestPhotoSession();
-  state.cleanDesign = clone(state.design);
-  state.binResizePending = false;
-  state.binFootprintResizePending = false;
-  state.drafts = {};
-  bindLidMemoryForDesign();
-  syncForm();
-  try {
-    clearDraftSelection();
-    await refreshPreview();
-  } finally {
-    finishDesignMutation();
-  }
-}
-
 let isGenerating = false;
 
 function wireGenerationDialog() {

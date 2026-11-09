@@ -97,28 +97,6 @@ SP.afterPick = async (folder, leaveOptions) => {
   return data.folder;
 };
 
-SP.chooseFolder = () => SP.run(async () => {
-  const folder = await SP.pickFolder();
-  if (folder) await SP.afterPick(folder);
-});
-
-// The opt-out checkbox beside the save folder. Space always keeps inventory
-// on, and a hosted session with no persistent folder has nowhere to keep one,
-// so the control is disabled in both cases (see setFolderState) - these
-// checks just guard against a stray change event reaching here anyway.
-SP.setInventory = enabled => SP.run(async () => {
-  if (!SP.hasFolder() || state.folderMode === "space") return;
-  if (state.runtime.hosted && !state.browserFolder?.handle) return;
-  if (state.runtime.hosted) {
-    await SP.writeMetadata(state.browserFolder?.handle, "design", null, enabled);
-  } else {
-    await api("/api/folder/inventory", { output: state.output, inventory: enabled });
-  }
-  state.inventoryEnabled = enabled;
-  state.keepLog = enabled;
-  toast(enabled ? "Keeping inventory for this folder." : "Inventory turned off for this folder.");
-});
-
 // Fix 034 K2: Keep bin defaults is retired (New Bin is always fresh;
 // Duplicate is the explicit clone workflow) - old keep_bin_defaults/
 // bin_defaults/part_defaults metadata keys are still read tolerantly on

@@ -264,7 +264,6 @@ DL.key = p => `${p.bin}:${p.copy ?? 0}`;
 // it in their name; show them without it. Display only - the stored name is kept.
 DL.legacySpacerName = name => String(name || "").replace(/\s*\(?\bunvalidated\b\)?/gi, "").replace(/\s{2,}/g, " ").trim();
 DL.label = one => (DL.isSpacer(one) ? DL.legacySpacerName(one.name) : one.name) || `${fmt(one.x)} × ${fmt(one.y)} mm`;
-DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
 // The user-facing Wavefinity unit is always 7 mm - see the "7 mm size grid"
 // section of README.md. The one place this conversion belongs.
 DL.mmToUnits = mm => fmt(mm / 7);
@@ -395,12 +394,6 @@ DL.pitch = one => DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.i
 DL.partHeight = one => DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.id]?.physical_mm)
   ? DL.stackMetrics[one.id].physical_mm
   : Number(one.z);   // the skirt and a closed stackable lid are inside the typed height
-DL.stackHeight = bins => DL.usesStackMetrics()
-  ? bins.reduce((sum, one, index) => index
-    ? sum - DL.partHeight(bins[index - 1]) + DL.pitch(bins[index - 1]) + DL.partHeight(one)
-    : DL.partHeight(one), 0)
-  : bins.reduce((sum, one, index) => sum + (index ? DL.pitch(one) : DL.partHeight(one)), 0);
-
 DL.stackWall = one => {
   const rowWall = one?.wall;
   const raw = rowWall === null || rowWall === undefined
@@ -651,9 +644,6 @@ DL.saveNeeded = one => (DL.printEligible(one) && !String(one.file || "").trim() 
 DL.printCount = one => {
   return DL.printEligible(one) ? 1 : 0;
 };
-
-DL.drawersHolding = id => DL.layout.drawers
-  .filter(drawer => drawer.placements.some(p => p.bin === id)).map(drawer => drawer.name);
 
 // A spacer is a repeated filler part: its next placement takes the first free
 // copy number. (Ordinary rows are always copy 0.)
@@ -1622,28 +1612,6 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async context => {
   const lines = Object.entries(result.counts || {}).map(([file, copyCount]) => `${copyCount} × ${file}`);
   toast(["Opened in Bambu Studio", ...lines].join("\n"), false, 9000);
 });
-
-DL.removeSpacers = () => DL.change(() => {
-  const drawer = DL.drawer();
-  drawer.placements = drawer.placements.filter(p => !DL.isSpacer(DL.bin(p.bin)));
-});
-
-// Saves a file for every connector the layout needs. Connectors are part of
-// saving spacers, not a separate Space setting.
-DL.saveConnectorFiles = async (context = DL.spaceContext()) => {
-  DL.requireSpaceContext(context);
-  const result = await apiSideEffect("/api/drawer/connectors", {
-    output: DL.output ?? DL.folder(), layout: DL.layout, bins: DL.bins, drawer_id: DL.layout.active,
-  });
-  DL.requireSpaceContext(context);
-  // Fix 096 C4: connector-only generation changes no Inventory, so the shared
-  // hosted file-set transaction is used directly (no post-commit write).
-  await SP.writeHostedFileSet(state.browserFolder?.handle ?? null, result.files_base64);
-  return {
-    lines: (result.connectors || []).map(one => `Print ${one.count} × ${one.file}`),
-    notes: result.notes || [],
-  };
-};
 
 // A batch Save/Print answer always carries the refreshed Inventory, even when
 // only part of the work finished, so the browser matches what is on disk.

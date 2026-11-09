@@ -712,8 +712,6 @@ async function flushCabinetAutosave() {
   const record = structuralEditorRecord;
   return record?.kind === "storage_drawers" ? persistCabinetAutosave(record) : true;
 }
-async function structuralSaveChanges() { return flushCabinetAutosave(); }
-
 // Add Drawer / Delete Drawer in full structural Design (Correction 1 C2). The
 // form only asks; the existing cabinet mutation authority (SP.cabinetAdd /
 // SP.cabinetDelete -> SP.mutateCabinet) keeps every placement check,
@@ -742,10 +740,3 @@ async function structuralCabinetMutation(kind, drawerId = null) {
   }
 }
 
-// Cancel / Discard: drop the draft and show the accepted Space again.
-async function structuralDiscardDraft() {
-  if (!structuralEditorRecord) return true;
-  syncStructuralEditor({ force: true });
-  setStructuralStatus("");
-  return true;
-}

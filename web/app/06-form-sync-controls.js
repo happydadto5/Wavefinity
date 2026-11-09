@@ -329,21 +329,6 @@ function binInsideExtent(box) {
   return [Math.max(1, number(box.x) - trim), Math.max(1, number(box.y) - trim)];
 }
 
-function getInsideDimension(axis, val) {
-  const key = axis === "x" ? "inside_x" : "inside_y";
-  if (state.preview?.dimensions?.[key] != null && state.design?.box?.[axis] === val) {
-    return state.preview.dimensions[key];
-  }
-  const box = state.design?.box || {
-    x: val,
-    y: val,
-    wall: state.catalog?.wall_rules?.default_mm ?? 0.8,
-  };
-  const tempBox = { ...box, [axis]: val };
-  const extents = binInsideExtent(tempBox);
-  return Math.floor(axis === "x" ? extents[0] : extents[1]);
-}
-
 function formatDimField(axis) {
   const selector = axis === "x" ? "#x-size" : "#y-size";
   const input = $(selector);
@@ -626,7 +611,7 @@ function wireControls() {
 
   const edgeMountChangeIds = [
     "#edge-mount-side",
-    "#edge-mount-label-length-mode", "#edge-mount-label-projection",
+    "#edge-mount-label-length-mode",
     "#edge-mount-label-style", "#edge-mount-label-flip",
     "#edge-mount-standoff-ribs-enabled", "#edge-mount-standoff-rib-count-mode",
     "#edge-mount-hole-count", "#edge-mount-hole-orientation", "#edge-mount-access-diameter",
@@ -823,7 +808,7 @@ function wireControls() {
       changedDesign(previousDesign);
     }
   });
-  ["#output-folder", "#keep-log", "#connector-tolerance", "#connector-length",
+  ["#output-folder", "#connector-tolerance", "#connector-length",
     "#connector-arm-thickness", "#connector-bin-a-height", "#connector-bin-b-height"]
     .forEach(selector => $(selector)?.addEventListener("change", () => {
       applyPendingLiveFormWithModifierConflictGuard();

@@ -52,7 +52,6 @@
     render();
     return {
       update(next) { current = next; editing = !!next.editing; render(); },
-      rowLocationText(rowId) { return window.StorageDrawers.rowLocationText(current.layout, rowId); },
       async jumpToInventoryRow(rowId) {
         const drawerId = window.StorageDrawers.drawerHoldingRow(current.layout, rowId);
         if (!drawerId) return false;

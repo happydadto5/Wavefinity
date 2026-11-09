@@ -67,20 +67,6 @@ DP.singleTypedSpace = () => state.folderMode === "space"
   && Boolean(DL.layout)
   && DL.layout.drawers.length === 1;
 
-DP.extraSpaceText = () => {
-  if (!DP.singleTypedSpace() || state.activeSpace?.kind !== "drawer") return "";
-  const drawer = DL.drawer();
-  if (!drawer) return "";
-  const grid = DL.grid(drawer);
-  if (!grid) return "";
-  const wall = DL.slack(drawer) / 2;
-  return [["left", grid.gapLeft], ["right", grid.gapRight], ["front", grid.gapFront], ["back", grid.gapBack]]
-    .map(([side, gap]) => [side, gap - wall])
-    .filter(([, play]) => Number.isFinite(play) && play >= 0.1)
-    .map(([side, play]) => `${play.toFixed(1)} mm (${side})`)
-    .join(", ");
-};
-
 DP.build = () => {
   if (DP.built) return;
   DP.built = true;
@@ -211,11 +197,6 @@ DP.build = () => {
   }
 };
 
-// Fix 019 Item 3: the hosted backend rejects /api/drawer/spacers,
-// /api/drawer/spacers/generate, /api/drawer/print-spacers and
-// /api/drawer/print-complete outright, so the remaining spacer actions stay unavailable in hosted mode
-// on every render, not just once at build time.
-DP.HOSTED_UNSUPPORTED_TOOLTIP = "Hosted Wavefinity uses the normal Design save-to-folder workflow instead of local Space spacer/slicer operations.";
 // Fix 096 C4: spacer file generation now works hosted; only opening a local
 // slicer stays unavailable.
 DP.HOSTED_SLICER_TOOLTIP = "Hosted Wavefinity saves files to your folder instead of opening a local slicer.";

@@ -260,60 +260,6 @@ async function designerInstallInventorySpec(rowId, spec, acceptTransition = null
   return installLoadedDesignSource(rowId, spec, { acceptTransition });
 }
 
-// Regenerate a saved source without replacing the live Designer edit.
-// ``expected`` (an automatic refresh) binds the whole run to the Space that
-// asked for it: it is checked before and after every await, so a Space switch
-// can never send this row ID to another Space.
-async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush = false } = {}) {
-  if (state.folderMode !== "space" || typeof DL === "undefined") return;
-  const bound = () => !expected || DL.spaceContextCurrent(expected);
-  if (!bound()) return;
-  if (relocationBlocksWrites()) return;
-  if (!skipFlush && (DL.busy || isGenerating || state.designMutationBusy)) {
-    toast("Finish the current action before saving files.", true);
-    return;
-  }
-  if (!skipFlush && typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave({ materialize: true }))) return false;
-  if (!bound()) return;
-  const one = DL.bin(rowId);
-  const spec = DL.layout?.design_specs?.[rowId];
-  if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return false;
-  const generateRow = async context => {
-    if (expected && !DL.spaceContextCurrent(expected)) return;
-    const result = await apiSideEffect("/api/generate", {
-      design: clone(spec), output: state.output, connector: state.connector,
-      keep_log: false,
-    });
-    try {
-      DL.requireSpaceContext(context);
-    } catch (error) {
-      if (!DL.isStaleSpaceError(error)) throw error;
-      toast("Generation finished for the Space you left. No files were saved to the current Space and its Inventory was not changed.");
-      return;
-    }
-    const savedFiles = await saveGeneratedFiles(result, { ownedStale: staleFileNamesForRow(rowId) });
-    try {
-      DL.requireSpaceContext(context);
-    } catch (error) {
-      if (!DL.isStaleSpaceError(error)) throw error;
-      toast("Files were generated in the Space you left, but its Inventory row was not updated.");
-      return;
-    }
-    const files = [...new Set(savedFiles.map(path => String(path).split(/[\\/]/).pop())
-      .filter(name => /\.3mf$/i.test(name)))];
-    if (!files.length) throw new Error("The generated design files were not returned.");
-    const file = files.join(", ");
-    const saved = await DL.inventoryCall("/api/drawer/design-source/status", {
-      row_id: rowId, action: "saved", file, design: clone(spec),
-    }, { context, sideEffect: true });
-    DL.adopt(saved);
-    DL.emit();
-    toast(`Generated ${file}.`);
-    return true;
-  };
-  return skipFlush ? generateRow(expected) : DL.busyWith("generate-row", generateRow);
-}
-
 // ------------------------------------------------------------ AI Help (Fix 073)
 //
 // Wavefinity never talks to an AI. It writes a prompt the person pastes into any

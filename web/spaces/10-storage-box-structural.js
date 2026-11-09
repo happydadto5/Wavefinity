@@ -165,24 +165,6 @@ SP.structuralBusy = false;
 SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP = "Printing needs local Wavefinity and a slicer. Use Export to get the files.";
 SP.HOSTED_SURFACE_PRINT_TOOLTIP = "Printing needs local Wavefinity and a slicer. Use Export to get the files.";
 
-// The derived outside/capacity summary of a Storage Box, from the server.
-SP.refreshStructuralSummary = async () => {
-  const space = state.activeSpace;
-  if (SP.structuralKind() !== "storage_box" || !space) return;
-  const key = JSON.stringify(space);
-  if (SP.structuralInfo.key === key) return;
-  SP.structuralInfo = { key, data: null, error: "" };
-  try {
-    const result = await api("/api/space/structural-design", { space: clone(space) });
-    if (SP.structuralInfo.key !== key) return;
-    SP.structuralInfo.data = result.summary;
-  } catch (error) {
-    if (SP.structuralInfo.key !== key) return;
-    SP.structuralInfo.error = error.message;
-  }
-  SP.renderSpaceInfo();
-};
-
 SP.runStructural = async (mode, event) => {
   const kind = SP.structuralKind();
   if (kind === "storage_drawers") return SP.runCabinetStructural(mode);

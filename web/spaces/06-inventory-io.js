@@ -464,10 +464,5 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   return info;
 };
 
-// The active folder's inventory filename. Create/Configure must use
-// SP.inventoryFilenameFor(folder) against the *selected target* instead -
-// this one only ever reflects whatever was already active, which is wrong
-// mid-Create before the new folder is activated - see Fix 004 Correction 7.A.
-SP.inventoryFilename = () => SP.inventoryFilenameFor(state.browserFolder);
 SP.inventoryFilenameFor = _folder => INVENTORY_FILENAME;
 
