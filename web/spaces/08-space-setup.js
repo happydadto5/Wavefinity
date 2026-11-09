@@ -928,6 +928,53 @@ SP.fail = (message, selector) => {
   if (selector) $(selector)?.focus();
 };
 
+// Reopens the remembered hosted folder (permission already granted). A folder
+// that was moved or deleted is reported plainly and the one pick is offered.
+SP.resumeSavedHosted = async saved => {
+  try {
+    const folder = { handle: saved.handle, name: saved.handle.name };
+    const data = await SP.inspectHosted(folder);
+    SP.assertExpectedHostedIdentity(data, saved.space_id || null);
+    if (data.needs_setup) {
+      SP.enterSetupFor(folder, data);
+      return;
+    }
+    const info = await SP.useHostedFolder(folder, { expectedSpaceId: saved.space_id || null });
+    if (!info) { SP.showHome(); return; } // switch aborted mid-startup - fall back quietly
+    if (info.folder_mode === "space") SP.showResume(info, { startup: true });
+  } catch (error) {
+    if (error?.name === "NotFoundError" || error?.name === "TypeMismatchError") {
+      SP.pendingReconnect = null;
+      SP.showHome(`The folder "${saved.handle?.name || "you used last time"}" was moved or deleted. Choose a folder to continue - you can make a new one in the folder dialog.`);
+      return;
+    }
+    SP.showHome(error.message);
+  }
+};
+
+// One click on a user gesture: restore access to the remembered folder.
+SP.reconnectSavedFolder = () => SP.run(async () => {
+  const saved = SP.pendingReconnect;
+  if (!saved?.handle) { SP.showHome(); return; }
+  let granted = false;
+  try {
+    granted = await WFFileSystem.requestReadWritePermission(saved.handle);
+  } catch (error) {
+    if (error?.name === "NotFoundError") {
+      SP.pendingReconnect = null;
+      SP.showHome(`The folder "${saved.handle.name}" was moved or deleted. Choose a folder to continue.`);
+      return;
+    }
+    throw error;
+  }
+  if (!granted) {
+    SP.showHome("Folder access was not allowed. Choose Reconnect and allow access, or pick a folder.");
+    return;
+  }
+  SP.pendingReconnect = null;
+  await SP.resumeSavedHosted(saved);
+});
+
 // Fix 019 Item 6: "no remembered folder" and "permission not (yet) granted"
 // are expected, silent outcomes - Welcome with no message. An exception from
 // actually reading/classifying/identifying the remembered folder is a real
@@ -961,23 +1008,16 @@ SP.launch = async () => {
       SP.showHome(error?.message || "Wavefinity could not read your saved folder.");
       return;
     }
-    if (!hasPermission) { SP.showHome(); return; }
-    try {
-      const folder = { handle: saved.handle, name: saved.handle.name };
-      const data = await SP.inspectHosted(folder);
-      SP.assertExpectedHostedIdentity(data, saved.space_id || null);
-      if (data.needs_setup) {
-        SP.enterSetupFor(folder, data);
-        return;
-      }
-      const info = await SP.useHostedFolder(folder, { expectedSpaceId: saved.space_id || null });
-      if (!info) { SP.showHome(); return; } // switch aborted mid-startup - fall back quietly
-      if (info.folder_mode === "space") SP.showResume(info, { startup: true });
-      return;
-    } catch (error) {
-      SP.showHome(error.message);
+    if (!hasPermission) {
+      // The browser wants re-approval (needs a click). Offer one reconnect
+      // action for the remembered folder instead of a fresh pick.
+      SP.pendingReconnect = saved?.handle ? saved : null;
+      SP.showHome();
       return;
     }
+    SP.pendingReconnect = null;
+    await SP.resumeSavedHosted(saved);
+    return;
   }
 
   try {

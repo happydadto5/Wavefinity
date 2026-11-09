@@ -61,6 +61,7 @@ SP.afterPick = async (folder, leaveOptions) => {
       SP.showFolderAccessNeeded("unsupported");
       return null;
     }
+    SP.pendingReconnect = null; // a fresh pick replaces the remembered folder
     const inspected = await SP.inspectHosted(folder);
     if (inspected.needs_setup) {
       SP.enterSetupFor(folder, inspected);
@@ -377,6 +378,15 @@ SP.showHome = (message = null) => {
       : message;
     errorEl.textContent = friendly || "";
     errorEl.hidden = !friendly;
+  }
+  const reconnect = document.getElementById("welcome-reconnect");
+  if (reconnect) {
+    reconnect.hidden = !SP.pendingReconnect;
+    if (SP.pendingReconnect) reconnect.textContent = `Reconnect "${SP.pendingReconnect.handle.name}"`;
+    if (!reconnect.dataset.wired) {
+      reconnect.dataset.wired = "1";
+      reconnect.addEventListener("click", () => SP.reconnectSavedFolder());
+    }
   }
   SP.renderRecent();
   // Proactive, not just reactive: on a browser that cannot give writable

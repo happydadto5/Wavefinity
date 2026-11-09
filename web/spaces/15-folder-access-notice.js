@@ -36,7 +36,10 @@ SP.wireFolderAccessNotice = () => {
   const notice = document.getElementById("folder-access-notice");
   if (!notice || notice.dataset.wired) return;
   notice.dataset.wired = "1";
-  document.getElementById("folder-access-choose")?.addEventListener("click", () => SP.open());
+  document.getElementById("folder-access-choose")?.addEventListener("click", () => {
+    if (SP.pendingReconnect) SP.reconnectSavedFolder();
+    else SP.open();
+  });
   document.getElementById("folder-access-dismiss")?.addEventListener("click", SP.hideFolderAccessNotice);
   document.getElementById("folder-access-suppress")?.addEventListener("change", event => {
     SP.setFolderNoticeSuppressed(event.target.checked);
@@ -52,6 +55,8 @@ SP.showFolderAccessNoticeIfNeeded = () => {
   SP.wireFolderAccessNotice();
   const checkbox = document.getElementById("folder-access-suppress");
   if (checkbox) checkbox.checked = false;
+  const choose = document.getElementById("folder-access-choose");
+  if (choose) choose.textContent = SP.pendingReconnect ? "Reconnect folder" : "Choose folder";
   notice.hidden = false;
   // Choosing a folder happens elsewhere (Welcome / Spaces); drop the banner as
   // soon as access exists, without touching the suppression preference.
