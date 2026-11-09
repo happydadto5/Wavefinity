@@ -323,13 +323,14 @@ def generate_b4b_files(
     # non-label parts must each be one clean solid; labels are one prism per
     # letter, so they get the relaxed check
     for name, mesh in parts:
-        if "Label" not in name:
+        if "Label" not in name and name != "Storage Box Note Text":
             mesh_report(name, mesh)
 
     # lettering parts open on the second filament slot
     filaments = {
         name: 2 for name, _ in parts
-        if name in ("Storage Box Top Label", "Storage Box Front Label Text")
+        if name in ("Storage Box Top Label", "Storage Box Front Label Text",
+                    "Storage Box Note Text")
     }
     written = export_object_groups_3mf(print_objects, target, filaments)
     report = validate_object_groups_3mf(target, print_objects, filaments)
@@ -341,7 +342,7 @@ def generate_b4b_files(
         "box": _part_result(target, {"name": "Storage Box Body", **report}),
         "parts": [
             {"name": name, "mesh": mesh_report(name, mesh) if "Label" not in name
-             else {"name": name}}
+             and name != "Storage Box Note Text" else {"name": name}}
             for name, mesh in parts
         ],
         "object_names": written,

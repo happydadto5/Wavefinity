@@ -38,6 +38,7 @@ from ._labels import (
 )
 from ._compose import b4b_body_with_features
 from ._validation import validate_b4b_design
+from ._note import b4b_screw_totals, make_b4b_screw_note
 
 
 # --------------------------------------------------------------------------- #
@@ -333,6 +334,11 @@ def _print_object_plan(box: BoxSpec, features=()):
             return [("Storage Box Front Label Plate", translated(plate, centre)),
                     ("Storage Box Front Label Text", translated(text, centre))]
         plan.append(("Storage Box Front Label", "label", label_parts))
+
+    # Flat 0.2 mm card listing the screws this very design needs; none if it
+    # needs none.  Already flat on the bed, so it takes no print pose.
+    if b4b_screw_totals(box):
+        plan.append(("Storage Box Screw Note", "note", lambda: make_b4b_screw_note(box)))
     return plan
 
 
