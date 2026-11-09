@@ -122,6 +122,12 @@ body.ws-task-settings .dl-section[aria-label="Inventory"] { display: none; }
 body.ws-task-settings #space-fields-portable,
 body.ws-task-settings #space-fields-storage_drawers { display: none; }
 
+/* Story 2743: for a box or cabinet every part of the Space header is hidden in the layout view, which left
+   an empty bordered card above Spacers; it is not shown while nothing visible remains inside it. */
+body.ws-task-settings #space-head:not(:has(
+  .space-type-fields:not([hidden]):not(#space-fields-portable):not(#space-fields-storage_drawers),
+  #space-error:not([hidden]), #space-folder-help:not([hidden]))) { display: none; }
+
 /* The Space name is shown in the heading; the layout view has no (falsely editable) Name section. */
 body.ws-task-settings #space-name-row,
 body.ws-task-settings #space-note { display: none !important; }
