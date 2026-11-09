@@ -68,7 +68,7 @@ WS.items = () => {
     return typed || DL.label(one);
   };
   const binItem = (one, drawerLabel = "") => add("bin", one.id, liveLabel(one), {
-    note: [drawerLabel, `${fmt(one.x)} × ${fmt(one.y)} mm`].filter(Boolean).join(" · "),
+    note: [drawerLabel, `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`].filter(Boolean).join(" · "),
     printable: DL.printEligible(one),
   });
   const drawers = DL.layout.drawers || [];
