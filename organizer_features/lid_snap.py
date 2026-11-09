@@ -1,8 +1,12 @@
 """Optional lid fingers mating with the existing connector detents."""
-from organizer_engine._specs import LOCK_PROTRUSION, LOCK_NOTCH_CLEARANCE
+from dataclasses import replace
+from functools import lru_cache
+
+from organizer_engine._specs import LOCK_PROTRUSION, LOCK_NOTCH_CLEARANCE, LidSpec
 from organizer_engine._wave import _wall_lock_paths, _lock_profile, lock_z_levels
 from organizer_geometry import _sweep_profile, _extrude_polygon, difference, intersection, union
 
+_SNAP_REF_Z = 40.0
 SNAP_FLOOR_GAP = 0.5 - LOCK_NOTCH_CLEARANCE
 SNAP_MIN_DEPTH = -lock_z_levels(0.0)[0] + LOCK_NOTCH_CLEARANCE + SNAP_FLOOR_GAP
 
@@ -16,8 +20,29 @@ def snap_status(box):
 
 
 def snap_fingers(box):
+    """The snap fingers, built once per bin shape.
+
+    The fingers depend only on the bin body, never on the lid's handle or
+    lettering, so adding a knob (or the summary asking again) reuses them
+    instead of re-sweeping hundreds of fingers.
+    """
     if not box.lid.snap_enabled or snap_status(box):
         return []
+    # Without a flat interior band the fingers are the same shape at any body
+    # height, only shifted: share one build across heights (a knob changes the
+    # body height). A flat band ties them to the real height, so keep that.
+    ref_z = box.z if box.flat_inside > 0 else _SNAP_REF_Z
+    key = replace(box, z=ref_z, lid=LidSpec(enabled=True, snap_enabled=True))
+    fingers = []
+    for finger in _snap_fingers_cached(key):
+        finger = finger.copy()
+        finger.apply_translation((0.0, 0.0, box.z - ref_z))
+        fingers.append(finger)
+    return fingers
+
+
+@lru_cache(maxsize=8)
+def _snap_fingers_cached(box):
     from organizer_engine._boxes import flat_cavity_polygon
     from organizer_engine import wavy_cavity_polygon
     from organizer_features.stack import STACK_SKIRT_DEPTH
@@ -53,4 +78,4 @@ def snap_fingers(box):
         finger = difference([intersection([tab, cavity]), notch])
         if len(finger.faces):
             fingers.append(finger)
-    return fingers
+    return tuple(fingers)
