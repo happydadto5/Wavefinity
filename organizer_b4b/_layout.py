@@ -24,7 +24,6 @@ from organizer_engine.product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD
 from ._constants import (
     B4B_CAVITY_CORNER_CLEARANCE,
     B4B_LID_SKIRT_LAP,
-    B4B_LID_SKIRT_TIP_CLEARANCE,
     B4B_WALL_CORNER_FILLET,
     B4B_STACK_MIN_BASE,
     _SUPPORT_FREE_INSCRIBED,
@@ -585,18 +584,21 @@ def b4b_internal_floor_z(box: BoxSpec) -> float:
 
 
 def b4b_lid_underside_z_from_eff(eff: BoxSpec) -> float:
-    # The skirt hangs below the underside, so a nominal-height child needs at
-    # least lap + tip clearance above it; the riser carries what the chosen
-    # headroom does not, instead of taking it from the child's stated height.
-    skirt_room = B4B_LID_SKIRT_LAP + B4B_LID_SKIRT_TIP_CLEARANCE
-    return eff.base_thickness + eff.z + max(eff.b4b.lid_headroom_mm, skirt_room)
+    # ``lid_headroom_mm`` is the clearance the user actually gets: the gap between
+    # the top of a nominal-height child and the lowest point of the lid, which is
+    # the locating skirt tip.  The skirt hangs ``B4B_LID_SKIRT_LAP`` below the
+    # underside, so the underside sits lap + headroom above the child; the skirt's
+    # physical lap is preserved on top of the chosen headroom, never substituted
+    # for it.
+    return eff.base_thickness + eff.z + B4B_LID_SKIRT_LAP + eff.b4b.lid_headroom_mm
 
 
 def b4b_lid_underside_z(box: BoxSpec) -> float:
     """Z of the lid underside over the child field, from the Storage Box bottom datum.
 
-    ``effective_floor_z + box.z + lid_headroom_mm`` - a child of nominal height
-    ``box.z`` resting on the floor then has ``lid_headroom_mm`` clearance.
+    ``effective_floor_z + box.z + skirt lap + lid_headroom_mm`` - a child of
+    nominal height ``box.z`` resting on the floor then has exactly
+    ``lid_headroom_mm`` between its top and the skirt tip.
     """
     return b4b_lid_underside_z_from_eff(b4b_effective_box(box))
 
