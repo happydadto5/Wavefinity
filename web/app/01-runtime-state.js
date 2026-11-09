@@ -113,6 +113,7 @@ const state = {
   camera: { yaw: 45, elevation: 76, zoom: 1 },
   lastBoxSize: null,
   previewRequest: 0,
+  previewSettledRequest: -1,
   draftRequest: 0,
   // Fix 103 (Section C): epoch for structural preview requests; stale
   // responses are dropped, latest request wins.

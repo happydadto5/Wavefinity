@@ -146,7 +146,11 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false,
     if (!beginDesignMutation()) return false;
     let saved = false;
     try {
-      await refreshPreview();
+      // Story 2773: leaving (e.g. Manage Spaces) with an already-current preview
+      // rebuilds nothing; only a label-only difference is recorded.
+      if (previewShowsCurrentGeometry()) {
+        if (state.previewDesignKey !== JSON.stringify(state.design)) state.previewDesignKey = JSON.stringify(state.design);
+      } else await refreshPreview();
       if (!state.preview?.fits || state.preview.feature_errors?.length || state.preview.draft_error ||
           state.previewDesignKey !== JSON.stringify(state.design))
         throw new Error("Resolve the design issue before leaving this bin.");

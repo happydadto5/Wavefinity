@@ -614,6 +614,39 @@ function updateStorageBoxHeightWarning(warning) {
 // silently overwrite the bad checkpoint the original contract says must be
 // left alone for possible recovery. Every ordinary call (the ordinary
 // default) persists exactly as before.
+// Story 2773: the name (and any other label-only field) shapes no geometry, so a
+// design that differs from the last adopted preview only by those fields is still
+// showing the right shape. True only when a settled, error-free, draft-free preview
+// exists and nothing else is in flight.
+const PREVIEW_NON_GEOMETRY_KEYS = ["part_name"];
+function previewGeometryKey(design) {
+  if (!design || typeof design !== "object") return JSON.stringify(design);
+  const copy = { ...design };
+  for (const key of PREVIEW_NON_GEOMETRY_KEYS) delete copy[key];
+  return JSON.stringify(copy);
+}
+function previewShowsCurrentGeometry() {
+  const shown = state.preview;
+  if (!shown || state.draft || state.previewDesignKey === null) return false;
+  if (state.previewSettledRequest !== state.previewRequest) return false;
+  if (!shown.fits || shown.feature_errors?.length || shown.draft_error) return false;
+  let previous;
+  try { previous = JSON.parse(state.previewDesignKey); } catch (_) { return false; }
+  return previewGeometryKey(previous) === previewGeometryKey(state.design);
+}
+// Keep the existing preview; record the label-only change exactly as a finished
+// preview would (saved key, autosave, resume checkpoint) without a rebuild.
+function keepPreviewForLabelOnlyChange({ persistResume = true } = {}) {
+  state.previewDesignKey = JSON.stringify(state.design);
+  if (state.preview) state.preview = { ...state.preview, design: state.design };
+  state.canGenerate = true;
+  updateGenerateAvailability();
+  if (typedSpaceOrdinaryBin()) queueSpaceDesignAutosave();
+  if (persistResume && state.folderMode === "space" && typeof SP !== "undefined") {
+    SP.queueResumeCheckpoint(state.design, false);
+  }
+}
+
 async function refreshPreview({ persistResume = true } = {}) {
   // Fix 103: the structural target owns its own preview (refreshStructuralPreview);
   // an ordinary design must never preview or checkpoint under it.
@@ -658,6 +691,7 @@ async function refreshPreview({ persistResume = true } = {}) {
     if (result.superseded) throw new Error("Current preview was unexpectedly superseded. Try again.");
     endPreviewWait(request);
     adoptPreviewResult(result, { persistResume, lidEpochAtRequest });
+    state.previewSettledRequest = request;
   } catch (error) {
     if (request !== state.previewRequest) return;
     endPreviewWait(request);

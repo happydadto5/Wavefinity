@@ -220,7 +220,10 @@ const applyChangedDesign = debounce(() => {
   // can briefly validate their old footprint and show a false fit error.
   // refreshDraft() finishes by refreshing the whole preview.
   if (state.draft) refreshDraft();
-  else refreshPreview();
+  else if (previewShowsCurrentGeometry() && !state.binResizePending) {
+    // Story 2773: a name-only edit changes no shape; keep the preview.
+    keepPreviewForLabelOnlyChange();
+  } else refreshPreview();
   if (state.binResizePending &&
       (state.draft || state.design.layout.features.length)) {
     enforceBinMinimumSoon();
