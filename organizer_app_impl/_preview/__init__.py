@@ -36,7 +36,7 @@ from organizer_features.side_openings import (
     validate_side_openings,
 )
 from organizer_features.pegboard import apply_pegboard_mount_structure, receiver_layout
-from organizer_features.stack import stack_enabled
+from organizer_features.stack import stack_enabled, stack_seated_height
 from organizer_inserts._bore import bore_reference_meshes, bore_tool_clearance_zone
 from organizer_inserts._cradle import cradle_reference_meshes
 from organizer_inserts import (
@@ -269,7 +269,7 @@ def _preview_geometry(
             if box.edge_mount.active:
                 shell_body = apply_edge_mount_structure(box, shell_body)
             if box.pegboard.enabled:
-                shell_body = apply_pegboard_mount_structure(box, shell_body)
+                shell_body = apply_pegboard_mount_structure(box, shell_body, stack_seated_height(box))
             if mode == "fused" and base_inlay_meshes:
                 try:
                     shell_body = apply_texts(
@@ -850,7 +850,7 @@ def _preview_geometry(
             geometry.extend(_mesh_preview_geometry(edge_mesh, "label"))
 
     side_openings_meta = side_opening_summary(box) if box.side_openings.enabled else None
-    pegboard_meta = receiver_layout(box) if box.pegboard.enabled else None
+    pegboard_meta = receiver_layout(box, height=stack_seated_height(box)) if box.pegboard.enabled else None
 
     # The effective list has already replaced a selected saved part with its
     # live draft. These faces never enter any printable builder or pick map.

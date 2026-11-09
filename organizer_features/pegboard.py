@@ -276,10 +276,17 @@ def _axis_positions(
     return [candidates[index] for index in indexes]
 
 
-def receiver_layout(box_or_x: Any, z: float | None = None, mount: PegboardMountSpec | None = None) -> dict[str, Any]:
+def receiver_layout(box_or_x: Any, z: float | None = None, mount: PegboardMountSpec | None = None,
+                    height: float | None = None) -> dict[str, Any]:
+    """Receiver seats for a bin.
+
+    ``height`` is the bin as it actually seats on the board (lid included).
+    A built body can be shorter than that, so generation passes it explicitly;
+    placement uses the inventory height, which is the same basis.
+    """
     if hasattr(box_or_x, "x"):
         x = float(box_or_x.x)
-        height = float(box_or_x.z)
+        height = float(box_or_x.z if height is None else height)
         mount = normalise_mount_spec(getattr(box_or_x, "pegboard", mount))
     else:
         x = float(box_or_x)
@@ -491,8 +498,9 @@ def _bridge_with_latch_notch(cx: float, back_y: float, cz: float) -> trimesh.Tri
     return difference([bridge, notch])
 
 
-def apply_pegboard_mount_structure(box_spec: Any, body: trimesh.Trimesh) -> trimesh.Trimesh:
-    layout = receiver_layout(box_spec)
+def apply_pegboard_mount_structure(box_spec: Any, body: trimesh.Trimesh,
+                                   height: float | None = None) -> trimesh.Trimesh:
+    layout = receiver_layout(box_spec, height=height)
     if not layout["enabled"]:
         return body
     back_y = float(box_spec.y) / 2.0
@@ -539,8 +547,9 @@ def adapter_print_transform() -> np.ndarray:
     return trimesh.transformations.rotation_matrix(-math.pi / 2.0, (1.0, 0.0, 0.0))
 
 
-def make_board_adapters(box_spec: Any, thickness_mm: Any = 3.2) -> list[tuple[str, trimesh.Trimesh]]:
-    layout = receiver_layout(box_spec)
+def make_board_adapters(box_spec: Any, thickness_mm: Any = 3.2,
+                        height: float | None = None) -> list[tuple[str, trimesh.Trimesh]]:
+    layout = receiver_layout(box_spec, height=height)
     if not layout["enabled"]:
         return []
     result = []

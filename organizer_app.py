@@ -108,6 +108,7 @@ from organizer_features.stack import (
     make_stack_lid,
     normalize_stack_settings,
     stack_closed_height,
+    stack_seated_height,
     stack_effective_box,
     stack_enabled,
     stack_spec,
@@ -581,7 +582,7 @@ def generate_organizer_files(
         # shell (fused features, scoop and the rim ledge already on it), so
         # the driver-access cut also clears any fused geometry blocking it.
         body = apply_edge_mount_structure(box, body)
-        body = apply_pegboard_mount_structure(box, body)
+        body = apply_pegboard_mount_structure(box, body, stack_seated_height(box))
         reported = apply_texts(body, texts + rim_texts)
         edge_text = edge_mount_text_object(box)
         if edge_text is not None and box.edge_mount.label_type == "integrated":
@@ -641,7 +642,7 @@ def generate_organizer_files(
             body, box_inlay = make_top_labelled_box(box, tidy, body, side)
             box_inlays.append((tidy, box_inlay, False))
         body = apply_edge_mount_structure(box, body)
-        body = apply_pegboard_mount_structure(box, body)
+        body = apply_pegboard_mount_structure(box, body, stack_seated_height(box))
         edge_text = edge_mount_text_object(box)
         if edge_text is not None and box.edge_mount.label_type == "integrated":
             _edge_label, edge_mesh, edge_raised = edge_text
@@ -712,7 +713,7 @@ def generate_organizer_files(
             result["edge_mount_label"] = _part_result(label_output, mesh_report("edge_mount_label", printed_body))
             result["edge_mount_label"]["text_objects"] = written
     if box.pegboard.enabled:
-        adapters = make_board_adapters(box, pegboard_thickness_mm)
+        adapters = make_board_adapters(box, pegboard_thickness_mm, stack_seated_height(box))
         adapter_output = _resolve_file(pegboard_adapter_filename, box, part_name)
         export_object_groups_3mf(
             [(name, [(name, mesh)]) for name, mesh in adapters], adapter_output
@@ -722,7 +723,7 @@ def generate_organizer_files(
             "count": len(adapters),
             "standard": box.pegboard.standard,
         }
-        result["pegboard"] = receiver_layout(box)
+        result["pegboard"] = receiver_layout(box, height=stack_seated_height(box))
     if label_info is not None:
         result["label"] = label_info
     result["texts"] = [

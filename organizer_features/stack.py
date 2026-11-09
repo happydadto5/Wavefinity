@@ -215,6 +215,11 @@ def stack_effective_box(box: BoxSpec) -> BoxSpec:
     return replace(normalized, z=body_z)
 
 
+def stack_seated_height(eff: BoxSpec) -> float:
+    """Height of the bin as it seats (body plus lid rise) from its effective box."""
+    return eff.z + stack_lid_rise(eff)
+
+
 def stack_grew(box: BoxSpec) -> bool:
     """Whether stacking had to change what the user entered."""
     eff = stack_effective_box(box)
