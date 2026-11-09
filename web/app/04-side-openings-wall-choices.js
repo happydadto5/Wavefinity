@@ -550,18 +550,15 @@ function baseRequiredMin(box) {
       ? number(state.catalog?.b4b_rules?.stack_min_base_mm, 2.8)
       : -Infinity;
   }
-  const mode = (box?.stack?.mode || "none") === "direct"
-    ? "direct" : box?.lid?.enabled && box.lid.stackable ? "lid" : "none";
+  const mode = (box?.stack?.mode || "none") === "direct" ? "direct" : "none";
   if (mode === "none") return -Infinity;
   return stackBaseMinForWall(mode, box?.wall);
 }
 
 function baseRequiredLabel(box) {
   if (box?.b4b?.enabled) return "Required for stacking";
-  const mode = (box?.stack?.mode || "none") === "direct"
-    ? "direct" : box?.lid?.enabled && box.lid.stackable ? "lid" : "none";
+  const mode = (box?.stack?.mode || "none") === "direct" ? "direct" : "none";
   if (mode === "direct") return "Required for direct stacking";
-  if (mode === "lid") return "Required for lid stacking";
   return "";
 }
 
@@ -596,7 +593,7 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
     && !choices.some(choice => Math.abs(number(choice.value) - modeMin) < 1e-9);
   const base = number(box?.base_thickness, rules.default_mm ?? 0.8);
   const value = fmt(base);
-  const verticalStack = (box?.stack?.mode || "none") === "direct" || Boolean(box?.lid?.enabled && box.lid.stackable);
+  const verticalStack = (box?.stack?.mode || "none") === "direct";
   const standard = box?.standard_base !== false && !isB4B && !verticalStack;
   const ordinaryDefaultValue = fmt(ordinaryRules.default_mm ?? 0.8);
   const numericChoices = isB4B

@@ -47,7 +47,6 @@ from organizer_engine import (
     lid_enabled,
     lid_label_relief_mm,
     lid_spec,
-    lid_stackable,
     direct_stack_enabled,
     placed_label_outline,
     preview_rings,
@@ -767,7 +766,7 @@ def generate_organizer_files(
             export_mesh(lid, lid_output, "lid")
         result["lid"] = _part_result(lid_output, None)
         result["lid"]["text_objects"] = written
-    if stack_enabled(stack_request):
+    if stack_enabled(stack_request) or lid_enabled(stack_request):
         result["stack"] = stack_summary(stack_request)
     if keep_log:
         out_files: list[Path] = []

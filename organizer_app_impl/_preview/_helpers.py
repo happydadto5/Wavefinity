@@ -14,7 +14,6 @@ from organizer_engine import (
     BoxSpec,
     make_scoop,
     lift_grabber_collision_volumes,
-    lid_stackable,
     flat_cavity_polygon,
     scoop_keep_out,
     top_label_zone,
@@ -480,7 +479,7 @@ def apply_surface_lightweight_base(body: trimesh.Trimesh, box: BoxSpec,
     """Remove hidden 7 mm cell cavities from a Surface platform only."""
     if not layout.surface_lightweight_base:
         return body
-    if box.b4b.enabled or stack_enabled(box) or lid_stackable(box):
+    if box.b4b.enabled or stack_enabled(box):
         raise ValueError("Lightweight base is unavailable with vertical stacking")
     roof_top = box.base_thickness - SURFACE_BASE_TOP_SKIN_MM
     max_opening = min(SURFACE_BASE_CELL_MM - 2 * SURFACE_BASE_CELL_INSET_MM,

@@ -402,9 +402,25 @@ DL.stackWall = one => {
   return raw !== null && raw !== undefined && Number.isFinite(wall) && wall > 0 ? wall : null;
 };
 
+// Story 2804: every snap and resting lid carries a stack seat in its top face.
+// Anything standing proud of the lid top (a hinged lid's hardware, the pull
+// knob, raised lettering) means the lid takes no stack. Read from the saved
+// design; a bin with no saved design or no lid places no restriction.
+DL.lidRefusalFor = (box, name) => {
+  const lid = box?.lid;
+  if (!lid?.enabled) return "";
+  if (lid.flip_enabled) return `${name} has a hinged lid, which cannot take a stack.`;
+  if (lid.handle_enabled) return `${name} has a lid with a knob, which stands too proud to take a stack.`;
+  if (lid.label_enabled && lid.label_style === "raised") return `${name} has raised lettering on its lid, which stands too proud to take a stack.`;
+  return "";
+};
+DL.lidRefusal = lower => DL.lidRefusalFor(DL.layout?.design_specs?.[lower?.id]?.box, DL.label(lower));
+
 // Why `upper` cannot snap onto `lower`, or "" if it can.
 DL.stackRefusal = (upper, lower) => {
   if (!DL.stackable(upper)) return `${DL.label(upper)} was not printed to stack.`;
+  const lidIssue = DL.lidRefusal(lower);
+  if (lidIssue) return lidIssue;
   // A direct (skirted) bin's interface is its own base; the bin below is just an open-topped bin.
   const plainBelow = upper.stack === "direct" && !DL.stackable(lower);
   if (!plainBelow && !DL.stackable(lower)) return `${DL.label(lower)} was not printed to stack.`;
@@ -982,14 +998,47 @@ DL.unstackResized = previous => {
   return count;
 };
 
+// Story 2804: giving a bin a lid that cannot take a stack (hinged, knob, raised
+// lettering) while other bins stand on it takes everything above it out of the
+// stack and back to Unplaced bins, as a resize does. Returns how many left.
+DL.unstackBlockedLids = previousSpecs => {
+  if (!DL.layout?.drawers || !previousSpecs) return 0;
+  const specs = DL.layout.design_specs || {};
+  const blocked = new Set(Object.keys(specs).filter(id =>
+    DL.lidRefusalFor(specs[id]?.box, id) && !DL.lidRefusalFor(previousSpecs[id]?.box, id)));
+  if (!blocked.size) return 0;
+  let count = 0;
+  DL.change(() => {
+    for (const drawer of DL.layout.drawers) {
+      const leaving = new Set();
+      const queue = drawer.placements.filter(p => blocked.has(p.bin)).map(DL.key);
+      while (queue.length) {
+        const key = queue.pop();
+        for (const above of drawer.placements.filter(p => p.on === key)) {
+          if (leaving.has(above)) continue;
+          leaving.add(above);
+          queue.push(DL.key(above));
+        }
+      }
+      if (!leaving.size) continue;
+      drawer.placements = drawer.placements.filter(p => !leaving.has(p));
+      for (const placement of leaving) if (DL.selected === DL.key(placement)) DL.selected = null;
+      count += leaving.size;
+    }
+  });
+  return count;
+};
+
 DL.adopt = data => {
   const previousBins = DL.bins;
+  const previousSpecs = DL.layout?.design_specs;
   DL.bins = data.bins || DL.bins;
   if (data.bins && DL.unstackResized(previousBins)) toast("This bin was stacked and will be move to unplaced bins.");
   if (data.stack_steps) DL.stackSteps = data.stack_steps;
   if (data.stack_metrics) DL.stackMetrics = data.stack_metrics;
   if (DL.layout && data.layout && Object.hasOwn(data.layout, "design_specs")) {
     DL.layout.design_specs = DL.cleanTextConsent(data.layout.design_specs);
+    if (DL.unstackBlockedLids(previousSpecs)) toast("A bin under this stack now has a lid that cannot take a stack, so the bins above it were moved to unplaced bins.");
     // Any saved-design change can alter a leaned Bore's reference envelope.
     // Refuse to reuse the old report until requestReport() returns the new map.
     DL.report = null;

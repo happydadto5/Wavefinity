@@ -64,7 +64,7 @@ MIN_CONNECTOR_SEAM = 16.0       # mm of shared wall a connector needs
 HEIGHT_TOLERANCE = 0.5          # mm; "taller" means taller by more than this
 # How far a stacked bin's foot sinks into the one below, by stacking style.
 STACK_STEPS = {
-    "lid": STACK_SEAT_DEPTH,
+    "lid": STACK_SEAT_DEPTH,      # legacy rows only; new designs never save this mode
     "direct": STACK_SKIRT_DEPTH,
     "b4b": B4B_STACK_PEG_EXPOSED,
 }
@@ -288,11 +288,35 @@ def stack_wall(one: dict[str, Any], specs: dict[str, Any]) -> float | None:
     return wall if math.isfinite(wall) and wall > 0 else None
 
 
+def lid_refusal(lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
+    """Why the lid on ``lower`` cannot take a stack, or None.
+
+    Read from the lower bin's saved design: a snap or resting lid carries the
+    stack seat; anything standing proud of the lid top (a hinged lid's hardware,
+    the pull knob, raised lettering) means it does not. A bin with no saved
+    design or no lid places no restriction.
+    """
+    lid = (((specs.get(lower["id"]) or {}).get("box") or {}).get("lid"))
+    if not isinstance(lid, dict) or not lid.get("enabled"):
+        return None
+    name = _label(lower)
+    if lid.get("flip_enabled"):
+        return f"{name} has a hinged lid, which cannot take a stack"
+    if lid.get("handle_enabled"):
+        return f"{name} has a lid with a knob, which stands too proud to take a stack"
+    if lid.get("label_enabled") and lid.get("label_style") == "raised":
+        return f"{name} has raised lettering on its lid, which stands too proud to take a stack"
+    return None
+
+
 def stack_compatibility_issue(upper: dict[str, Any], lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
     """The same physical stack rule used by placement and report."""
     upper_mode, lower_mode = upper.get("stack", "none"), lower.get("stack", "none")
     if upper_mode == "none":
         return "The upper bin must be printed as stackable"
+    lid_issue = lid_refusal(lower, specs)
+    if lid_issue:
+        return lid_issue
     # A direct (skirted) bin's interface is its own base; the bin below is just
     # an open-topped bin, so it need not be printed as stackable.
     plain_below = upper_mode == "direct" and lower_mode == "none"

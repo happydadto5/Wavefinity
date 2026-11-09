@@ -31,7 +31,6 @@ from organizer_geometry import BuildAbandoned, build_scope, checkpoint, stage
 from organizer_inserts import EDITOR_SNAP, Layout
 from organizer_app import APP_DIR, design_to_dict
 from organizer_features.stack import (
-    STACK_MIN_WALL,
     stack_base_minimum,
     stack_effective_box,
     stack_enabled,
@@ -339,16 +338,15 @@ def _stack_base_min_by_wall() -> dict[str, dict[str, float]]:
     number here - it has to read the same geometry stack_base_minimum() uses.
     """
     probe = BoxSpec(x=2 * BASE_UNIT, y=6 * BASE_UNIT, z=100.0)
-    table: dict[str, dict[str, float]] = {"lid": {}, "direct": {}}
-    # A lid wants the lid minimum wall; a plain skirt works with any wall.
-    for mode, lowest in (("lid", STACK_MIN_WALL), ("direct", MIN_WALL)):
+    table: dict[str, dict[str, float]] = {"direct": {}}
+    # A plain skirt works with any wall.
+    for mode, lowest in (("direct", MIN_WALL),):
         steps = round((MAX_WALL - lowest) / WALL_STEP)
         for i in range(steps + 1):
             wall = round(lowest + i * WALL_STEP, 3)
             box = replace(
                 probe, wall=wall, standard_walls=False,
-                stack=StackSpec(mode="direct") if mode == "direct" else StackSpec(),
-                lid=LidSpec(enabled=True, stackable=True) if mode == "lid" else LidSpec(),
+                stack=StackSpec(mode="direct"),
             )
             table[mode][f"{wall:g}"] = round(stack_base_minimum(box), 3)
     return table

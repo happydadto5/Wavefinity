@@ -111,7 +111,7 @@ function isSurfaceBinDesign(design = state.design) {
 }
 
 function surfaceStackingBlocked(design = state.design) {
-  return design?.box?.stack?.mode === "direct" || Boolean(design?.box?.lid?.enabled && design.box.lid.stackable);
+  return design?.box?.stack?.mode === "direct";
 }
 
 function readInlineSurfaceObjectHeight() {
@@ -400,12 +400,11 @@ function dividerLayoutExtent(box = state.design?.box) {
 }
 
 function stackMode() {
-  if ((state.design?.box?.stack?.mode || "none") === "direct") return "direct";
-  return state.design?.box?.lid?.enabled && state.design.box.lid.stackable ? "lid" : "none";
+  return (state.design?.box?.stack?.mode || "none") === "direct" ? "direct" : "none";
 }
 
 const LID_DEFAULTS = {
-  enabled: false, stackable: true, thickness: "1.6",
+  enabled: false, thickness: "1.6",
   label_enabled: false, label_style: "flush", label_orientation: "horizontal",
   label_text: "", division_labels: [], handle_enabled: false, handle_type: "knob",
   handle_size: "medium", handle_position: "middle", fit: "standard",
@@ -419,7 +418,7 @@ const LID_DEFAULTS = {
 function lidThicknessKey(design = state.design) {
   const box = design?.box || {};
   return JSON.stringify([box.x, box.y, box.wall, box.corner_fillet, box.flat_inside,
-    Boolean(box.lid?.enabled), Boolean(box.lid?.stackable), (box.stack?.mode || "none"),
+    Boolean(box.lid?.enabled), (box.stack?.mode || "none"),
     box.z, Boolean(box.lid?.snap_enabled), Boolean(box.lid?.flip_enabled)]);
 }
 
@@ -439,8 +438,7 @@ function lidLabelDepthShown(lid) {
 function renderLidLabelDepthLegality() {
   const select = $("#lid-label-depth");
   if (!select) return;
-  const handled = lidConfiguration() === "handled_lid";
-  const raised = handled && $("#lid-label-style")?.value === "raised";
+  const raised = $("#lid-label-style")?.value === "raised";
   const report = state.lidLabelBackingReport;
   const fresh = report && report.epoch === state.lidThicknessEpoch &&
     report.key === lidThicknessKey(state.design);
@@ -468,19 +466,12 @@ function lidState(design = state.design) {
   return { ...LID_DEFAULTS, ...(state.lidMemory || {}), ...(boxLid || {}), enabled: Boolean(boxLid?.enabled) };
 }
 
-// Fix 060 Correction 2: label_style is a real, unforced preference only while
-// Handled Lid is active - Stackable Lid always forces the active value to
-// Flush. Snapshotting the true style (not the forced one) here, rather than
-// wherever design.box.lid is about to be mutated, lets it survive any number
-// of Stackable Bin/Stackable Lid switches until Handled Lid is chosen again.
+// Fix 060 Correction 2: snapshot the lid values (including the label style) so
+// they survive switching the lid off and on again.
 function rememberedLidSnapshot(design = state.design) {
   const boxLid = design?.box?.lid;
   if (!boxLid) return null;
-  const merged = lidState(design);
-  const labelStyle = lidConfiguration(design) === "stackable_lid"
-    ? (state.lidMemory?.label_style ?? merged.label_style)
-    : boxLid.label_style;
-  return { ...merged, label_style: labelStyle };
+  return { ...lidState(design), label_style: boxLid.label_style };
 }
 
 // Fix 060 Correction 3: the only safe moment to reseed/clear the remembered
@@ -497,12 +488,6 @@ function bindLidMemoryForDesign(design = state.design) {
 
 function lidPartActive(design = state.design) {
   return (design?.box?.stack?.mode || "none") === "direct" || Boolean(design?.box?.lid?.enabled);
-}
-
-function lidConfiguration(design = state.design) {
-  if ((design?.box?.stack?.mode || "none") === "direct") return "stackable_bin";
-  if (design?.box?.lid?.enabled) return design.box.lid.stackable ? "stackable_lid" : "handled_lid";
-  return "stackable_bin";
 }
 
 function lidDivider(design = state.design) {
@@ -670,10 +655,9 @@ function clearLidThicknessReport() {
 
 function syncLidForm() {
   const lid = lidState();
-  const config = lidConfiguration();
   state.lidLabelEnabled = Boolean(lid.label_enabled);
   populateLidChoices();
-  $("#bin-stackable").value = String((state.design?.box?.stack?.mode === "direct") || (lid.enabled && Boolean(lid.stackable)));
+  $("#bin-stackable").value = String(state.design?.box?.stack?.mode === "direct");
   $("#lid-choice").value = !lid.enabled ? "none" : lid.flip_enabled ? "hinged" : lid.snap_enabled ? "snap" : "resting";
   $("#lid-thickness").value = ({ thin: "1.2", medium: "1.4", thick: "1.6" })[lid.thickness] || lid.thickness;
   renderLidThicknessOptions();
@@ -694,7 +678,6 @@ function syncLidForm() {
     depthField.value = String(shown);
   }
   const hasLid = lid.enabled;
-  const handled = hasLid && !lid.stackable;
   $("#lid-option-panel").hidden = !hasLid;
   $("#lid-fit-row").hidden = lid.flip_enabled || !lid.snap_enabled;
   $("#lid-flip-note").hidden = !(hasLid && lid.flip_enabled);
@@ -707,27 +690,20 @@ function syncLidForm() {
   const labelOn = hasLid && lid.label_enabled;
   $("#lid-label-details").hidden = !labelOn;
   $("#lid-label-orientation-row").hidden = !labelOn;
-  // Style is a one-choice control for Stackable Lid (Raised is invalid and the
-  // engine already forces Flush), so it is hidden there rather than shown
-  // disabled; Handled Lid keeps the real Level-with-top/Raised choice.
-  $("#lid-label-style-row").hidden = !labelOn || !handled;
-  // Inlay depth / Raised height follows the active style; a Stackable Lid is
-  // always Inlaid, so it shows Inlay depth.
+  // Raised lettering stands proud of the lid top, so a lid that has it takes
+  // no stack seat; Level-with-top keeps the seat.
+  $("#lid-label-style-row").hidden = !labelOn;
+  // Inlay depth / Raised height follows the active style.
   const depthRow = $("#lid-label-depth-row");
   if (depthRow) {
     depthRow.hidden = !labelOn;
-    const raisedActive = handled && $("#lid-label-style").value === "raised";
+    const raisedActive = $("#lid-label-style").value === "raised";
     $("#lid-label-depth-name").textContent = raisedActive ? "Raised height" : "Inlay depth";
     depthRow.title = raisedActive
       ? "How far the lid lettering projects above the lid top."
       : "How deeply the lid lettering is cut into the lid; the lid keeps material under it.";
   }
   renderLidLabelDepthLegality();
-  const raised = [...$("#lid-label-style").options].find(option => option.value === "raised");
-  if (raised) raised.disabled = config === "stackable_lid";
-  if (config === "stackable_lid" && $("#lid-label-style").value === "raised") {
-    $("#lid-label-style").value = "flush";
-  }
   renderLidLabelEditor();
   applyStackVisibility();
 }
@@ -745,8 +721,7 @@ function stackRuleValues(mode = stackMode(), wall = state.design?.box?.wall) {
 function normalizeStackSettings(design, { restoreDefaults = false, flash = false } = {}) {
   const box = design?.box;
   if (!box) return;
-  const mode = (box.stack?.mode || "none") === "direct"
-    ? "direct" : box.lid?.enabled && box.lid.stackable ? "lid" : "none";
+  const mode = (box.stack?.mode || "none") === "direct" ? "direct" : "none";
   const hasLid = Boolean(box.lid?.enabled);
   const changed = [];
   const set = (key, value, selector) => {
@@ -819,7 +794,7 @@ function applyStackVisibility() {
         hasLid
           ? `Stacking requires at least ${fmt(values.minWall)} mm walls and a ${fmt(values.minBase)} mm base.`
           : `Stacking requires a ${fmt(values.minBase)} mm base.`,
-        `Stack height contribution: ${fmt(moduleHeight)} mm${mode === "lid" ? " including lid" : ""}.`,
+        `Stack height contribution: ${fmt(moduleHeight)} mm.`,
       ];
   if (info?.mode === mode) {
     bits.push(mode === "direct"
@@ -833,19 +808,18 @@ function applyStackVisibility() {
 
 function readStackForm(design) {
   design.box = design.box || {};
-  const previousConfig = lidConfiguration(design);
+  // The Stackable Bin choice is the bin's own base (the top bin of a stack); a
+  // lid never changes it. Every snap or resting lid receives a stack on its own.
   const stackable = $("#bin-stackable").value === "true";
   const hasLid = $("#lid-choice").value !== "none";
-  const config = hasLid ? (stackable ? "stackable_lid" : "handled_lid") : "stackable_bin";
   const remembered = lidState(design);
   if (design.box.lid) state.lidMemory = rememberedLidSnapshot(design);
+  if (stackable) design.box.stack = { mode: "direct" };
+  else delete design.box.stack;
   if (!hasLid) {
-    if (stackable) design.box.stack = { mode: "direct" };
-    else delete design.box.stack;
     delete design.box.lid;
     return;
   }
-  delete design.box.stack;
   const divider = lidDivider(design);
   let divisionLabels = Array.isArray(remembered.division_labels) ? [...remembered.division_labels] : [];
   const labelEnabled = Boolean(state.lidLabelEnabled);
@@ -853,19 +827,9 @@ function readStackForm(design) {
   if (divider && labelEnabled && !divisionLabels.some(value => String(value || "").trim())) {
     divisionLabels = dividerLabelsForLid(divider);
   }
-  // Stackable Lid always forces the active style to Flush; leaving Stackable
-  // Lid restores the remembered Handled Lid style rather than the live
-  // control, which was itself forced to Flush the moment Stackable Lid
-  // became active and so cannot be trusted here. A direct field edit while
-  // already in one of the two active configs still reads the live control.
-  const labelStyle = config === "stackable_lid"
-    ? "flush"
-    : previousConfig === "stackable_lid"
-      ? (state.lidMemory?.label_style ?? $("#lid-label-style").value)
-      : $("#lid-label-style").value;
+  const labelStyle = $("#lid-label-style").value;
   design.box.lid = {
     enabled: true,
-    stackable: config === "stackable_lid",
     thickness: $("#lid-thickness").value,
     label_enabled: labelEnabled,
     label_style: labelStyle,

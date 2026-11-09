@@ -142,7 +142,7 @@ from ._specs import (
     lid_label_relief_mm,
     lid_spec,
     lid_enabled,
-    lid_stackable,
+    lid_receives_stack,
     lid_has_handle,
     lid_has_flip,
     direct_stack_enabled,

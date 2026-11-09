@@ -49,7 +49,7 @@ from organizer_engine import (
     lid_has_handle,
     lid_label_relief_mm,
     lid_spec,
-    lid_stackable,
+    lid_receives_stack,
     text_outline,
     text_prism,
     vertical_stack_enabled,
@@ -85,7 +85,7 @@ from organizer_geometry import (
 # lands exactly on the plug's top face and the lid unions as two loose pieces
 # instead of one - and the bin above would be standing on nothing.
 STACK_LID_SKIN = 2.0      # minimum lid rise above the rim
-STACK_SEAT_DEPTH = 1.0    # lid mode: base step height == lid top recess depth
+STACK_SEAT_DEPTH = 2.0    # lid top stack seat depth == the skirt that drops into it (STACK_SKIRT_DEPTH)
 STACK_PLUG_DEPTH = 3.0    # how far a lid plug reaches into the mouth it closes
 STACK_INTERIOR_MARGIN = 0.5  # lidded bins: interior parts stop this far below the plug bottom
 STACK_SKIRT_DEPTH = 2.0   # direct mode: how far the skirt drops into the bin below
@@ -133,20 +133,19 @@ def stack_lid_rise(box: BoxSpec) -> float:
     if not lid_enabled(box):
         return 0.0
     plate = float(lid_spec(box).thickness)
-    # A stackable lid's top recess is cut into the plate, so the chosen
-    # thickness is the plate left under the recess floor.
-    return plate + (STACK_SEAT_DEPTH if lid_stackable(box) else 0.0)
+    # The lid's top stack seat is cut into the plate, so the chosen thickness
+    # is the plate left under the seat floor. The seat's rise is counted here,
+    # once, and every stack height is built from this rise.
+    return plate + (STACK_SEAT_DEPTH if lid_receives_stack(box) else 0.0)
 
 
 def stack_step_depth(box: BoxSpec) -> float:
     """How far the bin's own stepped base drops into whatever is below it.
 
-    In lid mode it only has to locate in the lid's recess.  In direct mode it
-    is the skirt, which drops into the mouth of the bin below.
+    It is the skirt, which drops into the mouth of the bin below or into the
+    stack seat of that bin's lid (the seat is cut as deep as the skirt).
     """
-    if direct_stack_enabled(box):
-        return STACK_SKIRT_DEPTH
-    return STACK_SEAT_DEPTH if lid_stackable(box) else 0.0
+    return STACK_SKIRT_DEPTH if direct_stack_enabled(box) else 0.0
 
 
 def stack_foot_growth(box: BoxSpec) -> float:
@@ -205,8 +204,9 @@ def stack_effective_box(box: BoxSpec) -> BoxSpec:
     Settings are normalized defensively.  Consecutive bodies are placed one
     stack pitch apart, so the foot overlaps without falsifying the pitch.  A
     direct bin's skirt and a lid bin's foot sit inside the typed height, so
-    the body plus its lid rise is exactly that tall.  Any lidded bin, stackable
-    or not, is shortened once by its lid's rise: the typed height is the total.
+    the body plus its lid rise is exactly that tall.  Any lidded bin is
+    shortened once by its lid's rise (plate plus the stack seat's rise): the
+    typed height is the total.
     """
     if not vertical_stack_enabled(box) and not lid_enabled(box):
         return box
@@ -238,7 +238,7 @@ def _plug_polygon(eff: BoxSpec, fit: float = STACK_FIT) -> Polygon:
 
     Three interfaces share this shape, but only the first two must keep the
     accepted 0.25 mm stack fit: the bin stepped base (direct foot) and a
-    stackable lid top recess, so a base always fits a recess.  The removable
+    lid top stack seat, so a base always fits a seat.  The removable
     lid bottom plug asks for its own fit through ``_lid_plug_polygon``.
     """
     plug = wavy_cavity_polygon(eff).buffer(-fit)
@@ -265,7 +265,7 @@ def _lid_hinge(eff: BoxSpec) -> LidHinge | None:
     if not (lid_enabled(eff) and lid_has_flip(eff)):
         return None
     rise = stack_lid_rise(eff)
-    seat = STACK_SEAT_DEPTH if lid_stackable(eff) else 0.0
+    seat = STACK_SEAT_DEPTH if lid_receives_stack(eff) else 0.0
     key = (eff.half_x, eff.half_y, eff.wall_depth, eff.corner_fillet, eff.wall,
            eff.z, eff.base_thickness, rise, seat)
     hinge = _FLIP_HINGES.get(key)
@@ -576,14 +576,12 @@ def stack_body_adders(eff: BoxSpec) -> list[trimesh.Trimesh]:
     if hinge is not None:
         rail = union(body_hinge_parts(hinge, wavy_cavity_polygon(eff),
                                       wavy_outer_polygon(eff), eff.base_thickness))
-        if lid_stackable(eff):
-            rail = difference([rail, _lid_stack_seat(eff)])
-        else:
-            # Carry the roots into the wall, then restore the pin bore.
-            # Exact contact with the cut wall can disconnect a ledge.
-            root = rail.copy()
-            root.apply_translation((0.0, 0.0, -0.05))
-            rail = difference([union([rail, root]), body_hinge_cutters(hinge)[-1]])
+        # A hinged lid never receives a stack, so the rail has no seat to
+        # clear. Carry the roots into the wall, then restore the pin bore.
+        # Exact contact with the cut wall can disconnect a ledge.
+        root = rail.copy()
+        root.apply_translation((0.0, 0.0, -0.05))
+        rail = difference([union([rail, root]), body_hinge_cutters(hinge)[-1]])
         return [rail]
     return []
 
@@ -617,7 +615,7 @@ def lid_handle_height(box: BoxSpec) -> float:
 def lid_label_height(box: BoxSpec) -> float:
     """Height Raised lid lettering stands above the lid top (0 when none)."""
     spec = lid_spec(box)
-    if not (spec.enabled and not spec.stackable and spec.label_enabled
+    if not (spec.enabled and spec.label_enabled
             and spec.label_style == "raised" and _lid_has_lettering(spec)):
         return 0.0
     return lid_label_relief_mm(spec)
@@ -664,10 +662,10 @@ def _regions_avoiding_handle(
 def lid_label_backing(box: BoxSpec) -> float:
     """Lid material under an inlaid label's surface before the pocket is cut.
 
-    A handled lid label sits on the lid top; a stackable lid label sits on the
-    floor of the recess that receives the next bin stepped foot.
+    A label on a lid that does not receive a stack sits on the lid top; on a
+    receiving lid it sits on the floor of the stack seat.
     """
-    return stack_lid_rise(box) - (STACK_SEAT_DEPTH if lid_stackable(box) else 0.0)
+    return stack_lid_rise(box) - (STACK_SEAT_DEPTH if lid_receives_stack(box) else 0.0)
 
 
 def _lid_text_parts(
@@ -679,8 +677,6 @@ def _lid_text_parts(
     if not spec.label_enabled:
         return []
     raised = spec.label_style == "raised"
-    if raised and spec.stackable:
-        raise ValueError("raised lettering cannot be used on a stackable lid")
     depth = lid_label_relief_mm(spec)
     if not raised and lid_label_backing(box) - depth < LID_LABEL_MIN_BACKING - _EPS:
         raise ValueError(
@@ -714,7 +710,7 @@ def _lid_text_parts(
 
 
 def _lid_stack_seat(eff: BoxSpec) -> trimesh.Trimesh:
-    """One unchanged recess cutter shared by the flip rail and moving plate."""
+    """The stack seat cutter: a shallow recess in the lid's top face."""
     seat = _extrude_polygon(
         _plug_polygon(eff).buffer(STACK_FIT), STACK_SEAT_DEPTH + 1.0
     )
@@ -758,8 +754,8 @@ def make_lid_parts(
     from organizer_features.lid_snap import snap_fingers
     lid = union([*parts, *bumps, *snap_fingers(eff), *_lid_alignment_tabs(eff, rim)])
 
-    if lid_stackable(eff):
-        # Recess accepting the next stackable-lid bin stepped base. It keeps
+    if lid_receives_stack(eff):
+        # Seat accepting the skirt of the bin stacked on this one. It keeps
         # the direct-foot fit, whatever the lid own plug fit is.
         lid = difference([lid, _lid_stack_seat(eff)])
     elif lid_has_handle(eff):
@@ -769,23 +765,19 @@ def make_lid_parts(
 
     if hinge is not None:
         # Lid knuckles sit in the back-top corner, flush with the back face and
-        # the lid top; a stacking lid's seat is cut through them as well.
+        # the lid top.
         lid = union([lid, *lid_hinge_parts(hinge, wavy_outer_polygon(eff))])
-        if lid_stackable(eff):
-            lid = difference([lid, _lid_stack_seat(eff)])
 
     regions = label_regions or []
     if lid_spec(eff).label_enabled and not regions:
-        safe = _plug_polygon(eff) if lid_stackable(eff) else _lid_top_polygon(eff, hinge)
-        if hinge is not None and lid_stackable(eff):
-            safe = _clip_back(safe, hinge.plate_back_y)
+        safe = _plug_polygon(eff) if lid_receives_stack(eff) else _lid_top_polygon(eff, hinge)
         regions = [(lid_spec(eff).label_text, tuple(float(v) for v in safe.bounds))]
     if hinge is not None:
         # Divider-provided label regions must also end on the moving plate.
         regions = [(text, (x0, y0, x1, min(y1, hinge.plate_back_y)))
                    for text, (x0, y0, x1, y1) in regions]
     regions = _regions_avoiding_handle(eff, regions)
-    label_surface = rim + rise - (STACK_SEAT_DEPTH if lid_stackable(eff) else 0.0)
+    label_surface = rim + rise - (STACK_SEAT_DEPTH if lid_receives_stack(eff) else 0.0)
     labels = _lid_text_parts(eff, label_surface, regions)
     sunk = [mesh for _text, mesh, raised in labels if not raised]
     if sunk:
@@ -820,7 +812,7 @@ def stack_module_height(box: BoxSpec) -> float:
     """Contribution between consecutive stack seating datums.
 
     A direct bin's skirt and a lid bin's foot overlap the bin below (the
-    skirt into its mouth, the foot into its lid recess), so each adds its
+    skirt into its mouth or into its lid's stack seat), so each adds its
     typed height less that engagement depth.
     """
     return box.z - stack_step_depth(box)
@@ -857,7 +849,8 @@ def stack_summary(box: BoxSpec) -> dict:
     eff = stack_effective_box(box)
     parts = ["Bin"] + (["Lid"] if lid_enabled(box) else [])
     summary = {
-        "mode": "lid" if lid_stackable(box) else spec.mode,
+        "mode": spec.mode,
+        "lid_receives_stack": lid_receives_stack(box),
         "enabled": vertical_stack_enabled(box),
         "module_height_mm": round(stack_module_height(box), 3),
         "closed_height_mm": round(stack_closed_height(box), 3),
@@ -920,8 +913,8 @@ def validate_stack_design(box: BoxSpec) -> None:
             )
     eff = stack_effective_box(box)
     if lid_enabled(box):
-        if lid_stackable(box) and stack_lid_rise(eff) - STACK_SEAT_DEPTH < STACK_MIN_FLOOR_SKIN - _EPS:
-            raise ValueError("the stacking lid does not leave enough material under its seat")
+        if lid_receives_stack(box) and stack_lid_rise(eff) - STACK_SEAT_DEPTH < STACK_MIN_FLOOR_SKIN - _EPS:
+            raise ValueError("the lid does not leave enough material under its stack seat")
         if lid_has_flip(box):
             _lid_hinge(eff)        # raises if the bin is too small to hinge
         else:

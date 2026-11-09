@@ -350,7 +350,7 @@ LID_HANDLE_TYPES = ("knob",)      # one handle: the knob (a saved Pull opens as 
 LID_HANDLE_SIZES = ("small", "medium", "large")
 LID_HANDLE_POSITIONS = ("left", "right", "front", "back", "middle")
 # Removable-lid plug clearance per side. Only the lid's own bottom plug uses
-# this; the direct stack foot and a stackable lid's top recess keep STACK_FIT.
+# this; the direct stack foot and a lid's top stack seat keep STACK_FIT.
 LID_FITS = ("tight", "standard", "loose")
 LID_FIT_MM = {"tight": 0.15, "standard": 0.25, "loose": 0.35}
 LID_FIT_NAMES = {"tight": "Tight", "standard": "Standard", "loose": "Loose"}
@@ -370,7 +370,6 @@ class LidSpec:
     """Ordinary-bin lid intent. Storage Box owns its separate lid system."""
 
     enabled: bool = False
-    stackable: bool | None = None
     thickness: str = LID_DEFAULT_THICKNESS
     label_enabled: bool = False
     label_style: str = "flush"
@@ -383,7 +382,7 @@ class LidSpec:
     handle_position: str = "middle"
     fit: str = "standard"
     # A back-edge interior hinge (filament pin) in place of a loose lid. Opt-in,
-    # independent of stackable, handle and label.
+    # independent of handle and label.
     flip_enabled: bool = False
     snap_enabled: bool = False
     alignment: str = "off"            # hinged lid only; a missing value is an older file: Off
@@ -392,8 +391,6 @@ class LidSpec:
     label_depth_mm: float | None = None
 
     def __post_init__(self) -> None:
-        if self.stackable is None:
-            object.__setattr__(self, "stackable", self.enabled)
         object.__setattr__(
             self, "thickness",
             LID_LEGACY_THICKNESS.get(str(self.thickness), str(self.thickness)),
@@ -419,10 +416,6 @@ class LidSpec:
                 "lid label depth must be one of "
                 + ", ".join(f"{preset:g}" for preset in LID_LABEL_RELIEFS) + " mm"
             )
-        if self.stackable and not self.enabled:
-            raise ValueError("a stackable lid must be enabled")
-        if self.stackable and self.label_style == "raised" and self.label_enabled:
-            raise ValueError("a stackable lid cannot use raised lettering")
 
 
 def lid_fit_mm(box: "BoxSpec") -> float:
@@ -449,7 +442,7 @@ def lid_spec(box: "BoxSpec") -> LidSpec:
     # Compatibility for callers that still construct StackSpec(mode="lid")
     # directly. Serialization migrates this to a real LidSpec.
     if getattr(getattr(box, "stack", None), "mode", "none") == "lid" and not spec.enabled:
-        return LidSpec(enabled=True, stackable=True)
+        return LidSpec(enabled=True)
     return spec
 
 
@@ -457,18 +450,25 @@ def lid_enabled(box: "BoxSpec") -> bool:
     return lid_spec(box).enabled
 
 
-def lid_stackable(box: "BoxSpec") -> bool:
+def lid_receives_stack(box: "BoxSpec") -> bool:
+    """Whether the lid carries the stack seat another bin can stand in.
+
+    Every snap and resting lid does. Anything standing proud of the lid top
+    means it does not: the hinge hardware of a hinged lid, the pull knob, and
+    raised lettering.
+    """
     spec = lid_spec(box)
-    return spec.enabled and spec.stackable
+    return (spec.enabled and not spec.flip_enabled and not spec.handle_enabled
+            and not (spec.label_enabled and spec.label_style == "raised"))
 
 
 def lid_has_handle(box: "BoxSpec") -> bool:
     spec = lid_spec(box)
-    return spec.enabled and not spec.stackable and spec.handle_enabled
+    return spec.enabled and spec.handle_enabled
 
 
 def lid_has_flip(box: "BoxSpec") -> bool:
-    """Whether the lid is the hinged Flip lid (stackable and plain alike)."""
+    """Whether the lid is the hinged Flip lid."""
     spec = lid_spec(box)
     return spec.enabled and spec.flip_enabled
 
@@ -478,7 +478,11 @@ def direct_stack_enabled(box: "BoxSpec") -> bool:
 
 
 def vertical_stack_enabled(box: "BoxSpec") -> bool:
-    return direct_stack_enabled(box) or lid_stackable(box)
+    """Whether the bin's own base is built to stack on what is below it.
+
+    Only the top bin needs this; a lid never asks for it (see lid_receives_stack).
+    """
+    return direct_stack_enabled(box)
 
 
 @dataclass(frozen=True)

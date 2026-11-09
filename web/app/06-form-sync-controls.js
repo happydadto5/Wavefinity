@@ -685,7 +685,7 @@ function wireControls() {
     readStackForm(state.design);
     $("#lid-label-details").hidden = !state.lidLabelEnabled;
     $("#lid-label-orientation-row").hidden = !state.lidLabelEnabled;
-    $("#lid-label-style-row").hidden = !state.lidLabelEnabled || state.design.box.lid.stackable;
+    $("#lid-label-style-row").hidden = !state.lidLabelEnabled;
     $("#lid-label-depth-row").hidden = !state.lidLabelEnabled;
     renderLidLabelEditor();
     seedPartNameFromLabel($("#lid-label-text").value);

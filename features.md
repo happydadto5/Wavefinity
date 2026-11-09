@@ -765,7 +765,7 @@ Fit changes the lid plug clearance without changing the accepted direct-stack fi
 
 ### Handle
 
-A handle is optional and starts at **None**. Stackable lids require a flat seating surface.
+A handle is optional and starts at **None**. A lid with a handle has no stack seat: it stands proud of the lid top, so nothing can be stacked on it.
 
 When on, the handle is the Knob: a square post with a diamond head. Every lid and bin builds it from one shared builder. Older Pull and Dome/Mushroom designs open as the Knob.
 
@@ -789,7 +789,7 @@ If a requested handle cannot physically fit, Wavefinity rejects it rather than s
 
 ### Flip lid
 
-The Hinged Lid kind is available for stackable and non-stackable lids alike. It does not depend on the handle: a flip lid may still carry a Knob to lift it by.
+A Hinged lid never receives a stack: stacking onto a bin with a hinged lid is refused, and giving a bin a hinged lid while another bin stands on it moves the bins above to Unplaced. A hinged-lid bin can still be the top bin of a stack. The Hinged Lid kind does not depend on the handle: a flip lid may still carry a Knob to lift it by.
 
 When on, the lid and bin gain a piano hinge across the full back edge, in the back-top corner (the back is always the hinge side; there is no side choice):
 
@@ -1222,7 +1222,7 @@ The prompt contains:
 - current bin context;
 - current typed-Space constraints when applicable;
 - an authoritative capability manifest naming, for every current palette-visible part, the exact current Designer control for each field the AI may set (not merely that a capability exists) -- footprint zone, quantity (and what Auto means), run direction, alternate ends, and the stored item's shape/length/diameter/fit (Bore offers all six shapes including the fixed hex-bit sizes; Cradle is always round) -- with legacy/derived fields (for example Bore's older orientation field, Divider's older single-axis quantity, Post's engine-only grid override, Cradle's derived floor gap/rib thickness, Label's unused font field) explained as structure to preserve, never offered as a second control for the same behavior;
-- legal modifier families, with a canonical example of each Lid & Stacking configuration (Stackable Bin, Stackable Lid, Lid with Handle);
+- legal modifier families, with a canonical example of each Lid & Stacking configuration (Stackable Bin, Lid with Handle);
 - important compatibility rules;
 - the current bin's interior bounds as a reference only: if the AI changes the bin size, every part must fit the interior of the design it returns;
 - a complete canonical design example;

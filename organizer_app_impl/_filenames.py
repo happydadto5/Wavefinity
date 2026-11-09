@@ -15,7 +15,7 @@ from organizer_engine import (
     LOCKED_TOLERANCE,
     DEFAULT_ARM_THICKNESS,
     lid_spec,
-    lid_stackable,
+    lid_receives_stack,
 )
 from organizer_features.pegboard import pegboard_standard
 from organizer_features.stack import stack_effective_box
@@ -83,7 +83,7 @@ def pegboard_adapter_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf"
 def lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
     """The ordinary bin's matching removable lid."""
     effective = stack_effective_box(box)
-    name = f"{'Stack Lid' if lid_stackable(box) else 'Handled Lid'} {box.x:g} x {box.y:g}"
+    name = f"{'Stack Lid' if lid_receives_stack(box) else 'Handled Lid'} {box.x:g} x {box.y:g}"
     if not math.isclose(effective.wall, DEFAULT_WALL, abs_tol=1e-9):
         name += f" Wall {effective.wall:g}mm"
     tidy = clean_label(part)

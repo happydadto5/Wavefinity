@@ -112,7 +112,7 @@ Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling:
 
 Spacers brace placed bins; they are Space filler, not AI-designed bins. Choose Rigid or Flexible (default; 2 mm oversized), manual height (at least 6 mm) or Auto height (default: full height of the tallest placed bin, rounded and bounded by the Space height; 15 mm fallback when none is placed). Left, Back and Right walls default on; there is no front-wall spacer. Plan and select candidates, place or refresh them, and choose quantities to print.
 
-Bins can stack when their modes, footprints and wall geometry match. Direct stacking requires the same footprint. A stackable lid can also carry multiple compatible smaller lid-stack bins on the 7 mm grid if each fits fully and they do not overlap.
+Bins can stack when their modes, footprints and wall geometry match. Direct stacking requires the same footprint. Every snap and resting lid carries a stack seat, so a same-footprint stackable bin can stand on it; a hinged lid, a lid with the knob and a lid with raised lettering take no stack.
 
 ---
 
@@ -367,10 +367,10 @@ Choosing Lid - Resting fit, Lid - Snap Fit, or Lid - Hinged Lid includes a lid a
 General rules:
 
 - direct bin-on-bin stacking uses no lid: a straight 3 mm locating skirt under the base, beveled and support-free, drops into the mouth of a same-size bin below. It only locates (nothing snaps), sits inside the typed Height, and needs no extra wall thickness;
-- stackable lid keeps a seat/recess for another bin; compatible smaller lid-stack bins may also share it when they fit on the grid without overlap;
-- handled lid is non-stackable;
+- every snap and resting lid keeps a stack seat (a recess in its top face) for another bin; there is no separate stackable-lid print choice;
+- a hinged lid, or a lid with the knob or raised lettering, has no seat and takes no stack;
 - Wavefinity may require stronger wall/base values (a lid needs the stronger wall; a direct skirt needs only a thicker base);
-- stackable lids allow inlaid, not raised, lid text; a Divider can provide one lid label per compartment;
+- raised lid lettering removes the stack seat; a Divider can provide one lid label per compartment;
 - a handle that does not fit is rejected rather than silently shrunk;
 - a flip lid keeps the closed outside size: a full-width piano hinge in the back-top corner, flush with the wavy back face and the lid top, on a 1.75 mm filament pin in a 2.3 mm bore open at one side wall and closed by a 2 mm end stop at the other. Bin-side knuckles grow from the wall on 45 degree underside bevels; the preview and export both include them. It cuts into the back top corner, keeps any stacking recess, and opens to a 110 degree stop. Continuous below-rim arc clearance may increase the closed plug gap beyond the selected fit minimum. It has no snap-fit lock bumps and is rejected when the bin is too narrow or short to hinge.
 

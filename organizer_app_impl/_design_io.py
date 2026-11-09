@@ -28,7 +28,7 @@ from organizer_engine import (
     lid_enabled,
     lid_label_relief_mm,
     lid_spec,
-    lid_stackable,
+    lid_receives_stack,
     max_wave_slope,
 )
 from organizer_features.side_openings import SIDE_OPENING_TOP_BRIDGE_MM, validate_side_openings
@@ -39,7 +39,6 @@ from organizer_features.stack import (
     stack_closed_height,
     stack_effective_box,
     stack_enabled,
-    stack_step_depth,
 )
 from organizer_inserts import (
     BASE_PLATE,
@@ -203,7 +202,7 @@ def inventory_bin_record(
         phys_x, phys_y, phys_z = physical_size_mm
     else:
         phys_x, phys_y, phys_z = box.x, box.y, box.z
-        if lid_enabled(box) and not lid_stackable(box):
+        if lid_enabled(box) and not lid_receives_stack(box):
             phys_z = stack_closed_height(box)
 
     if stack_enabled(box) or lid_enabled(box):
@@ -222,10 +221,7 @@ def inventory_bin_record(
         "stack": (
             b4b_stack_mode
             if b4b_stack_mode is not None
-            else (
-                "lid" if lid_stackable(box)
-                else getattr(getattr(box, "stack", None), "mode", "none")
-            )
+            else getattr(getattr(box, "stack", None), "mode", "none")
         ),
         "wall": wall,
         "object_height_mm": layout.object_height_mm,
@@ -653,7 +649,6 @@ def design_to_dict(
     if lid.enabled:
         box_block["lid"] = {
             "enabled": True,
-            "stackable": lid.stackable,
             "thickness": lid.thickness,
             "label_enabled": lid.label_enabled,
             "label_style": lid.label_style,
@@ -788,14 +783,13 @@ def design_from_dict(
         if legacy_stack_mode != "lid":
             stack = StackSpec(mode=legacy_stack_mode)
     lid_raw = raw.get("lid")
-    lid = LidSpec(enabled=True, stackable=True) if legacy_stack_mode == "lid" else LidSpec()
+    lid = LidSpec(enabled=True) if legacy_stack_mode == "lid" else LidSpec()
     if isinstance(lid_raw, dict) and bool(lid_raw.get("enabled", False)):
         raw_labels = lid_raw.get("division_labels", ())
         if not isinstance(raw_labels, (list, tuple)):
             raise ValueError("lid division labels must be a list")
         lid = LidSpec(
             enabled=True,
-            stackable=bool(lid_raw.get("stackable", False)),
             thickness=str(lid_raw.get("thickness", "thin")),  # absent = old default Thin; LidSpec maps words
             label_enabled=bool(lid_raw.get("label_enabled", False)),
             label_style=str(lid_raw.get("label_style", "flush")),
@@ -981,8 +975,11 @@ def design_from_dict(
     # Preserve v4 physical geometry exactly: its Z was the detached closed
     # height, which equals the v5 module height plus the engagement depth.
     # A direct skirt lives inside the typed height, so it has nothing to take off.
-    if design_version == 4 and (stack.enabled or lid.stackable) and stack.mode != "direct":
-        requested_z -= stack_step_depth(BoxSpec(stack=stack, lid=lid))
+    # (the old stackable-lid foot was 1.0 mm deep).
+    if design_version == 4 and lid.enabled and (
+            legacy_stack_mode == "lid"
+            or (isinstance(lid_raw, dict) and lid_raw.get("stackable"))):
+        requested_z -= 1.0
     box = BoxSpec(
         x, y, requested_z,
         wall,
@@ -1053,7 +1050,7 @@ def design_from_dict(
         location = label_position(data.get("label_position", "bottom"))
         return (box, layout, label, str(data.get("part_name", "")), location, False)
     layout = layout_from_dict(data.get("layout", {}))
-    if layout.surface_lightweight_base and (stack_enabled(box) or lid_stackable(box)):
+    if layout.surface_lightweight_base and stack_enabled(box):
         raise ValueError("Lightweight base is unavailable with vertical stacking")
     base_z = base_height(box, layout.mode)
     layout = replace(layout, features=tuple(

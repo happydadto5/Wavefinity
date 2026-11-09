@@ -51,12 +51,11 @@ AI_MEDIA_REASON = (
 )
 AI_MODIFIER_BLOCKS = (
     ("lid_stacking", "Lid & Stacking",
-     "Choose ONE of three configurations (see example): Stackable Bin "
-     "(box.stack = {\"mode\": \"direct\"}, no box.lid), Stackable Lid (box.lid with "
-     "stackable=true; its label style is forced to flush) or Lid with Handle "
-     "(box.lid with stackable=false; the handle is optional and OFF by default, so add handle_enabled=true only when one is asked for, with handle_type knob (the only handle), handle_size and handle_position). "
-     "Any lid, stackable or not, may also be a Flip lid: flip_enabled=true (OFF by default; add it only when a hinged lid is asked for) hinges it on the back inside edge with a 1.75 mm filament pin, independent of the handle; optional alignment=\"off\"|\"thin\"|\"standard\"|\"thick\" (default off, only add when asked) adds front-corner alignment tabs 0/1/2/3 mm deep and makes the lid need support. "
-     "Never combine a lid with direct stacking.",
+     "Stackable Bin is box.stack = {\"mode\": \"direct\"} (its own base sits in the bin below); it may be combined with a lid. "
+     "A Lid is box.lid; every snap or resting lid carries a stack seat in its top face, so another stackable bin can stand on it (there is no separate stackable-lid setting). "
+     "A lid with a handle (the handle is optional and OFF by default, so add handle_enabled=true only when one is asked for, with handle_type knob (the only handle), handle_size and handle_position), a Flip lid, or a lid with raised lettering has no stack seat and cannot receive a stack. "
+     "Any lid may also be a Flip lid: flip_enabled=true (OFF by default; add it only when a hinged lid is asked for) hinges it on the back inside edge with a 1.75 mm filament pin, independent of the handle; optional alignment=\"off\"|\"thin\"|\"standard\"|\"thick\" (default off, only add when asked) adds front-corner alignment tabs 0/1/2/3 mm deep and makes the lid need support. "
+     "",
      ("box.lid", "box.stack")),
     ("inside_handles", "Inside Grip",
      "A finger grip inside the bin (box.lift_grabbers).", ("box.lift_grabbers",)),
@@ -205,7 +204,6 @@ def _ai_modifier_examples() -> dict[str, dict[str, Any]]:
     """
     raw_blocks = {
         "lid_with_handle": {"lid": {"enabled": True}},
-        "stackable_lid": {"lid": {"enabled": True, "stackable": True}},
         "stackable_bin": {"stack": {"mode": "direct"}},
         "inside_handles": {"lift_grabbers": {
             "enabled": True, "size": "medium", "location": "sides"}},

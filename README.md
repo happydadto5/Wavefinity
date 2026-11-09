@@ -66,14 +66,14 @@ no step or gap, and its underside rests on the rim. Only the plug that enters
 the bin mouth has running clearance, set by **Lid fit** — **Tight 0.15**,
 **Standard 0.25** (default, and the fit older designs always had) or **Loose
 0.35 mm per side**. Lid fit changes only that plug; the direct bin-on-bin foot
-and a stackable lid's top recess keep the accepted 0.25 mm stack fit, and the
+and a lid's top stack seat keep the accepted 0.25 mm stack fit, and the
 lid's snap lock keeps the same interference at every fit. **Lid thickness** shows
 each choice as a measurement first — for example `2.8 mm — Medium` — resolved
 for the current bin by the same geometry that builds the lid. **Lid labels** are
 **Inlaid** or **Raised**, with **Inlay depth** or **Raised height** of 0.2, 0.4,
 0.6 or 0.8 mm (new labels start at 0.4 mm; older files keep their 0.4 mm inlaid
 and 0.6 mm raised). Inlay never cuts into the lid's required floor or seat, and
-a stackable lid cannot be Raised. The only handle is the **Knob**: a square post with a diamond head
+a lid with Raised lettering has no stack seat. Every snap and resting lid has a stack seat in its top face (a shallow recess, as deep as the skirt that drops into it; the chosen thickness is the plate under it), so a Stackable Bin can stand on any of them; a Hinged lid, or a lid with the Knob or Raised lettering, takes no stack. The only handle is the **Knob**: a square post with a diamond head
 (flared at 45 degrees, tapered back to a small flat top, printable without supports); a handle too large for
 a very small lid is refused with a message to choose a smaller size or a larger
 lid, never shrunk. The reported closed height is the tallest point of the whole

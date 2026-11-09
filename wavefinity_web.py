@@ -2831,7 +2831,6 @@ def ai_capability_manifest() -> dict[str, Any]:
     modifier_examples = {
         "lid_stacking": {
             "stackable_bin": examples["stackable_bin"],
-            "stackable_lid": examples["stackable_lid"],
             "lid_with_handle": examples["lid_with_handle"],
         },
         "inside_handles": examples["inside_handles"],

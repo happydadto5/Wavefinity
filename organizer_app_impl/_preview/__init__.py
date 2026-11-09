@@ -9,7 +9,6 @@ from organizer_engine import (
     make_top_label_ledge,
     make_lift_grabbers,
     lift_grabber_collision_volumes,
-    lid_stackable,
     lid_has_flip,
     direct_stack_enabled,
     preview_rings,

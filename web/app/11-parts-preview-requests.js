@@ -248,8 +248,8 @@ function placedRowData() {
   const modifierDetail = kind => {
     const box = state.design.box || {};
     if (kind === "lid_stacking") {
-      return !box.lid?.enabled ? "Stackable bin on bin"
-        : box.lid.stackable ? "Stackable bin on lid" : "Lid with handle";
+      if (box.lid?.enabled) return box.stack?.mode === "direct" ? "Stackable bin with lid" : "Lid";
+      return "Stackable bin on bin";
     }
     if (kind === "inside_handles") {
       return `${box.lift_grabbers?.size || "medium"} · ${box.lift_grabbers?.location || "sides"}`;
