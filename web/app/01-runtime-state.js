@@ -533,6 +533,9 @@ function cleanPartDefaultEntry(entry) {
   for (const key of Object.keys(clean.options)) {
     if (isSpaceTextKey(key)) delete clean.options[key];
   }
+  // Turned-off divider segments (merged compartments) belong to the one bin
+  // they were made in; a new divider always starts with every segment present.
+  if (entry.kind === "divider") delete clean.options.compartment_spans;
   if (entry.kind === "text") {
     delete clean.options.small_size_ack;
     delete clean.options.level;
