@@ -102,7 +102,7 @@ from organizer_b4b import (
     validate_b4b_design,
 )
 from organizer_features.stack import (
-    lid_has_flip,
+    lid_receives_stack,
     make_lid_parts,
     make_stack_lid,
     normalize_stack_settings,
@@ -738,11 +738,12 @@ def generate_organizer_files(
         lid, lid_texts = make_lid_parts(
             stack_request, lid_label_regions(stack_request, layout),
         )
-        if lid_has_flip(stack_request):
-            # A hinged lid prints top-down: turn it over about the hinge
-            # direction (the X axis, the hinge runs along the back edge) so the
-            # lid's top face is on the bed, resting at z = 0. The preview and
-            # the other lid kinds are untouched.
+        if not lid_receives_stack(stack_request):
+            # Every lid prints top-down: turn it over about the X axis (the hinge
+            # runs along the back edge, so a hinged lid turns about its hinge) so
+            # the lid's top face is on the bed, resting at z = 0. The exception is
+            # a resting lid with the stacking rim, which stands on its top face
+            # and prints as built. The preview and the saved design are untouched.
             flip = trimesh.transformations.rotation_matrix(math.pi, (1.0, 0.0, 0.0))
             lid = lid.copy()
             lid.apply_transform(flip)
