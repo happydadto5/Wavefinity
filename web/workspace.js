@@ -132,7 +132,7 @@ WS.renderSelector = () => {
   // Story 2736: in Layout, the bin clicked in the preview is the selected row, and can be opened with Edit.
   const layoutBin = !locked && WS.task === "settings" && DL.selectedRow ? DL.bin(DL.selectedRow) : null;
   const layoutPick = layoutBin && DL.isOrdinary(layoutBin) ? String(layoutBin.id) : "";
-  const rows = (here ? [{ kind: "settings", id: "settings", label: "Layout your space" }, ...items] : items).map(one => {
+  const rows = (here ? [{ kind: "settings", id: "settings", label: "Layout or print your space" }, ...items] : items).map(one => {
     if (one.kind === "group") return `<li class="ws-group" role="presentation">${wsEsc(one.label)}</li>`;
     const picked = Boolean(now) && now.kind === one.kind && (one.kind === "container" || String(now.id || "") === String(one.id || ""));
     const layoutPicked = Boolean(layoutPick) && one.kind === "bin" && String(one.id || "") === layoutPick;
@@ -719,7 +719,10 @@ WS.rowOutputs = (one, picked) => {
   const exportTitle = !live ? "Select this row to export it."
     : one.kind === "settings" ? "Bring every 3MF file in the space up to date" : `Create the 3MF file for the ${what}`;
   const attrs = `data-ws-out data-kind="${one.kind}" data-id="${wsEsc(one.id)}"`;
-  return `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live ? "" : " disabled"} title="${wsEsc(printTitle)}">Print</button>`
+  // Story 2815: the space line has no Print button; clicking the line opens the space details screen.
+  const printButton = one.kind === "settings" ? ""
+    : `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live ? "" : " disabled"} title="${wsEsc(printTitle)}">Print</button>`;
+  return printButton
     + `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live ? "" : " disabled"} title="${wsEsc(exportTitle)}">Export</button>`;
 };
 
