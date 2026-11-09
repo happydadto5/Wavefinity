@@ -31,7 +31,7 @@ from .._registry import (
 )
 from .._scoop import scoop_default_depth, scoop_region, scoop_settings
 
-from ._consts import MAX_DIVIDER_ANGLE, MIN_WEDGE_EDGE, BOTTOM_SLOPE_MAX, RIB_THICKNESS
+from ._consts import DIVIDER_CHAMFER, MAX_DIVIDER_ANGLE, MIN_WEDGE_EDGE, BOTTOM_SLOPE_MAX, RIB_THICKNESS
 from ._bottoms import _divider_sloped_bottoms, _custom_divider_sloped_bottoms
 from ._shelf import divider_division_texts
 from ._walls import _divider_wall, _full_span_leaning_divider, _full_span_divider
@@ -239,6 +239,7 @@ def build_divider(
         _wj_scoop_solids = _divider_scoops(box, spec_feature, base_z)
         from .._walljoin import (
             _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+            _divider_join_material,
         )
         from .._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
         if spec_feature.options.get(WALL_JOIN_FLAG):
@@ -254,9 +255,11 @@ def build_divider(
             _wj_keep_clear = Polygon()  # empty
             _wj_material = _footprint_from_solids(solids)
             _wj_wall_tabs = _join_tabs(
-                box, _wj_material, _wj_keep_clear, JOIN_BAND,
+                box, _divider_join_material(solids, base_z, DIVIDER_CHAMFER + 0.01),
+                _wj_keep_clear, JOIN_BAND,
                 sides=_joined_sides(box, _wj_material, "divider",
                                     spec_feature.along),
+                follow_shape=True,
             )
             solids.extend(_tab_meshes(
                 _wj_wall_tabs, options["height"], base_z))
@@ -340,6 +343,7 @@ def build_divider(
     _wj_scoop_solids = _divider_scoops(box, spec_feature, base_z)
     from .._walljoin import (
         _join_tabs, _tab_meshes, _footprint_from_solids, _joined_sides,
+            _divider_join_material,
     )
     from .._bore._consts import JOIN_BAND, WALL_JOIN_FLAG
     if spec_feature.options.get(WALL_JOIN_FLAG):
@@ -356,8 +360,10 @@ def build_divider(
         _wj_keep_clear = Polygon()  # empty
         _wj_material = _footprint_from_solids(solids)
         _wj_wall_tabs = _join_tabs(
-            box, _wj_material, _wj_keep_clear, JOIN_BAND,
+            box, _divider_join_material(solids, base_z, DIVIDER_CHAMFER + 0.01),
+            _wj_keep_clear, JOIN_BAND,
             sides=_joined_sides(box, _wj_material, "divider", along),
+            follow_shape=True,
         )
         solids.extend(_tab_meshes(_wj_wall_tabs, height, base_z))
         if _wj_scoop_solids:

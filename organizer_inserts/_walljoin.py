@@ -11,6 +11,7 @@ import math
 
 import numpy as np
 import shapely
+import shapely.affinity
 import trimesh
 from shapely.geometry import LineString, Polygon, box as shapely_box
 
@@ -158,10 +159,48 @@ def _web_polygon(points, width: float, avoid, limit, keep_clear) -> list[Polygon
     return chosen
 
 
+def _swept(piece: Polygon, dx: float, dy: float):
+    """``piece`` plus everything it covers when slid by ``(dx, dy)``.
+
+    The union of the piece, its slid copy and, for every outline edge, the
+    quad between the edge and its slid copy - the exact swept area, with no
+    bounding-box padding.
+    """
+    from shapely.ops import unary_union
+    parts = [piece, shapely.affinity.translate(piece, dx, dy)]
+    for ring in (piece.exterior, *piece.interiors):
+        coords = list(ring.coords)
+        for (ax, ay), (bx, by) in zip(coords, coords[1:]):
+            quad = Polygon([(ax, ay), (bx, by), (bx + dx, by + dy), (ax + dx, ay + dy)])
+            if quad.is_valid and quad.area > 1e-9:
+                parts.append(quad)
+    return unary_union(parts).buffer(0)
+
+
+def _divider_join_material(solids, base_z: float, above: float):
+    """Plan footprint of the parts of ``solids`` higher than ``above`` over ``base_z``.
+
+    Faces lying wholly within ``above`` of the floor (the flared base foot)
+    are left out, so a wall join is sized to the divider's real thickness,
+    not to the wider footing at the floor.
+    """
+    cut = base_z + above
+    kept = []
+    for solid in solids:
+        tris = np.asarray(solid.triangles, dtype=float)
+        tris = tris[tris[:, :, 2].max(axis=1) > cut]
+        if len(tris):
+            kept.append(trimesh.Trimesh(
+                vertices=tris.reshape(-1, 3),
+                faces=np.arange(len(tris) * 3).reshape(-1, 3), process=False))
+    return _footprint_from_solids(kept) if kept else _footprint_from_solids(solids)
+
+
 def _join_tabs(
     box: BoxSpec, material, keep_clear, fill: float, hug: bool = False,
     web_width: float = BORE_WALL, wavy: bool = False, avoid: tuple = (),
     sides: tuple = ("right", "left", "back", "front"),
+    follow_shape: bool = False,
 ) -> list[Polygon]:
     """Blends that carry ``material`` straight into any bin wall it reaches.
 
@@ -177,6 +216,10 @@ def _join_tabs(
     ``hug`` (a Walls Only Bore whose bin is sized around it) also bridges a gap
     of up to one grid step: the bin can only grow in whole steps, so the sleeves
     are carried the rest of the way to the wall on every side.
+
+    ``follow_shape`` (dividers) makes each tab the material's own outline
+    carried to the wall, instead of the bounding box of that outline, so the
+    join is no wider than what it joins - wave profile included.
     """
     whole = Zone.whole(box)
     limit = wavy_outer_polygon(box).buffer(-JOIN_SKIN)
@@ -250,6 +293,16 @@ def _join_tabs(
             continue
         span = gap if gap > JOIN_TOUCH else 0.0
         for piece in _polygons(material.intersection(band(span))):
+            if follow_shape:
+                full = make(piece.bounds, span)
+                fx0, fy0, fx1, fy1 = full.bounds
+                px0, py0, px1, py1 = piece.bounds
+                dx = {"right": fx1 - px1, "left": fx0 - px0}.get(side_name, 0.0)
+                dy = {"back": fy1 - py1, "front": fy0 - py0}.get(side_name, 0.0)
+                tab = _swept(piece, dx, dy).intersection(full)
+                tab = tab.difference(keep_clear).intersection(limit)
+                tabs.extend(part for part in _polygons(tab) if part.area > 1e-6)
+                continue
             tab = make(piece.bounds, span).difference(keep_clear).intersection(limit)
             tabs.extend(part for part in _polygons(tab) if part.area > 1e-6)
     return tabs
