@@ -5,6 +5,7 @@ from functools import lru_cache
 from organizer_engine._specs import LOCK_PROTRUSION, LOCK_NOTCH_CLEARANCE, LidSpec
 from organizer_engine._wave import _wall_lock_paths, _lock_profile, lock_z_levels
 from organizer_geometry import _sweep_profile, _extrude_polygon, difference, intersection, union
+from organizer_geometry._stages import uninterruptible
 
 _SNAP_REF_Z = 40.0
 SNAP_FLOOR_GAP = 0.5 - LOCK_NOTCH_CLEARANCE
@@ -34,7 +35,11 @@ def snap_fingers(box):
     ref_z = box.z if box.flat_inside > 0 else _SNAP_REF_Z
     key = replace(box, z=ref_z, lid=LidSpec(enabled=True, snap_enabled=True))
     fingers = []
-    for finger in _snap_fingers_cached(key):
+    # A newer preview request must not abandon this half way: the cache only
+    # keeps a finished set, so an abandoned build would be redone from nothing.
+    with uninterruptible():
+        built = _snap_fingers_cached(key)
+    for finger in built:
         finger = finger.copy()
         finger.apply_translation((0.0, 0.0, box.z - ref_z))
         fingers.append(finger)

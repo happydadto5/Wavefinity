@@ -95,11 +95,19 @@ def _sweep_profile(
             next_index = (index + 1) % loop
             faces.append((a + index, a + next_index, b + next_index))
             faces.append((a + index, b + next_index, b + index))
-    for index in range(1, loop - 1):
-        faces.append((0, index, index + 1))
+    # The end caps face outward only when wound against the side walls, which
+    # depends on which way round the profile runs; orient them to match so the
+    # sweep is consistent as built (fix_winding below stays as the fallback).
+    area = sum(t0 * z1 - t1 * z0 for (t0, z0), (t1, z1)
+               in zip(profile_tz, profile_tz[1:] + profile_tz[:1]))
     last = (rings - 1) * loop
     for index in range(1, loop - 1):
-        faces.append((last, last + index + 1, last + index))
+        if area > 0:
+            faces.append((0, index + 1, index))
+            faces.append((last, last + index, last + index + 1))
+        else:
+            faces.append((0, index, index + 1))
+            faces.append((last, last + index + 1, last + index))
 
     mesh = trimesh.Trimesh(
         vertices=np.asarray(vertices, dtype=float),
@@ -107,7 +115,10 @@ def _sweep_profile(
         process=True,
     )
     mesh.merge_vertices()
-    trimesh.repair.fix_winding(mesh)
+    # fix_winding walks every face in Python: only run it when needed. The
+    # volume sign below fixes an inside-out solid.
+    if not mesh.is_winding_consistent:
+        trimesh.repair.fix_winding(mesh)
     if mesh.volume < 0:
         mesh.invert()
     if not (mesh.is_watertight and mesh.is_winding_consistent):

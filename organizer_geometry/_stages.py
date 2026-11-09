@@ -118,6 +118,25 @@ def checkpoint() -> None:
         raise BuildAbandoned()
 
 
+@contextmanager
+def uninterruptible() -> Iterator[None]:
+    """Let the work inside finish even if a newer request replaces the build.
+
+    For a shared, cached piece (e.g. the snap fingers): abandoning it half way
+    throws the work away, so every later edit would start it again from nothing.
+    The abandon takes effect at the first checkpoint after this block.
+    """
+    build = _current()
+    if build is None or build.superseded is None:
+        yield
+        return
+    saved, build.superseded = build.superseded, None
+    try:
+        yield
+    finally:
+        build.superseded = saved
+
+
 _F = TypeVar("_F", bound=Callable)
 
 
