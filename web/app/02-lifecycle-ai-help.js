@@ -126,7 +126,8 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
 }
 
 async function flushSpaceDesignAutosave({ visible = true, materialize = false,
-    deferDraftPreview = false, noDeferredPreview = false, leavingDesign = false } = {}) {
+    deferDraftPreview = false, noDeferredPreview = false, leavingDesign = false,
+    abandonBuild = false } = {}) {
   if (designTargetIsStructural()) return true; // Fix 103
   if (!typedSpaceOrdinaryBin()) return true;
   // Fix 109 A1: leaving Design for Space is where a first bin becomes durable.
@@ -148,6 +149,16 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false,
     try {
       // Story 2773: leaving (e.g. Manage Spaces) with an already-current preview
       // rebuilds nothing; only a label-only difference is recorded.
+      if (abandonBuild && state.previewSettledRequest !== state.previewRequest) {
+        // Story 2777: New Bin during a geometry rebuild switches at once. The
+        // unfinished preview is dropped (the server abandons the superseded build
+        // when the new bin's preview starts); only the design's settings are saved.
+        invalidatePendingPreview();
+        await persistSpaceDesignSource(null, true);
+        await SP.flushDefaults();
+        saved = true;
+        return saved;
+      }
       if (previewShowsCurrentGeometry()) {
         if (state.previewDesignKey !== JSON.stringify(state.design)) state.previewDesignKey = JSON.stringify(state.design);
       } else await refreshPreview();

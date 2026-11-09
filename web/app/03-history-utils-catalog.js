@@ -21,7 +21,7 @@ async function designerNewBin(acceptTransition = null, { skipBank = false } = {}
     // the pre-fix "bank only if changed" behavior would still resurrect a
     // deleted bin that had unsaved edits.
     if (typedSpaceOrdinaryBin() && !skipBank &&
-        !(await flushSpaceDesignAutosave({ deferDraftPreview: true, materialize: true }))) {
+        !(await flushSpaceDesignAutosave({ deferDraftPreview: true, materialize: true, abandonBuild: true }))) {
       const discard = await appConfirmAction({
         title: "Discard Invalid Changes?",
         message: "This bin has invalid changes that cannot be saved. Discard those changes and start a new bin?",
