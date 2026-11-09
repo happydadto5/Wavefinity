@@ -75,8 +75,8 @@ B4B_FRONT_LABEL_SIDE_OVERLAP = 1.0      # how far its lip reaches onto the plate
 B4B_FRONT_LABEL_MAX_WIDTH_FRACTION = 0.5  # holder <= this fraction of the case width
 # Clear vertical gap that must exist above the plate's fully-inserted top edge
 # so it can be dropped straight in without fouling the latch/handle hardware
-# above it - just the plate's own height of travel to slide it into place,
-# not a whole extra plate height on top of that. See
+# above it - the side channels reach the seated plate's top, so the plate must
+# travel its own full height clear of them, on top of its seated height. See
 # ``_b4b_front_label_bottom_z``.
 B4B_FRONT_LABEL_INSERT_CLEARANCE = 2.0
 B4B_FRONT_LABEL_PREFERRED_HEIGHT_FRACTION = 1.0 / 3.0
@@ -107,14 +107,16 @@ def _b4b_front_label_bottom_z(
     the lowest position can't clear the corridor, i.e. the plate must shrink
     further before a position exists at all.
 
-    The plate slides straight down into the holder from above, so the
-    corridor only has to fit the plate's own height of travel plus
-    ``B4B_FRONT_LABEL_INSERT_CLEARANCE`` of working clearance above the
-    seated position - not a second plate height on top of that for a full
-    lift-out."""
+    The plate slides straight down into the holder from above, and the side
+    channels run up to the seated plate's top edge, so its edges stay
+    captured until the plate has risen by its entire height.  The corridor
+    above the seated position therefore has to fit the plate's own height
+    again (the travel to clear the channels) plus the plate's height in the
+    seated position, plus ``B4B_FRONT_LABEL_INSERT_CLEARANCE`` of working
+    clearance - the seated fit alone is not enough to insert or remove it."""
     preferred_bottom = case_z * B4B_FRONT_LABEL_PREFERRED_HEIGHT_FRACTION
     required_span = (
-        B4B_FRONT_LABEL_HOLDER_DEPTH + plate_h
+        B4B_FRONT_LABEL_HOLDER_DEPTH + 2.0 * plate_h
         + B4B_FRONT_LABEL_INSERT_CLEARANCE
     )
     bottom_z = min(preferred_bottom, insertion_ceiling_z - required_span)
@@ -558,8 +560,9 @@ def b4b_front_label_geometry(box: BoxSpec):
     Before settling on a size, the fit is checked against the real vertical
     insertion corridor: the clear space above the holder's open top (up to
     ``insertion_ceiling_z``, the lowest latch/handle obstruction) must fit
-    the plate's own height of travel to slide it into place, plus
-    ``B4B_FRONT_LABEL_INSERT_CLEARANCE`` of working clearance.  The holder
+    the seated plate plus its own full height of travel to slide clear of the
+    side channels, plus ``B4B_FRONT_LABEL_INSERT_CLEARANCE`` of working
+    clearance.  The holder
     first tries its preferred resting height - about a third of the way up
     the inside height - and, if that alone doesn't leave enough headroom,
     drops as low as ``B4B_FRONT_LABEL_BOTTOM_MIN`` to buy back the
