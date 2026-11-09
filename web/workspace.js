@@ -412,9 +412,13 @@ WS.transition = async (task, arg) => {
   if (!WS.open()) return false;
   if (from === "settings" && task !== "settings" && !(await WS.closeSettings())) return false;
   if (task === "settings") {
-    if (!(await WS.toSpaceMode())) return false;
-    SP.editSpace();
+    // Story 2818: the left side swaps to the space details screen at once; the mode switch and
+    // the form load below (the heavy part) fill it in. A failed switch puts the old screen back.
+    const shown = WS.task;
     WS.task = "settings";
+    WS.sync();
+    if (!(await WS.toSpaceMode())) { WS.task = shown; WS.sync(); return false; }
+    SP.editSpace();
     return true;
   }
   if (task === "print") {
