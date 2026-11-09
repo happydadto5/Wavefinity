@@ -54,7 +54,7 @@ AI_MODIFIER_BLOCKS = (
      "Choose ONE of three configurations (see example): Stackable Bin "
      "(box.stack = {\"mode\": \"direct\"}, no box.lid), Stackable Lid (box.lid with "
      "stackable=true; its label style is forced to flush) or Lid with Handle "
-     "(box.lid with stackable=false; the handle is optional and OFF by default, so add handle_enabled=true only when one is asked for, with handle_type knob|pull, knob_shape mushroom|dome for a knob, handle_size and handle_position). "
+     "(box.lid with stackable=false; the handle is optional and OFF by default, so add handle_enabled=true only when one is asked for, with handle_type knob (the only handle), handle_size and handle_position). "
      "Any lid, stackable or not, may also be a Flip lid: flip_enabled=true (OFF by default; add it only when a hinged lid is asked for) hinges it on the back inside edge with a 1.75 mm filament pin, independent of the handle; optional alignment=\"off\"|\"thin\"|\"standard\"|\"thick\" (default off, only add when asked) adds front-corner alignment tabs 0/1/2/3 mm deep and makes the lid need support. "
      "Never combine a lid with direct stacking.",
      ("box.lid", "box.stack")),

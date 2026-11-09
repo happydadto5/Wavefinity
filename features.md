@@ -766,7 +766,7 @@ Fit changes the lid plug clearance without changing the accepted direct-stack fi
 
 A handle is optional and starts at **None**. Stackable lids require a flat seating surface.
 
-When on, the handle is a Dome knob or Pull. Older Mushroom knobs open as Dome.
+When on, the handle is the Knob: a square post with a diamond head. Every lid and bin builds it from one shared builder. Older Pull and Dome/Mushroom designs open as the Knob.
 
 Saved designs from before this option load with the handle off.
 
@@ -788,7 +788,7 @@ If a requested handle cannot physically fit, Wavefinity rejects it rather than s
 
 ### Flip lid
 
-The Hinged Lid kind is available for stackable and non-stackable lids alike. It does not depend on the handle: a flip lid may still carry a Knob or Pull to lift it by.
+The Hinged Lid kind is available for stackable and non-stackable lids alike. It does not depend on the handle: a flip lid may still carry a Knob to lift it by.
 
 When on, the lid and bin gain a piano hinge across the full back edge, in the back-top corner (the back is always the hinge side; there is no side choice):
 

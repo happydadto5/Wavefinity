@@ -55,7 +55,7 @@ never silent generation-only overrides.
 **Lid & Stacking** offers three ordinary-bin **Stacking Methods**: **Stackable
 bin on bin** stacks directly with no lid, **Stackable bin on lid** closes the bin
 and keeps a flat seat for the next bin, and **Lid with handle — non-stackable**
-adds a knob or pull but does not stack. The Specification row shows the lid state and opens these controls in place. Controls follow the method: bin on bin shows no
+adds a knob but does not stack. The Specification row shows the lid state and opens these controls in place. Controls follow the method: bin on bin shows no
 lid controls; bin on lid shows Lid thickness, Lid fit and the label controls;
 lid with handle also shows Handle type, size and position and full label
 choices. Choices you set under one method are remembered when you switch away
@@ -73,8 +73,8 @@ for the current bin by the same geometry that builds the lid. **Lid labels** are
 **Inlaid** or **Raised**, with **Inlay depth** or **Raised height** of 0.2, 0.4,
 0.6 or 0.8 mm (new labels start at 0.4 mm; older files keep their 0.4 mm inlaid
 and 0.6 mm raised). Inlay never cuts into the lid's required floor or seat, and
-a stackable lid cannot be Raised. The **Knob** is a rounded dome that flares into
-the lid and the **Pull** a smooth arch with flared roots; a handle too large for
+a stackable lid cannot be Raised. The only handle is the **Knob**: a square post with a diamond head
+(flared at 45 degrees, tapered back to a small flat top, printable without supports); a handle too large for
 a very small lid is refused with a message to choose a smaller size or a larger
 lid, never shrunk. The reported closed height is the tallest point of the whole
 lid, handle and lettering included. Storage Box (B4B) lids are a separate system

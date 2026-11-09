@@ -408,7 +408,6 @@ const LID_DEFAULTS = {
   enabled: false, stackable: true, thickness: "1.6",
   label_enabled: false, label_style: "flush", label_orientation: "horizontal",
   label_text: "", division_labels: [], handle_enabled: false, handle_type: "knob",
-  knob_shape: "dome",
   handle_size: "medium", handle_position: "middle", fit: "standard",
   flip_enabled: false,
   snap_enabled: false,
@@ -874,9 +873,7 @@ function readStackForm(design) {
     label_text: $("#lid-label-text").value,
     division_labels: divisionLabels,
     handle_enabled: ($("#lid-handle-type").value || "none") !== "none",
-    handle_type: ["knob", "pull"].includes($("#lid-handle-type").value)
-      ? $("#lid-handle-type").value : remembered.handle_type,
-    knob_shape: "dome",
+    handle_type: "knob",
     handle_size: $("#lid-handle-size").value || remembered.handle_size,
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
     flip_enabled: $("#lid-choice").value === "hinged",

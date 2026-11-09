@@ -843,11 +843,9 @@ def catalog_payload() -> dict[str, Any]:
             ],
             "default_thickness": "1.6",
             # A handle is opt-in: handle_enabled defaults to false and a
-            # stackable lid never has one. Knobs come in two shapes.
+            # stackable lid never has one. There is one handle: the knob.
             "handle_default_enabled": False,
-            "handle_types": ["knob", "pull"],
-            "knob_shapes": ["mushroom", "dome"],
-            "default_knob_shape": "mushroom",
+            "handle_types": ["knob"],
             "handle_sizes": ["small", "medium", "large"],
             "handle_positions": ["left", "right", "front", "back", "middle"],
             "label_styles": ["flush", "raised"],

@@ -594,7 +594,7 @@ def _lid_handle_mesh(box: BoxSpec) -> trimesh.Trimesh:
     # handle on the plate that is actually there.
     outer = _lid_top_polygon(eff, _lid_hinge(eff))
     return resolve_lid_handle(outer.bounds, spec.handle_type, spec.handle_size,
-                              spec.handle_position, spec.knob_shape)
+                              spec.handle_position)
 
 
 def _lid_has_lettering(spec) -> bool:
