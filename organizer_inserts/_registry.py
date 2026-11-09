@@ -18,6 +18,7 @@ Builder = Callable[[BoxSpec, Feature, float], list[trimesh.Trimesh]]
 Defaults = Callable[[BoxSpec, "Feature", float], dict[str, object]]
 FEATURE_BUILDERS: dict[str, Builder] = {}
 FEATURE_DEFAULTS: dict[str, Defaults] = {}
+FEATURE_FINALIZERS: dict[str, Callable[..., None]] = {}
 
 # The four sides of a bin, shared by every option that names one.
 SIDE_CHOICES = tuple((side, side.title()) for side in ("front", "back", "left", "right"))
@@ -227,6 +228,18 @@ def defaults(kind: str) -> Callable[[Defaults], Defaults]:
     return register
 
 
+def finalizer(kind: str) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    """Register a step that rewrites a kind's merged options in place.
+
+    Runs after the saved options are laid over the defaults, so a derived
+    value (one computed from another setting) wins over any stale saved copy.
+    """
+    def register(function: Callable[..., None]) -> Callable[..., None]:
+        FEATURE_FINALIZERS[kind] = function
+        return function
+    return register
+
+
 def feature_definition(kind: str) -> FeatureDefinition:
     """Return one complete registered feature definition."""
     return FEATURE_DEFINITIONS[kind]
@@ -286,4 +299,7 @@ def resolved_options(
         name: value for name, value in spec_feature.options.items()
         if value is not None
     })
+    finalize = FEATURE_FINALIZERS.get(spec_feature.kind)
+    if finalize:
+        finalize(box, spec_feature, base_z, resolved)
     return resolved

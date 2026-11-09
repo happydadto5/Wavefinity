@@ -27,7 +27,14 @@ from .._registry import (
     SIDE_CHOICES,
     defaults,
     feature,
+    finalizer,
     resolved_options,
+)
+from ._height import (
+    DIVIDER_HEIGHT_CHOICES,
+    DIVIDER_HEIGHT_DEFAULT,
+    divider_height,
+    divider_height_percent,
 )
 from .._scoop import scoop_default_depth, scoop_region, scoop_settings
 
@@ -56,7 +63,8 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
         # option and keep their geometry via the explicit-vs-absent rules in
         # _divider_grid_texts / divider_division_texts.
         "division_label_orientation": "side_to_side",
-        "height": connector_keep_out(box) - base_z,
+        "height_percent": DIVIDER_HEIGHT_DEFAULT,
+        "height": divider_height(box, {}, base_z),
         "angle": 0.0,
         # Fence-post spacing: this many equal gaps fill the zone's cross
         # axis, including from each end divider to its side of the zone -
@@ -89,12 +97,24 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
     }
 
 
+@finalizer("divider")
+def _divider_finalize(box: BoxSpec, one: "Feature", base_z: float, resolved: dict) -> None:
+    """The height is always the picked percentage of the bin height.
+
+    A design saved with a millimetre height resolves to the closest pick, and
+    the mm figure follows the bin's current height.
+    """
+    saved = one.options or {}
+    resolved["height_percent"] = divider_height_percent(box, saved, base_z)
+    resolved["height"] = divider_height(box, saved, base_z)
+
+
 def divider_max_bottom_angle(box: BoxSpec, one: Feature, base_z: float) -> float:
     """Maximum slope from the same longest-run/height rule as the builder."""
     options = one.options or {}
     one = resolve_divider_span(box, one)
-    height = float(options.get("height") or connector_keep_out(box) - base_z)
-    run = one.zone.width if one.along == "x" else one.zone.depth
+    height = divider_height(box, options, base_z)
+    run =one.zone.width if one.along == "x" else one.zone.depth
     grid_x, grid_y = divider_grid_counts(options)
     if grid_x or grid_y:
         x_edges, y_edges = divider_grid_edges(
@@ -194,7 +214,8 @@ def _divider_scoops(
     options=(
         OptionDefinition("Width", "thickness", "1.6", minimum=MIN_WEDGE_EDGE, note="mm thickness of each divider wall; must fit inside the bin"),
         OptionDefinition("Walls", "wall_style", "straight", "enum", choices=(("straight", "Straight"), ("wavy", "Wavy"))),
-        OptionDefinition("Height", "height", "", minimum=0.1, note="mm; blank = full interior height"),
+        OptionDefinition("Height", "height_percent", str(DIVIDER_HEIGHT_DEFAULT), "enum", choices=tuple((str(value), label) for value, label in DIVIDER_HEIGHT_CHOICES), note="divider wall height as a percentage of the bin's inside height; follows the bin when its height changes"),
+        OptionDefinition("Height (mm)", "height", "", "number", False, legacy=True, minimum=0.1, note="older millimetre height; a saved value opens on the closest height_percent pick and is otherwise ignored"),
         OptionDefinition("Spacing", "spacing", "", minimum=0.1, note="mm between dividers; blank = even split of the count"),
         OptionDefinition("Degree °", "bottom_angle", "0", minimum=-BOTTOM_SLOPE_MAX, maximum=BOTTOM_SLOPE_MAX, note="degrees of bottom slope either way; any non-zero value gives the divider a sloped bottom"),
         OptionDefinition("Number of crossbars", "bottom_supports", "3", "integer", minimum=1, note="whole number of bottom crossbars"),

@@ -78,7 +78,8 @@ def _feature_height(box: BoxSpec, one: Feature, base_z: float) -> float:
         )
         return base_z + tool_thickness + lift
     if one.kind == "divider":
-        return base_z + options.get("height", connector_keep_out(box) - base_z)
+        from organizer_inserts._divider._height import divider_height
+        return base_z + divider_height(box, options, base_z)
     return base_z + options.get("height", 12.0)
 
 

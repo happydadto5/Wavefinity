@@ -760,6 +760,22 @@ function dividerThicknessField(value, key = "option:thickness") {
   </label>`;
 }
 
+// The Divider's wall height is a pick of the bin's inside height, like the
+// wall-thickness dropdown; the backend maps an older millimetre height onto
+// the closest of these four, so `value` is always one of them.
+const DIVIDER_HEIGHT_CHOICES = [
+  [90, "90%"], [75, "75% - Partial"], [50, "50% - Half way"], [25, "25% - Short"],
+];
+function dividerHeightField(value, key = "option:height_percent") {
+  const current = number(value, 90);
+  const optionsHtml = DIVIDER_HEIGHT_CHOICES.map(([percent, label]) =>
+    `<option value="${percent}" ${percent === current ? "selected" : ""}>${escapeHtml(label)}</option>`
+  ).join("");
+  return `<label><span class="field-label">Wall height</span>
+    <select data-draft="${key}">${optionsHtml}</select>
+  </label>`;
+}
+
 function scoopDepthField(key, value, options = {}) {
   const html = field("Scoop height", key, value, {
     unit: "% of bin height", step: "1", min: "1", max: "100",

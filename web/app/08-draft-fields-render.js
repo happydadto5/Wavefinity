@@ -313,14 +313,16 @@ function renderDraftFields() {
       const shownGx = (number(gx, 0) === 0) ? "" : gx;
       const shownGy = (number(gy, 0) === 0) ? "" : gy;
       const shownThickness = opt.thickness ?? state.draftResolvedOptions?.thickness ?? 1.6;
-      const shownHeight = opt.height ?? state.draftResolvedOptions?.height ?? "";
+      // The resolved value is always one of the four picks (an older mm height
+      // is already mapped to the closest by the backend).
+      const shownHeightPercent = state.draftResolvedOptions?.height_percent ?? opt.height_percent ?? 90;
       const wallStyle = opt.wall_style ?? state.draftResolvedOptions?.wall_style ?? "straight";
       html += `<div class="editor-group divider-layout"><div class="pair divider-xy-pair">
         ${field("X count", "option:count_x", shownGx, { min: "0", max: "200", step: "1", tip: "Walls dividing the bin left to right. 0 for none. At most 200." })}
         ${field("Y count", "option:count_y", shownGy, { min: "0", max: "200", step: "1", tip: "Walls dividing the bin front to back. 0 for none. At most 200." })}
       </div><div class="pair triple">
         ${dividerThicknessField(shownThickness)}
-        ${field("Wall height", "option:height", fmtBlank(shownHeight), { unit: "mm", step: "0.5", min: "0.1" })}
+        ${dividerHeightField(shownHeightPercent)}
         ${wallStyleSelect(wallStyle)}
       </div></div>`;
     } else {
@@ -513,7 +515,7 @@ function renderDraftFields() {
     // Rendered by the Divider slope block below only for Crossbars.
     if (option.key === "bottom_supports") continue;
     // Slope and angle are handled specifically for divider below.
-    if (info.kind === "divider" && ["bottom_angle", "angle", "thickness", "height", "wall_style"].includes(option.key)) continue;
+    if (info.kind === "divider" && ["bottom_angle", "angle", "thickness", "height", "height_percent", "wall_style"].includes(option.key)) continue;
     // The scoop depth field is rendered with its own % unit and help text above.
     if (info.kind === "scoop") continue;
     // Audit 006 J1: Pocket size/geometry/Walls are already rendered as
@@ -889,8 +891,6 @@ function draftFieldProblems() {
     fields.push({ key: "depth", name: "Bore depth", dataDraft: depthKey });
   } else if (kind === "post") {
     fields.push({ key: "height", name: "Post height", dataDraft: "option:height" });
-  } else if (kind === "divider") {
-    fields.push({ key: "height", name: "Divider height", dataDraft: "option:height" });
   }
   for (const { key, name, dataDraft } of fields) {
     const input = $(`#draft-fields input[data-draft="${dataDraft}"]`);

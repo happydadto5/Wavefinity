@@ -20,6 +20,7 @@ from organizer_geometry import (
     intersection,
 )
 from .._core import Feature, Zone, connector_keep_out
+from ._height import divider_height
 from .._text import preview_lettering_layer
 from .._divider_cells import (
     DividerCell,
@@ -199,8 +200,7 @@ def _divider_grid_rim_texts(
     side = {"front": "bottom", "back": "top"}.get(side, side)
     if side not in ("left", "right", "top", "bottom"):
         side = "top"
-    height = float(options.get("height", connector_keep_out(box) - base_z)
-                   or (connector_keep_out(box) - base_z))
+    height = divider_height(box, options, base_z)
     cells = divider_cells(box, spec_feature, base_z)
     max_depth = min(DIVISION_SHELF_DEPTH, max(2.0, height - 1.0))
 
@@ -448,7 +448,7 @@ def divider_division_texts(
     along = spec_feature.along
     count = spec_feature.count or 1
     thickness = float(options.get("thickness", RIB_THICKNESS) or RIB_THICKNESS)
-    height = float(options.get("height", connector_keep_out(box) - base_z) or (connector_keep_out(box) - base_z))
+    height = divider_height(box, options, base_z)
     spacing = float(options.get("spacing", 0.0) or 0.0)
     if spacing <= 0.0:
         span = (zone.y1 - zone.y0) if along == "x" else (zone.x1 - zone.x0)
