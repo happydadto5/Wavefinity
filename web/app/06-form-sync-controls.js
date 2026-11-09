@@ -399,6 +399,7 @@ function setCameraView(view) {
   Object.assign(state.camera, CAMERA_VIEWS[view] || CAMERA_VIEWS.reset);
   $$('[data-camera-view]').forEach(button => button.classList.toggle("active", button.dataset.cameraView === view && view !== "reset"));
   renderPreview3D();
+  updateDividerEditBreadcrumb();
 }
 
 // A click-to-spin alternative to dragging: 15 degrees a step, or 2 with
@@ -412,6 +413,7 @@ function rotateCameraStep(direction, fine) {
   else if (direction === "down") camera.elevation = Math.max(-89, Math.min(89, camera.elevation - step));
   $$('[data-camera-view]').forEach(button => button.classList.remove("active"));
   renderPreview3D();
+  updateDividerEditBreadcrumb();
 }
 
 // Bin/Interior/Lid/Xray each toggle their own state only - see the state.binVisible
@@ -473,16 +475,19 @@ function updateDividerEditBreadcrumb() {
   if (!button) return;
   const in3d = $('.canvas-wrap[data-canvas="3d"]')?.classList.contains("active");
   button.hidden = !in3d || eligibleGridDividerIndexes().length === 0;
+  const top = isTopCameraView();
+  button.textContent = top ? "Click individual segments to remove" : "Switch to Top to remove individual dividers";
+  button.classList.toggle("divider-edit-note-static", top);
 }
 
-async function openDividerSegmentEditor() {
-  const eligible = eligibleGridDividerIndexes();
-  if (!eligible.length) return;
-  const index = eligible.includes(state.selected) ? state.selected : eligible[0];
-  if (state.selected !== index) await selectedFeature(index);
-  if (state.selected !== index || state.draft?.kind !== "divider") return;
-  activatePreviewView("2d");
-  renderLayout2D();
+// A bin's Top view: camera straight down (flat plan, no tilt).
+function isTopCameraView(camera = state.camera) {
+  return camera.elevation >= 90;
+}
+
+// The note is a shortcut to Top when it asks for Top; in Top it is just a hint.
+function openDividerSegmentEditor() {
+  if (!isTopCameraView()) setCameraView("top");
 }
 
 // The Space/Drawer canvas has no matching .view-tab (there is no third tab -

@@ -540,6 +540,7 @@ async function editDividerSegment(originalHit) {
     markDraftChanged();
     renderDraftFields();
     renderLayout2D();
+    renderPreview3D();
     await refreshDraft();
   } finally {
     state.dividerTopologyBusy = false;

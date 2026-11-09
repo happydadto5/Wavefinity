@@ -916,6 +916,7 @@ function renderPreview3D() {
     return;
   }
   checkBinSizeChange();
+  updateDividerEditBreadcrumb();
   const overlayCanvas = $("#preview-3d");
   const solidCanvas = $("#preview-3d-solid");
   // B4B ships its geometry as compact mesh groups (state.preview.meshes) -
@@ -1070,6 +1071,21 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
   draw3DDimensions(context, box, camera, project, outerXYZ);
   drawDimensionGhost3D(context, camera, project, box, outerXYZ);
   drawFrontMarker(context, camera, point => project(iso(point, camera)), width, height);
+  drawTopDividerSegments(context, camera, project);
+}
+
+// Top view only: the clickable divider segments, drawn flat over the bin the
+// way the old 2D mode drew them. Elsewhere there are no segment hits.
+function drawTopDividerSegments(context, camera, project) {
+  state.dividerSegmentHits = [];
+  if (!isTopCameraView(camera) || b4bEnabled() || baseTrimEnabled() || !state.design?.layout?.features) return;
+  const z = number(state.design.box?.z, 0);
+  const toCanvas = point => project(iso([point[0], point[1], z], camera));
+  layoutFeatures().forEach((feature, index) => {
+    if (feature.kind !== "divider") return;
+    const active = index === state.selected && state.draft?.kind === "divider" ? state.draft : feature;
+    renderDividerSegments(context, active, index, toCanvas);
+  });
 }
 
 // B4B's assembled_envelope_mm accounts for hinge/latch/handle/stacking

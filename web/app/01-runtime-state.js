@@ -312,7 +312,8 @@ const INSERT_TINT_MIX = .5;
 const DRAFT_HIGHLIGHT = "#1f6b45";
 const AUTO_FOOTPRINT_KINDS = new Set(["cradle", "bore", "post", "slot"]);
 const CAMERA_VIEWS = {
-  top: { yaw: 45, elevation: 89, zoom: 1 },
+  // Straight down, north up: a flat plan view (the renderer is orthographic).
+  top: { yaw: 0, elevation: 90, zoom: 1 },
   front: { yaw: 0, elevation: 8, zoom: 1 },
   side: { yaw: 90, elevation: 8, zoom: 1 },
   reset: { yaw: 45, elevation: 76, zoom: 1 },

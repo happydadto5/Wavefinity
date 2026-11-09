@@ -300,12 +300,23 @@ function wireSceneInteraction(canvas, camera, render) {
     if (!drag) {
       const handle = hitDimensionHandle("3d", canvasPointFromEvent(canvas, event));
       if (updateDimensionHover("3d", handle, canvas)) repaint();
+      if (canvas.id === "preview-3d" && isTopCameraView(camera)) {
+        const hit = handle ? null : hitDividerSegment(canvasPointFromEvent(canvas, event));
+        if (!sameDividerHit(hit, state.dividerSegmentHover)) {
+          state.dividerSegmentHover = hit;
+          canvas.style.cursor = hit ? "pointer" : "";
+          repaint();
+        }
+      }
       return;
     }
     if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4) {
       drag.moved = true;
       $$('[data-camera-view]').forEach(button => button.classList.remove("active"));
     }
+    // A click (pointer jitter under the threshold) must not nudge the camera:
+    // Top view is exactly straight down, and clicking its segments keeps it so.
+    if (!drag.moved) return;
     camera.yaw = drag.yaw + (event.clientX - drag.x) * drag.yawPerPixel;
     camera.elevation = Math.max(-89, Math.min(89, drag.elevation - (event.clientY - drag.y) * drag.elevationPerPixel));
     repaint();
@@ -319,6 +330,14 @@ function wireSceneInteraction(canvas, camera, render) {
     if (state.dimensionDrag) {
       commitDimensionDrag(canvas);
       repaint();
+      return;
+    }
+    const segmentHit = drag && !drag.moved && canvas.id === "preview-3d" && isTopCameraView(camera)
+      ? hitDividerSegment(canvasPointFromEvent(canvas, event)) : null;
+    if (segmentHit) {
+      drag = null;
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      if (!state.designMutationBusy) void editDividerSegment(segmentHit);
       return;
     }
     const clickedSupport = drag && !drag.moved && clickedPreviewSupport(canvas, event);
