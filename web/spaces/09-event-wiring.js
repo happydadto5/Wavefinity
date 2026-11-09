@@ -2,9 +2,6 @@
 
 SP.wire = () => {
   wireInfoButtons();
-  $("#space-cancel-edit")?.addEventListener("click", async () => {
-    if (await SP.flushSetupAutosave()) SP.cancelInlineEdit();
-  });
   document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close")
     .forEach(el => el?.addEventListener("click", SP.close));
   // A changed cabinet setup asks before it is discarded: X, backdrop, Escape and Back.

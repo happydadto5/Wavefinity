@@ -23,8 +23,6 @@
 .ws-card-text small { color: var(--muted); font-size: 12px; }
 body.ws-on #bin-actions { display: none !important; }
 
-body.ws-on #space-cancel-edit { display: none; }
-
 /* Two persistent panes beneath the bar: about 40% left, the preview keeps the rest. */
 body.ws-on .app-shell { height: calc(100vh - 79px - var(--ws-chrome, 0px)); }
 

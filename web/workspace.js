@@ -419,6 +419,8 @@ WS.transition = async (task, arg) => {
     WS.sync();
     if (!(await WS.toSpaceMode())) { WS.task = shown; WS.sync(); return false; }
     SP.editSpace();
+    // Story 2817: the space details screen is the layout row alone; an edited bin's old highlight clears.
+    DL.selectedRow = null; DL.emit();
     return true;
   }
   if (task === "print") {
