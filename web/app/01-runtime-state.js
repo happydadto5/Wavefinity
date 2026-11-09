@@ -704,6 +704,15 @@ function rememberSpacePreferences(design, previous) {
     if (!settings) continue;
     const before = modifierIsActive(kind, previous) ? modifierSettingsFromDesign(kind, previous) : null;
     if (JSON.stringify(settings) === JSON.stringify(before)) continue;
+    // The lid label Size is a Space preference of its own: it moves only when a
+    // bin's size was actually adjusted, not when another lid setting changed.
+    if (kind === "lid_stacking" && settings.lid) {
+      const kept = parts.lid_stacking?.settings?.lid?.label_size;
+      if (before?.lid && kept &&
+          (settings.lid.label_size || "default") === (before.lid.label_size || "default")) {
+        settings.lid.label_size = kept;
+      }
+    }
     parts[kind] = { kind, settings };
     partsChanged = true;
   }

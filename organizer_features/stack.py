@@ -41,8 +41,7 @@ from organizer_engine import (
     TEXT_DEPTH,
     _lock_profile,
     direct_stack_enabled,
-    LID_LABEL_DEFAULT_MAX_CAP,
-    LID_LABEL_SIZE_CAP_FACTOR,
+    LID_LABEL_SIZE_CAP_MM,
     LID_THICKNESSES,
     lid_alignment_mm,
     lid_enabled,
@@ -699,8 +698,8 @@ def _lid_text_parts(
             probe = affinity.rotate(probe, 90.0, origin=(0.0, 0.0))
         bx0, by0, bx1, by1 = probe.bounds
         scale = min(avail_x / max(bx1 - bx0, _EPS), avail_y / max(by1 - by0, _EPS))
-        cap = min(LID_LABEL_DEFAULT_MAX_CAP * LID_LABEL_SIZE_CAP_FACTOR[spec.label_size],
-                  10.0 * scale)
+        # A fixed letter height by name; only the lid's own fit may make it smaller.
+        cap = min(LID_LABEL_SIZE_CAP_MM[spec.label_size], 10.0 * scale)
         if cap < LID_LABEL_MIN_CAP:
             raise ValueError(f"lid label '{text}' cannot fit this compartment")
         outline = text_outline(text, cap)

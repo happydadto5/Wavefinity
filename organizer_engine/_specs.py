@@ -363,15 +363,13 @@ LID_LABEL_RELIEFS = (0.2, 0.4, 0.6, 0.8)
 LID_LABEL_RELIEF_NAMES = {0.2: "Thin", 0.4: "Default", 0.6: "Thick", 0.8: "Thickest"}
 LID_LABEL_LEGACY_INLAY_MM = 0.4
 LID_LABEL_LEGACY_RAISED_MM = 0.6
-# Lid lettering Size.  "default" is today's lettering: the largest cap height that
-# fits the label zone, never above LID_LABEL_DEFAULT_MAX_CAP.  Every other step
-# scales that ceiling by a fixed factor, in ladder order; the lid's fit (zone
-# size, handle keep-out, readable floor) still applies to every step.
+# Lid lettering Size.  Each name is a fixed letter (cap) height in mm, the same on
+# every bin, Default being 8 mm.  The lid's fit still applies to every step: a
+# label too long for its zone shrinks to fit it (never below the readable floor).
 LID_LABEL_SIZES = B4B_LABEL_SIZES
-LID_LABEL_DEFAULT_MAX_CAP = 15.0
-LID_LABEL_SIZE_CAP_FACTOR = {
-    "very_small": 0.25, "small": 0.4, "medium": 0.65, "default": 1.0,
-    "medium_large": 1.4, "large": 1.9, "extra_large": 2.5,
+LID_LABEL_SIZE_CAP_MM = {
+    "very_small": 3.0, "small": 4.0, "medium": 6.0, "default": 8.0,
+    "medium_large": 10.0, "large": 12.0, "extra_large": 15.0,
 }
 
 
