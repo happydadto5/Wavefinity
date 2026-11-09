@@ -1112,7 +1112,7 @@ def detect_bambu_studio(custom_path: str | None = None) -> Path | None:
         return _find_bambu_studio_linux()
 
 
-def launch_slicer(slicer_path: Path, files: list[Path]) -> Path | None:
+def launch_slicer(slicer_path: Path, files: list[Path], *, already_on_plate: bool = False) -> Path | None:
     """Open ``files`` directly in the slicer.
 
     Fix 058: Wavefinity never manufactures a Bambu project for handoff.
@@ -1132,6 +1132,14 @@ def launch_slicer(slicer_path: Path, files: list[Path]) -> Path | None:
         raise FileNotFoundError(f"Slicer executable not found: {slicer_path}")
     if not files:
         raise ValueError("No files to open in slicer")
+    if not already_on_plate:
+        # Every launch path comes through here, so parts are never handed over
+        # stacked at their assembled spots. Copies are laid out side by side;
+        # a single file is returned untouched. A layout that cannot fit raises
+        # before anything is staged or opened.
+        files, layout_issues = space_out_for_plate(list(files), _printer_profile_for({}))
+        if layout_issues:
+            raise ValueError("The parts do not fit the active printer:\n" + "\n".join(layout_issues))
     if is_bambu_studio_executable(slicer_path):
         staged = stage_bambu_inputs(files)
         args = [str(slicer_path.resolve())] + [str(p) for p in staged]
@@ -2125,7 +2133,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     try:
-        project_path = launch_slicer(slicer_path, handoff_files)
+        project_path = launch_slicer(slicer_path, handoff_files, already_on_plate=True)
     except Exception as error:
         return {
             "partial": True,
