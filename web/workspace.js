@@ -182,12 +182,12 @@ WS.renderPrint = () => {
   const none = n === 0 || DL.busy;
   return `<div class="ws-page ws-print">
     <h2>Print Space</h2>
-    <p class="ws-printcount" role="status">${n === 0 ? "Tick what to print. The preview stays live on the right." : `${n} ${n === 1 ? "item" : "items"} ticked`}</p>
+    <p class="ws-printcount" role="status">${n === 0 ? "Select what to print. The preview stays live on the right." : `${n} ${n === 1 ? "item" : "items"} selected`}</p>
     <ul class="ws-items" aria-label="Items to print">${WS.tickRows(items)}</ul>
     <div class="ws-toprow" role="group" aria-label="Print Space">
       ${hosted ? "" : `<button type="button" class="button primary dl-small" data-ws-act="print-picked"${none || noSlicer ? " disabled" : ""}${noSlicer ? ' title="A slicer is needed to print. Open Printer Settings… to choose one."' : ""}>Print Selected</button>`}
       <button type="button" class="button secondary dl-small" data-ws-act="export-picked"${none ? " disabled" : ""}>Export Selected</button>
-      <button type="button" class="button secondary dl-small" data-ws-act="pick-all">Tick all</button>
+      <button type="button" class="button secondary dl-small" data-ws-act="pick-all">Select all</button>
       <button type="button" class="button secondary dl-small" data-ws-act="pick-none">Clear</button>
       <button type="button" class="button secondary dl-small" data-ws-act="cancel">Cancel</button>
       <button type="button" class="button secondary dl-small" data-ws-act="cancel">Done</button>
