@@ -389,7 +389,7 @@ SP.drawerBinContents = () => {
   const rows = (drawer.placements || []).map(p => DL.bin(p.bin)).filter(one => one && DL.isOrdinary(one));
   if (!rows.length) return "empty";
   const limits = cabinetActiveLimits();
-  const fit = insideBinFitForStorageBox({ ...limits, z: Math.floor(limits.z - 2) }, freshDesignForCurrentFolder());
+  const fit = insideBinFitForStorageBox({ ...limits, z: Math.floor(limits.z) }, freshDesignForCurrentFolder());
   return rows.some(one => SP.binMatchesInteriorFit(one, fit))
     ? "full_interior" : "ordinary";
 };

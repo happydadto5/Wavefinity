@@ -95,7 +95,7 @@ async function designerMakeInsideBin() {
   if (!(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   const candidate = freshDesignForCurrentFolder();
   const limits = state.activeSpace?.kind === "storage_drawers" ? cabinetActiveLimits() : null;
-  const interior = limits ? { ...limits, z: Math.floor(limits.z - 2) } : state.activeSpace;
+  const interior = limits ? { ...limits, z: Math.floor(limits.z) } : state.activeSpace;
   const fit = insideBinFitForStorageBox(interior, candidate);
   if (fit.error) {
     toast(limits ? fit.error.replace("Storage Box", "drawer") : fit.error, true, 6000);
