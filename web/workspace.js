@@ -60,7 +60,14 @@ WS.items = () => {
   if (WS.containerKind()) add("container", "container", WS.containerName());
   const bins = (DL.bins || []).filter(DL.isOrdinary);
   // Story 2753: a bin placed in a drawer carries that drawer's label in its own row, not only the group line.
-  const binItem = (one, drawerLabel = "") => add("bin", one.id, DL.label(one), {
+  // The bin whose editor is open shows the name as typed in Part Name, not the last saved one, so a rename
+  // lands in the pick list in the same edit (Story 2806). Blank typing falls back to the saved label.
+  const liveLabel = one => {
+    const typed = WS.task === "bin" && String(one.id) === String(state.designInventoryId ?? "")
+      ? ($("#part-name")?.value || "").trim() : "";
+    return typed || DL.label(one);
+  };
+  const binItem = (one, drawerLabel = "") => add("bin", one.id, liveLabel(one), {
     note: [drawerLabel, `${fmt(one.x)} × ${fmt(one.y)} mm`].filter(Boolean).join(" · "),
     printable: DL.printEligible(one),
   });
