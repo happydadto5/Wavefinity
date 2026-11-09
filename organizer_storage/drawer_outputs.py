@@ -15,12 +15,15 @@ from organizer_app import clean_label
 from organizer_engine import export_mesh, export_text_body_3mf, validate_3mf
 from organizer_outputs.printer_profile import component_fit, normalise_printer_profile, orientation_transform
 from organizer_storage.drawers import normalise_storage_drawers_definition
-from organizer_storage.drawer_geometry import resolve_storage_drawers_plan
+from organizer_storage.drawer_geometry import SD_BIN_CLEARANCE_MM, resolve_storage_drawers_plan
 
 STRUCTURAL_OUTPUT_KEY = "storage_drawers"
 # Version 4: Fix 1113 — Fix 114 changed runner, dovetail, pull, top-retention and
 # support geometry, so pre-114 saved manifests must report needs-update.
-STRUCTURAL_GENERATOR_VERSION = 4
+# Version 5: Fix 2765 — Story 2754 added SD_BIN_CLEARANCE_MM to every drawer pitch
+# and the cabinet height, so pre-2754 saved manifests must report needs-update; the
+# signature now carries the clearance, pitches and cabinet height.
+STRUCTURAL_GENERATOR_VERSION = 5
 # The exact app-owned namespace for temp files and rollback backups in a Space folder.
 CABINET_DEBRIS_PREFIX = ".wavefinity-cabinet-"
 # (Fix 096 A7) The local transaction namespace: only files under this prefix
@@ -59,6 +62,9 @@ def effective_structural_state(space: dict) -> dict:
         "drawer_labels_enabled": block["drawer_labels_enabled"],
         "material": {key: block[key] for key in ("cabinet_wall_mm", "cabinet_base_mm", "cabinet_top_mm", "drawer_wall_mm", "drawer_base_mm")},
         "effective_base_mm": plan.effective_base_mm, "effective_top_mm": plan.effective_top_mm,
+        "bin_clearance_mm": SD_BIN_CLEARANCE_MM,
+        "drawer_pitches_mm": list(plan.drawer_pitches_mm),
+        "cabinet_height_mm": plan.outside_xyz[2],
     }
     # Only Open geometry depends on the frame width. Full stays independent of a
     # hidden Open selection, in geometry and in this freshness signature.
