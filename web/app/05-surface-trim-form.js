@@ -404,7 +404,7 @@ function stackMode() {
 }
 
 const LID_DEFAULTS = {
-  enabled: false, thickness: "1.6",
+  enabled: false, thickness: "1.2",
   label_enabled: false, label_style: "flush", label_orientation: "horizontal", label_size: "default",
   label_text: "", division_labels: [], handle_enabled: false, handle_type: "knob",
   handle_size: "medium", handle_position: "middle", fit: "standard",
@@ -589,11 +589,22 @@ function renderLidThicknessOptions() {
   // pending the plain names show rather than another bin's measurements.
   const fresh = report && report.epoch === state.lidThicknessEpoch
     && report.key === lidThicknessKey(state.design);
-  const names = { "1.0": "Very thin", "1.2": "Thin", "1.4": "Medium", "1.6": "Thick", "1.8": "Very thick" };
+  // Names come from the backend catalog; only the default carries one.
+  const names = Object.fromEntries((state.catalog?.lid_rules?.thicknesses || []).map(t => [t.value, t.name || ""]));
   [...select.options].forEach(option => {
     const mm = fresh ? report.values?.[option.value] : undefined;
-    option.textContent = Number.isFinite(mm) ? `${fmt(mm)} mm \u2014 ${names[option.value]}` : names[option.value];
+    const name = names[option.value];
+    const label = Number.isFinite(mm) ? `${fmt(mm)} mm` : `${option.value} mm`;
+    option.textContent = name ? `${label} \u2014 ${name}` : label;
   });
+}
+
+// A lid saved on the previous ladder (1.8) is not a choice any more, but it must
+// still show as what it is; add an option for it rather than dropping the value.
+function ensureLidThicknessOption(value) {
+  const select = $("#lid-thickness");
+  if (!select || !value || [...select.options].some(option => option.value === value)) return;
+  select.add(new Option(`${value} mm`, value));
 }
 
 // Everything that can change the resolved lid rise: the design plus the raw
@@ -662,7 +673,9 @@ function syncLidForm() {
   $("#bin-stackable").value = String(state.design?.box?.stack?.mode === "direct");
   $("#lid-choice").value = !lid.enabled ? "none" : lid.flip_enabled ? "hinged" : lid.snap_enabled ? "snap" : "resting";
   $("#lid-stack-rim").value = String(Boolean(lid.stack_rim));
-  $("#lid-thickness").value = ({ thin: "1.2", medium: "1.4", thick: "1.6" })[lid.thickness] || lid.thickness;
+  const savedThickness = ({ thin: "1.2", medium: "1.4", thick: "1.6" })[lid.thickness] || lid.thickness;
+  ensureLidThicknessOption(String(savedThickness));
+  $("#lid-thickness").value = String(savedThickness);
   renderLidThicknessOptions();
   $("#lid-fit").value = lid.fit || "standard";
   $("#lid-alignment").value = lid.alignment || "off";

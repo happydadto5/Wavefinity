@@ -337,11 +337,14 @@ class StackSpec:
         return self.mode != "none"
 
 
-# Absolute plate thicknesses in mm, on a 0.2 grid. The keys are what is saved.
-LID_THICKNESSES = ("1.0", "1.2", "1.4", "1.6", "1.8")
-LID_THICKNESS_NAMES = {"1.0": "Very thin", "1.2": "Thin", "1.4": "Medium",
-                       "1.6": "Thick", "1.8": "Very thick"}
-LID_DEFAULT_THICKNESS = "1.6"
+# Absolute plate thicknesses in mm, on a 0.2 grid, centred on 1.2 (the default).
+# The keys are what is saved. Only the default carries a name.
+LID_THICKNESSES = ("0.8", "1.0", "1.2", "1.4", "1.6")
+LID_THICKNESS_NAMES = {"1.2": "Default"}
+LID_DEFAULT_THICKNESS = "1.2"
+# Lids saved on the previous ladder (Very thick 1.8) still load as themselves;
+# they are not offered as a new choice.
+LID_SAVED_ONLY_THICKNESSES = ("1.8",)
 # Older files stored relative words; they open on the new ladder.
 LID_LEGACY_THICKNESS = {"thin": "1.2", "medium": "1.4", "thick": "1.6"}
 LID_LABEL_STYLES = ("flush", "raised")
@@ -409,7 +412,7 @@ class LidSpec:
         choices = (
             (self.fit, LID_FITS, "lid fit"),
             (self.alignment, LID_ALIGNMENTS, "lid alignment"),
-            (self.thickness, LID_THICKNESSES, "lid thickness"),
+            (self.thickness, LID_THICKNESSES + LID_SAVED_ONLY_THICKNESSES, "lid thickness"),
             (self.label_style, LID_LABEL_STYLES, "lid label style"),
             (self.label_orientation, LID_LABEL_ORIENTATIONS, "lid label orientation"),
             (self.label_size, LID_LABEL_SIZES, "lid label size"),

@@ -802,7 +802,7 @@ def make_stack_lid(box: BoxSpec) -> trimesh.Trimesh:
 
 
 def lid_thickness_options(box: BoxSpec) -> dict[str, float]:
-    """The plate thickness in mm of every Very thin..Very thick choice."""
+    """The plate thickness in mm of every lid thickness choice."""
     if not lid_enabled(box):
         return {}
     return {name: float(name) for name in LID_THICKNESSES}

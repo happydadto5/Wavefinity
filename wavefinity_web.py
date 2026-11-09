@@ -838,10 +838,10 @@ def catalog_payload() -> dict[str, Any]:
         },
         "lid_rules": {
             "thicknesses": [
-                {"value": name, "mm": float(name), "name": LID_THICKNESS_NAMES[name]}
+                {"value": name, "mm": float(name), "name": LID_THICKNESS_NAMES.get(name, "")}
                 for name in LID_THICKNESSES
             ],
-            "default_thickness": "1.6",
+            "default_thickness": "1.2",
             # A handle is opt-in: handle_enabled defaults to false and a
             # stackable lid never has one. There is one handle: the knob.
             "handle_default_enabled": False,
