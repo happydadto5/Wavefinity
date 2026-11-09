@@ -227,7 +227,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   state.previewSupportPolygons = [];
   state.previewPickMeshContext = null;
   const visibleGroups = b4bEnabled()
-    ? new Set(state.b4bView === "base" ? ["base"] : state.b4bView === "lid" ? ["lid"] : ["base", "lid"])
+    ? new Set(["base", "lid"])
     : baseTrimEnabled() ? new Set(["bin"])
       : new Set([...(state.binVisible ? ["bin"] : []), ...(state.lidVisible ? ["lid"] : []), ...(state.interiorVisible ? ["interior", "measured"] : [])]);
   if (!geometry?.length) {
@@ -867,13 +867,6 @@ function currentPreviewClassify() {
 // describe its fully-opaque bin+interior result.)
 function currentPreviewPasses(buffers) {
   if (b4bEnabled()) {
-    const view = state.b4bView;
-    if (view === "base") {
-      return { passes: [{ group: "base", alpha: 1 }], aabb: buffers.groups.base?.aabb, visible: new Set(["base"]) };
-    }
-    if (view === "lid") {
-      return { passes: [{ group: "lid", alpha: 1 }], aabb: buffers.groups.lid?.aabb, visible: new Set(["lid"]) };
-    }
     return {
       passes: [{ group: "base", alpha: 1 }, { group: "lid", alpha: 1 }],
       aabb: buffers.allAabb, visible: new Set(["base", "lid"]),
@@ -1100,12 +1093,8 @@ function b4bAssembledEnvelope() {
   return state.preview?.b4b?.assembled_envelope_mm;
 }
 
-// The contact shadow represents something resting on the ground. That's
-// true for the whole assembly and for an isolated Base, but not for an
-// isolated Lid - it is normally shown up on its hinges, not sitting flat -
-// so a full-case shadow under it would be a footprint nothing is casting.
+// The contact shadow represents the whole assembly resting on the ground.
 function b4bShadowBox() {
-  if (b4bEnabled() && state.b4bView === "lid") return null;
   return state.design?.box;
 }
 

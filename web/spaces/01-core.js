@@ -10,7 +10,6 @@ const SP = {
   otherSpacesFresh: false,
   setup: null,
   busy: false,
-  resume: null,
   isUpdate: false,
   collisionOrigin: null,
   // A read-only setup candidate offered only to its matching type card.

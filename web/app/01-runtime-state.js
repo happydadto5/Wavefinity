@@ -176,9 +176,6 @@ const state = {
   interiorVisible: true,
   lidVisible: true,
   xrayOn: false,
-  // All/Base/Lid preview state for a Storage Box preview response. The Designer
-  // only ever holds ordinary bins now, so this stays "all".
-  b4bView: "all",
   serverInstance: null,
   apiCompat: null,
   kindRequest: 0,

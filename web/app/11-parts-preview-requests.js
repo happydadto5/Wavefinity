@@ -573,7 +573,6 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   state.canGenerate = !messages.length;
   updateGenerateAvailability();
   if (actions.length) setError("", actions);
-  state.textMeta = result.text_meta || [];
   updateBoreCeilingWarning(result.bore_ceiling_warning);
   updateStorageBoxHeightWarning(result.storage_box_height_warning);
   state.fitError = Boolean(result.feature_errors.length || result.draft_error);

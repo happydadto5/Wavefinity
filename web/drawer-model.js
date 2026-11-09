@@ -22,7 +22,6 @@ const DL = {
   UNIT: 7,
   stackSteps: { lid: 1, direct: 2, b4b: 2 },   // replaced by the server's values on load
   stackMetrics: {},
-  storageBoxHeadroomDefault: 1, // replaced by the server's canonical default on load
   active: false,
   loaded: false,
   loadPromise: null,
@@ -997,10 +996,8 @@ DL.adopt = data => {
   const previousBins = DL.bins;
   DL.bins = data.bins || DL.bins;
   if (data.bins && DL.unstackResized(previousBins)) toast("This bin was stacked and will be move to unplaced bins.");
-  DL.file = data.file || DL.file;
   if (data.stack_steps) DL.stackSteps = data.stack_steps;
   if (data.stack_metrics) DL.stackMetrics = data.stack_metrics;
-  if (data.storage_box_headroom_default_mm !== undefined) DL.storageBoxHeadroomDefault = data.storage_box_headroom_default_mm;
   if (DL.layout && data.layout && Object.hasOwn(data.layout, "design_specs")) {
     DL.layout.design_specs = DL.cleanTextConsent(data.layout.design_specs);
     // Any saved-design change can alter a leaned Bore's reference envelope.

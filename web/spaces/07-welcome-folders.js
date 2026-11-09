@@ -232,7 +232,6 @@ SP.welcomeOtherSpaces = () => {
 };
 
 SP.showResume = info => {
-  SP.resume = info;
   SP.showOnly("welcome-resume");
   const space = info.space || {};
   const kind = SP_KINDS[space.kind] || SP_KINDS.drawer;

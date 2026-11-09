@@ -74,7 +74,6 @@ SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
   DL.loaded = false;
   DL.exists = false;
   DL.bins = [];
-  DL.file = "";
   DL.warnings = [];
   DL.report = null;
   DL.reportTicket += 1;

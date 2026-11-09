@@ -21,7 +21,6 @@ const WS = {
   printContainer: false,
   busy: false,
   message: "",
-  landing: null,
   placeSeen: "",
   signature: "",
   auxSignature: "",
@@ -477,7 +476,6 @@ WS.arrive = () => {
     WS.settle(0);
   } else if (state.folderMode !== "space") {
     WS.task = "bin";
-    WS.landing = null;
   }
 };
 
@@ -940,7 +938,6 @@ SP.showTypeCards = () => {
   return null;
 };
 SP.showResume = (info, { startup = false } = {}) => {
-  SP.resume = info;
   SP.close();
   if (startup) {
     // Launch always shows the open screen (spaces, My Bins, New Space) - never the last space,
