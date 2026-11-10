@@ -147,7 +147,8 @@ WS.renderSelector = () => {
     const drawerButtons = one.kind === "settings" ? WS.drawerButtons(locked) : "";
     // Story 2840: the Layout line's one button, Manage, opens the same space details screen as a click on the line.
     const manage = one.kind === "settings"
-      ? `<button type="button" class="ws-out" data-ws-pick="settings" data-id="" title="Open the space details"${locked ? " disabled" : ""}>Manage</button>` : "";
+      ? `<button type="button" class="ws-out" data-ws-pick="settings" data-id="" title="Open the space details"${locked ? " disabled" : ""}>Manage</button>`
+        + `<button type="button" class="ws-out" data-ws-act="print-space" title="Choose bins and the container to print or export"${locked ? " disabled" : ""}>Select…</button>` : "";
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     // Story 2840: Print and Export are rendered only on the selected row; other rows carry no output buttons.
     return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked || layoutPicked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked || layoutPicked}"${locked ? " disabled" : ""}>
@@ -679,6 +680,7 @@ WS.onAction = async (act, button, event) => {
     }
     case "print-picked": return WS.printPicked(event);
     case "export-picked": return WS.exportPicked();
+    case "print-space": return WS.go("print");
     case "pick-all": return WS.pickAll();
     case "pick-none": WS.printPick = new Set(); WS.printContainer = false; WS.sync(); return null;
     case "cancel": return WS.resume();

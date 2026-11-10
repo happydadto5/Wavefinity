@@ -107,8 +107,8 @@ body.ws-task-bin #space-head,
 body.ws-task-container #space-head .space-head-title,
 body.ws-task-container #space-actions > .button-row { display: none; }
 body.ws-task-settings #space-actions,
-body.ws-task-settings #space-head .space-head-title,
-body.ws-task-settings .dl-section[aria-label="Inventory"] { display: none; }
+body.ws-task-settings #space-head .space-head-title { display: none; }
+/* Story 2841: the Inventory list (select, Print Selected, Export Space) stays on the space details screen. */
 /* A dimension lives in one place: size and construction of a box or cabinet are in its container editor. */
 body.ws-task-settings #space-fields-portable,
 body.ws-task-settings #space-fields-storage_drawers { display: none; }
