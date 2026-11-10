@@ -123,10 +123,8 @@ DP.build = () => {
             <span id="dl-batch-filter-note" class="dl-batch-summary" hidden>Some bins are hidden by the current search/filter. Clear it to include all bins.</span>
           </div>
           <div class="dl-batch-actions">
-            <button type="button" id="dl-batch-save" class="button secondary">Save Selected</button>
-            <button type="button" id="dl-batch-export-space" class="button secondary">Export Space</button>
-            <button type="button" id="dl-batch-print" class="button secondary">Print Selected to Bambu Studio</button>
-            <button type="button" id="dl-batch-print-complete" class="button secondary">Print Space (bins + spacers)</button>
+            <button type="button" id="dl-batch-export-space" class="button secondary">Export whole space</button>
+            <button type="button" id="dl-batch-print" class="button secondary">Print whole space</button>
           </div>
         </div>
         <div id="dl-inv-list" class="dl-inv-list"></div>
@@ -290,14 +288,14 @@ DP.wire = () => {
   $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllPrintable());
   $("#dl-batch-clear").addEventListener("click", () => DP.clearPrintSelection());
   $("#dl-batch-delete").addEventListener("click", () => DP.deleteSelected());
-  $("#dl-batch-save").addEventListener("click", () =>
-    DL.saveSelectedBins(DP.batchSaveIds(), true));
-  // Story 2829: exports every printable bin and the container, as the removed tree-line Export did.
-  $("#dl-batch-export-space").addEventListener("click", () => WS.exportAll());
-  $("#dl-batch-print").addEventListener("click", () =>
-    DL.printSelectedBins(DP.printSelectionPayload(), true));
-  $("#dl-batch-print-complete").addEventListener("click", () =>
-    DL.printCompleteSpace());
+  $("#dl-batch-export-space").addEventListener("click", () => {
+    if (DP.printSelected.size) DL.saveSelectedBins(DP.batchSaveIds(), true);
+    else WS.exportAll();
+  });
+  $("#dl-batch-print").addEventListener("click", () => {
+    if (DP.printSelected.size) DL.printSelectedBins(DP.printSelectionPayload(), true);
+    else DL.printCompleteSpace();
+  });
   $("#dl-sp-auto-height").addEventListener("change", event => {
     DL.change(() => { DL.layout.settings.spacers.height_auto = event.target.checked; });
     $("#dl-sp-height").disabled = event.target.checked;
@@ -387,10 +385,8 @@ DP.clearPrintSelection = () => {
   DP.renderInventory(true);
 };
 
-// The one batch scope both buttons share. With rows ticked, Save and Print act
-// on exactly those rows. With nothing ticked they become whole-Space quick
-// actions: Save covers every bin still without current files, Print every bin
-// not yet Printed.
+// The batch buttons share the eligible ticked rows; an empty selection means
+// their whole-Space actions are available.
 DP.batchScope = () => {
   const picked = [...DP.printSelected].map(id => DL.bin(id)).filter(one => DL.printEligible(one));
   if (DP.printSelected.size) return { subset: true, save: picked, print: picked, picked };
@@ -411,9 +407,7 @@ DP.renderBatch = () => {
   const hosted = Boolean(state.runtime.hosted);
   const tools = $("#dl-batch-tools");
   if (!tools) return;
-  $("#dl-batch-save").hidden = false;
   $("#dl-batch-print").hidden = hosted;
-  $("#dl-batch-print-complete").hidden = hosted;
   const scope = DP.batchScope();
   const connectorNote = " · Space connectors included";
   const needFiles = scope.subset ? scope.picked.filter(one => DL.saveNeeded(one)).length : scope.save.length;
@@ -432,35 +426,25 @@ DP.renderBatch = () => {
   $("#dl-batch-delete").disabled = !DP.printSelected.size || Boolean(DL.busy);
   const busy = Boolean(DL.busy);
 
-  const save = $("#dl-batch-save");
-  const saveCount = scope.subset ? scope.picked.length : scope.save.length;
-  save.textContent = DL.busy === "save-bins" ? "Saving files…"
-    : scope.subset ? `Save Selected (${saveCount})` : `Save All Needed (${saveCount})`;
-  save.disabled = busy || (scope.subset ? scope.picked.length === 0 : scope.save.length === 0);
-  save.title = save.disabled && !busy
-    ? (scope.subset ? "No selected bins are eligible to save." : "Every bin already has current files.")
-    : "Make the print files without opening Bambu Studio.";
-
-  const exportSpace = $("#dl-batch-export-space");
-  exportSpace.disabled = busy || Boolean(WS.busy);
-  exportSpace.title = "Bring every 3MF file in the space, and the container's, up to date.";
+  const exportButton = $("#dl-batch-export-space");
+  exportButton.textContent = DL.busy === "save-bins" || WS.busy ? "Exporting…"
+    : scope.subset ? `Export ${scope.picked.length === 1 ? "bin" : `${scope.picked.length} bins`}`
+      : "Export whole space";
+  exportButton.disabled = busy || Boolean(WS.busy) || (scope.subset && !scope.picked.length);
+  exportButton.title = scope.subset && !scope.picked.length
+    ? "No selected bins are eligible to export."
+    : "Export the selected bins, or the whole Space when none are selected.";
 
   if (hosted) return;
   const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
-  const printCount = scope.print.length;
-  button.classList.toggle("primary", printCount >= 2);
-  button.classList.toggle("secondary", printCount < 2);
+  const printCount = scope.subset ? scope.picked.length : 0;
   button.textContent = DL.busy === "print-bins" ? "Opening Bambu Studio…"
-    : scope.subset ? `Print Selected to Bambu Studio (${printCount})` : `Print All Not Printed (${printCount})`;
-  button.disabled = !printCount || noSlicer || busy;
+    : scope.subset ? `Print ${printCount === 1 ? "bin" : `${printCount} bins`}` : "Print whole space";
+  button.disabled = noSlicer || busy || (scope.subset && !printCount);
   button.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."
-    : !printCount ? "Every bin has already been printed." : "Make any missing files, then open them in Bambu Studio.";
-  const complete = $("#dl-batch-print-complete");
-  complete.textContent = DL.busy === "print-complete" ? "Opening Bambu Studio…" : "Print Space (bins + spacers)";
-  complete.disabled = busy || noSlicer;
-  complete.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."
-    : "Print every placed bin and spacer in this Space, then open them in Bambu Studio.";
+    : scope.subset && !printCount ? "No selected bins are eligible to print."
+      : "Print the selected bins, or every bin and spacer in the Space when none are selected.";
 };
 
 // Inventory row activation: mouse click and keyboard (Enter/Space) share
