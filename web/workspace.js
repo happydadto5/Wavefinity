@@ -137,13 +137,9 @@ WS.renderSelector = () => {
   const now = WS.current();
   // Story 2816: Print Space (the layout preview) keeps the tree live; only New Space locks it.
   const locked = WS.task === "newspace";
-  // Story 2736: in Layout, the bin clicked in the preview is the selected row, and can be opened with Edit.
-  const layoutBin = !locked && WS.task === "settings" && DL.selectedRow ? DL.bin(DL.selectedRow) : null;
-  const layoutPick = layoutBin && DL.isOrdinary(layoutBin) ? String(layoutBin.id) : "";
   const rows = (here ? [{ kind: "settings", id: "settings", label: "Layout or print your space" }, ...items] : items).map(one => {
     if (one.kind === "group") return `<li class="ws-group" role="presentation">${wsEsc(one.label)}</li>`;
     const picked = Boolean(now) && now.kind === one.kind && (one.kind === "container" || String(now.id || "") === String(one.id || ""));
-    const layoutPicked = Boolean(layoutPick) && one.kind === "bin" && String(one.id || "") === layoutPick;
     const drawerButtons = one.kind === "settings" ? WS.drawerButtons(locked) : "";
     // Story 2840: the Layout line's one button, Manage, opens the same space details screen as a click on the line.
     const manage = one.kind === "settings"
@@ -151,16 +147,14 @@ WS.renderSelector = () => {
 
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     // Story 2840: Print and Export are rendered only on the selected row; other rows carry no output buttons.
-    return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked || layoutPicked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked || layoutPicked}"${locked ? " disabled" : ""}>
-      <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${drawerButtons}${manage}${picked ? WS.rowOutputs(one, !locked) : ""}${WS.rowBinActions(one, picked || layoutPicked, locked)}</li>`;
+    return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${locked ? " disabled" : ""}>
+      <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${drawerButtons}${manage}${picked ? WS.rowOutputs(one, !locked) : ""}${WS.rowBinActions(one, picked, locked)}</li>`;
   }).join("");
   // Story 2725: live on any bin view (a bin in a space or a loose bin in My Bins). Greyed only on the
   // container and Layout views, or while a switch/action is in flight. Not tied to the classic form's
   // button state, which is hidden or disabled in states where the header action still works.
   // Story 2783: Duplicate and Delete live on the selected bin's own row, so the top keeps New Bin only.
-  const actions = `${here ? "" : '<button type="button" class="button secondary dl-small" data-ws-act="new-space-choose">New Space</button>'}
-      <button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>New Bin</button>
-      ${layoutPick ? `<button type="button" class="button primary dl-small" data-ws-act="edit-bin" data-id="${wsEsc(layoutPick)}"${DP.designNavBlocked() ? " disabled" : ""}>Edit</button>` : ""}`;
+  const actions = `${here ? "" : '<button type="button" class="button secondary dl-small" data-ws-act="new-space-choose">New Space</button>'}<button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>New Bin</button>`;
   return `<div class="ws-sel">
     <div class="ws-sel-head"><h2>${wsEsc(here ? WS.placeName() : "My Bins")}</h2><span class="ws-sel-actions">${actions}</span></div>
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
@@ -951,7 +945,7 @@ DV.render = () => { wsRender(); WS.paintPreview(); };
 
 // A click on a bin in the preview picks it (its form opens at once); the preview never edits.
 DP.onLayoutClick = key => {
-  if (!WS.open() || WS.task === "settings" || WS.task === "newspace") return false;
+  if (!WS.open() || WS.task === "newspace") return false;
   const found = DL.findPlacement(key);
   const one = found && DL.bin(found.placement.bin);
   if (!one || !DL.isOrdinary(one)) return false;
