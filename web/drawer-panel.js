@@ -1318,7 +1318,7 @@ DP.renderInventory = (force = false) => {
       ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.binNumberLabel(one))} ${escapeHtml(DL.label(one))}"${picked ? " checked" : ""}>`
       : `<span class="dl-print-placeholder" aria-hidden="true"></span>`;
     const lifecycle = spacer
-      ? `<small>${one.status === "printed" ? "Printed" : "Not printed"}</small>`
+      ? `<small>${spacerFlexible ? "Flexible" : "Rigid"} · ${one.status === "printed" ? "Printed" : "Not printed"}</small>`
       : `<small class="dl-status">${cabinet ? StorageDrawers.rowLocationText(DL.layout, one.id) : (placed ? "Placed" : "Unplaced")} · ${DL.statusLabel(one)}</small>`;
     const actions = spacer ? "" : `<div class="dl-row-actions">
           ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>`
@@ -1338,7 +1338,6 @@ DP.renderInventory = (force = false) => {
         <span class="dl-bin-main">
           <strong>${escapeHtml(DL.label(one))}${DL.stackIconHtml(one)}</strong>
           <small>${spacer ? `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm` : `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units`}</small>
-          ${spacer ? `<small>${spacerFlexible ? "Flexible" : "Rigid"}</small>` : ""}
           ${!spacer && planningText ? `<small>${escapeHtml(planningText)}</small>` : ""}
           ${lifecycle}
           ${flags.length ? `<small class="dl-flags">${escapeHtml(flags.join(" · "))}</small>` : ""}
