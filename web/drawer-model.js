@@ -1800,8 +1800,8 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
 // placed spacer with a file + the Space's connectors, one preflight, one
 // slicer launch. Hosted is rejected by the backend with a plain message.
 DL.printCompleteSpace = () => DL.busyWith("print-complete", async context => {
-  const drawer = DL.layout && Array.isArray(DL.layout.drawers) ? DL.drawer() || null : null;
-  const placedIds = [...new Set(((drawer && drawer.placements) || []).map(placement => placement.bin))];
+  const drawers = DL.layout && Array.isArray(DL.layout.drawers) ? DL.layout.drawers : [];
+  const placedIds = [...new Set(drawers.flatMap(drawer => (drawer.placements || []).map(placement => placement.bin)))];
   if (!(await DL.prepareBatch(placedIds, { printing: true }))) return;
   if (!state.slicer || !state.slicer.available) {
     toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 7000);

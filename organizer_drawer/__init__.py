@@ -1046,11 +1046,11 @@ def drawer_routes(
         Sequence (fixed):
           1. Slicer preflight — before any file is written.
           2. One truthful preflight: C6's selected_blocking_problems over
-             every placed bin in the drawer.
+             every placed bin in the Space.
           3. Bin files via prepare_inventory_bins (only rows without current
              files are generated from their design source).
           4. Placed spacer files already on disk. The literal eligibility
-             predicate: a spacer-kind row referenced by a placement in this
+             predicate: a spacer-kind row referenced by a placement in any
              drawer whose "file" names a real .3mf directly inside the Space
              folder. Rows whose file is missing are named in notes and
              skipped — they are NOT generated here.
@@ -1069,19 +1069,20 @@ def drawer_routes(
             out_dir = folder(payload)
             inv = load_inventory(out_dir)
             layout, bins = inv["layout"], inv["bins"]
-            drawer = find_drawer(layout, payload.get("drawer_id"))
+            drawers = layout.get("drawers") or []
             # 1. Slicer preflight first.
             slicer = detect_slicer(payload.get("slicer_path"))
             if slicer is None or not Path(slicer).is_file():
                 raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
-            # 2. One truthful preflight over every placed bin in the drawer.
+            # 2. One truthful preflight over every placed bin in the Space.
             by_id = {one["id"]: one for one in bins}
             counts: dict[str, int] = {}
-            for placement in drawer.get("placements") or []:
-                one = by_id.get(placement.get("bin"))
-                if (one is not None and one.get("kind") in ("bin", "b4b")
-                        and one.get("status") != "printed"):
-                    counts[one["id"]] = counts.get(one["id"], 0) + 1
+            for drawer in drawers:
+                for placement in drawer.get("placements") or []:
+                    one = by_id.get(placement.get("bin"))
+                    if (one is not None and one.get("kind") in ("bin", "b4b")
+                            and one.get("status") != "printed"):
+                        counts[one["id"]] = counts.get(one["id"], 0) + 1
             blocked = selected_blocking_problems(layout, bins, counts)
             if blocked:
                 raise ValueError(blocking_problem_copy(bins, blocked))
@@ -1097,10 +1098,7 @@ def drawer_routes(
             # 4. Placed spacer copies already on disk. One Inventory spacer
             # row may have several physical placements; launch one file per
             # placement while promoting the row identity only once.
-            current_drawer = find_drawer(
-                inventory["layout"],
-                payload.get("drawer_id"),
-            )
+            current_drawers = inventory["layout"].get("drawers") or []
             current_by_id = {
                 str(one["id"]): one
                 for one in inventory["bins"]
@@ -1111,20 +1109,21 @@ def drawer_routes(
             launch_files: list[Path] = []
             for bin_id in counts:
                 launch_files.extend(rows_files[bin_id])
-            for placement in current_drawer.get("placements") or []:
-                row_id = str(placement.get("bin") or "")
-                one = current_by_id.get(row_id)
-                if one is None or one.get("kind") not in SPACER_KINDS:
-                    continue
-                if one.get("status") == "printed":
-                    continue
-                safe = _safe_row_file(out_dir, one.get("file") or "")
-                if safe is None:
-                    skipped_spacers.add(_label(one))
-                    continue
-                launch_files.append(safe)
-                spacer_rows_printed.add(row_id)
-                spacer_copies += 1
+            for drawer in current_drawers:
+                for placement in drawer.get("placements") or []:
+                    row_id = str(placement.get("bin") or "")
+                    one = current_by_id.get(row_id)
+                    if one is None or one.get("kind") not in SPACER_KINDS:
+                        continue
+                    if one.get("status") == "printed":
+                        continue
+                    safe = _safe_row_file(out_dir, one.get("file") or "")
+                    if safe is None:
+                        skipped_spacers.add(_label(one))
+                        continue
+                    launch_files.append(safe)
+                    spacer_rows_printed.add(row_id)
+                    spacer_copies += 1
             # 5. Space connectors.
             try:
                 connector_counts, notes = _space_connectors(out_dir, inventory["layout"], inventory["bins"])
