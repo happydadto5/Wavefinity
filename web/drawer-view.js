@@ -1163,7 +1163,7 @@ DV.wire = () => {
       } else if (drag.valid) {
         DL.moveTo(drag.key, { gx: drag.gx, gy: drag.gy });
       } else {
-        toast(drag.reason || "It does not fit there.", true);
+        toastAt(drag.reason || "It does not fit there.", event.clientX, event.clientY, true);
       }
     }
     DV.render();
@@ -1204,7 +1204,7 @@ DV.wire = () => {
     const drop = DV.drop;
     DV.drop = null;
     if (drop && !readOnly()) {
-      if (!drop.valid) toast(drop.reason || "It does not fit there.", true);
+      if (!drop.valid) toastAt(drop.reason || "It does not fit there.", event.clientX, event.clientY, true);
       else DL.placeAt(drop.bin, drop.target ? { target: drop.target } : { gx: drop.gx, gy: drop.gy });
     }
     DV.render();

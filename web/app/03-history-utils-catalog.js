@@ -476,7 +476,7 @@ function apiSideEffectStartOver(path, payload, opts = {}) {
 }
 
 let toastTimer;
-function toast(message, error = false, hold = 3200) {
+function showToast(message, error, hold, point = null) {
   const node = $("#toast");
   // Fix 096 F6: toasts always appear above the current top layer. While a
   // dialog is open the toast node lives inside the open dialog; otherwise it
@@ -488,10 +488,28 @@ function toast(message, error = false, hold = 3200) {
     document.body.appendChild(node);
   }
   node.textContent = message;
+  node.classList.toggle("at-point", Boolean(point));
+  if (point) {
+    const gap = 14;
+    const bounds = node.getBoundingClientRect();
+    const left = Math.max(8, Math.min(point.x + gap, window.innerWidth - bounds.width - 8));
+    const top = Math.max(8, Math.min(point.y + gap, window.innerHeight - bounds.height - 8));
+    node.style.left = `${left}px`;
+    node.style.top = `${top}px`;
+  } else {
+    node.style.removeProperty("left");
+    node.style.removeProperty("top");
+  }
   node.classList.toggle("error", error);
   node.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => node.classList.remove("show"), hold);
+}
+function toast(message, error = false, hold = 3200) {
+  showToast(message, error, hold);
+}
+function toastAt(message, clientX, clientY, error = false, hold = 3200) {
+  showToast(message, error, hold, { x: clientX, y: clientY });
 }
 
 function setError(message = "", actions = []) {
