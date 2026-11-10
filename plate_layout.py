@@ -14,6 +14,7 @@ import tempfile
 import uuid
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import numpy as np
 import trimesh
@@ -67,9 +68,9 @@ def _format_matrix(m: np.ndarray) -> str:
     return " ".join(repr(round(float(v), 6) + 0.0) for v in flat)
 
 
-def _move_file(source: Path, dest: Path, bounds: np.ndarray, x: float, y: float, turned: bool) -> None:
+def _placement_move(bounds: np.ndarray, x: float, y: float, turned: bool) -> np.ndarray:
     low = bounds[0]
-    w, d = bounds[1][0] - low[0], bounds[1][1] - low[1]
+    d = bounds[1][1] - low[1]
     # Row-vector convention (3MF): p' = p @ M. Bring the lower corner to the
     # origin, optionally quarter-turn about z, then slide to the placed spot.
     move = np.eye(4)
@@ -81,6 +82,11 @@ def _move_file(source: Path, dest: Path, bounds: np.ndarray, x: float, y: float,
         move[3, 0] += d
     move[3, 0] += x
     move[3, 1] += y
+    return move
+
+
+def _move_file(source: Path, dest: Path, bounds: np.ndarray, x: float, y: float, turned: bool) -> None:
+    move = _placement_move(bounds, x, y, turned)
 
     def patch_item(match: re.Match) -> str:
         tag = match.group(0)
@@ -144,3 +150,98 @@ def space_out_for_plate(files: list[Path], profile: dict,
         shutil.rmtree(folder, ignore_errors=True)
         raise
     return out, []
+
+
+def combine_for_plate(files: list[Path], profile: dict, dest: Path) -> tuple[Path, list[str]]:
+    """Merge physical occurrences into one model, preserving registered parts.
+
+    Fit is decided before writing. Only resource IDs, names and build transforms
+    change; component transforms and mesh payloads remain intact.
+    """
+    from organizer_engine._export import unique_object_names
+
+    files, dest = [Path(f) for f in files], Path(dest)
+    if not files:
+        raise ValueError("No files to open in slicer")
+    bounds = [_file_bounds(f) for f in files]
+    sizes = [(float(b[1][0] - b[0][0]), float(b[1][1] - b[0][1])) for b in bounds]
+    placed, error = plan_plate(sizes, (float(profile["x_mm"]), float(profile["y_mm"])))
+    if error:
+        return dest, [error]
+
+    ns = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+    def tag(name: str) -> str:
+        return f"{{{ns}}}{name}"
+    model = ET.Element(tag("model"), unit="millimeter")
+    resources = ET.SubElement(model, tag("resources"))
+    build = ET.SubElement(model, tag("build"))
+    config = ET.Element("config")
+    next_id, used_names = 1, []
+    for source, b, (x, y, turned) in zip(files, bounds, placed):
+        with zipfile.ZipFile(source) as archive:
+            members = {n.lstrip("/").lower(): n for n in archive.namelist()}
+            incoming = ET.fromstring(archive.read(members["3d/3dmodel.model"]))
+            source_config = (ET.fromstring(archive.read(members["metadata/model_settings.config"]))
+                             if "metadata/model_settings.config" in members else ET.Element("config"))
+        if incoming.get("unit", "millimeter") != "millimeter":
+            raise ValueError(f"{source.name}: expected millimetre model units")
+        entries = list(incoming.find(tag("resources")))
+        ids = {}
+        names = {}
+        for entry in entries:
+            old_id = entry.attrib["id"]
+            ids[old_id] = str(next_id)
+            next_id += 1
+            if entry.tag == tag("object"):
+                name = unique_object_names([entry.get("name", source.stem)], taken=used_names)[0]
+                used_names.append(name)
+                entry.set("name", name)
+                names[old_id] = name
+        for entry in entries:
+            entry.set("id", ids[entry.attrib["id"]])
+            for node in entry.iter():
+                for attr in ("objectid", "pid"):
+                    if attr in node.attrib:
+                        node.set(attr, ids[node.attrib[attr]])
+            resources.append(entry)
+        move = _placement_move(b, x, y, turned)
+        items = list(incoming.find(tag("build")))
+        if not items:
+            raise ValueError(f"{source.name}: no build item to place on the plate")
+        for item in items:
+            item.set("objectid", ids[item.attrib["objectid"]])
+            existing = (_row_matrix([float(v) for v in item.attrib["transform"].split()])
+                        if "transform" in item.attrib else np.eye(4))
+            item.set("transform", _format_matrix(existing @ move))
+            build.append(item)
+        for obj in source_config.findall("object"):
+            for node in [obj, *obj.findall("part")]:
+                old_id = node.attrib["id"]
+                node.set("id", ids[old_id])
+                for meta in node.findall("metadata"):
+                    if meta.get("key") == "name":
+                        meta.set("value", names[old_id])
+            config.append(obj)
+
+    # Minimal model package: object metadata is the only slicer sidecar.
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=dest.parent, suffix=".3mf", delete=False) as tmp:
+        temporary = Path(tmp.name)
+    try:
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("3D/3dmodel.model", ET.tostring(model, encoding="utf-8", xml_declaration=True))
+            archive.writestr("Metadata/model_settings.config", ET.tostring(config, encoding="utf-8", xml_declaration=True))
+            archive.writestr("[Content_Types].xml", (
+                '<?xml version="1.0"?>'
+                '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                '<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>'
+                '<Default Extension="config" ContentType="application/octet-stream"/></Types>'))
+            archive.writestr("_rels/.rels", (
+                '<?xml version="1.0"?>'
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                '<Relationship Id="model" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" '
+                'Target="/3D/3dmodel.model"/></Relationships>'))
+        temporary.replace(dest)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return dest, []

@@ -327,11 +327,11 @@ from typing import Any, Callable
 from urllib.parse import quote, unquote, urlparse
 from urllib.request import Request, urlopen
 from photo_nest import photo_outline_from_data
-from plate_layout import space_out_for_plate
+from plate_layout import space_out_for_plate, combine_for_plate
 from bambu_handoff import (
     _validate_settings_safe,
     is_bambu_studio_executable,
-    stage_bambu_inputs,
+    validate_bambu_handoff,
 )
 
 from organizer_geometry import build_scope, checkpoint, stage
@@ -1114,13 +1114,13 @@ def detect_bambu_studio(custom_path: str | None = None) -> Path | None:
         return _find_bambu_studio_linux()
 
 
-def launch_slicer(slicer_path: Path, files: list[Path], *, already_on_plate: bool = False) -> Path | None:
+def launch_slicer(slicer_path: Path, files: list[Path], *, already_on_plate: bool = False,
+                  output_dir: Path | None = None) -> Path | None:
     """Open ``files`` directly in the slicer.
 
     Fix 058: Wavefinity never manufactures a Bambu project for handoff.
-    Bambu Studio gets each requested physical occurrence (repeated files mean
-    repeated physical copies, never deduplicated) staged as a profile-free
-    model file and opened directly - no ``--export-3mf``, ``--arrange``,
+    Bambu Studio gets every requested physical occurrence in one combined,
+    profile-free Last Print Layout.3mf - no ``--export-3mf``, ``--arrange``,
     ``--slice``, ``--load-settings`` or ``--load-filaments``, so Wavefinity
     can never introduce or select a printer/process/filament preset. Other
     slicers keep getting the files directly. Always returns ``None`` now:
@@ -1134,6 +1134,7 @@ def launch_slicer(slicer_path: Path, files: list[Path], *, already_on_plate: boo
         raise FileNotFoundError(f"Slicer executable not found: {slicer_path}")
     if not files:
         raise ValueError("No files to open in slicer")
+    output_dir = Path(output_dir) if output_dir is not None else Path(files[0]).parent
     if not already_on_plate:
         # Every launch path comes through here, so parts are never handed over
         # stacked at their assembled spots. Copies are laid out side by side;
@@ -1143,8 +1144,14 @@ def launch_slicer(slicer_path: Path, files: list[Path], *, already_on_plate: boo
         if layout_issues:
             raise ValueError("The parts do not fit the active printer:\n" + "\n".join(layout_issues))
     if is_bambu_studio_executable(slicer_path):
-        staged = stage_bambu_inputs(files)
-        args = [str(slicer_path.resolve())] + [str(p) for p in staged]
+        for source in files:
+            _validate_settings_safe(source)
+        combined, layout_issues = combine_for_plate(
+            files, _printer_profile_for({}), output_dir / "Last Print Layout.3mf")
+        if layout_issues:
+            raise ValueError("The parts do not fit the active printer:\n" + "\n".join(layout_issues))
+        validate_bambu_handoff(combined, files)
+        args = [str(slicer_path.resolve()), str(combined.resolve())]
     else:
         args = [str(slicer_path.resolve())] + [str(f.resolve()) for f in files]
     process = subprocess.Popen(
@@ -2166,7 +2173,8 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     try:
-        project_path = launch_slicer(slicer_path, handoff_files, already_on_plate=True)
+        project_path = launch_slicer(slicer_path, handoff_files, already_on_plate=True,
+                                     output_dir=Path(files[0]).parent)
     except Exception as error:
         return {
             "partial": True,

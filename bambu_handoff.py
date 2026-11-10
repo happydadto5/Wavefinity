@@ -109,6 +109,18 @@ def _default_handoff_root() -> Path:
     return Path(tempfile.gettempdir()) / "Wavefinity" / "Bambu Handoffs"
 
 
+def validate_bambu_handoff(path: Path, sources: list[Path]) -> None:
+    """Apply the staging safety and colour checks to one combined handoff."""
+    _validate_settings_safe(path)
+    expected = sum(_second_colour_assignment_count(source) for source in sources)
+    actual = _second_colour_assignment_count(path)
+    if actual != expected:
+        raise ValueError(
+            f"Wavefinity stopped the Bambu handoff because {path.name} does not preserve "
+            f"its {expected} extruder-slot assignment(s) ({actual} found)."
+        )
+
+
 def prune_stale_handoffs(root: Path, keep: Path | None = None) -> None:
     """Best-effort removal of old handoff directories.
 
@@ -180,16 +192,7 @@ def stage_bambu_inputs(
             # ever launched. Staged files are byte-for-byte copies, so this
             # never rewrites either file; a mismatch means the handoff is
             # incomplete and must be refused, not silently accepted.
-            source_slots = _second_colour_assignment_count(src)
-            if source_slots:
-                staged_slots = _second_colour_assignment_count(dest)
-                if staged_slots != source_slots:
-                    raise ValueError(
-                        f"Wavefinity stopped the Bambu handoff because the staged "
-                        f"copy of {src.name} does not preserve its "
-                        f"{source_slots} extruder-slot assignment(s) "
-                        f"({staged_slots} found)."
-                    )
+            validate_bambu_handoff(dest, [src])
             staged.append(dest)
     except Exception:
         shutil.rmtree(handoff_dir, ignore_errors=True)

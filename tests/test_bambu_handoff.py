@@ -3,8 +3,14 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
+
+import numpy as np
+import trimesh
 
 import bambu_handoff as bh
+from plate_layout import combine_for_plate
+from organizer_engine._export import export_object_groups_3mf
 
 MODEL_SECOND = (
     '<config><object id="1"><metadata key="extruder" value="1"/>'
@@ -127,6 +133,104 @@ class StageBambuInputsTests(unittest.TestCase):
     def test_executable_detection(self):
         self.assertTrue(bh.is_bambu_studio_executable(Path("C:/x/Bambu-Studio.exe")))
         self.assertFalse(bh.is_bambu_studio_executable(Path("C:/x/orca-slicer.exe")))
+
+
+class CombinedPlateTests(unittest.TestCase):
+    def test_both_launch_paths_hand_bambu_one_layout_in_output_folder(self):
+        from unittest.mock import patch
+        import wavefinity_web as web
+        from plate_layout import space_out_for_plate
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "bin.3mf"
+            export_object_groups_3mf(
+                [("Bin", [("Body", trimesh.creation.box(extents=(20, 30, 5)))])], source)
+            slicer = root / "bambu-studio.exe"
+            slicer.touch()
+            profile = {"x_mm": 256, "y_mm": 256}
+            spaced, issues = space_out_for_plate([source, source], profile, root / "spacing")
+            self.assertEqual(issues, [])
+            with patch.object(web, "_printer_profile_for", return_value=profile), \
+                    patch.object(web.subprocess, "Popen") as popen:
+                popen.return_value.wait.return_value = 0
+                web.launch_slicer(slicer, [source, source])
+                self.assertEqual(popen.call_args.args[0],
+                                 [str(slicer.resolve()), str((root / "Last Print Layout.3mf").resolve())])
+                web.launch_slicer(slicer, spaced, already_on_plate=True, output_dir=root)
+                self.assertEqual(popen.call_args.args[0],
+                                 [str(slicer.resolve()), str((root / "Last Print Layout.3mf").resolve())])
+                with patch.object(web, "validate_bambu_handoff", side_effect=ValueError("rejected")):
+                    popen.reset_mock()
+                    with self.assertRaises(ValueError):
+                        web.launch_slicer(slicer, [source])
+                    popen.assert_not_called()
+
+    def test_combined_spacing_registered_parts_slots_and_overwrite(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            box = trimesh.creation.box(extents=(20, 30, 5))
+            label = trimesh.creation.box(extents=(5, 5, 1))
+            label.apply_translation((0, 0, 3))
+            a, b = root / "a.3mf", root / "b.3mf"
+            export_object_groups_3mf([("Bin", [("Body", box), ("Label", label)])], a,
+                                     filaments={"Label": 2})
+            export_object_groups_3mf([("Bin", [("Body", box)])], b)
+            originals = [p.read_bytes() for p in (a, b)]
+            dest = root / "Last Print Layout.3mf"
+            result, issues = combine_for_plate([a, b, a], {"x_mm": 256, "y_mm": 256}, dest)
+            self.assertEqual((result.name, issues), ("Last Print Layout.3mf", []))
+            ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+            with zipfile.ZipFile(dest) as archive:
+                model = ET.fromstring(archive.read("3D/3dmodel.model"))
+                config = ET.fromstring(archive.read("Metadata/model_settings.config"))
+            items = model.findall("m:build/m:item", ns)
+            self.assertEqual(len(items), 3)
+            objects = model.findall("m:resources/m:object", ns)
+            by_id = {obj.get("id"): obj for obj in objects}
+            self.assertEqual(len(by_id), len(objects))
+            self.assertEqual(len({obj.get("name") for obj in objects}), len(objects))
+            for index in (0, 2):
+                parent = by_id[items[index].get("objectid")]
+                self.assertEqual(len(parent.findall("m:components/m:component", ns)), 2)
+            for obj in config.findall("object"):
+                self.assertIn(obj.get("id"), by_id)
+                for part in obj.findall("part"):
+                    self.assertIn(part.get("id"), by_id)
+                    if by_id[part.get("id")].get("name").startswith("Label"):
+                        self.assertEqual(part.find("metadata[@key='extruder']").get("value"), "2")
+            bh.validate_bambu_handoff(dest, [a, b, a])
+            self.assertEqual(bh._second_colour_assignment_count(dest), 2)
+            scene = trimesh.load(dest, force="scene")
+            # Each registered occurrence has two meshes sharing one footprint.
+            footprints = []
+            for node in scene.graph.nodes_geometry:
+                transform, geom = scene.graph[node]
+                points = trimesh.transform_points(scene.geometry[geom].vertices, transform)
+                if np.ptp(points[:, 0]) > 10:
+                    footprints.append(np.array([points.min(axis=0), points.max(axis=0)]))
+            footprints.sort(key=lambda bounds: bounds[0, 0])
+            self.assertEqual(len(footprints), 3)
+            for left, right in zip(footprints, footprints[1:]):
+                self.assertGreaterEqual(right[0, 0] - left[1, 0], 10 - 1e-6)
+            for bounds in footprints:
+                self.assertAlmostEqual(bounds[0, 2], 0)
+            combine_for_plate([b], {"x_mm": 256, "y_mm": 256}, dest)
+            with zipfile.ZipFile(dest) as archive:
+                model = ET.fromstring(archive.read("3D/3dmodel.model"))
+            self.assertEqual(len(model.findall("m:build/m:item", ns)), 1)
+            self.assertEqual([p.read_bytes() for p in (a, b)], originals)
+
+    def test_fit_error_keeps_previous_layout(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source, dest = root / "part.3mf", root / "Last Print Layout.3mf"
+            export_object_groups_3mf(
+                [("Bin", [("Body", trimesh.creation.box(extents=(20, 30, 5)))])], source)
+            dest.write_bytes(b"previous layout")
+            _, issues = combine_for_plate([source, source], {"x_mm": 30, "y_mm": 40}, dest)
+            self.assertTrue(issues)
+            self.assertEqual(dest.read_bytes(), b"previous layout")
 
 
 if __name__ == "__main__":
