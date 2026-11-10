@@ -124,6 +124,7 @@ DP.build = () => {
           </div>
           <div class="dl-batch-actions">
             <button type="button" id="dl-batch-save" class="button secondary">Save Selected</button>
+            <button type="button" id="dl-batch-export-space" class="button secondary">Export Space</button>
             <button type="button" id="dl-batch-print" class="button secondary">Print Selected to Bambu Studio</button>
             <button type="button" id="dl-batch-print-complete" class="button secondary">Print Space (bins + spacers)</button>
           </div>
@@ -291,6 +292,8 @@ DP.wire = () => {
   $("#dl-batch-delete").addEventListener("click", () => DP.deleteSelected());
   $("#dl-batch-save").addEventListener("click", () =>
     DL.saveSelectedBins(DP.batchSaveIds(), true));
+  // Story 2829: exports every printable bin and the container, as the removed tree-line Export did.
+  $("#dl-batch-export-space").addEventListener("click", () => WS.exportAll());
   $("#dl-batch-print").addEventListener("click", () =>
     DL.printSelectedBins(DP.printSelectionPayload(), true));
   $("#dl-batch-print-complete").addEventListener("click", () =>
@@ -437,6 +440,10 @@ DP.renderBatch = () => {
   save.title = save.disabled && !busy
     ? (scope.subset ? "No selected bins are eligible to save." : "Every bin already has current files.")
     : "Make the print files without opening Bambu Studio.";
+
+  const exportSpace = $("#dl-batch-export-space");
+  exportSpace.disabled = busy || Boolean(WS.busy);
+  exportSpace.title = "Bring every 3MF file in the space, and the container's, up to date.";
 
   if (hosted) return;
   const noSlicer = !state.slicer || !state.slicer.available;

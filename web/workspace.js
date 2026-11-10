@@ -738,11 +738,12 @@ WS.rowOutputs = (one, picked) => {
     : !state.slicer?.available ? "A slicer is needed - use Printer Settings to choose one"
     : `Send the ${what} to ${state.slicer.name || "the slicer"}`;
   const exportTitle = !live ? "Select this row to export it."
-    : one.kind === "settings" ? "Bring every 3MF file in the space up to date" : `Create the 3MF file for the ${what}`;
+    : `Create the 3MF file for the ${what}`;
   const attrs = `data-ws-out data-kind="${one.kind}" data-id="${wsEsc(one.id)}"`;
   // Story 2815: the space line has no Print button; clicking the line opens the space details screen.
-  const printButton = one.kind === "settings" ? ""
-    : `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live ? "" : " disabled"} title="${wsEsc(printTitle)}">Print</button>`;
+  // Story 2829: the space line has no Export button either; the details screen exports the space's files.
+  if (one.kind === "settings") return "";
+  const printButton = `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live ? "" : " disabled"} title="${wsEsc(printTitle)}">Print</button>`;
   return printButton
     + `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live ? "" : " disabled"} title="${wsEsc(exportTitle)}">Export</button>`;
 };
