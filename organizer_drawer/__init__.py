@@ -685,7 +685,8 @@ def drawer_routes(
                         # Inventory x/y/z are physical mm, never Wavefinity unit counts.
                         "name": "Flexible Spacer" if gen.get("flexible") else "Rigid Spacer",
                         "x": gen["w"], "y": gen["d"], "z": gen["h"],
-                        "qty": 1,
+                        "qty": 0,
+                        "status": "saved",
                         "file": gen["file"],
                         "flexible": bool(gen.get("flexible")),
                     }
@@ -742,7 +743,8 @@ def drawer_routes(
                     "name": "Flexible Spacer" if gen.get("flexible") else "Rigid Spacer",
                     # Inventory x/y/z are physical mm, never Wavefinity unit counts.
                     "x": gen["w"], "y": gen["d"], "z": gen["h"],
-                    "qty": 1,
+                    "qty": 0,
+                    "status": "saved",
                     "file": gen["file"],
                     "flexible": bool(gen.get("flexible")),
                 }
@@ -797,6 +799,32 @@ def drawer_routes(
 
             active_id = str(drawer.get("id") or "")
             by_id = {str(one["id"]): one for one in bins}
+            # Read persisted status cells directly. load_inventory normalises
+            # missing statuses from Qty, which must not count as print history.
+            raw_inventory = (
+                inventory_text
+                if hosted
+                else Path(inv["file"]).read_text(encoding="utf-8")
+            )
+            explicit_printed: set[str] = set()
+            header: list[str] | None = None
+            for line in raw_inventory.splitlines():
+                if not line.strip().startswith("|"):
+                    header = None
+                    continue
+                cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+                if header is None:
+                    lowered = [cell.lower() for cell in cells]
+                    if "id" in lowered and "status" in lowered:
+                        header = lowered
+                    continue
+                if all(not cell or set(cell) <= {"-", ":"} for cell in cells):
+                    continue
+                if len(cells) <= max(header.index("id"), header.index("status")):
+                    continue
+                if cells[header.index("status")].strip().lower() == "printed":
+                    explicit_printed.add(cells[header.index("id")].strip())
+            printed_files: dict[str, int] = {}
             old_spacer_ids = {
                 str(placement.get("bin"))
                 for placement in drawer.get("placements") or []
@@ -805,6 +833,11 @@ def drawer_routes(
                     and by_id[str(placement.get("bin"))].get("kind") in SPACER_KINDS
                 )
             }
+            for row_id in old_spacer_ids:
+                old = by_id.get(row_id)
+                if old and row_id in explicit_printed and old.get("file"):
+                    filename = str(old["file"])
+                    printed_files[filename] = printed_files.get(filename, 0) + 1
 
             if root is not None:
                 root.mkdir(parents=True, exist_ok=True)
@@ -836,6 +869,10 @@ def drawer_routes(
                 new_placements: list[dict[str, Any]] = []
                 for gen in generated.get("generated") or []:
                     new_id = next_bin_id(bins_so_far)
+                    filename = str(gen["file"])
+                    carry_printed = printed_files.get(filename, 0) > 0
+                    if carry_printed:
+                        printed_files[filename] -= 1
                     row = {
                         "id": new_id,
                         "kind": "spacer",
@@ -844,8 +881,9 @@ def drawer_routes(
                         "x": gen["w"],
                         "y": gen["d"],
                         "z": gen["h"],
-                        "qty": 1,
-                        "file": gen["file"],
+                        "qty": 1 if carry_printed else 0,
+                        "status": "printed" if carry_printed else "saved",
+                        "file": filename,
                     }
                     new_bins.append(row)
                     bins_so_far.append(row)
@@ -1077,6 +1115,8 @@ def drawer_routes(
                 row_id = str(placement.get("bin") or "")
                 one = current_by_id.get(row_id)
                 if one is None or one.get("kind") not in SPACER_KINDS:
+                    continue
+                if one.get("status") == "printed":
                     continue
                 safe = _safe_row_file(out_dir, one.get("file") or "")
                 if safe is None:
