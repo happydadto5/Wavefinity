@@ -116,16 +116,16 @@ Width and Depth fields show only the physical size. Their inside dimension
 (or updating status) and whole-unit count wrap below each input. Formatting
 leaves focused Width and Depth values alone; blur commits and reformats them.
 
-**Space and Design are separate top-level work areas.** Design has 3D and 2D
-views of the bin (2D is where its interior parts are laid out).
-**Space is a mode, not a panel**: it swaps the whole screen: the inventory and
-its tools take the sidebar, the Space takes the workspace, and the bin editor's
-chrome (placed parts, the design file buttons) steps aside. There is no
-undo/redo anywhere in the app (Fix 1137): every change commits immediately.
-A Space has only two mental
-objects: **the Space** and **the bins inside it**. The top-level switch reads
-**Space | Design**. In Design, the main build fields, **Options**, and
-**Connectors** appear in separate cards.
+**One screen, two sides.** The left side edits, the right side shows. At the
+top of the left side is the **selection tree** for the open Space: the
+**Layout or print your space** line, then the container (Storage box, Drawers
+cabinet or Base Trim) when the Space has one, then its bins. Whatever is
+selected in the tree decides what both sides show. There is no undo/redo
+anywhere in the app (Fix 1137): every change commits immediately. A Space has
+only two mental objects: **the Space** and **the bins inside it**. In a bin's
+editor the main build fields, **Options** and **Connectors** appear in
+separate cards. **Manage Spaces** in the top bar goes back to the open screen
+(your Spaces, *My Bins / No Space*, and the New Space choices).
 
 **The drawer is seen through a camera looking into it.** It is a real 3D
 view: bins are boxes in perspective, showing their tops, their fronts and the
@@ -147,10 +147,12 @@ on each other, each foot sunk into the bin below. A stackable bin's swatch
 carries a ⇅. Dropping a bin on a same-size bin that stacks the same way snaps it
 on top with the sides aligned; anything else is refused, and the refusal says why.
 
-**Bins are placed by hand.** Every ordinary bin is one Inventory row and is placed at most once. A bin that is
-not placed waits in the **Unplaced bins** rail beside the Space (a derived view of
-Inventory, in Inventory order - never stored coordinates). Drag it into the
-Space; drag a placed bin off the Space to unplace it again.
+**Bins are placed by hand, from the tree.** Every ordinary bin is one Inventory
+row and is placed at most once. The tree lists every bin in two groups,
+**Not placed** first and **Placed** below (a Storage Drawers Space groups placed
+bins by drawer); it is never filtered. Drag a bin from the tree into the
+layout to place it; drag a placed bin back onto the tree to unplace it
+(Story 2855).
 
 **Field labels stand alone.** No section or group label may merely name the
 fields below it: every field label must stand alone without a group heading.
@@ -159,6 +161,110 @@ the field's label instead (*Label mode* and *Opening shape*, not *Mode* and
 *Shape* under a *Label* or *Opening* heading). Headings that carry a working
 control, screen and dialog titles, and list headings that do not explain
 themselves are not group labels and stay.
+
+
+### How the screen behaves (Andrew's UI/UX rules)
+
+These are the product owner's rules for the whole app. New work follows them;
+when a change would break one, ask first. Items marked *(planned, Story N)* are
+filed but not built yet.
+
+- **The tree dictates both sides.** Only one tree row is ever selected.
+  Selecting the Layout line, the container or a bin shows that thing on the
+  left and its view on the right. Selecting the Space line or the container
+  deselects any bin. Clicking a bin in the layout highlights that same bin in
+  the tree (Story 2849).
+- **One Manage screen.** The Layout line (its click and its one **Manage**
+  button go to the same place) is where you lay out *and* print: the layout on
+  the right, the print list on the left. The Space's name and size are shown
+  there read-only; a Space with a container is edited by selecting the
+  container row (the second row). A Drawer or Pegboard Space, which has no
+  container row, keeps its size fields on the Manage screen *(planned, Story
+  2858)*.
+- **Peek without leaving the layout.** Clicking a bin in the layout opens its
+  details on the left while the layout stays on the right; change its height
+  or stacking and the layout updates in place. Click empty floor or press Esc
+  to go back to the print list. Clicking the bin's row in the tree, or the
+  **3D view** button, opens it fully (Story 2855).
+- **After Delete nothing is selected.** A bin's **Delete** (on its selected tree
+  row) acts at once, with no confirmation, removes the bin and its files for
+  good, and leaves nothing selected (Stories 2836, 2846, 2847).
+- **Messages appear where the action happened.** A refused drop ("can't stack
+  here") shows at the drop point, not at the top of the screen (Story 2850).
+  A note about a field sits under that field. If the action already shows its
+  result (a bin visibly moving into *Not placed*), no message is needed
+  *(planned, Story 2859)*.
+- **Hints in place, not pop-ups.** Help is a quiet line or a placeholder in the
+  spot where the user is looking, and it disappears the moment they act. There
+  is nothing to acknowledge or dismiss. Examples:
+  - an empty layout shows a centred note, *Drag bins to place / Drag onto a
+    bin to stack*, that vanishes as soon as a drag starts or a bin is placed
+    (Story 2854); a Space with no bins at all says *No bins yet / Choose New
+    Bin to make one*, each empty drawer of a Storage Drawers Space gets its own
+    note, and a Pegboard never mentions stacking *(planned, Story 2859)*;
+  - a Space with no bins shows *No bins yet. New Bin makes your first one.* in
+    the tree *(planned, Story 2859)*;
+  - the bin's Height field says how tall a bin the Space takes, and turns red
+    when the bin is taller *(planned, Story 2861)*;
+  - with no slicer found, a line under Print says so and links to Printer
+    Settings *(planned, Story 2860)*;
+  - the very first launch, with no Spaces, says *No spaces yet - pick what
+    you're organizing below* *(planned, Story 2862)*.
+- **Keep questions and choices to a minimum.** Prefer one sensible default
+  over a question; offer a choice only when the user really decides something.
+- **Two dynamic batch buttons.** Under the print list: with nothing ticked they
+  read **Print whole space** and **Export whole space**; tick one bin and they
+  read **Print bin** / **Export bin**; tick several, **Print N bins** /
+  **Export N bins** (Story 2851). Export goes away once files build themselves
+  *(planned, Story 2857)*, leaving Print as the one batch button. The container
+  gets its own tick row in that list, and Spacers / Fill Empty Space sit under
+  it *(planned, Story 2858)*.
+- **Height colours with an always-on guide.** In the layout a bin at the
+  Space's full height has no rim colour, a shorter bin has a yellow rim, and a
+  bin taller than the Space has a red rim. A small guide under the layout
+  always explains the colours and the stacking icon (Story 2852).
+- **One stacking icon.** A stackable bin carries one icon with an up arrow
+  (it can take a bin on top) and/or a down arrow (it can sit on a bin), the
+  same icon in the layout and in the lists, kept inside the bin's outline
+  (Story 2852).
+- **Files are built in the background, so Print is fast.** A bin's 3MF is
+  rebuilt a few seconds after its design changes; Print only waits
+  (*Finishing files…*) when a build is still running *(planned, Story 2857)*.
+- **Per-bin files are kept, plus one combined print file.** Each bin keeps its
+  own 3MF in the Space folder. Printing to Bambu Studio hands it one combined,
+  pre-spaced file, *Last Printed.3mf*, overwritten on every print, so parts
+  never land on top of each other *(planned, Story 2856)*.
+
+### The flow, start to print (every Space type)
+
+1. **Open screen.** Launch shows your Spaces, *My Bins / No Space* (bins with no
+   Space) and the five New Space choices: **Storage Box**, **Storage Drawers**,
+   **Surface**, **Drawer** and **Pegboard**.
+2. **New Space.** Choosing a type opens its setup on the left (name and size;
+   Pegboard also picks its board standard; Storage Drawers configures its
+   cabinet and drawers). **Create Space** makes the folder under
+   `Documents/Wavefinity/<Space Name>/` and opens the Space.
+3. **Where it lands.** A Space with a container (Storage Box, Storage Drawers,
+   Surface) opens with the container selected, showing its design. A Drawer or
+   Pegboard Space opens on its first bin, or on the Layout line when it has no
+   bins yet.
+4. **Make bins.** **New Bin** (top of the tree) adds a bin and opens its
+   editor; it appears in the tree under *Not placed*. Its design saves as you
+   work.
+5. **Lay out.** Select the Layout line. Drag bins from *Not placed* into the
+   layout; they snap to the 7 mm grid (or to the holes on a Pegboard) and
+   refuse overlaps and the Space edge. Drop a bin on a compatible bin to stack
+   it. Click a bin to peek and adjust it; the layout updates in place. In a
+   Storage Drawers Space the small 1 / 2 / 3 buttons on the Layout line switch
+   drawers.
+6. **Fill gaps (optional).** Drawer, Storage Box and Storage Drawers Spaces
+   can add Spacers; a Surface can turn free cells into Fill bins *(on the
+   Manage screen once Story 2858 lands)*.
+7. **Print.** On the Manage screen tick bins (or nothing, for the whole Space)
+   and press Print. The container prints from its own tree row, or from the
+   print list *(planned, Story 2858)*. Bambu Studio opens with the parts; a bin
+   is marked *Printed* once the slicer has opened. Changing a printed bin
+   makes it not printed again.
 
 ---
 
@@ -564,9 +670,8 @@ visible; there is no tutorial or first-run card. A one-drawer Drawer Space's
 name, width, depth and usable height belong to the Space: the Space header shows
 them read-only with **Edit Space** (the Space Edit form), and an edit
 there updates the loaded layout through the normal Drawer save path. An empty
-Space view points to the **New Bin** button in **Unplaced bins** (or adding an
-existing bin), and spacer/connector actions stay disabled until there is
-something to work on.
+Space view points to **New Bin** (see *How the screen behaves* above), and
+spacer/connector actions stay disabled until there is something to work on.
 
 **The four Space types** are exactly **Drawer**, **Storage Box**, **Surface** and
 **Pegboard**. A Storage Box's internal kind is `portable` (a legacy `box` kind
@@ -605,13 +710,13 @@ which suppress Inventory logging entirely.
   (direct, or in Space Inventory) marks each bin Printed exactly once, and only
   after Wavefinity handed it to Bambu Studio and the slicer opened
   successfully - it does not claim the physical printer finished the part.
-  **Batch Save / Print** (Space Inventory): with nothing ticked the two buttons
-  are whole-Space quick actions - *Save All Needed (N)* and *Print All Not
-  Printed (N)*; with rows ticked (or via *Select all not printed* / *Select
-  all*) they become *Save Selected (N)* and *Print Selected to Bambu Studio (N)*.
+  **Batch Export / Print** (the print list on the Manage screen): two buttons
+  whose labels follow the ticks - *Print whole space* / *Export whole space*
+  with nothing ticked, *Print bin* / *Export bin* for one, *Print N bins* /
+  *Export N bins* for several (Story 2851).
   Both use one preparation step: it re-reads the Inventory, reuses a row's
   current files, and generates only rows without current files (each becomes
-  Saved as soon as it is made). Save stops there; Print then opens the files in
+  Saved as soon as it is made). Export stops there; Print then opens the files in
   Bambu Studio. Applicable Space connectors are included automatically.
   If a bin fails part-way, the
   bins already saved stay Saved, Bambu Studio is not opened, and the unfinished
@@ -674,10 +779,10 @@ which suppress Inventory logging entirely.
   Sort remains a saved preference. Selection survives filtering and sorting; one
   Inventory **Delete** button removes selected ordinary bins. Spacers remain
   visible below ordinary bins. *Clear selection* is disabled while nothing is ticked.
-- **Placing.** Drag a bin from **Unplaced bins** (or its Inventory row) onto the
+- **Placing.** Drag a bin from the tree's **Not placed** group onto the
   Space. Drag placed bins to move them: they snap to the 7 mm grid and refuse
-  overlaps and the Space edge. Drag one off the Space, or select it and press
-  **Delete**, to unplace it - it returns to Unplaced bins and stays in Inventory.
+  overlaps and the Space edge. Drag one back onto the tree, or select it and press
+  **Delete**, to unplace it - it returns to **Not placed** and stays in Inventory.
   Keys: the arrows move one unit, **Delete** unplaces, **F** fits the view, **Esc**
   deselects. An ordinary bin is placed at most once; a legacy layout that holds
   several copies of one row keeps one deterministically when it loads.
