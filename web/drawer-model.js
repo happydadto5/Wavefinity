@@ -402,7 +402,7 @@ DL.stackWall = one => {
   return raw !== null && raw !== undefined && Number.isFinite(wall) && wall > 0 ? wall : null;
 };
 
-// Story 2814: only a resting lid with its stack rim on receives a bin. Snap and
+// Story 2814: only a Lid for stacking receives a bin. Snap and
 // hinged lids never do, and the knob or raised lettering needs the same space as
 // the rim's bin. Read from the saved design; a bin with no saved design or no
 // lid places no restriction.
@@ -410,7 +410,7 @@ DL.lidRefusalFor = (box, name) => {
   const lid = box?.lid;
   if (!lid?.enabled) return "";
   if (lid.flip_enabled) return `${name} has a hinged lid, which cannot take a stack.`;
-  if (!lid.stack_rim) return `${name} has a resting lid without a stack rim, which cannot take a stack.`;
+  if (!lid.stack_rim) return `${name} has a lid that isn't a Lid for stacking, so it can't take a stack.`;
   if (lid.handle_enabled) return `${name} has a lid with a knob, which stands too proud to take a stack.`;
   if (lid.label_enabled && lid.label_style === "raised") return `${name} has raised lettering on its lid, which stands too proud to take a stack.`;
   return "";

@@ -743,7 +743,10 @@ def make_lid_parts(
     # plate.  Nothing here is a preview-only offset.
     # A flip plate is cleared behind the hinge pin and over each bin knuckle.
     # It has no lock bumps to resist the swing.
-    plate = _extrude_polygon(outer, rise)
+    # A lid for stacking: the plate is only the chosen thickness; the rim ring
+    # stands on it, so the well inside the ring is open and the label shows.
+    plate_h = rise - (STACK_SEAT_DEPTH if lid_receives_stack(eff) else 0.0)
+    plate = _extrude_polygon(outer, plate_h)
     plate.apply_translation((0.0, 0.0, rim))
     if hinge is not None:
         plate = difference([plate, plate_hinge_cutter(hinge, eff.half_x)])

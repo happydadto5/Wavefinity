@@ -303,7 +303,7 @@ def lid_refusal(lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
     if lid.get("flip_enabled"):
         return f"{name} has a hinged lid, which cannot take a stack"
     if not lid.get("stack_rim"):
-        return f"{name} has a resting lid without a stack rim, which cannot take a stack"
+        return f"{name} has a lid that isn't a Lid for stacking, so it can't take a stack"
     if lid.get("handle_enabled"):
         return f"{name} has a lid with a knob, which stands too proud to take a stack"
     if lid.get("label_enabled") and lid.get("label_style") == "raised":

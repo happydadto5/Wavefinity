@@ -664,8 +664,7 @@ function syncLidForm() {
   state.lidLabelEnabled = Boolean(lid.label_enabled);
   populateLidChoices();
   $("#bin-stackable").value = String(state.design?.box?.stack?.mode === "direct");
-  $("#lid-choice").value = !lid.enabled ? "none" : lid.flip_enabled ? "hinged" : "resting";
-  $("#lid-stack-rim").value = String(Boolean(lid.stack_rim));
+  $("#lid-choice").value = !lid.enabled ? "none" : lid.flip_enabled ? "hinged" : lid.stack_rim ? "stacking" : "resting";
   const savedThickness = ({ thin: "1.2", medium: "1.4", thick: "1.6" })[lid.thickness] || lid.thickness;
   ensureLidThicknessOption(String(savedThickness));
   $("#lid-thickness").value = String(savedThickness);
@@ -691,9 +690,12 @@ function syncLidForm() {
   $("#lid-option-panel").hidden = !hasLid;
   $("#lid-fit-row").hidden = true;      // the fit was only offered with the removed lid option; a saved fit is kept
   $("#lid-flip-note").hidden = !(hasLid && lid.flip_enabled);
-  // Only a resting lid can carry the stack rim; the knob needs the same space.
-  $("#lid-stack-rim-row").hidden = !(hasLid && !lid.flip_enabled);
-  $("#lid-stack-rim-note").hidden = !(hasLid && lid.stack_rim && !lid.flip_enabled && lid.handle_enabled);
+  // A Lid for stacking has the rim on its top, so the knob and raised lettering
+  // (which need the same space) are not offered; sunk lettering stays.
+  const stacking = hasLid && !lid.flip_enabled && Boolean(lid.stack_rim);
+  $("#lid-handle-type-row").hidden = stacking;
+  const raisedOption = [...$("#lid-label-style").options].find(option => option.value === "raised");
+  if (raisedOption) raisedOption.hidden = raisedOption.disabled = stacking;
   $("#lid-alignment-row").hidden = !(hasLid && lid.flip_enabled);
   $("#lid-alignment-note").hidden = !(hasLid && lid.flip_enabled && (lid.alignment || "off") !== "off");
   const handleOn = hasLid && Boolean(lid.handle_enabled);
@@ -812,7 +814,8 @@ function readStackForm(design) {
   if (divider && labelEnabled && !divisionLabels.some(value => String(value || "").trim())) {
     divisionLabels = dividerLabelsForLid(divider);
   }
-  const labelStyle = $("#lid-label-style").value;
+  const labelStyle = $("#lid-choice").value === "stacking" && $("#lid-label-style").value === "raised"
+    ? "flush" : $("#lid-label-style").value;
   design.box.lid = {
     enabled: true,
     thickness: $("#lid-thickness").value,
@@ -822,12 +825,12 @@ function readStackForm(design) {
     label_size: $("#lid-label-size").value || "default",
     label_text: $("#lid-label-text").value,
     division_labels: divisionLabels,
-    handle_enabled: ($("#lid-handle-type").value || "none") !== "none",
+    handle_enabled: $("#lid-choice").value !== "stacking" && ($("#lid-handle-type").value || "none") !== "none",
     handle_type: "knob",
     handle_size: $("#lid-handle-size").value || remembered.handle_size,
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
     flip_enabled: $("#lid-choice").value === "hinged",
-    stack_rim: $("#lid-choice").value === "resting" && $("#lid-stack-rim").value === "true",
+    stack_rim: $("#lid-choice").value === "stacking",
     // Written explicitly on every save, so a missing value only ever means an
     // older file.
     fit: $("#lid-fit")?.value || remembered.fit || "standard",

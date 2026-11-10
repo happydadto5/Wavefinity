@@ -73,7 +73,7 @@ for the current bin by the same geometry that builds the lid. **Lid labels** are
 **Inlaid** or **Raised**, with **Inlay depth** or **Raised height** of 0.2, 0.4,
 0.6 or 0.8 mm (new labels start at 0.4 mm; older files keep their 0.4 mm inlaid
 and 0.6 mm raised). Inlay never cuts into the lid's required floor or seat, and
-a lid with Raised lettering cannot receive a stack. A Resting lid has an optional **Stack rim**: a rim about 2 mm tall standing on its top face, which the Stackable Base of the bin above sits into (the lid counts once in stack heights as its thickness plus the 2 mm rim). A Hinged lid never receives a stack, and a lid with the Knob or Raised lettering cannot receive one either. The only handle is the **Knob**: a square post with a diamond head
+a lid with Raised lettering cannot receive a stack. The **Lid for stacking** lid type has a rim about 2 mm tall standing on its top face, which the Stackable Base of the bin above sits into (the lid counts once in stack heights as its thickness plus the 2 mm rim). A Hinged lid never receives a stack, and a lid with the Knob or Raised lettering cannot receive one either. The only handle is the **Knob**: a square post with a diamond head
 (flared at 45 degrees, tapered back to a small flat top, printable without supports); a handle too large for
 a very small lid is refused with a message to choose a smaller size or a larger
 lid, never shrunk. The reported closed height is the tallest point of the whole

@@ -112,7 +112,7 @@ Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling:
 
 Spacers brace placed bins; they are Space filler, not AI-designed bins. Choose Rigid or Flexible (default; 2 mm oversized), manual height (at least 6 mm) or Auto height (default: full height of the tallest placed bin, rounded and bounded by the Space height; 15 mm fallback when none is placed). Left, Back and Right walls default on; there is no front-wall spacer. Plan and select candidates, place or refresh them, and choose quantities to print.
 
-Bins can stack when their modes, footprints and wall geometry match. Direct stacking requires the same footprint. A resting lid with its Stack rim option on carries a 2 mm rim that a same-footprint stackable bin sits into; hinged lids, resting lids without the rim, lids with the knob and lids with raised lettering take no stack.
+Bins can stack when their modes, footprints and wall geometry match. Direct stacking requires the same footprint. A "Lid for stacking" (resting lid with the 2 mm rim) carries a 2 mm rim that a same-footprint stackable bin sits into; hinged lids, resting lids without the rim, lids with the knob and lids with raised lettering take no stack.
 
 ---
 
@@ -367,7 +367,7 @@ Choosing Lid - Resting fit, or Lid - Hinged Lid includes a lid and shows the lid
 General rules:
 
 - direct bin-on-bin stacking uses no lid: a straight 3 mm locating skirt under the base, beveled and support-free, drops into the mouth of a same-size bin below. It only locates (nothing snaps), sits inside the typed Height, and needs no extra wall thickness;
-- a resting lid can carry a Stack rim (about 2 mm tall, on its top face) for another bin; there is no separate stackable-lid print choice;
+- "Lid for stacking" is a lid type with a rim (about 2 mm tall, on its top face) for another bin; there is no separate stackable-lid print choice;
 - a hinged lid, a resting lid without the rim, or a lid with the knob or raised lettering takes no stack;
 - Wavefinity may require stronger wall/base values (a lid needs the stronger wall; a direct skirt needs only a thicker base);
 - raised lid lettering means the lid takes no stack; a Divider can provide one lid label per compartment;

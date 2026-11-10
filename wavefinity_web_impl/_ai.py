@@ -52,8 +52,8 @@ AI_MEDIA_REASON = (
 AI_MODIFIER_BLOCKS = (
     ("lid_stacking", "Lid & Stacking",
      "Stackable Bin is box.stack = {\"mode\": \"direct\"} (its own base sits in the bin below); it may be combined with a lid. "
-     "A Lid is box.lid; a resting lid (not flip_enabled) may set stack_rim=true (OFF by default; add it only when a bin is to stand on the lid) to carry a 2 mm rim on its top face that another stackable bin sits into. "
-     "A lid with a handle (the handle is optional and OFF by default, so add handle_enabled=true only when one is asked for, with handle_type knob (the only handle), handle_size and handle_position), a Flip lid, or a lid with raised lettering cannot receive a stack, and neither can a resting lid without stack_rim. "
+     "A Lid is box.lid; a resting lid (not flip_enabled) may set stack_rim=true (this is the \"Lid for stacking\" lid type; OFF by default, add it only when a bin is to stand on the lid) to carry a 2 mm rim on its top face that another stackable bin sits into. "
+     "A lid with a handle (the handle is optional and OFF by default, so add handle_enabled=true only when one is asked for, with handle_type knob (the only handle), handle_size and handle_position), a Flip lid, or a lid with raised lettering cannot receive a stack, and neither can a lid that is not a Lid for stacking (stack_rim false). "
      "Any lid may also be a Flip lid: flip_enabled=true (OFF by default; add it only when a hinged lid is asked for) hinges it on the back inside edge with a 1.75 mm filament pin, independent of the handle; optional alignment=\"off\"|\"thin\"|\"standard\"|\"thick\" (default off, only add when asked) adds front-corner alignment tabs 0/1/2/3 mm deep and makes the lid need support. "
      "",
      ("box.lid", "box.stack")),
