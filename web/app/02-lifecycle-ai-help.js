@@ -109,6 +109,7 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
     state.designInventoryId = data.row_id;
     DL.adopt(data);
     DL.emit();
+    if (state.runtime.hosted) SP.queueHostedBinBuild(data, context);
     if (JSON.stringify(state.design) === JSON.stringify(design)) {
       state.design = clone(data.design);
       state.cleanDesign = clone(data.design);

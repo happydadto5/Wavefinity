@@ -529,6 +529,17 @@ def _merge_inventory(
         target = by_id.get(str(update.get("id", "")))
         if target is None:
             raise ValueError(f"no bin {update.get('id')!r} in the inventory")
+        if "file" in update:
+            # Hosted background promotion: a file may become current only for
+            # the exact canonical source used to build it, never a newer edit.
+            expected = update.get("expected_design")
+            if not isinstance(expected, dict):
+                raise ValueError("Recording generated files requires their design source")
+            if target.get("file"):
+                raise ValueError("This bin already has current files")
+            bins, chosen = _change_design_status(
+                {"bins": bins, "layout": chosen}, target["id"], "saved",
+                update["file"], expected)
         clean = _clean_bin(update, partial=True)
         if target["id"] in design_specs(chosen) and clean:
             raise ValueError("Edit this bin through its canonical Designer source")
@@ -600,6 +611,7 @@ def save_inventory_text(
 ) -> dict[str, Any]:
     """Merge changes into browser-owned text and return replacement text."""
     delete_ids = tuple(delete_ids or ())
+    bin_updates = tuple(bin_updates or ())
     raw = str(text or "")
     with INVENTORY_LOCK:
         current = parse_inventory(raw)
@@ -615,8 +627,13 @@ def save_inventory_text(
             current, layout=layout, bin_updates=bin_updates,
             new_bins=new_bins, new_bin_specs=new_bin_specs, delete_ids=delete_ids,
         )
+        for update in bin_updates:
+            if "file" in update:
+                chosen, superseded = _reap_superseded_names(
+                    bins, chosen, str(update["id"]), available_filenames)
+                cleanup.extend(name for name in superseded if name not in protected)
         rendered = render_inventory(str(title or "Wavefinity"), bins, chosen)
         result = _text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered))
-        if ids:
+        if ids or cleanup:
             result["cleanup_files"] = cleanup
         return result

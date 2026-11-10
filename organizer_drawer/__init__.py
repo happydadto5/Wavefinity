@@ -105,6 +105,9 @@ from organizer_outputs.printer_profile import (
 )
 
 import copy
+import logging
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -342,6 +345,85 @@ def drawer_routes(
     def folder(payload: dict[str, Any]) -> Path:
         return Path(str(payload.get("output") or default_output)).expanduser().resolve()
 
+    # Queue bookkeeping never holds the geometry lock. Each notification wakes
+    # waiters on the old event, then installs a fresh event (no lost wakeups).
+    build_lock = threading.Lock()
+    builds: dict[Path, dict[str, Any]] = {}
+    build_delay = 3.0
+
+    def notify_build(state):
+        changed = state["changed"]
+        state["changed"] = threading.Event()
+        changed.set()
+
+    def build_worker(root, state):
+        while True:
+            with build_lock:
+                row_id = next(iter(state["queued"]), None)
+                delay = (max(0, state["queued"][row_id] - time.monotonic())
+                         if row_id is not None else None)
+                changed = state["changed"]
+                if row_id is not None and delay == 0:
+                    del state["queued"][row_id]
+                    state["running"] = row_id
+            if row_id is None or delay:
+                changed.wait(delay)
+                continue
+            expected = None
+            try:
+                with geometry_lock:
+                    inv = load_inventory(root)
+                    expected = copy.deepcopy(design_specs(inv["layout"]).get(row_id))
+                    if expected is not None:
+                        result = save_inventory_bins(root, [row_id], False, generate_from_design)
+                        if result.get("partial"):
+                            logging.getLogger(__name__).warning(
+                                "Background bin build failed for %s/%s: %s",
+                                root, row_id, result.get("error"))
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Background bin build failed for %s/%s", root, row_id)
+            finally:
+                # An edit during generation gets its own turn. Ordinary build
+                # failures do not retry; Print retains its synchronous fallback.
+                try:
+                    current = design_specs(load_inventory(root)["layout"]).get(row_id)
+                    if expected is not None and current is not None and current != expected:
+                        queue_build(root, row_id)
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "Could not recheck background bin %s/%s", root, row_id)
+                finally:
+                    with build_lock:
+                        state["running"] = None
+                        notify_build(state)
+
+    def queue_build(root, row_id):
+        with build_lock:
+            state = builds.get(root)
+            if state is None:
+                state = {"queued": {}, "running": None, "changed": threading.Event()}
+                builds[root] = state
+                threading.Thread(target=build_worker, args=(root, state), daemon=True,
+                                 name="wavefinity-bin-build").start()
+            state["queued"][row_id] = time.monotonic() + build_delay
+            notify_build(state)
+
+    def wait_for_builds(root, row_ids=None):
+        ids = None if row_ids is None else set(row_ids)
+        while True:
+            with build_lock:
+                state = builds.get(root)
+                if state is None:
+                    return
+                pending = set(state["queued"])
+                if state["running"] is not None:
+                    pending.add(state["running"])
+                if not pending or (ids is not None and not pending.intersection(ids)):
+                    return
+                changed = state["changed"]
+            changed.wait()
+
     def with_rules(result: dict[str, Any]) -> dict[str, Any]:
         # The view needs the stacking steps for live stack heights while dragging.
         return {**result, "stack_steps": STACK_STEPS,
@@ -400,8 +482,42 @@ def drawer_routes(
                 available_filenames=payload.get("available_filenames") or (),
             )
         else:
-            result = _save_design_source_row(folder(payload), design=design, record=record, row_id=row_id)
+            root = folder(payload)
+            with INVENTORY_LOCK:
+                result = _save_design_source_row(root, design=design, record=record, row_id=row_id)
+                queue_build(root, result["row_id"])
+        if hosted:
+            row = next(one for one in result["bins"] if one["id"] == result["row_id"])
+            result["build_needed"] = not bool(row.get("file"))
         return with_rules(result)
+
+    def generate_hosted_bin(payload):
+        """Build one browser-owned row, without keeping any server folder."""
+        if not hosted or generate_from_design is None:
+            raise ValueError("Hosted bin generation is not available here")
+        import base64
+        import tempfile
+        from ._inventory import _call_generator
+
+        inv = load_inventory_text(payload.get("inventory_text") or "")
+        row_id = str(payload.get("row_id") or "")
+        row = next((one for one in inv["bins"] if one["id"] == row_id), None)
+        spec = design_specs(inv["layout"]).get(row_id)
+        if row is None or row.get("kind") not in ("bin", "b4b") or spec is None:
+            raise ValueError("No editable bin to build")
+        if spec != payload.get("design"):
+            raise ValueError("This bin changed while its files were being prepared")
+        with geometry_lock, tempfile.TemporaryDirectory(prefix="wavefinity-hosted-bin-") as tmp:
+            root = Path(tmp).resolve()
+            (root / INVENTORY_FILENAME).write_text(payload.get("inventory_text") or "", encoding="utf-8")
+            made = _call_generator(generate_from_design, root, spec, row_id)
+            if not made or any(_safe_row_file(root, Path(path).name) != Path(path).resolve()
+                               for path in made):
+                raise ValueError("Generating this bin did not produce safe 3MF files")
+            return {"row_id": row_id, "design_stamp": payload.get("design_stamp"),
+                    "file": ", ".join(dict.fromkeys(Path(path).name for path in made)),
+                    "files_base64": {Path(path).name: base64.b64encode(Path(path).read_bytes()).decode("ascii")
+                                     for path in made}}
 
     def duplicate_design_source(payload):
         row_id = str(payload.get("row_id") or "")
@@ -872,6 +988,7 @@ def drawer_routes(
             raise ValueError("Bulk printing to a local slicer is available in local Wavefinity.")
         if detect_slicer is None or launch_slicer is None:
             raise ValueError("printing is not available here")
+        wait_for_builds(folder(payload), (payload.get("selection") or {}).keys())
         with geometry_lock:
             out_dir = folder(payload)
             inv = load_inventory(out_dir)
@@ -909,6 +1026,7 @@ def drawer_routes(
             raise ValueError("Hosted Wavefinity saves files to your folder instead of opening a local slicer.")
         if detect_slicer is None or launch_slicer is None:
             raise ValueError("printing is not available here")
+        wait_for_builds(folder(payload))
         with geometry_lock:
             out_dir = folder(payload)
             inv = load_inventory(out_dir)
@@ -1046,6 +1164,7 @@ def drawer_routes(
             raise ValueError("Saving bin files in bulk is available in local Wavefinity.")
         selection = payload.get("selection") or []
         row_ids = list(selection.keys()) if isinstance(selection, dict) else list(selection)
+        wait_for_builds(folder(payload), row_ids)
         with geometry_lock:
             return with_rules(save_inventory_bins(
                 folder(payload), row_ids, bool(payload.get("include_connectors", False)),
@@ -1076,6 +1195,7 @@ def drawer_routes(
         "/api/drawer/load": load,
         "/api/drawer/save": save,
         "/api/drawer/design-source/save": save_design_source,
+        "/api/drawer/generate-bin": generate_hosted_bin,
         "/api/drawer/design-source/duplicate": duplicate_design_source,
         "/api/drawer/design-source/status": change_design_status,
         "/api/drawer/report": report,

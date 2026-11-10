@@ -135,7 +135,6 @@ DP.build = () => {
             <span id="dl-batch-filter-note" class="dl-batch-summary" hidden>Some bins are hidden by the current search/filter. Clear it to include all bins.</span>
           </div>
           <div class="dl-batch-actions">
-            <button type="button" id="dl-batch-export-space" class="button secondary">Export whole space</button>
             <button type="button" id="dl-batch-print" class="button secondary">Print whole space</button>
           </div>
         </div>
@@ -300,10 +299,6 @@ DP.wire = () => {
   $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllPrintable());
   $("#dl-batch-clear").addEventListener("click", () => DP.clearPrintSelection());
   $("#dl-batch-delete").addEventListener("click", () => DP.deleteSelected());
-  $("#dl-batch-export-space").addEventListener("click", () => {
-    if (DP.printSelected.size) DL.saveSelectedBins(DP.batchSaveIds(), true);
-    else WS.exportAll();
-  });
   $("#dl-batch-print").addEventListener("click", () => {
     if (DP.printSelected.size) DL.printSelectedBins(DP.printSelectionPayload(), true);
     else DL.printCompleteSpace();
@@ -388,8 +383,7 @@ DP.clearPrintSelection = () => {
   DP.renderInventory(true);
 };
 
-// The batch buttons share the eligible ticked rows; an empty selection means
-// their whole-Space actions are available.
+// Print uses the eligible ticked rows; an empty selection prints the Space.
 DP.batchScope = () => {
   const picked = [...DP.printSelected].map(id => DL.bin(id)).filter(one => DL.printEligible(one));
   if (DP.printSelected.size) return { subset: true, save: picked, print: picked, picked };
@@ -416,9 +410,9 @@ DP.renderBatch = () => {
   const needFiles = scope.subset ? scope.picked.filter(one => DL.saveNeeded(one)).length : scope.save.length;
   let summary;
   if (scope.subset) {
-    summary = `${dlPlural(DP.printSelected.size, "bin")} selected · ${scope.picked.length} eligible for Save/Print · ${needFiles} need${needFiles === 1 ? "s" : ""} new files${connectorNote}`;
+    summary = `${dlPlural(DP.printSelected.size, "bin")} selected · ${scope.picked.length} eligible to print · ${needFiles} need${needFiles === 1 ? "s" : ""} new files${connectorNote}`;
   } else if (!scope.eligible.length) {
-    summary = "No designs to save or print yet.";
+    summary = "No designs to print yet.";
   } else summary = "";
   const summaryNode = $("#dl-batch-summary");
   summaryNode.textContent = summary;
@@ -429,21 +423,12 @@ DP.renderBatch = () => {
   $("#dl-batch-delete").disabled = !DP.printSelected.size || Boolean(DL.busy);
   const busy = Boolean(DL.busy);
 
-  const exportButton = $("#dl-batch-export-space");
-  exportButton.textContent = DL.busy === "save-bins" || WS.busy ? "Exporting…"
-    : scope.subset ? `Export ${scope.picked.length === 1 ? "bin" : `${scope.picked.length} bins`}`
-      : "Export whole space";
-  exportButton.disabled = busy || Boolean(WS.busy) || (scope.subset && !scope.picked.length);
-  exportButton.title = scope.subset && !scope.picked.length
-    ? "No selected bins are eligible to export."
-    : "Export the selected bins, or the whole Space when none are selected.";
-
   if (WS.open() && ["settings", "none"].includes(WS.task)) DV.paint();
   if (hosted) return;
   const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
   const printCount = scope.subset ? scope.picked.length : 0;
-  button.textContent = (DL.busy === "print-bins" || DL.busy === "print-complete") ? "Opening Bambu Studio…"
+  button.textContent = (DL.busy === "print-bins" || DL.busy === "print-complete") ? DL.printBusyLabel
     : scope.subset ? `Print ${printCount === 1 ? "bin" : `${printCount} bins`}` : "Print whole space";
   button.disabled = noSlicer || busy || (scope.subset && !printCount);
   button.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."

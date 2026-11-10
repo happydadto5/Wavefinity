@@ -33,7 +33,52 @@ SP.readInventoryFor = async (folder, { migrate = false } = {}) => {
 };
 
 SP._inventoryWriteChain = Promise.resolve();
-SP.writeHostedFileSet = async (handle, filesBase64 = {}) => {
+SP._binBuilds = new Map();
+SP.queueHostedBinBuild = (data, context) => {
+  if (!data.build_needed || !data.row_id) return;
+  const folder = state.browserFolder;
+  const rowId = data.row_id;
+  const design = clone(data.design);
+  const designKey = JSON.stringify(DL.cleanTextConsent({ [rowId]: design })[rowId]);
+  let rows = SP._binBuilds.get(folder?.handle);
+  if (!rows) SP._binBuilds.set(folder?.handle, rows = new Map());
+  let entry = rows.get(rowId);
+  if (!entry) rows.set(rowId, entry = { chain: Promise.resolve(), timer: null, version: 0 });
+  clearTimeout(entry.timer);
+  const version = ++entry.version;
+  const current = () => !state.relocating && state.browserFolder === folder &&
+    DL.spaceContextCurrent(context) && entry.version === version &&
+    Boolean(DL.bin(rowId)) && !DL.bin(rowId).file &&
+    JSON.stringify(DL.layout?.design_specs?.[rowId]) === designKey;
+
+  entry.timer = setTimeout(() => {
+    entry.timer = null;
+    const run = async () => {
+      if (!current()) return;
+      const bytes = new TextEncoder().encode(JSON.stringify(design));
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const stamp = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+      if (!current()) return;
+      const generated = await SP.inventoryRequest("/api/drawer/generate-bin", {
+        row_id: rowId, design, design_stamp: stamp,
+      }, { context, write: false, buildOnly: true });
+      // Discard superseded bytes before they reach the user's folder.
+      if (!current() || generated.design_stamp !== stamp) return;
+      const saved = await SP.inventoryRequest("/api/drawer/save", {
+        bin_updates: [{ id: rowId, file: generated.file, expected_design: design }],
+      }, { context, generatedFiles: generated.files_base64, promotionCurrent: current });
+      if (current()) {
+        DL.adopt(saved);
+        DL.emit();
+      }
+    };
+    // Generation is outside the inventory write chain. Each row nevertheless
+    // has only one build at a time; promotion rejoins the write chain below.
+    entry.chain = entry.chain.then(run, run).catch(() => {});
+  }, 3000);
+};
+
+SP.writeHostedFileSet = async (handle, filesBase64 = {}, promotionCurrent = null) => {
   const names = Object.keys(filesBase64 || {});
   if (!names.length) return { rollback: async () => {} };
 
@@ -63,6 +108,7 @@ SP.writeHostedFileSet = async (handle, filesBase64 = {}) => {
     for (const name of names) {
       prior.set(name, await WFFileSystem.readBlob(handle, name));
       const bytes = Uint8Array.from(atob(filesBase64[name]), c => c.charCodeAt(0));
+      if (promotionCurrent && !promotionCurrent()) throw DL.staleSpaceError();
       await WFFileSystem.writeBlob(
         handle,
         name,
@@ -91,6 +137,9 @@ SP.inventoryRequest = async (
     context = null,
     sideEffect = false,
     onStillFinishing = null,
+    buildOnly = false,
+    generatedFiles = null,
+    promotionCurrent = null,
     ...requestOptions
   } = {},
 ) => {
@@ -109,6 +158,7 @@ SP.inventoryRequest = async (
 
   const run = async () => {
     requireContext();
+    if (promotionCurrent && !promotionCurrent()) throw DL.staleSpaceError();
     const inventoryText = await SP.readInventoryFor(
       { ...folder, handle },
       { migrate: write },
@@ -118,6 +168,7 @@ SP.inventoryRequest = async (
       deleting || path === "/api/drawer/spacers/refresh";
     const needsFilenameSnapshot =
       mayDeleteOwnedFiles ||
+      Boolean(generatedFiles) ||
       path === "/api/drawer/design-source/save" ||
       path === "/api/drawer/design-source/status";
 
@@ -140,13 +191,17 @@ SP.inventoryRequest = async (
       : await api(path, requestBody, requestOptions);
 
     requireContext();
+    if (buildOnly) return data;
+    if (promotionCurrent && !promotionCurrent()) throw DL.staleSpaceError();
     const fileTxn = await SP.writeHostedFileSet(
       handle,
-      data.files_base64 || {},
+      generatedFiles || data.files_base64 || {},
+      promotionCurrent,
     );
 
     try {
       requireContext();
+      if (promotionCurrent && !promotionCurrent()) throw DL.staleSpaceError();
       if (write && typeof data.inventory_text === "string") {
         await WFFileSystem.writeText(
           handle,
@@ -166,7 +221,7 @@ SP.inventoryRequest = async (
     }
 
     if (data.cleanup_files?.length) {
-      const generatedNames = new Set(Object.keys(data.files_base64 || {}));
+      const generatedNames = new Set(Object.keys(generatedFiles || data.files_base64 || {}));
       const failed = [];
       for (const name of data.cleanup_files) {
         requireContext();

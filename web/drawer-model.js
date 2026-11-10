@@ -1343,6 +1343,9 @@ DL.requestReport = debounce(async () => {
   }
 }, 120);
 
+// The server launches Bambu before replying; that instant is not observable
+// here. Keep the honest waiting label through the whole outstanding request.
+DL.printBusyLabel = "Finishing files…";
 DL.busyWith = async (what, work) => {
   if (state.relocating) {
     toast("Wavefinity is changing its folder. Try again in a moment.", true);

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import inspect
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Iterable
-from organizer_inventory import design_specs, load_inventory, update_bin_file
+from organizer_inventory import INVENTORY_FILENAME, INVENTORY_LOCK, design_specs, load_inventory, update_bin_file
 
 from ._core import _label
 from ._spacers import generate_connectors
@@ -157,13 +158,32 @@ def prepare_inventory_bins(
             reused.append(row_id)
             continue
         try:
-            made = _call_generator(generate_from_design, root, spec, row_id)
-            if not made:
-                raise ValueError("generating its files did not produce any")
-            if any(not Path(path).is_file() for path in made):
-                raise ValueError("a generated file was not saved")
-            file_text = ", ".join(dict.fromkeys(path.name for path in made))
-            update_bin_file(root, row_id, file_text, expected_design=spec)
+            # Keep unfinished/stale bytes away from current files. Promotion
+            # and recording share the same lock as an autosave's design write.
+            with tempfile.TemporaryDirectory(prefix=".bin-build-", dir=root) as tmp:
+                stage = Path(tmp).resolve()
+                # The generator also reads Space settings (e.g. pegboard
+                # thickness) from its output folder. Preserve that context.
+                with INVENTORY_LOCK:
+                    source = load_inventory(root)
+                    (stage / INVENTORY_FILENAME).write_bytes(Path(source["file"]).read_bytes())
+                made = _call_generator(generate_from_design, stage, spec, row_id)
+                if not made:
+                    raise ValueError("generating its files did not produce any")
+                names = list(dict.fromkeys(Path(path).name for path in made))
+                if any(Path(path).resolve().parent != stage or not Path(path).is_file()
+                       for path in made):
+                    raise ValueError("a generated file was not saved in the build folder")
+                with INVENTORY_LOCK:
+                    if design_specs(load_inventory(root)["layout"]).get(row_id) != spec:
+                        raise ValueError("This bin changed while its files were being prepared")
+                    backups, installed = _promote_spacer_stage(root, stage, names)
+                    try:
+                        update_bin_file(root, row_id, ", ".join(names), expected_design=spec)
+                    except Exception:
+                        _rollback_spacer_stage(root, backups, installed)
+                        raise
+                made = [root / name for name in names]
         except Exception as error:
             failed = {"id": row_id, "name": _label(one), "error": str(error)}
             break
