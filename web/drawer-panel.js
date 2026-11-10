@@ -167,7 +167,7 @@ DP.build = () => {
     </section>
 
     <details id="dl-spacers" class="dl-section dl-spacers" aria-label="Spacers" open>
-      <summary>Spacers <span id="dl-sp-hint" class="dl-sp-hint" hidden></span></summary>
+      <summary>Spacers</summary>
       <div class="section-body">
         <p class="dl-note">Spacers are filler parts that brace your bins against the drawer walls so nothing slides around. Flexible spacers print 2mm oversized to wedge in snugly — print them in PLA or PETG.</p>
         <div class="field-grid two">
@@ -187,6 +187,7 @@ DP.build = () => {
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
         </div>
         <p id="dl-sp-reason" class="dl-note" hidden></p>
+        <p id="dl-sp-status" class="dl-note" hidden></p>
       </div>
     </details>
 
@@ -334,12 +335,6 @@ DP.wire = () => {
     DL.refreshSpacers();
   });
   $("#dl-sp-print").addEventListener("click", () => DP.openSpacerPrintDialog());
-  // Fix 1060: the Spacers section defaults to open (Fix 1045), so the quiet
-  // "N gaps could use spacers" hint only matters when the user collapses the
-  // section. Re-run the hint evaluation on every expand/collapse; without
-  // this the hint logic in DP.updateSpacerHint is dead because nothing
-  // re-checks section.open after load.
-  $("#dl-spacers").addEventListener("toggle", () => DP.updateSpacerHint());
   $("#spacer-print-cancel").addEventListener("click", () => $("#spacer-print-dialog").close());
   $("#spacer-print-dialog").addEventListener("click", event => {
     if (event.target === $("#spacer-print-dialog")) $("#spacer-print-dialog").close();
@@ -1158,23 +1153,19 @@ DP.renderStats = () => {
   DP.updateSpacerHint();
 };
 
-// Fix 088 S88-5: a quiet "N gaps could use spacers" hint inside the
-// collapsed Spacers section summary. Computed from a debounced (~800 ms)
-// backend spacer plan that respects the wall toggles; shown only while the
-// section is collapsed, bins are placed, and the section is closed. Never
-// writes plan state - the result is only counted, never stored.
+// Quiet spacer status from a debounced plan; the plan does not change the layout.
 DP.spacerHintTimer = null;
-DP.spacerHintCache = null; // { signature, count } - avoids repeat backend calls
+DP.spacerHintCache = null; // Avoids repeat backend calls for the same layout.
 DP.updateSpacerHint = () => {
-  const hint = $("#dl-sp-hint");
-  const section = $("#dl-spacers");
-  if (!hint || !section) return;
-  const usable = !section.open &&
-    DL.loaded && DL.drawer().placements.length > 0;
-  if (!usable) {
+  const hint = $("#dl-sp-status");
+  if (!hint) return;
+  const usable = DL.loaded && DL.drawer().placements.some(placement =>
+    DL.bins.some(bin => bin.id === placement.bin && !DL.isSpacer(bin)));
+  const invalid = () => (DL.report?.problems || []).some(problem => problem.type === "edge_spacer");
+  if (!usable || invalid()) {
     if (DP.spacerHintTimer) { clearTimeout(DP.spacerHintTimer); DP.spacerHintTimer = null; }
-    hint.hidden = true;
-    hint.textContent = "";
+    hint.textContent = usable ? "Some spacers no longer fit your bins. Refresh Spacers remakes them." : "";
+    hint.hidden = !hint.textContent;
     return;
   }
   // The Space identity and wall toggles join the fingerprint so switching
@@ -1185,6 +1176,8 @@ DP.updateSpacerHint = () => {
     hint.hidden = !DP.spacerHintCache.text;
     return;
   }
+  hint.hidden = true;
+  hint.textContent = "";
   if (DP.spacerHintTimer) clearTimeout(DP.spacerHintTimer);
   DP.spacerHintTimer = setTimeout(async () => {
     DP.spacerHintTimer = null;
@@ -1194,28 +1187,21 @@ DP.updateSpacerHint = () => {
         layout: DL.layout,
         drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
       }, { write: false });
-      // Fix 096 C10: three truthful hint states. run_count counts only the
-      // cap-limited selection; run_count_total is the winning-edge total
-      // before the cap (same basis as run_count); placed_spacer_count
-      // identifies the satisfied case.
+      // run_count is cap-limited; run_count_total includes the remaining gaps.
       const runs = result.run_count ?? (result.selected || []).length;
       const totalRuns = result.run_count_total ?? runs;
-      const placed = result.placed_spacer_count ?? 0;
-      const wallsOff = (result.notes || []).some(note => String(note).includes("All spacer walls are off."));
       if (runs > 0 && totalRuns > runs) {
         const more = totalRuns - runs;
-        text = `${runs} gap${runs === 1 ? "" : "s"} could use spacers — ${more} more gap${more === 1 ? "" : "s"} need${more === 1 ? "s" : ""} spacers too`;
+        text = `${runs} gap${runs === 1 ? "" : "s"} could use spacers — ${more} more gap${more === 1 ? "" : "s"} need${more === 1 ? "s" : ""} spacers too. Refresh Spacers adds them.`;
       } else if (runs > 0) {
-        text = `${runs} gap${runs === 1 ? "" : "s"} could use spacers`;
-      } else if (placed > 0 && !wallsOff) {
-        text = "All gaps have spacers";
+        text = `${runs} gap${runs === 1 ? "" : "s"} could use spacers. Refresh Spacers adds them.`;
       }
     } catch (error) { text = ""; /* a hint must never fail visibly */ }
     // Publish only if the world hasn't moved on while planning.
     const now = JSON.stringify([DL.spaceContext(), DL.spacerSignature(), DL.layout.settings.spacers]);
-    const stillUsable = !$("#dl-spacers")?.open &&
-      DL.loaded && DL.drawer().placements.length > 0;
-    if (now !== signature || !stillUsable) return;
+    const stillUsable = DL.loaded && DL.drawer().placements.some(placement =>
+      DL.bins.some(bin => bin.id === placement.bin && !DL.isSpacer(bin)));
+    if (now !== signature || !stillUsable || invalid()) return;
     DP.spacerHintCache = { signature, text };
     hint.textContent = text;
     hint.hidden = !text;

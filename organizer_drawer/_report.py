@@ -501,7 +501,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
             if ex1 > ex0 and ey1 > ey0:
                 collides = bool((owner[ey0:ey1, ex0:ex1] >= 0).any())
         if outside or collides:
-            problems.append({"type": "edge_spacer", "keys": [_key(placement)], "message": "An edge spacer no longer fits this drawer - take the spacers out and make them again"})
+            problems.append({"type": "edge_spacer", "keys": [_key(placement)], "message": "A spacer no longer fits - Refresh Spacers remakes it"})
     issues = _height_issues(items, reach)
     for front, back in issues:
         problems.append({

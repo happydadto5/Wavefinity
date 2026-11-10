@@ -1106,16 +1106,24 @@ def drawer_routes(
             spacer_rows_printed: set[str] = set()
             skipped_spacers: set[str] = set()
             spacer_copies = 0
+            invalid_spacers = 0
             launch_files: list[Path] = []
             for bin_id in counts:
                 launch_files.extend(rows_files[bin_id])
             for drawer in current_drawers:
+                invalid_keys = {
+                    key for problem in drawer_report(drawer, inventory["bins"], layout=inventory["layout"]).get("problems", [])
+                    if problem.get("type") == "edge_spacer" for key in problem.get("keys", [])
+                }
                 for placement in drawer.get("placements") or []:
                     row_id = str(placement.get("bin") or "")
                     one = current_by_id.get(row_id)
                     if one is None or one.get("kind") not in SPACER_KINDS:
                         continue
                     if one.get("status") == "printed":
+                        continue
+                    if _key(placement) in invalid_keys:
+                        invalid_spacers += 1
                         continue
                     safe = _safe_row_file(out_dir, one.get("file") or "")
                     if safe is None:
@@ -1124,6 +1132,11 @@ def drawer_routes(
                     launch_files.append(safe)
                     spacer_rows_printed.add(row_id)
                     spacer_copies += 1
+            invalid_note = None
+            if invalid_spacers:
+                noun = "spacer" if invalid_spacers == 1 else "spacers"
+                verb = "fits and was" if invalid_spacers == 1 else "fit and were"
+                invalid_note = f"{invalid_spacers} {noun} no longer {verb} left out. Refresh Spacers remakes them."
             # 5. Space connectors.
             try:
                 connector_counts, notes = _space_connectors(out_dir, inventory["layout"], inventory["bins"])
@@ -1136,7 +1149,7 @@ def drawer_routes(
                         f"Spacer {name} has no file yet and was skipped — "
                         "open Spacers and choose Generate to remake it."
                         for name in sorted(skipped_spacers)
-                    ],
+                    ] + ([invalid_note] if invalid_note else []),
                 )
             for name, count in connector_counts.items():
                 launch_files.extend([out_dir / name] * count)
@@ -1146,6 +1159,8 @@ def drawer_routes(
                     "open Spacers and choose Generate to remake it."
                     for name in sorted(skipped_spacers)
                 )
+            if invalid_note:
+                notes.append(invalid_note)
             # 6. Fit check, then one launch: every file handed to the slicer
             # must fit the active printer; a fit failure fails before launch.
             # Truthful count payload for the preflight branch (defined here so
