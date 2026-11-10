@@ -671,7 +671,7 @@ WS.onAction = async (act, button, event) => {
     case "delete-bin": {
       const one = DL.bin(button.dataset.id);
       if (!one) return null;
-      return one.id === DP.designDeleteRowId() ? DP.deleteDesignBin() : DP.deleteRow(one);
+      return DP.deleteBinNow(one); // Story 2836: at once, no confirmation, nothing selected after
     }
     case "print-picked": return WS.printPicked(event);
     case "export-picked": return WS.exportPicked();

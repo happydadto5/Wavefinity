@@ -659,6 +659,66 @@ DP.duplicateRow = async one => {
   }
 };
 
+// Story 2836: the workspace tree's Delete button on the selected bin. It deletes the bin the
+// button names, at once and without a confirmation; its unsaved draft is discarded rather
+// than saved first. Afterwards nothing is selected and the screen shows the blank landing.
+DP.deleteBinNow = async one => {
+  if (!one?.id) return false;
+  if (DP.designNavBlocked()) {
+    toast("Wavefinity is still working on this bin. Try Delete again in a moment.", true);
+    return false;
+  }
+  const context = DL.spaceContext();
+  const openHere = one.id === state.designInventoryId;
+  DP.designNavBusy = true;
+  DP.refreshDesignerDeleteBin();
+  try {
+    if (openHere) {
+      // The bin is going away: stop any queued autosave from re-creating it.
+      clearTimeout(spaceAutosaveTimer);
+      spaceAutosaveTimer = null;
+      await spaceAutosaveChain;
+    }
+    if (!DL.spaceContextCurrent(context)) return false;
+    if (!(await DL.editBins({ delete_ids: [one.id] }, { context }))) {
+      if (!DL.spaceContextCurrent(context)) toast("The Space changed, so the bin was not deleted.", true, 6000);
+      return false;
+    }
+    DP.printSelected.delete(one.id);
+    if (typeof WS !== "undefined" && WS.printPick) WS.printPick.delete(one.id);
+    if (typeof discardStaleFileRefreshRows === "function") discardStaleFileRefreshRows([one.id]);
+    // Nothing selected: drop the open bin's binding, draft and preview geometry.
+    clearTimeout(spaceAutosaveTimer);
+    spaceAutosaveTimer = null;
+    invalidatePendingPreview();
+    state.designInventoryId = null;
+    DP.clearDesignTarget();
+    state.design = freshDesignForCurrentFolder();
+    state.cleanDesign = clone(state.design);
+    state.drafts = {};
+    state.preview = null;
+    state.previewDesignKey = null;
+    renderPreview3D();
+    DL.selectedRow = null;
+    DL.selected = null;
+    DL.emit();
+    if (DP.mode !== "space") DP.setMode("space");
+    DP.renderInventory(true);
+    if (typeof WS !== "undefined") {
+      WS.task = "landing";
+      WS.prior = null;
+      WS.sync();
+    }
+    return true;
+  } catch (error) {
+    toast(`Could not delete bin: ${friendlyError(error)}`, true, 6000);
+    return false;
+  } finally {
+    DP.designNavBusy = false;
+    DP.refreshDesignerDeleteBin();
+  }
+};
+
 // Every Delete button carries its row ID; never delete a stale selection.
 DP.deleteRow = async (one, opts = {}) => {
   const context = DL.spaceContext();
