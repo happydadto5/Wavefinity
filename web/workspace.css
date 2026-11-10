@@ -108,15 +108,14 @@ body.ws-task-container #space-head .space-head-title,
 body.ws-task-container #space-actions > .button-row { display: none; }
 body.ws-task-settings #space-actions,
 body.ws-task-settings #space-head .space-head-title { display: none; }
-/* Story 2841: the Inventory list (select, Print Selected, Export Space) stays on the space details screen. */
-/* A dimension lives in one place: size and construction of a box or cabinet are in its container editor. */
-body.ws-task-settings #space-fields-portable,
-body.ws-task-settings #space-fields-storage_drawers { display: none; }
+/* Story 2841: the Inventory list (select, Print Selected, Export Space) stays on the space details screen, and so
+   do the Name + Size summary of a Storage Box / Storage Drawers space (the setup form for an existing space).
+   Full size and construction editing still lives only in the container editor. */
 
-/* Story 2743: for a box or cabinet every part of the Space header is hidden in the layout view, which left
-   an empty bordered card above Spacers; it is not shown while nothing visible remains inside it. */
+/* Story 2743 / 2841: no empty bordered card above the details; the head shows only while it holds something
+   visible (the kind's field group, an error or folder help). */
 body.ws-task-settings #space-head:not(:has(
-  .space-type-fields:not([hidden]):not(#space-fields-portable):not(#space-fields-storage_drawers),
+  .space-type-fields:not([hidden]),
   #space-error:not([hidden]), #space-folder-help:not([hidden]))) { display: none; }
 
 /* Story 2834: the same for the Storage box / Storage Drawers design view, where the title and the
@@ -126,7 +125,8 @@ body.ws-task-container #space-head:not(:has(
   #space-error:not([hidden]), #space-folder-help:not([hidden]))) { display: none; }
 
 /* The Space name is shown in the heading; the layout view has no (falsely editable) Name section. */
-body.ws-task-settings #space-name-row,
+/* Story 2841: except for a Storage Box, whose Name + Size summary is its details (a cabinet hides the row itself). */
+body.ws-task-settings:not(:has(#space-fields-portable:not([hidden]))) #space-name-row,
 body.ws-task-settings #space-note { display: none !important; }
 
 /* Big message in the middle section while switching views. */
