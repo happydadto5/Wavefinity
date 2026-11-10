@@ -107,11 +107,13 @@ WS.current = () => {
 
 // Launch screen: existing spaces, My Bins, and (beside it) the New Space kinds.
 WS.renderPicker = () => {
-  const cards = WS.spaceRows().map(one => `<li><button type="button" class="ws-menu-item" data-ws-act="open-space" data-src="${one.src}" data-index="${one.index ?? ""}"${one.invalid ? " disabled" : ""}>
+  const spaces = WS.spaceRows();
+  const cards = spaces.map(one => `<li><button type="button" class="ws-menu-item" data-ws-act="open-space" data-src="${one.src}" data-index="${one.index ?? ""}"${one.invalid ? " disabled" : ""}>
       <span class="ws-card-icon" aria-hidden="true">${SP.compactKindIcon(one.kind)}</span>
       <span class="ws-card-text"><strong>${wsEsc(one.name)}</strong><small>${wsEsc([SP_KINDS[one.kind]?.label, one.meta].filter(Boolean).join(" · "))}</small></span></button></li>`).join("");
   return `<div class="ws-sel">
-    <div class="ws-sel-head"><h2>Open a Space</h2></div>
+    <div class="ws-sel-head"><h2>${spaces.length ? "Open a Space" : "Welcome to Wavefinity"}</h2></div>
+    ${spaces.length ? "" : '<p class="ws-links">No spaces yet - pick what you\'re organizing below.</p>'}
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
     <ul class="ws-menu-list" aria-label="Your Spaces">${cards}
       <li><button type="button" class="ws-menu-item" data-ws-act="my-bins">
