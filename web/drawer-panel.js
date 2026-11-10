@@ -439,7 +439,7 @@ DP.renderBatch = () => {
   const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
   const printCount = scope.subset ? scope.picked.length : 0;
-  button.textContent = DL.busy === "print-bins" ? "Opening Bambu Studio…"
+  button.textContent = (DL.busy === "print-bins" || DL.busy === "print-complete") ? "Opening Bambu Studio…"
     : scope.subset ? `Print ${printCount === 1 ? "bin" : `${printCount} bins`}` : "Print whole space";
   button.disabled = noSlicer || busy || (scope.subset && !printCount);
   button.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."
