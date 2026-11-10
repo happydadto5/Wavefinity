@@ -748,7 +748,7 @@ def print_spacers_and_connectors(
     # Preflight the authoritative slicer before any connector file is written.
     slicer = detect_slicer(slicer_path)
     if slicer is None or not Path(slicer).is_file():
-        raise ValueError("A slicer was not found. Locate it with Change slicer in the bin view.")
+        raise ValueError("Bambu Studio wasn't found. Open Printer Settings… to choose it.")
     # Fix 096 F11: user-facing copy names the detected slicer, never a hardcoded brand.
     name = slicer_display_name(slicer) or "the slicer"
     counts: dict[str, int] = {}

@@ -238,7 +238,7 @@ def print_inventory_bins(
     # Inventory File-cell write or connector generation.
     slicer = detect_slicer(slicer_path)
     if slicer is None or not Path(slicer).is_file():
-        raise ValueError("A slicer was not found. Locate it with Change slicer in the bin view.")
+        raise ValueError("Bambu Studio wasn't found. Open Printer Settings… to choose it.")
     # Fix 096 F11: user-facing copy names the detected slicer, never a hardcoded brand.
     name_cap = slicer_display_name(slicer) or "The slicer"
     by_id = {one["id"]: one for one in bins}
@@ -1006,12 +1006,12 @@ def drawer_routes(
                 raise ValueError(
                     "These spacers have no printable file and were not sent: "
                     + ", ".join(sorted(set(unresolved)))
-                    + ". Generate their files first, then print again.")
+                    + ". Refresh Spacers to remake them, then print again.")
             if not files:
                 raise ValueError("Select at least one spacer to print.")
             slicer = detect_slicer(payload.get("slicer_path"))
             if slicer is None or not Path(slicer).is_file():
-                raise ValueError("A slicer was not found. Locate it with Change slicer in the bin view.")
+                raise ValueError("Bambu Studio wasn't found. Open Printer Settings… to choose it.")
             fit_issues: list[str] = []
             for path in dict.fromkeys(launch_files):
                 fit_issues.extend(print_file_fit_issues(path, _printer_profile(payload)))
@@ -1073,7 +1073,7 @@ def drawer_routes(
             # 1. Slicer preflight first.
             slicer = detect_slicer(payload.get("slicer_path"))
             if slicer is None or not Path(slicer).is_file():
-                raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
+                raise ValueError("Bambu Studio wasn't found. Open Printer Settings… to choose it.")
             # 2. One truthful preflight over every placed bin in the Space.
             by_id = {one["id"]: one for one in bins}
             counts: dict[str, int] = {}
@@ -1147,7 +1147,7 @@ def drawer_routes(
                     "Bambu Studio was not opened.",
                     notes=[
                         f"Spacer {name} has no file yet and was skipped — "
-                        "open Spacers and choose Generate to remake it."
+                        "Refresh Spacers remakes it."
                         for name in sorted(skipped_spacers)
                     ] + ([invalid_note] if invalid_note else []),
                 )
@@ -1156,7 +1156,7 @@ def drawer_routes(
             if skipped_spacers:
                 notes.extend(
                     f"Spacer {name} has no file yet and was skipped — "
-                    "open Spacers and choose Generate to remake it."
+                    "Refresh Spacers remakes it."
                     for name in sorted(skipped_spacers)
                 )
             if invalid_note:

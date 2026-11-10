@@ -331,7 +331,6 @@ DP.wire = () => {
     });
   }
   $("#dl-sp-refresh").addEventListener("click", () => {
-    if (!confirm("Refresh Spacers will delete all placed spacers and create new ones. Continue?")) return;
     DL.refreshSpacers();
   });
   $("#dl-sp-print").addEventListener("click", () => DP.openSpacerPrintDialog());
@@ -476,6 +475,11 @@ DP.onInventoryClick = async event => {
   else if (action === "not-printed") DL.markNotPrinted(one);
   else if (action === "edit") DP.openInventoryRow(one.id);
   else if (action === "delete") {
+    if (DL.isSpacer(one)) {
+      const context = DL.spaceContext();
+      if (await DL.editBins({ delete_ids: [one.id] }, { context }) && DL.selectedRow === one.id) DL.selectedRow = null;
+      return;
+    }
     // Story 2782: a bin row's Delete is the open-bin delete (stays in Design, as the header button did).
     if (one.id === DP.designDeleteRowId()) await DP.deleteDesignBin();
     else DP.deleteRow(one);
@@ -1273,7 +1277,7 @@ DP.renderInventory = (force = false) => {
   if (!bins.length) { list.innerHTML = containerRow + `<div class="dl-empty">No bins match.</div>`; return; }
   const range = DV.heightRange();
   const kinds = { b4b: "Storage Box", manual: "Added by hand" };
-  const kindLabel = one => one.kind === "spacer" ? (one.boundary === "edge" ? "Edge spacer" : "Spacer") : kinds[one.kind];
+  const kindLabel = one => one.kind === "spacer" ? "Spacer" : kinds[one.kind];
   const cabinet = DL.isStorageDrawers();
   list.innerHTML = containerRow + bins.map(one => {
     const placed = DL.placedCount(one.id);
@@ -1290,6 +1294,7 @@ DP.renderInventory = (force = false) => {
         : `Object height ${fmt(one.object_height_mm)} mm · Installed planning ${plan?.estimated ? "~" : ""}${fmt(plan?.effective_mm ?? one.z)} mm${plan?.estimated ? " (estimated)" : ""}`
       : "";
     const spacer = DL.isSpacer(one);
+    const spacerFlexible = Boolean(one.flexible ?? /^Spacer Flex /.test(String(one.file || "")));
     const color = DV.binColor(one, range);
     const flags = [
       DL.stackable(one) ? DL.stackName(one.stack) : "", kindLabel(one),
@@ -1313,7 +1318,7 @@ DP.renderInventory = (force = false) => {
       ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.binNumberLabel(one))} ${escapeHtml(DL.label(one))}"${picked ? " checked" : ""}>`
       : `<span class="dl-print-placeholder" aria-hidden="true"></span>`;
     const lifecycle = spacer
-      ? `<small>${dlPlural(placed, "placement")} · ${one.qty} printed</small>`
+      ? `<small>${one.status === "printed" ? "Printed" : "Not printed"}</small>`
       : `<small class="dl-status">${cabinet ? StorageDrawers.rowLocationText(DL.layout, one.id) : (placed ? "Placed" : "Unplaced")} · ${DL.statusLabel(one)}</small>`;
     const actions = spacer ? "" : `<div class="dl-row-actions">
           ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>`
@@ -1332,8 +1337,9 @@ DP.renderInventory = (force = false) => {
         ${swatch}
         <span class="dl-bin-main">
           <strong>${escapeHtml(DL.label(one))}${DL.stackIconHtml(one)}</strong>
-          <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units</small>
-          ${planningText ? `<small>${escapeHtml(planningText)}</small>` : ""}
+          <small>${spacer ? `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm` : `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units`}</small>
+          ${spacer ? `<small>${spacerFlexible ? "Flexible" : "Rigid"}</small>` : ""}
+          ${!spacer && planningText ? `<small>${escapeHtml(planningText)}</small>` : ""}
           ${lifecycle}
           ${flags.length ? `<small class="dl-flags">${escapeHtml(flags.join(" · "))}</small>` : ""}
         </span>
