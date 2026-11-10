@@ -409,24 +409,11 @@ DV.render = () => {
   DV.hits = DL.isPegboard(drawer) ? DV.paintPegboardScene(ctx, drawer, DV.cam) : DV.paintScene(ctx, drawer, DV.cam);
   // Taking a bin off the Space is a drop onto the staging rail beside it.
   $("#dl-staging")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.outside));
-  // The yellow/red height rims only exist for box/drawer spaces (Fix 1068),
-  // so their legend only shows there. The legend describes the rule the
-  // rims evaluate (Fix 1091 + Fix 1098 option A): drawers enforce the 2 mm
-  // running clearance as a hard cap — safe max = usable drawer height − 2 mm;
-  // boxes compare against the raw interior.
-  // Fix 2490: a Storage Box shows no message unless a bin is over its height;
-  // then it shows one bold red line instead of the standing rim explanation.
   const heightLegend = $("#dl-height-legend");
   if (heightLegend) {
-    const showRims = DL.isStorageBox() || DL.isStorageDrawers();
-    const showLegend = DL.isStorageBox() ? DV.stackOverHeight : showRims;
+    const showLegend = DL.isStorageBox() || DL.isStorageDrawers();
     heightLegend.hidden = !showLegend;
-    heightLegend.classList.toggle("over-height", showLegend && DL.isStorageBox());
-    if (showLegend) {
-      heightLegend.textContent = DL.isStorageBox()
-        ? "Red bins exceed total storage bin height!"
-        : "Yellow rim: the bin stack is below the safe height (the drawer inside height) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam";
-    }
+    if (showLegend) heightLegend.innerHTML = `<span class="dl-height-swatch yellow"></span>Yellow: below full height · <span class="dl-height-swatch red"></span>Red: over space height · ${DL.stackIconForRoles({ bottom: true })} can take a stack · ${DL.stackIconForRoles({ top: true })} can sit on a bin`;
   }
 };
 
@@ -490,9 +477,7 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
     ctx.fillStyle = "white";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    if (DL.stackable(one) && boxW >= 26 && boxH >= 18) {
-      DV.drawStackIcon(ctx, Math.min(poly[0][0], poly[2][0]) + 4, Math.min(poly[0][1], poly[2][1]) + 4, 11, "white");
-    }
+    DV.drawStackIcon(ctx, poly, one, "white");
     if (boxH >= 40 && boxW >= 55) {
       const fontSize = Math.min(12, boxW / Math.max(4, info.name.length * 0.55));
       const subSize = Math.max(7.5, Math.min(9.5, fontSize * 0.8));
@@ -884,14 +869,43 @@ DV.stackSummary = bins => {
   };
 };
 
-// The stackable glyph (two stacked squares) with its top-left corner at (x, y).
-DV.drawStackIcon = (ctx, x, y, size, ink) => {
-  const s = size * 0.62, o = size - s;
+// Place a complete icon inside the projected face, including its stroke.
+DV.drawStackIcon = (ctx, poly, one, ink) => {
+  const { top, bottom } = DL.stackRoles(one);
+  if (!top && !bottom) return;
+  const size = 16, margin = 1;
+  const center = poly.reduce((sum, p) => [sum[0] + p[0] / 4, sum[1] + p[1] / 4], [0, 0]);
+  const inside = point => {
+    let sign = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const cross = (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
+      if (Math.abs(cross) < 1e-6) continue;
+      if (sign && Math.sign(cross) !== sign) return false;
+      sign = Math.sign(cross);
+    }
+    return sign !== 0;
+  };
+  let pos = null;
+  for (let t = 0.1; t <= 1.001; t += 0.05) {
+    const x = poly[3][0] * (1 - t) + center[0] * t - size / 2;
+    const y = poly[3][1] * (1 - t) + center[1] * t - size / 2;
+    if ([[x-margin,y-margin], [x+size+margin,y-margin], [x+size+margin,y+size+margin], [x-margin,y+size+margin]].every(inside)) { pos = [x, y]; break; }
+  }
+  if (!pos) return;
+  const [x, y] = pos;
   ctx.save();
+  ctx.translate(x, y);
   ctx.strokeStyle = ink;
-  ctx.lineWidth = Math.max(1, size / 9);
-  ctx.strokeRect(x + o, y, s, s * 0.8);
-  ctx.strokeRect(x, y + o + s * 0.2, s, s * 0.8);
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeRect(5, 4, 8, 3.5);
+  ctx.strokeRect(3, 8.5, 8, 3.5);
+  ctx.beginPath();
+  if (bottom) { ctx.moveTo(8, 3); ctx.lineTo(8, 0.8); ctx.moveTo(6.5, 2.3); ctx.lineTo(8, 0.8); ctx.lineTo(9.5, 2.3); }
+  if (top) { ctx.moveTo(8, 13); ctx.lineTo(8, 15.2); ctx.moveTo(6.5, 13.7); ctx.lineTo(8, 15.2); ctx.lineTo(9.5, 13.7); }
+  ctx.stroke();
   ctx.restore();
 };
 
@@ -925,9 +939,7 @@ DV.drawLabel = (ctx, entry, topFace, ink) => {
     return;
   }
   DP.paintPrintMark?.(ctx, top, cx, cy, Math.min(width, height)); // Story 2671: print-mode tick
-  if (DL.stackable(top) && width >= 26 && height >= 18) {
-    DV.drawStackIcon(ctx, Math.min(p0[0], p3[0]) + 4, Math.min(p0[1], p1[1], p2[1], p3[1]) + 4, 11, ink);
-  }
+  DV.drawStackIcon(ctx, topFace, top, ink);
   const stackCount = entry.layers.length;
   if (stackCount > 1) {
     const summary = DV.stackSummary(entry.layers.map(layer => layer.bin));
@@ -1366,7 +1378,7 @@ DV.buildOverlay = () => {
     </div>
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
     <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
-    <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden>Yellow rim: the bin stack is below the safe height (the drawer inside height) · Red rim: the bin stack exceeds the safe height — the drawer above will drag or jam</div>`);
+    <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden></div>`);
   // The staging rail sits immediately beside the physical Space, before the canvas.
   wrap.insertAdjacentHTML("afterbegin", `
     <aside id="dl-staging" class="dl-staging" aria-label="Unplaced bins">

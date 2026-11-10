@@ -269,10 +269,17 @@ DL.label = one => (DL.isSpacer(one) ? DL.legacySpacerName(one.name) : one.name) 
 DL.mmToUnits = mm => fmt(mm / 7);
 DL.isSpacer = one => one?.kind === "spacer";
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
-// The small "stackable" glyph (two stacked squares) for row lists; empty for a non-stackable bin.
-DL.stackIconHtml = one => DL.stackable(one)
-  ? `<svg class="dl-stack-icon" viewBox="0 0 12 12" width="12" height="12" role="img" aria-label="Stackable" focusable="false"><title>Stackable</title><rect x="3.5" y="0.75" width="7.5" height="5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="1" y="6.25" width="7.5" height="5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>`
-  : "";
+// Both displays use these roles and the same stacked-box glyph.
+DL.stackRoles = one => ({
+  top: DL.stackable(one),
+  bottom: Boolean(one) && (DL.lidTakesStack(one) || one.stack === "direct" || one.stack === "b4b"),
+});
+DL.stackIconForRoles = ({ top, bottom }) => {
+  if (!top && !bottom) return "";
+  const label = top && bottom ? "Can stack both ways" : bottom ? "Can stack on top" : "Can sit on another bin";
+  return `<svg class="dl-stack-icon" viewBox="0 0 16 16" width="16" height="16" role="img" aria-label="${label}" focusable="false"><title>${label}</title><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="8" height="3.5"/><rect x="3" y="8.5" width="8" height="3.5"/>${bottom ? '<path d="M8 3V0.8 M6.5 2.3 8 0.8 9.5 2.3"/>' : ""}${top ? '<path d="M8 13v2.2 M6.5 13.7 8 15.2 9.5 13.7"/>' : ""}</g></svg>`;
+};
+DL.stackIconHtml = one => DL.stackIconForRoles(DL.stackRoles(one));
 DL.stackName = mode => ({ lid: "Lid", direct: "Direct stack", b4b: "Storage Box stacking" })[mode] || "Not stackable";
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
