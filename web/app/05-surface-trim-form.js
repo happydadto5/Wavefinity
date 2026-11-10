@@ -712,7 +712,7 @@ function syncLidForm() {
   if (depthRow) {
     depthRow.hidden = !labelOn;
     const raisedActive = $("#lid-label-style").value === "raised";
-    $("#lid-label-depth-name").textContent = raisedActive ? "Raised height" : "Inlay depth";
+    $("#lid-label-depth-name").textContent = raisedActive ? "Label raised height" : "Label inlay";
     depthRow.title = raisedActive
       ? "How far the lid lettering projects above the lid top."
       : "How deeply the lid lettering is cut into the lid; the lid keeps material under it.";
