@@ -56,12 +56,10 @@ function updateDesignFromForm() {
     : (wallRules.default_mm ?? 0.8);
   const minWall = b4bOn
     ? b4bMinWall()
-    : (!hasOrdinaryLid
-        ? wallRules.min_mm ?? 0.2
-        : stackValues.minWall);
+    : (wallRules.min_mm ?? 0.2);
   const maxWall = wallRules.max_mm ?? 2.4;
   const wallChoice = $("#wall-thickness").value;
-  design.box.standard_walls = !b4bOn && !hasOrdinaryLid && wallChoice === "standard";
+  design.box.standard_walls = !b4bOn && wallChoice === "standard";
   design.box.wall = design.box.standard_walls
     ? defaultWall
     : Math.max(minWall, Math.min(maxWall, number(

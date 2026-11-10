@@ -159,11 +159,9 @@ def stack_foot_growth(box: BoxSpec) -> float:
 
 
 def _stack_wall_box(box: BoxSpec) -> BoxSpec:
-    """``box`` with the wall its stack hardware needs: a lid's clips and recess
-    want ``STACK_MIN_WALL``; a plain skirt asks nothing of the wall."""
-    if not lid_enabled(box):
-        return box
-    return replace(box, wall=max(box.wall, STACK_MIN_WALL), standard_walls=False)
+    """``box`` with the wall its stack hardware needs. Story 2805: neither a
+    lid nor a plain skirt raises the wall; the wall the user picked is built."""
+    return box
 
 
 def stack_base_minimum(box: BoxSpec) -> float:
@@ -189,8 +187,6 @@ def normalize_stack_settings(box: BoxSpec) -> BoxSpec:
     if not vertical_stack_enabled(box) and not lid_enabled(box):
         return box
     changes: dict = {}
-    if lid_enabled(box):
-        changes.update(wall=max(box.wall, STACK_MIN_WALL), standard_walls=False)
     if vertical_stack_enabled(box):
         changes.update(
             base_thickness=max(box.base_thickness, stack_base_minimum(box)),

@@ -470,8 +470,10 @@ function wallPresetChoices(box = state.design?.box) {
   return Array.isArray(rules.choices) && rules.choices.length
     ? rules.choices
     : [
-        { value: 0.4, label: "Very thin / prototype" },
+        { value: 0.4, label: "Extremely thin (experimental)" },
+        { value: 0.5, label: "Very thin (experimental)" },
         { value: 0.8, label: "Default" },
+        { value: 1.0, label: "Sturdy" },
         { value: 1.2, label: "Strong" },
         { value: 1.6, label: "Heavy" },
         { value: 2.0, label: "Extra heavy" },
@@ -483,30 +485,25 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
   const isB4B = Boolean(box?.b4b?.enabled);
   const ordinaryRules = state.catalog?.wall_rules || {};
   const b4bRules = state.catalog?.b4b_rules || {};
-  const hasLid = Boolean(box?.lid?.enabled);
-  // Only a lid needs the thicker wall; a plain stacking skirt takes any wall.
-  const stackMin = hasLid ? number(state.catalog?.stack_rules?.min_wall_mm, 1.2) : -Infinity;
-  const modeMin = isB4B ? b4bMinWall() : stackMin;
+  // Story 2805: an ordinary bin, lidded or not, is offered the whole bin wall
+  // list; only a Storage Box design has a wall floor of its own.
+  const modeMin = isB4B ? b4bMinWall() : -Infinity;
   const choices = wallPresetChoices(box).filter(choice => number(choice.value) >= modeMin - 1e-9);
   const defaultWall = isB4B
     ? number(b4bRules.default_wall_mm, 1.6)
     : number(ordinaryRules.default_mm, 0.8);
   const wall = number(box?.wall, defaultWall);
   const value = fmt(wall);
-  const standard = !isB4B && box?.standard_walls !== false && !hasLid;
   const ordinaryDefaultValue = fmt(ordinaryRules.default_mm ?? 0.8);
-  const numericChoices = isB4B
-    ? choices
-    : choices.filter(choice => fmt(choice.value) !== ordinaryDefaultValue);
-  const isDiscrete = numericChoices.some(choice => fmt(choice.value) === value);
+  const standard = !isB4B && (box?.standard_walls !== false || value === ordinaryDefaultValue);
+  const isDiscrete = choices.some(choice => fmt(choice.value) === value);
   const customValue = !standard && !isDiscrete ? value : "";
-  const signature = JSON.stringify({ numericChoices, customValue, modeMin, standard });
+  const signature = JSON.stringify({ choices, customValue, modeMin, standard: isB4B });
   if (select.dataset.choices !== signature) {
     select.replaceChildren();
-    if (!hasLid && !isB4B) select.add(new Option("0.8 mm — Default", "standard"));
-    select.append(...numericChoices.map(choice => new Option(
+    select.append(...choices.map(choice => new Option(
       `${number(choice.value).toFixed(1)} mm — ${choice.label}`,
-      fmt(choice.value),
+      !isB4B && fmt(choice.value) === ordinaryDefaultValue ? "standard" : fmt(choice.value),
     )));
     if (customValue) {
       // A saved design keeps whatever wall it was made with: the preset list is

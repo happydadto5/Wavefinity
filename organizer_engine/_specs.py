@@ -47,8 +47,10 @@ WALL_STEP = 0.2
 # saved design carrying 0.6 or 1.4 still loads and regenerates unchanged - the
 # UI simply shows it as a legacy value until the user picks a current preset.
 WALL_PRESETS = (
-    (0.4, "Very thin / prototype"),
+    (0.4, "Extremely thin (experimental)"),
+    (0.5, "Very thin (experimental)"),
     (0.8, "Default"),
+    (1.0, "Sturdy"),
     (1.2, "Strong"),
     (1.6, "Heavy"),
     (2.0, "Extra heavy"),
