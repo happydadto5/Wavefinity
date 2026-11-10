@@ -1899,6 +1899,10 @@ body.structural-design-active #ai-help-open,
 
 body.structural-design-active .output-panel,
 body.structural-design-active #space-head-edit { display: none !important; }
+/* Fix 2834: in structural Design the Build section body (Bin actions row and its
+   framing padding) renders as an empty box when none of its bin action buttons
+   is showing. New Bin, Make full interior bin, etc. keep the body when visible. */
+body.structural-design-active .control-section[data-section="build"] .section-body:not(:has(#bin-actions button:not([hidden]):not(#designer-duplicate):not(#ai-help-open))) { display: none !important; }
 /* The 2D view of a structural target is the Space canvas, view only. */
 body.structural-design-active #sd-workspace-host,
 body.structural-design-active .canvas-wrap[data-canvas="drawer"] .dl-hint { display: none !important; }
