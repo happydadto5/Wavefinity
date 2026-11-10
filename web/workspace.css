@@ -31,18 +31,18 @@ body.ws-on.ws-open .view-tabs,
 body.ws-on.ws-open #preview-state,
 body.ws-on.ws-open .workspace-footer,
 body.ws-on.ws-open .canvas-wrap[data-canvas="drawer"] .dl-hint { display: none !important; }
-body.ws-on.ws-open:not(.ws-task-settings) #dl-staging { display: none !important; }
 body.ws-on.ws-open:not(.ws-task-settings) #drawer-canvas { cursor: pointer; }
 /* Story 2704: the open screen has nothing selected, so the right pane shows no preview. */
 body.ws-on.ws-task-picker .workspace { visibility: hidden; }
-/* Story 2846: after Delete, keep the tree visible but leave both work areas blank until a row is chosen. */
-body.ws-on.ws-task-none .workspace { visibility: hidden; }
-body.ws-on.ws-task-none .controls > :not(#ws-stage),
-body.ws-on.ws-task-none #ws-aux { display: none !important; }
+/* Story 2846 / 2853: after Delete (nothing selected), the tree stays and the area beneath it shows only the
+   Inventory bin list (unplaced first) to drag from; the preview stays visible so a bin can be dropped into it. */
+body.ws-on.ws-task-none .controls > :not(#ws-stage):not(#drawer-panel),
+body.ws-on.ws-task-none #ws-aux,
+body.ws-on.ws-task-none #drawer-panel > :not([aria-label="Inventory"]) { display: none !important; }
 
 /* (A) the selector: pinned and bounded, it scrolls within itself. (B) is the rest of the pane. */
 .controls > .ws-stage {
-  position: sticky; top: 0; z-index: 6; max-height: 250px; overflow: hidden; box-sizing: border-box;
+  position: sticky; top: 0; z-index: 6; max-height: 325px; overflow: hidden; box-sizing: border-box;
   display: flex; flex-direction: column;
   background: #f8faf9; border-bottom: 2px solid var(--line-dark);
 }

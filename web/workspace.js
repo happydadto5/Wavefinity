@@ -837,7 +837,7 @@ WS.sync = () => {
   if (switcher) switcher.disabled = WS.task === "picker";
   const place = $("#ws-place");
   if (place) place.textContent = "Manage Spaces";
-  if (open) {
+  if (open || (WS.task === "none" && WS.open())) {
     const view = WS.task === "bin" || WS.task === "container" ? "3d" : "drawer";
     const wrap = $(`.canvas-wrap[data-canvas="${view}"]`);
     if (wrap && !wrap.classList.contains("active")) wsActivatePreview(view);

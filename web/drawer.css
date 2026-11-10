@@ -97,30 +97,14 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
    into the auto first row of .workspace and fill only the top of the pane. */
 .canvas-wrap[data-canvas="drawer"].active { display: flex; grid-row: 2; }
 .canvas-wrap[data-canvas="drawer"] #drawer-canvas { flex: 1 1 0; width: auto; min-width: 0; height: 100%; }
-.dl-staging {
-  flex: 0 0 188px; width: 188px; display: flex; flex-direction: column; gap: 6px; padding: 10px 8px;
-  background: rgba(255,255,255,.9); border-right: 1px solid var(--line-dark); overflow: hidden; z-index: 2;
-}
-.dl-staging-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
-.dl-staging-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; }
-.dl-staged {
-  display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 7px; padding: 5px 6px;
-  border: 1px solid var(--line); border-radius: 8px; background: white; cursor: grab;
-}
-.dl-staged:hover { border-color: var(--line-dark); }
-.dl-staged.selected { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(20,108,112,.18); }
-/* The camera controls and hint float over the canvas, not over the rail. */
-.canvas-wrap[data-canvas="drawer"] .dl-view-controls { left: 202px; }
-.canvas-wrap[data-canvas="drawer"] .dl-hint { left: 202px; }
 /* Fix 1091: legend for the yellow/red bin-height rims; sits above the hint. */
-.canvas-wrap[data-canvas="drawer"] .dl-height-legend { left: 202px; bottom: 54px; }
+.canvas-wrap[data-canvas="drawer"] .dl-height-legend { left: 10px; bottom: 54px; }
 .dl-height-swatch { display: inline-block; width: 9px; height: 9px; margin-right: 3px; border-radius: 2px; }
 .dl-height-swatch.yellow { background: #e0a100; }
 .dl-height-swatch.red { background: #d43d2f; }
-.dl-height-legend { white-space: nowrap; overflow-x: auto; max-width: calc(100% - 212px); }
-.dl-staging.receiving { background: var(--teal-soft); box-shadow: inset -3px 0 0 var(--teal); }
-.dl-staging.has-selection .dl-staging-head strong { color: var(--teal-dark); }
-.dl-staged .dl-swatch { width: 34px; }
+.dl-height-legend { white-space: nowrap; overflow-x: auto; max-width: calc(100% - 20px); }
+/* Dragging a placed bin from the Space over the bin list: release to unplace it. */
+.dl-inv-list.receiving { background: var(--teal-soft); box-shadow: inset 0 0 0 2px var(--teal); border-radius: 8px; }
 .canvas-wrap[data-canvas="drawer"] { background: radial-gradient(circle at 50% 40%, #fff 0, #f6f7f5 60%, #eceeea 100%); }
 #drawer-canvas.panning { cursor: grabbing; }
 .dl-tilt-control input[type="range"] { width: 104px; margin: 0; accent-color: var(--teal); }
@@ -166,9 +150,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
   .canvas-wrap[data-canvas="drawer"] .dl-height-legend { max-width: calc(100% - 20px); }
   .canvas-wrap[data-canvas="drawer"] .dl-view-controls { top: 146px; }
   .canvas-wrap[data-canvas="drawer"].active { flex-direction: column; }
-  .dl-staging { flex: 0 0 auto; width: auto; max-height: 132px; border-right: 0; border-bottom: 1px solid var(--line-dark); }
-  .dl-staging-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
-  .dl-staged { flex: 0 0 176px; }
 }
 
 /* Spacers: below Inventory, collapsed until wanted. */

@@ -635,7 +635,7 @@ DP.duplicateRow = async one => {
     DL.selected = null;
     DL.emit();
     DL.requestReport();
-    toast(`Duplicated as ${DL.label(DL.bin(data.row_id) || one)}. It is waiting in Unplaced bins.`);
+    toast(`Duplicated as ${DL.label(DL.bin(data.row_id) || one)}. It is unplaced, at the top of the bin list.`);
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) toast(`Could not duplicate bin: ${friendlyError(error)}`, true, 6000);
   }
@@ -872,7 +872,6 @@ DP.update = () => {
   DP.renderSurfaceFill();
   DP.renderInventory();
   DP.renderSave();
-  DV.renderStaging();
   DV.render();
   if (typeof SP !== "undefined" && SP.updateCabinetWorkspace) SP.updateCabinetWorkspace();
 };
@@ -1230,7 +1229,11 @@ DP.filteredBins = () => {
     name: (a, b) => DL.label(a).localeCompare(DL.label(b), undefined, { numeric: true }),
     newest: (a, b) => Number(b.id.slice(1)) - Number(a.id.slice(1)),
   };
-  return [...list.sort(sorters[DP.filter.sort] || sorters.height), ...DL.bins.filter(DL.isSpacer)];
+  // Story 2853: unplaced bins lead the list, in the chosen order; spacers stay last.
+  const sorted = list.sort(sorters[DP.filter.sort] || sorters.height);
+  const unplaced = sorted.filter(one => DL.placedCount(one.id) === 0);
+  const placed = sorted.filter(one => DL.placedCount(one.id) !== 0);
+  return [...unplaced, ...placed, ...DL.bins.filter(DL.isSpacer)];
 };
 
 DP.renderInventory = (force = false) => {

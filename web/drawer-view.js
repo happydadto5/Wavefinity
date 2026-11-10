@@ -407,8 +407,8 @@ DV.render = () => {
   const drawer = DL.drawer();
   DV.cam = DL.isPegboard(drawer) ? DV.pegboardCamera(box.width, box.height, drawer) : DV.camera(box.width, box.height, drawer);
   DV.hits = DL.isPegboard(drawer) ? DV.paintPegboardScene(ctx, drawer, DV.cam) : DV.paintScene(ctx, drawer, DV.cam);
-  // Taking a bin off the Space is a drop onto the staging rail beside it.
-  $("#dl-staging")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.outside));
+  // Taking a bin off the Space is a drop onto the bin list.
+  $("#dl-inv-list")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.overList));
   const heightLegend = $("#dl-height-legend");
   if (heightLegend) {
     const showLegend = DL.isStorageBox() || DL.isStorageDrawers();
@@ -1130,7 +1130,8 @@ DV.wire = () => {
         const fit = DL.fitsAt(DL.drawer(), drag.moving, drag.gx, drag.gy, drag.keys);
         Object.assign(drag, { valid: fit.ok, reason: fit.ok ? "" : refusal || fit.reason });
       }
-      canvas.style.cursor = drag.outside ? "no-drop" : "grabbing";
+      drag.overList = DV.overInventoryList(event);
+      canvas.style.cursor = drag.outside && !drag.overList ? "no-drop" : "grabbing";
       DV.paint();
     } else if (DV.pan) {
       const point = DV.pan.cam.onPlane(sx, sy, 0);
@@ -1167,9 +1168,11 @@ DV.wire = () => {
     DV.pan = null;
     if (drag && !drag.moved && !readOnly()) DP.onLayoutClick?.(drag.key); // Story 2671: a click, not a drag
     if (drag?.moved && !readOnly()) {
-      if (drag.outside) {
+      if (DV.overInventoryList(event)) {
         const count = DL.takeOut(drag.key);
         toast(`Moved to Unplaced bins${count > 1 ? ` (${count} bins)` : ""}. Still in Inventory.`);
+      } else if (drag.outside) {
+        // Released off the Space but not on the bin list: nothing changes.
       } else if (drag.target) {
         DL.moveTo(drag.key, { target: drag.target });
       } else if (drag.valid) {
@@ -1283,40 +1286,13 @@ DV.wire = () => {
 
 };
 
-// The staging rail: every ordinary Inventory row with no placement, in
-// Inventory order. Derived from Inventory each time - never persisted, and
-// never a coordinate.
-DV.renderStaging = () => {
-  const rail = $("#dl-staging");
-  if (!rail || !DL.layout) return;
-  const staged = DL.stagedBins();
-  const drawer = DL.drawer();
-  const signature = JSON.stringify([
-    staged.map(one => [one.id, DL.binNumber(one), one.name, one.x, one.y, one.z, one.status, one.stack]), DL.selectedRow, drawer.id,
-    DL.bins.some(DL.isOrdinary),
-  ]);
-  if (rail.dataset.signature === signature) return;
-  rail.dataset.signature = signature;
-  rail.querySelector(".dl-staging-count").textContent = staged.length ? String(staged.length) : "";
-  const list = rail.querySelector(".dl-staging-list");
-  const range = DV.heightRange();
-  list.innerHTML = staged.length ? staged.map(one => {
-    const color = DV.binColor(one, range);
-    const picked = one.id === DL.selectedRow;
-    return `<div class="dl-staged${picked ? " selected" : ""}" data-staged-bin="${escapeHtml(one.id)}" draggable="true" tabindex="0" title="Drag into the Space">
-      <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}">${DL.swatchLabel(one)}</span>
-      <span class="dl-bin-main"><strong>${escapeHtml(DL.label(one))}${DL.stackIconHtml(one)}</strong>
-        <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · Unplaced · ${escapeHtml(DL.statusLabel(one))}</small></span>
-    </div>`;
-  }).join("") : `<p class="dl-note">${DL.bins.some(DL.isOrdinary) ? "Every bin is placed." : "New and duplicated bins wait here until you drag them into the Space."}</p>`;
-  $$(".dl-swatch", list).forEach(node => {
-    node.style.background = node.dataset.top;
-    node.style.color = node.dataset.ink;
-  });
-  rail.classList.toggle("has-selection", staged.some(one => one.id === DL.selectedRow));
+// Taking a bin off the Space is a drop onto the Inventory bin list (it replaces the old Unplaced bins rail).
+DV.overInventoryList = event => {
+  const over = document.elementFromPoint(event.clientX, event.clientY);
+  return Boolean(over?.closest?.("#dl-inv-list, .dl-inv-tools, #dl-batch-tools, [aria-label='Inventory']"));
 };
 
-// Story 2751: in a Storage Drawers space, picking an unplaced bin on the rail
+// Story 2751: in a Storage Drawers space, picking an unplaced bin in the list
 // sets its design height to exactly the viewed drawer's safe height (inside
 // height minus the 2 mm running clearance - the same cap the height rim and
 // the Layout report judge against), so it fits top to bottom. It is a normal
@@ -1377,37 +1353,8 @@ DV.buildOverlay = () => {
       </div>
     </div>
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
-    <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
+    <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag a bin onto the bin list to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
     <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden></div>`);
-  // The staging rail sits immediately beside the physical Space, before the canvas.
-  wrap.insertAdjacentHTML("afterbegin", `
-    <aside id="dl-staging" class="dl-staging" aria-label="Unplaced bins">
-      <div class="dl-staging-head"><strong>Unplaced bins</strong><span class="dl-staging-count count-badge"></span></div>
-      <button type="button" class="button primary dl-small" data-staging-new-bin>New Bin</button>
-      <div class="dl-staging-list"></div>
-    </aside>`);
-  const rail = $("#dl-staging");
-  rail.querySelector("[data-staging-new-bin]").addEventListener("click", () => {
-    if (typeof WS !== "undefined") WS.newBin();
-    else DP.newBinFromSpace();
-  });
-  rail.addEventListener("click", event => {
-    const id = event.target.closest("[data-staged-bin]")?.dataset.stagedBin;
-    if (id) { DL.selectRow(id); DV.revealRow(id); DV.fitStagedBinHeight(id); }
-  });
-  rail.addEventListener("keydown", event => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    const id = event.target.closest("[data-staged-bin]")?.dataset.stagedBin;
-    if (id) { event.preventDefault(); DL.selectRow(id); DV.revealRow(id); DV.fitStagedBinHeight(id); }
-  });
-  rail.addEventListener("dragstart", event => {
-    const one = DL.bin(event.target.closest?.("[data-staged-bin]")?.dataset.stagedBin);
-    if (!one) return;
-    DV.dragBin = one;
-    event.dataTransfer.setData("text/plain", one.id);
-    event.dataTransfer.effectAllowed = "move";
-  });
-  rail.addEventListener("dragend", () => { DV.dragBin = null; DV.drop = null; DV.render(); });
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
     if (button.dataset.dlView === "fit") DV.fit(); else DV.setView(DV.PRESETS[button.dataset.dlView]);
   }));
