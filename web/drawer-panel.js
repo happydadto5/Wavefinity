@@ -140,6 +140,7 @@ DP.build = () => {
           <div class="dl-batch-actions">
             <button type="button" id="dl-batch-print" class="button secondary">Print whole space</button>
           </div>
+          <p id="dl-no-slicer-note" class="dl-note" role="status" hidden>Bambu Studio wasn't found. <button type="button" id="dl-no-slicer-settings" class="link-button">Printer Settings…</button></p>
         </div>
         <div id="dl-inv-list" class="dl-inv-list"></div>
       </div>
@@ -318,6 +319,7 @@ DP.wire = () => {
       DP.renderInventory(true);
     }
   });
+  $("#dl-no-slicer-settings").addEventListener("click", () => $("#settings-printer-open")?.click());
   $("#dl-sp-auto-height").addEventListener("change", event => {
     DL.change(() => { DL.layout.settings.spacers.height_auto = event.target.checked; });
     $("#dl-sp-height").disabled = event.target.checked;
@@ -426,6 +428,8 @@ DP.renderBatch = () => {
   const tools = $("#dl-batch-tools");
   if (!tools) return;
   $("#dl-batch-print").hidden = hosted;
+  const noSlicerNote = $("#dl-no-slicer-note");
+  if (noSlicerNote) noSlicerNote.hidden = hosted || Boolean(state.slicer?.available);
   const scope = DP.batchScope();
   const connectorNote = " · Space connectors included";
   const needFiles = scope.subset ? scope.picked.filter(one => DL.saveNeeded(one)).length : scope.save.length;
