@@ -86,8 +86,11 @@ Wavefinity can also be used **without a typed Space**, in which case the user ca
 
 - Ordinary bins can be dragged into the drawer.
 - Every ordinary bin is placed at most once.
-- Unplaced bins remain in the **Unplaced bins** rail.
-- Dragging a placed bin out of the Space unplaces it.
+- The tree lists every bin in **Not placed** then **Placed** groups in all Spaces with a layout. Storage Drawers keeps drawer groups for placed bins below **Not placed**.
+- Drag bins from the tree into the layout; drag a placed bin back onto the tree to unplace it.
+- Clicking a bin in the layout opens its editable details on the left while the layout stays live on the right. Height and stacking edits update that layout as they save.
+- Click the empty floor, press Esc, or choose the Layout line to return to the print list. Its filters, sorting, checkboxes, Export and Print controls stay available.
+- Click a bin in the tree or **3D view** in its details to open its full bin preview.
 - Bins can be stacked when their mode, footprint, and wall mating geometry are compatible.
   - Same-footprint stacking works for every stacking mode (lid, direct bin-on-bin, Storage Box).
   - A **Stackable bin on lid** can also carry one or more smaller bins: each must be compatible, sit on the 7 mm grid, fit fully inside that lid, and not overlap another bin on the same lid. Covering only part of the lid is fine, and no advance arrangement planning, custom lid, or reprint is needed — for example, a 10×10 lid-stack bin printed today can later take four 5×5 lid-stack bins, one per quadrant.

@@ -15,7 +15,8 @@
 // The classic screens and forms remain as the editors this layer hosts; there is no switch back to the old layout.
 
 const WS = {
-  task: "landing", // landing | container | bin | settings | newspace | picker  (bin with no Space = My Bins)
+  task: "landing", // landing | container | bin | peek | settings | newspace | picker  (bin with no Space = My Bins)
+  peekId: null,
   prior: null, // the editor Print Space / New Space was opened from
   printPick: new Set(),
   printContainer: false,
@@ -27,7 +28,7 @@ const WS = {
   previewSignature: "",
   entered: "",
 };
-const WS_TASKS = ["landing", "container", "bin", "settings", "newspace", "picker", "none"];
+const WS_TASKS = ["landing", "container", "bin", "peek", "settings", "newspace", "picker", "none"];
 
 WS.open = () => Boolean(typeof DL !== "undefined" && DL.active && DL.layout && state.folderMode === "space");
 
@@ -63,7 +64,7 @@ WS.items = () => {
   // The bin whose editor is open shows the name as typed in Part Name, not the last saved one, so a rename
   // lands in the pick list in the same edit (Story 2806). Blank typing falls back to the saved label.
   const liveLabel = one => {
-    const typed = WS.task === "bin" && String(one.id) === String(state.designInventoryId ?? "")
+    const typed = ["bin", "peek"].includes(WS.task) && String(one.id) === String(state.designInventoryId ?? "")
       ? ($("#part-name")?.value || "").trim() : "";
     return typed || DL.label(one);
   };
@@ -71,21 +72,20 @@ WS.items = () => {
     note: [drawerLabel, `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`].filter(Boolean).join(" · "),
     printable: DL.printEligible(one),
   });
+  const placed = new Set(bins.filter(one => DL.placedCount(one.id) > 0).map(one => one.id));
+  const loose = bins.filter(one => !placed.has(one.id));
+  if (loose.length) { add("group", null, "Not placed"); loose.forEach(one => binItem(one)); }
   const drawers = DL.layout.drawers || [];
   if (DL.isStorageDrawers() || drawers.length > 1) {
-    const placed = new Set();
     drawers.forEach((drawer, index) => {
       const here = [...new Map((drawer.placements || []).map(p => DL.bin(p.bin))
         .filter(one => one && DL.isOrdinary(one)).map(one => [one.id, one])).values()];
-      here.forEach(one => placed.add(one.id));
       const label = drawer.name || `Drawer ${index + 1}`;
-      add("group", null, label);
-      here.forEach(one => binItem(one, label));
+      if (here.length) { add("group", null, label); here.forEach(one => binItem(one, label)); }
     });
-    const loose = bins.filter(one => !placed.has(one.id));
-    if (loose.length) { add("group", null, "Not placed yet"); loose.forEach(one => binItem(one)); }
-  } else {
-    bins.forEach(one => binItem(one));
+  } else if (placed.size) {
+    add("group", null, "Placed");
+    bins.filter(one => placed.has(one.id)).forEach(one => binItem(one));
   }
   return items;
 };
@@ -98,6 +98,7 @@ WS.current = () => {
   const task = temporary ? WS.prior?.task : WS.task;
   if (task === "settings") return { kind: "settings", id: "settings" };
   if (task === "container") return { kind: "container", id: "container" };
+  if (task === "peek") return { kind: "bin", id: temporary ? WS.prior.id : WS.peekId };
   if (task === "bin") return { kind: "bin", id: WS.open() ? (temporary ? WS.prior.id : state.designInventoryId) || "" : "" };
   return null;
 };
@@ -147,7 +148,7 @@ WS.renderSelector = () => {
 
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     // Story 2840: Print and Export are rendered only on the selected row; other rows carry no output buttons.
-    return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${locked ? " disabled" : ""}>
+    return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${one.kind === "bin" && here && !locked ? ' draggable="true"' : ""}${locked ? " disabled" : ""}>
       <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${drawerButtons}${manage}${picked ? WS.rowOutputs(one, !locked) : ""}${WS.rowBinActions(one, picked, locked)}</li>`;
   }).join("");
   // Story 2725: live on any bin view (a bin in a space or a loose bin in My Bins). Greyed only on the
@@ -255,8 +256,9 @@ WS.render = () => {
     host.scrollTop = top;
     if (find) host.querySelector(find)?.focus();
   };
-  draw(stage, WS.renderSelector(), "signature");
-  const auxHtml = WS.task === "settings" ? WS.renderPrint() : WS.task === "newspace" || WS.task === "picker" ? WS.renderNewSpace() : "";
+  // Preserve the native drag source until dragend; regroup as soon as the drag finishes.
+  if (!WS.draggingRow) draw(stage, WS.renderSelector(), "signature");
+  const auxHtml = WS.task === "newspace" || WS.task === "picker" ? WS.renderNewSpace() : "";
   aux.hidden = !auxHtml;
   draw(aux, auxHtml, "auxSignature");
 };
@@ -275,7 +277,7 @@ WS.closeSettings = async () => {
 };
 
 WS.flushBin = async () => {
-  if (WS.task === "bin" && WS.open() && typeof flushSpaceDesignAutosave === "function") {
+  if (["bin", "peek"].includes(WS.task) && WS.open() && typeof flushSpaceDesignAutosave === "function") {
     return flushSpaceDesignAutosave({ deferDraftPreview: true });
   }
   return true;
@@ -285,8 +287,8 @@ WS.flushBin = async () => {
 // at once and stays until the next view is actually ready (or the switch fails).
 WS.switchingMessage = task => {
   if (!WS.open()) return "";
-  if (task === "settings" && WS.task !== "settings") return "Switching to space layout";
-  if ((task === "container" || task === "bin") && WS.task === "settings") return "Switching to bin view";
+  if (task === "settings" && !["settings", "peek"].includes(WS.task)) return "Switching to space layout";
+  if ((task === "container" || task === "bin") && ["settings", "peek"].includes(WS.task)) return "Switching to bin view";
   return "";
 };
 
@@ -310,10 +312,10 @@ WS.showSwitching = text => {
 // The clicked row is highlighted at once, the old preview is cleared and "Building geometry"
 // shows until the new item's preview is ready.
 WS.itemSwitchTarget = (task, arg) => {
-  if (!WS.open() || !["bin", "container", "settings"].includes(WS.task)) return null;
+  if (!WS.open() || !["bin", "peek", "container", "settings", "none"].includes(WS.task)) return null;
   const target = task === "container" ? { kind: "container", id: "container" }
     : task === "settings" ? { kind: "settings", id: "settings" }
-    : task === "bin" && arg ? { kind: "bin", id: arg } : null;
+    : ["bin", "peek"].includes(task) && arg ? { kind: "bin", id: arg } : null;
   const now = WS.current();
   return target && !(now && now.kind === target.kind && String(now.id || "") === String(target.id)) ? target : null;
 };
@@ -354,7 +356,7 @@ WS.go = async (task, arg = null) => {
   if (pending) {
     WS.pending = pending;
     WS.sync(); // highlight the new row now
-    if (!switching && pending.kind !== "settings") WS.beginItemSwitch();
+    if (!switching && pending.kind !== "settings" && task !== "peek") WS.beginItemSwitch();
   }
   if (switching || pending) {
     if (switching) WS.showSwitching(switching);
@@ -383,7 +385,7 @@ WS.toSpaceMode = async () => (DP.mode === "space" || await DP.selectMode("space"
 // Remember which editor a temporary one (Print Space, New Space) was opened from.
 WS.rememberPrior = () => {
   if (WS.task === "newspace") return;
-  WS.prior = { task: WS.task, id: WS.task === "bin" && WS.open() ? state.designInventoryId || "" : "" };
+  WS.prior = { task: WS.task, id: ["bin", "peek"].includes(WS.task) && WS.open() ? state.designInventoryId || "" : "" };
 };
 
 WS.transition = async (task, arg) => {
@@ -411,7 +413,27 @@ WS.transition = async (task, arg) => {
   }
   if (!WS.open()) return false;
   if (from === "settings" && task !== "settings" && !(await WS.closeSettings())) return false;
+  if (task === "peek") {
+    if (!arg || (from === "peek" && WS.peekId === arg)) return Boolean(arg);
+    const context = DL.spaceContext();
+    const previousId = WS.peekId;
+    const restore = () => {
+      if (DL.spaceContextCurrent(context)) { WS.task = from; WS.peekId = previousId; }
+    };
+    WS.task = "peek";
+    WS.peekId = arg;
+    WS.sync(); // highlight now; the ordinary editor installs through its existing save/load owner
+    try {
+      if (await DP.openInventoryRow(arg, { peek: true })) return true;
+    } catch (error) {
+      restore();
+      throw error;
+    }
+    restore();
+    return false;
+  }
   if (task === "settings") {
+    if (from === "peek" && !(await WS.flushBin())) return false;
     // Story 2818: the left side swaps to the space details screen at once; the mode switch and
     // the form load below (the heavy part) fill it in. A failed switch puts the old screen back.
     const shown = WS.task;
@@ -422,7 +444,8 @@ WS.transition = async (task, arg) => {
     if (!(await WS.toSpaceMode())) { WS.task = shown; WS.sync(); return false; }
     if (!WS.containerKind()) SP.editSpace();
     // Story 2817: the space details screen is the layout row alone; an edited bin's old highlight clears.
-    DL.selectedRow = null; DL.emit();
+    WS.peekId = null;
+    DL.selected = null; DL.selectedRow = null; DL.emit();
     return true;
   }
   if (task === "container") {
@@ -436,6 +459,7 @@ WS.transition = async (task, arg) => {
     const ok = arg ? await DP.openInventoryRow(arg) : await DP.newBinFromSpace();
     if (!ok) return false;
     WS.task = "bin";
+    WS.peekId = null;
     if (arg) DL.selectRow(arg);
     return true;
   }
@@ -472,6 +496,7 @@ WS.land = async () => {
 // A place just changed (a Space opened, created or left).
 WS.arrive = () => {
   WS.message = "";
+  WS.peekId = null;
   WS.prior = null;
   WS.printPick = new Set();
   WS.printContainer = false;
@@ -717,7 +742,7 @@ WS.rowLive = one => {
   if (WS.busy) return false;
   if (one.kind === "settings") return WS.task === "settings";
   if (one.kind === "container") return WS.task === "container" && WS.containerReady();
-  return WS.task === "bin" && WS.binReady();
+  return ["bin", "peek"].includes(WS.task) && WS.binReady();
 };
 
 WS.rowOutputs = (one, picked) => {
@@ -777,11 +802,11 @@ WS.output = (kind, mode, button, event) => {
 
 // The container print: lit whenever the open space has a container.
 WS.containerReady = () => !WS.busy && WS.open() && Boolean(WS.containerKind()) && !SP.structuralBusy
-  && ["bin", "container", "settings"].includes(WS.task);
+  && ["bin", "peek", "container", "settings"].includes(WS.task);
 
 // Print Bin: only an actual selected bin (never the container or the space layout).
 WS.binReady = () => {
-  if (WS.busy || WS.task !== "bin") return false;
+  if (WS.busy || !["bin", "peek"].includes(WS.task)) return false;
   const bin = WS.open() ? Boolean(state.designInventoryId) : state.folderMode !== "space";
   return bin && !state.designMutationBusy && state.canGenerate;
 };
@@ -819,7 +844,7 @@ WS.sync = () => {
   // The opening message ends once the Space's view has been drawn (or the open did not land).
   if (WS.landingPending && (WS.task !== "landing" || !WS.open())) WS.endOpening();
   // A task that needs an open Space falls back when that Space is gone.
-  if (["landing", "container", "settings"].includes(WS.task) && !WS.open() && state.folderMode !== "space") {
+  if (["landing", "container", "peek", "settings"].includes(WS.task) && !WS.open() && state.folderMode !== "space") {
     WS.task = "bin";
   }
   // Story 2704: on the open screen nothing is chosen yet - no preview, nothing current, and the
@@ -829,9 +854,11 @@ WS.sync = () => {
   body.classList.add("ws-on");
   body.classList.toggle("ws-open", open);
   for (const name of WS_TASKS) body.classList.toggle(`ws-task-${name}`, WS.task === name);
+  DP.syncEditorVisibility();
+  if (DP.built && ["settings", "none"].includes(WS.task)) DP.renderBatch();
   if (WS.task !== WS.entered) {
     WS.entered = WS.task;
-    if (["bin", "container", "settings"].includes(WS.task)) WS.editorToTop();
+    if (["bin", "peek", "container", "settings"].includes(WS.task)) WS.editorToTop();
   }
   const switcher = $("#ws-spaces");
   if (switcher) switcher.disabled = WS.task === "picker";
@@ -844,7 +871,7 @@ WS.sync = () => {
   }
   WS.render();
   WS.measure();
-  const signature = `${WS.task}|${[...WS.printPick].join(",")}|${WS.printContainer}|${state.designInventoryId || ""}|${WS.prior?.id ?? ""}`;
+  const signature = `${WS.task}|${[...WS.printPick].join(",")}|${WS.printContainer}|${state.designInventoryId || ""}|${WS.peekId || ""}|${WS.prior?.id ?? ""}`;
   if (signature !== WS.previewSignature) {
     WS.previewSignature = signature;
     if (open && typeof DV !== "undefined") DV.paint();
@@ -855,7 +882,7 @@ WS.sync = () => {
 // (or a field focused while it filled in scrolled it partway down).
 WS.editorToTop = () => {
   const reset = () => {
-    if (!["bin", "container", "settings"].includes(WS.task)) return;
+    if (!["bin", "peek", "container", "settings"].includes(WS.task)) return;
     const controls = $(".controls");
     const stage = $("#ws-stage");
     if (controls) controls.scrollTop = 0;
@@ -886,7 +913,8 @@ WS.paintPreview = () => {
   const ctx = canvas?.getContext("2d");
   if (!ctx) return;
   const printing = WS.task === "settings";
-  const marked = printing ? WS.printPick
+  const marked = printing ? DP.printSelected
+    : WS.task === "peek" && WS.peekId ? new Set([WS.peekId])
     : WS.task === "bin" && state.designInventoryId ? new Set([state.designInventoryId]) : new Set();
   const containerMarked = printing ? WS.printContainer : WS.task === "container";
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -943,16 +971,17 @@ activatePreviewView = view => {
 const wsRender = DV.render;
 DV.render = () => { wsRender(); WS.paintPreview(); };
 
-// A click on a bin in the preview picks it (its form opens at once); the preview never edits.
+// A layout click peeks at the ordinary editor while the layout stays live.
 DP.onLayoutClick = key => {
   if (!WS.open() || WS.task === "newspace") return false;
   const found = DL.findPlacement(key);
   const one = found && DL.bin(found.placement.bin);
   if (!one || !DL.isOrdinary(one)) return false;
-  WS.pick("bin", one.id);
+  WS.go("peek", one.id);
+  DV.revealRow(one.id);
   return true;
 };
-DP.layoutViewOnly = () => WS.open() && WS.task !== "settings";
+DP.layoutViewOnly = () => WS.open() && !["settings", "peek", "none"].includes(WS.task);
 
 // The welcome / type-card dialogs become the bar and the New Space kinds; a restored
 // session opens its last Space (container selected) straight away - nothing covers it.
@@ -1011,6 +1040,7 @@ SP.openTypedSpacePreferredView = async () => {
   controls.prepend(stage);
 
   const delegate = event => {
+    if (WS.draggingRow || Date.now() < (WS.suppressRowClickUntil || 0)) return;
     const out = event.target.closest("[data-ws-out]");
     if (out) { if (!out.disabled) WS.output(out.dataset.kind, out.dataset.output, out, event); return; }
     const pick = event.target.closest("[data-ws-pick]");
@@ -1019,6 +1049,22 @@ SP.openTypedSpacePreferredView = async () => {
     if (button && !button.disabled) WS.onAction(button.dataset.wsAct, button, event);
   };
   [stage, aux].forEach(host => host.addEventListener("click", delegate));
+  stage.addEventListener("dragstart", event => {
+    const row = event.target.closest('[data-ws-pick="bin"][draggable="true"]');
+    const one = row && DL.bin(row.dataset.id);
+    if (!one || WS.busy || WS.task === "newspace") { event.preventDefault(); return; }
+    WS.draggingRow = true;
+    DV.dragBin = one;
+    event.dataTransfer.setData("text/plain", one.id);
+    event.dataTransfer.effectAllowed = "move";
+  });
+  stage.addEventListener("dragend", () => {
+    DV.dragBin = null; DV.drop = null;
+    WS.draggingRow = false;
+    WS.suppressRowClickUntil = Date.now() + 400;
+    WS.sync();
+    DV.render();
+  });
   aux.addEventListener("change", event => {
     const tick = event.target.dataset.wsTick;
     if (!tick) return;

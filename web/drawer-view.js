@@ -410,8 +410,8 @@ DV.render = () => {
   const emptyHint = $("#dl-empty-hint");
   if (emptyHint) emptyHint.hidden = DV.drag?.moved || DL.bins.some(one =>
     DL.isOrdinary(one) && DL.placedCount(one.id) > 0);
-  // Taking a bin off the Space is a drop onto the bin list.
-  $("#dl-inv-list")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.overList));
+  // Taking a bin off the Space is a drop onto the tree.
+  $("#ws-stage")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.overTree));
   const heightLegend = $("#dl-height-legend");
   if (heightLegend) {
     const showLegend = DL.isStorageBox() || DL.isStorageDrawers();
@@ -1105,7 +1105,8 @@ DV.wire = () => {
     } else {
       if (event.button === 0) DL.selectPlacement(null);
       const start = DV.cam.onPlane(sx, sy, 0);
-      if (start) DV.pan = { cam: DV.cam, start, panX: DV.view.panX, panY: DV.view.panY };
+      if (start) DV.pan = { cam: DV.cam, start, panX: DV.view.panX, panY: DV.view.panY,
+        sx, sy, moved: false, emptyClick: event.button === 0 };
       canvas.classList.add("panning");
     }
     DL.emit();
@@ -1133,10 +1134,11 @@ DV.wire = () => {
         const fit = DL.fitsAt(DL.drawer(), drag.moving, drag.gx, drag.gy, drag.keys);
         Object.assign(drag, { valid: fit.ok, reason: fit.ok ? "" : refusal || fit.reason });
       }
-      drag.overList = DV.overInventoryList(event);
-      canvas.style.cursor = drag.outside && !drag.overList ? "no-drop" : "grabbing";
+      drag.overTree = DV.overTree(event);
+      canvas.style.cursor = drag.outside && !drag.overTree ? "no-drop" : "grabbing";
       DV.paint();
     } else if (DV.pan) {
+      if (Math.hypot(sx - DV.pan.sx, sy - DV.pan.sy) >= 4) DV.pan.moved = true;
       const point = DV.pan.cam.onPlane(sx, sy, 0);
       if (!point) return;
       DV.view.panX = DV.pan.panX - (point[0] - DV.pan.start[0]);
@@ -1167,15 +1169,18 @@ DV.wire = () => {
     canvas.classList.remove("panning");
     canvas.style.cursor = "";
     const drag = DV.drag;
+    const pan = DV.pan;
     DV.drag = null;
     DV.pan = null;
+    if (event.type === "pointerup" && pan?.emptyClick && !pan.moved && !readOnly() &&
+        typeof WS !== "undefined" && WS.task === "peek") WS.go("settings");
     if (drag && !drag.moved && !readOnly()) DP.onLayoutClick?.(drag.key); // Story 2671: a click, not a drag
     if (drag?.moved && !readOnly()) {
-      if (DV.overInventoryList(event)) {
+      if (DV.overTree(event)) {
         const count = DL.takeOut(drag.key);
         toast(`Moved to Unplaced bins${count > 1 ? ` (${count} bins)` : ""}. Still in Inventory.`);
       } else if (drag.outside) {
-        // Released off the Space but not on the bin list: nothing changes.
+        // Released off the Space but not on the tree: nothing changes.
       } else if (drag.target) {
         DL.moveTo(drag.key, { target: drag.target });
       } else if (drag.valid) {
@@ -1199,7 +1204,7 @@ DV.wire = () => {
     if (!DV.hitAt(sx, sy)) DV.fit();
   });
 
-  // Dropping a bin dragged from the inventory list: onto the floor, or onto a
+  // Dropping a bin dragged from the tree: onto the floor, or onto a
   // stack it can snap onto.
   canvas.addEventListener("dragover", event => {
     if (readOnly() || !DV.dragBin || !DV.cam) return;
@@ -1236,8 +1241,14 @@ DV.wire = () => {
   // own shortcuts (arrow nudges) never act on the hidden design.
   window.addEventListener("keydown", event => {
     if (!DP.spaceEditing() || !DL.layout || readOnly()) return;
-    if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return;
     if (document.querySelector("dialog[open]")) return;
+    if (event.key === "Escape" && !DV.drag && typeof WS !== "undefined" && WS.task === "peek") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      WS.go("settings");
+      return;
+    }
+    if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return;
     if (event.key === "Escape" && DV.drag) {
       const pointerId = DV.drag.pointerId;
       DV.drag = null;
@@ -1289,10 +1300,10 @@ DV.wire = () => {
 
 };
 
-// Taking a bin off the Space is a drop onto the Inventory bin list (it replaces the old Unplaced bins rail).
-DV.overInventoryList = event => {
+// Pointer capture keeps the canvas drag alive while the pointer is over the tree.
+DV.overTree = event => {
   const over = document.elementFromPoint(event.clientX, event.clientY);
-  return Boolean(over?.closest?.("#dl-inv-list, .dl-inv-tools, #dl-batch-tools, [aria-label='Inventory']"));
+  return Boolean(over?.closest?.("#ws-stage"));
 };
 
 // Story 2751: in a Storage Drawers space, picking an unplaced bin in the list
@@ -1326,10 +1337,10 @@ DV.fitStagedBinHeight = async id => {
   }
 };
 
-// Scroll the Inventory row for `id` into view (canvas -> Inventory).
+// Scroll the tree row for `id` into view (canvas -> tree).
 DV.revealRow = id => {
   if (!id) return;
-  const row = document.querySelector(`#dl-inv-list .dl-bin[data-bin="${CSS.escape(id)}"]`);
+  const row = document.querySelector(`#ws-stage [data-ws-pick="bin"][data-id="${CSS.escape(id)}"]`);
   if (row && row.scrollIntoView) row.scrollIntoView({ block: "nearest" });
 };
 
@@ -1357,7 +1368,7 @@ DV.buildOverlay = () => {
     </div>
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
     <div id="dl-empty-hint" class="dl-empty-hint" hidden><strong>Drag bins to place</strong><span>Drag onto a bin to stack</span></div>
-    <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag a bin onto the bin list to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
+    <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag a bin onto the tree to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
     <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden></div>`);
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
     if (button.dataset.dlView === "fit") DV.fit(); else DV.setView(DV.PRESETS[button.dataset.dlView]);

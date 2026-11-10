@@ -70,6 +70,18 @@ DP.singleTypedSpace = () => state.folderMode === "space"
 DP.build = () => {
   if (DP.built) return;
   DP.built = true;
+  const editor = $('.controls > [data-section="build"] .section-body');
+  if (editor && !$("#dl-peek-header")) {
+    const header = document.createElement("div");
+    header.id = "dl-peek-header";
+    header.className = "ws-sel-head";
+    header.hidden = true;
+    header.innerHTML = '<strong>Bin details</strong><button type="button" id="dl-peek-3d" class="ws-out">3D view</button>';
+    header.querySelector("button").addEventListener("click", () => {
+      if (typeof WS !== "undefined" && WS.task === "peek") WS.go("bin", WS.peekId);
+    });
+    editor.prepend(header);
+  }
   $("#drawer-panel").innerHTML = `
     <section id="dl-space-details-card" class="dl-card" aria-label="Space">
       <div class="dl-drawer-row">
@@ -350,15 +362,6 @@ DP.wire = () => {
     if (!one) return;
     await DP.activateInventoryRow(one);
   });
-  list.addEventListener("dragstart", event => {
-    DP.draggingRow = true;
-    const one = DL.bin(event.target.closest?.("[data-bin]")?.dataset.bin);
-    if (!one) return;
-    DV.dragBin = one;
-    event.dataTransfer.setData("text/plain", one.id);
-    event.dataTransfer.effectAllowed = "move";
-  });
-  list.addEventListener("dragend", () => { DV.dragBin = null; DV.drop = null; DV.render(); DP.draggingRow = false; DP.suppressRowClickUntil = Date.now() + 400; });
 };
 
 // ------------------------------------------------------------ bulk print
@@ -435,6 +438,7 @@ DP.renderBatch = () => {
     ? "No selected bins are eligible to export."
     : "Export the selected bins, or the whole Space when none are selected.";
 
+  if (WS.open() && ["settings", "none"].includes(WS.task)) DV.paint();
   if (hosted) return;
   const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
@@ -455,7 +459,7 @@ DP.activateInventoryRow = async one => {
   DL.selectRow(one.id);
 };
 DP.onInventoryClick = async event => {
-  if (event.target.closest(".dl-print-select") || DP.draggingRow || Date.now() < (DP.suppressRowClickUntil || 0)) return;
+  if (event.target.closest(".dl-print-select")) return;
   const row = event.target.closest("[data-bin]");
   const one = row && DL.bin(row.dataset.bin);
   if (!one) return;
@@ -562,7 +566,7 @@ DP.deleteDesignBin = async () => {
   }
 };
 
-DP.openInventoryRow = async id => {
+DP.openInventoryRow = async (id, { peek = false } = {}) => {
   // Fix 103 (R6): structural -> Inventory bin settles an unsaved structural
   // draft through the one dirty/leave owner (true at once when nothing is dirty).
   if (typeof designTargetIsStructural === "function" && designTargetIsStructural() && !(await SP.confirmLeaveStructuralEditor())) return false;
@@ -576,8 +580,8 @@ DP.openInventoryRow = async id => {
   if (!(await designerEditInventoryRow(id, acceptTransition)) || !acceptTransition()) return false;
   DP.clearDesignTarget(); // Fix 103
   DL.selectRow(id);
-  DP.setMode("design");
-  activatePreviewView(preferredDesignView());
+  DP.setMode(peek ? "space" : "design");
+  activatePreviewView(peek ? "drawer" : preferredDesignView());
   DP.refreshDesignerDeleteBin();
   return true;
 };
@@ -1280,7 +1284,6 @@ DP.renderInventory = (force = false) => {
         : `Object height ${fmt(one.object_height_mm)} mm · Installed planning ${plan?.estimated ? "~" : ""}${fmt(plan?.effective_mm ?? one.z)} mm${plan?.estimated ? " (estimated)" : ""}`
       : "";
     const spacer = DL.isSpacer(one);
-    const canPlace = !tooTall && !(spacer && one.boundary === "edge") && (spacer || !placed);
     const color = DV.binColor(one, range);
     const flags = [
       DL.stackable(one) ? DL.stackName(one.stack) : "", kindLabel(one),
@@ -1318,7 +1321,7 @@ DP.renderInventory = (force = false) => {
             : `<button type="button" class="button secondary dl-small" data-act="printed">Mark Printed</button>`) : ""}
         </div>`;
     return `
-      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" data-editable="${editable}" tabindex="0" role="button" aria-label="Select ${escapeHtml(DL.label(one))}" draggable="${canPlace}" title="Select this item${canPlace ? " or drag it into Space" : ""}">
+      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" data-editable="${editable}" tabindex="0" role="button" aria-label="Select ${escapeHtml(DL.label(one))}" title="Select this item">
         ${check}
         ${swatch}
         <span class="dl-bin-main">
@@ -1371,16 +1374,29 @@ DP.modeRequest = 0;
 
 // The layout tools own the left panel (keys and the header buttons act on
 // the layout only then).
-DP.spaceEditing = () => DL.active && DP.mode === "space";
+DP.spaceEditing = () => DL.active && (DP.mode === "space" ||
+  (typeof WS !== "undefined" && ["settings", "none"].includes(WS.task)));
+
+// Peek shares the existing form in .controls; #drawer-panel remains the print list.
+// Keep the Space input owner active while exposing that same bin editor.
+DP.syncEditorVisibility = () => {
+  const space = DP.spaceEditing();
+  const peek = typeof WS !== "undefined" && WS.open() && WS.task === "peek";
+  document.body.classList.toggle("drawer-mode", space && !peek);
+  const panel = $("#drawer-panel");
+  if (panel) panel.hidden = !space || peek;
+  const tabs = $(".view-tabs");
+  if (tabs) tabs.hidden = space;
+  const header = $("#dl-peek-header");
+  if (header) header.hidden = !peek;
+  const button = $("#dl-peek-3d");
+  if (button) button.disabled = !peek || WS.busy;
+};
 
 DP.applyMode = () => {
   const open = DL.active;
-  const space = DP.spaceEditing();
   document.body.classList.toggle("space-workspace", open);
-  // Hides the bin editor's own chrome while the layout tools are showing.
-  document.body.classList.toggle("drawer-mode", space);
-  $("#drawer-panel").hidden = !space;
-  $(".view-tabs").hidden = space;
+  DP.syncEditorVisibility();
   if (typeof syncStructuralEditor === "function") syncStructuralEditor(); // Fix 103
   if (typeof SP !== "undefined" && SP.renderSpaceInfo) SP.renderSpaceInfo();
 };

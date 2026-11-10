@@ -34,11 +34,20 @@ body.ws-on.ws-open .canvas-wrap[data-canvas="drawer"] .dl-hint { display: none !
 body.ws-on.ws-open:not(.ws-task-settings) #drawer-canvas { cursor: pointer; }
 /* Story 2704: the open screen has nothing selected, so the right pane shows no preview. */
 body.ws-on.ws-task-picker .workspace { visibility: hidden; }
-/* Story 2846 / 2853: after Delete (nothing selected), the tree stays and the area beneath it shows only the
-   Inventory bin list (unplaced first) to drag from; the preview stays visible so a bin can be dropped into it. */
+/* Layout and nothing-selected show the existing print list beneath the one bin tree. */
 body.ws-on.ws-task-none .controls > :not(#ws-stage):not(#drawer-panel),
+body.ws-on.ws-task-settings .controls > :not(#ws-stage):not(#drawer-panel),
 body.ws-on.ws-task-none #ws-aux,
-body.ws-on.ws-task-none #drawer-panel > :not([aria-label="Inventory"]) { display: none !important; }
+body.ws-on.ws-task-settings #ws-aux,
+body.ws-on.ws-task-none #drawer-panel > :not([aria-label="Inventory"]),
+body.ws-on.ws-task-settings #drawer-panel > :not([aria-label="Inventory"]) { display: none !important; }
+
+/* The ordinary editor already lives in these control sections, outside #drawer-panel.
+   Peek exposes that same form; the print list and other Space chrome step aside. */
+body.ws-on.ws-task-peek .controls > :not(#ws-stage):not(.control-section),
+body.ws-on.ws-task-peek #space-head,
+body.ws-on.ws-task-peek #ws-aux { display: none !important; }
+.controls > .ws-stage.receiving { background: var(--teal-soft); box-shadow: inset 0 0 0 2px var(--teal); }
 
 /* (A) the selector: pinned and bounded, it scrolls within itself. (B) is the rest of the pane. */
 .controls > .ws-stage {
@@ -110,7 +119,6 @@ body.ws-task-picker .controls > :not(#ws-stage):not(#ws-aux) { display: none !im
 body.ws-task-bin #space-head,
 body.ws-task-container #space-head .space-head-title,
 body.ws-task-container #space-actions > .button-row { display: none; }
-body.ws-task-settings #drawer-panel,
 body.ws-task-settings #space-actions,
 body.ws-task-settings #space-head .space-head-title { display: none; }
 /* Story 2841: the Inventory list (select, Print Selected, Export Space) stays on the space details screen, and so
