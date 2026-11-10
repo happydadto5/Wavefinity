@@ -1048,12 +1048,12 @@ DL.adopt = data => {
   const previousBins = DL.bins;
   const previousSpecs = DL.layout?.design_specs;
   DL.bins = data.bins || DL.bins;
-  if (data.bins && DL.unstackResized(previousBins)) toast("This bin was stacked and will be move to unplaced bins.");
+  if (data.bins && DL.unstackResized(previousBins)) toast("This bin's size changed, so it came off its stack. It's under Not placed.");
   if (data.stack_steps) DL.stackSteps = data.stack_steps;
   if (data.stack_metrics) DL.stackMetrics = data.stack_metrics;
   if (DL.layout && data.layout && Object.hasOwn(data.layout, "design_specs")) {
     DL.layout.design_specs = DL.cleanTextConsent(data.layout.design_specs);
-    if (DL.unstackBlockedLids(previousSpecs)) toast("A bin under this stack now has a lid that cannot take a stack, so the bins above it were moved to unplaced bins.");
+    if (DL.unstackBlockedLids(previousSpecs)) toast("A bin below now has a lid that can't take a stack, so the bins above it are under Not placed.");
     // Any saved-design change can alter a leaned Bore's reference envelope.
     // Refuse to reuse the old report until requestReport() returns the new map.
     DL.report = null;

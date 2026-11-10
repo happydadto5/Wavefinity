@@ -138,7 +138,12 @@ WS.renderSelector = () => {
   const now = WS.current();
   // Story 2816: Print Space (the layout preview) keeps the tree live; only New Space locks it.
   const locked = WS.task === "newspace";
-  const rows = (here ? [{ kind: "settings", id: "settings", label: "Layout or print your space" }, ...items] : items).map(one => {
+  const spaceRows = here ? [{ kind: "settings", id: "settings", label: "Layout or print your space" }, ...items] : items;
+  const hasOrdinaryBins = here && items.some(one => one.kind === "bin");
+  const rows = (here && !hasOrdinaryBins
+    ? [...spaceRows, { kind: "empty", id: "empty", label: "No bins yet. New Bin makes your first one." }]
+    : spaceRows).map(one => {
+    if (one.kind === "empty") return `<li class="ws-empty">${wsEsc(one.label)}</li>`;
     if (one.kind === "group") return `<li class="ws-group" role="presentation">${wsEsc(one.label)}</li>`;
     const picked = Boolean(now) && now.kind === one.kind && (one.kind === "container" || String(now.id || "") === String(one.id || ""));
     const drawerButtons = one.kind === "settings" ? WS.drawerButtons(locked) : "";

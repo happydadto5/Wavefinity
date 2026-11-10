@@ -408,8 +408,20 @@ DV.render = () => {
   DV.cam = DL.isPegboard(drawer) ? DV.pegboardCamera(box.width, box.height, drawer) : DV.camera(box.width, box.height, drawer);
   DV.hits = DL.isPegboard(drawer) ? DV.paintPegboardScene(ctx, drawer, DV.cam) : DV.paintScene(ctx, drawer, DV.cam);
   const emptyHint = $("#dl-empty-hint");
-  if (emptyHint) emptyHint.hidden = DV.drag?.moved || DL.bins.some(one =>
-    DL.isOrdinary(one) && DL.placedCount(one.id) > 0);
+  if (emptyHint) {
+    const hasBins = DL.bins.some(one => DL.isOrdinary(one));
+    const drawerHasBins = drawer.placements?.some(placement => DL.isOrdinary(DL.bin(placement.bin)));
+    const title = emptyHint.querySelector("strong");
+    const detail = emptyHint.querySelector("span");
+    if (hasBins) {
+      if (title) title.textContent = "Drag bins to place";
+      if (detail) detail.textContent = DL.isPegboard(drawer) ? "Drop them on the holes" : "Drag onto a bin to stack";
+    } else {
+      if (title) title.textContent = "No bins yet";
+      if (detail) detail.textContent = "Choose New Bin to make one";
+    }
+    emptyHint.hidden = Boolean(DV.drag?.moved || (hasBins && drawerHasBins));
+  }
   // Taking a bin off the Space is a drop onto the tree.
   $("#ws-stage")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.overTree));
   const heightLegend = $("#dl-height-legend");
@@ -1178,7 +1190,7 @@ DV.wire = () => {
     if (drag?.moved && !readOnly()) {
       if (DV.overTree(event)) {
         const count = DL.takeOut(drag.key);
-        toast(`Moved to Unplaced bins${count > 1 ? ` (${count} bins)` : ""}. Still in Inventory.`);
+        // The bin visibly moves into the Not placed tree group.
       } else if (drag.outside) {
         // Released off the Space but not on the tree: nothing changes.
       } else if (drag.target) {

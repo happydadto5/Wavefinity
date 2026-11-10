@@ -624,7 +624,7 @@ DP.duplicateRow = async one => {
     DL.selected = null;
     DL.emit();
     DL.requestReport();
-    toast(`Duplicated as ${DL.label(DL.bin(data.row_id) || one)}. It is unplaced, at the top of the bin list.`);
+    toast(`Duplicated as ${DL.label(DL.bin(data.row_id) || one)}. It's under Not placed.`);
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) toast(`Could not duplicate bin: ${friendlyError(error)}`, true, 6000);
   }
