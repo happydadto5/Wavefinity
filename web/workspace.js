@@ -145,9 +145,13 @@ WS.renderSelector = () => {
     const picked = Boolean(now) && now.kind === one.kind && (one.kind === "container" || String(now.id || "") === String(one.id || ""));
     const layoutPicked = Boolean(layoutPick) && one.kind === "bin" && String(one.id || "") === layoutPick;
     const drawerButtons = one.kind === "settings" ? WS.drawerButtons(locked) : "";
+    // Story 2840: the Layout line's one button, Manage, opens the same space details screen as a click on the line.
+    const manage = one.kind === "settings"
+      ? `<button type="button" class="ws-out" data-ws-pick="settings" data-id="" title="Open the space details"${locked ? " disabled" : ""}>Manage</button>` : "";
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
+    // Story 2840: Print and Export are rendered only on the selected row; other rows carry no output buttons.
     return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked || layoutPicked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked || layoutPicked}"${locked ? " disabled" : ""}>
-      <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${drawerButtons}${WS.rowOutputs(one, picked && !locked)}${WS.rowBinActions(one, picked || layoutPicked, locked)}</li>`;
+      <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${drawerButtons}${manage}${picked ? WS.rowOutputs(one, !locked) : ""}${WS.rowBinActions(one, picked || layoutPicked, locked)}</li>`;
   }).join("");
   // Story 2725: live on any bin view (a bin in a space or a loose bin in My Bins). Greyed only on the
   // container and Layout views, or while a switch/action is in flight. Not tied to the classic form's

@@ -70,9 +70,9 @@ body.ws-on.ws-task-picker .workspace { visibility: hidden; }
 .ws-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-note { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-group { font-size: 12px; font-weight: 700; color: var(--muted); margin-top: 4px; }
-/* The hierarchy shows by indentation: container half an inch in, bins an inch in. */
-.ws-row.ws-level-1 { margin-left: .5in; }
-.ws-row.ws-level-2 { margin-left: 1in; }
+/* The hierarchy shows by indentation: container a third of an inch in, bins two-thirds of an inch in (Story 2840). */
+.ws-row.ws-level-1 { margin-left: .33in; }
+.ws-row.ws-level-2 { margin-left: .67in; }
 .ws-empty { color: var(--muted); font-size: 13px; padding: 4px 0; }
 
 /* Print Space and New Space take the editor region (B) for a while. */
