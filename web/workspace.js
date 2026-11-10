@@ -15,7 +15,7 @@
 // The classic screens and forms remain as the editors this layer hosts; there is no switch back to the old layout.
 
 const WS = {
-  task: "landing", // landing | container | bin | settings | print | newspace | picker  (bin with no Space = My Bins)
+  task: "landing", // landing | container | bin | settings | newspace | picker  (bin with no Space = My Bins)
   prior: null, // the editor Print Space / New Space was opened from
   printPick: new Set(),
   printContainer: false,
@@ -27,7 +27,7 @@ const WS = {
   previewSignature: "",
   entered: "",
 };
-const WS_TASKS = ["landing", "container", "bin", "settings", "print", "newspace", "picker"];
+const WS_TASKS = ["landing", "container", "bin", "settings", "newspace", "picker"];
 
 WS.open = () => Boolean(typeof DL !== "undefined" && DL.active && DL.layout && state.folderMode === "space");
 
@@ -94,7 +94,7 @@ WS.items = () => {
 // While Print Space / New Space is showing, it is the row of the editor they came from.
 WS.current = () => {
   if (WS.pending) return WS.pending; // Story 2735: a clicked row is selected at once, before its view is ready
-  const temporary = WS.task === "print" || WS.task === "newspace";
+  const temporary = WS.task === "newspace";
   const task = temporary ? WS.prior?.task : WS.task;
   if (task === "settings") return { kind: "settings", id: "settings" };
   if (task === "container") return { kind: "container", id: "container" };
@@ -147,8 +147,8 @@ WS.renderSelector = () => {
     const drawerButtons = one.kind === "settings" ? WS.drawerButtons(locked) : "";
     // Story 2840: the Layout line's one button, Manage, opens the same space details screen as a click on the line.
     const manage = one.kind === "settings"
-      ? `<button type="button" class="ws-out" data-ws-pick="settings" data-id="" title="Open the space details"${locked ? " disabled" : ""}>Manage</button>`
-        + `<button type="button" class="ws-out" data-ws-act="print-space" title="Choose bins and the container to print or export"${locked ? " disabled" : ""}>Select…</button>` : "";
+      ? `<button type="button" class="ws-out" data-ws-pick="settings" data-id="" title="Open the space details"${locked ? " disabled" : ""}>Manage</button>` : "";
+
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     // Story 2840: Print and Export are rendered only on the selected row; other rows carry no output buttons.
     return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked || layoutPicked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked || layoutPicked}"${locked ? " disabled" : ""}>
@@ -186,8 +186,10 @@ WS.renderPrint = () => {
   const noSlicer = !state.slicer || !state.slicer.available;
   const n = WS.pickedIds().length + (WS.printContainer ? 1 : 0);
   const none = n === 0 || DL.busy;
+  const space = WS.spaceRows().find(one => one.current);
   return `<div class="ws-page ws-print">
-    <h2>Print Space</h2>
+    <h2>Manage Space</h2>
+    ${space ? `<p><strong>${wsEsc(space.name)}</strong><br>${wsEsc(space.meta)}</p>` : ""}
     <p class="ws-printcount" role="status">${n === 0 ? "Select what to print. The preview stays live on the right." : `${n} ${n === 1 ? "item" : "items"} selected`}</p>
     <ul class="ws-items" aria-label="Items to print">${WS.tickRows(items)}</ul>
     <div class="ws-toprow" role="group" aria-label="Print Space">
@@ -195,8 +197,6 @@ WS.renderPrint = () => {
       <button type="button" class="button secondary dl-small" data-ws-act="export-picked"${none ? " disabled" : ""}>Export Selected</button>
       <button type="button" class="button secondary dl-small" data-ws-act="pick-all">Select all</button>
       <button type="button" class="button secondary dl-small" data-ws-act="pick-none">Clear</button>
-      <button type="button" class="button secondary dl-small" data-ws-act="cancel">Cancel</button>
-      <button type="button" class="button secondary dl-small" data-ws-act="cancel">Done</button>
     </div>
   </div>`;
 };
@@ -262,7 +262,7 @@ WS.render = () => {
     if (find) host.querySelector(find)?.focus();
   };
   draw(stage, WS.renderSelector(), "signature");
-  const auxHtml = WS.task === "print" ? WS.renderPrint() : WS.task === "newspace" || WS.task === "picker" ? WS.renderNewSpace() : "";
+  const auxHtml = WS.task === "settings" ? WS.renderPrint() : WS.task === "newspace" || WS.task === "picker" ? WS.renderNewSpace() : "";
   aux.hidden = !auxHtml;
   draw(aux, auxHtml, "auxSignature");
 };
@@ -388,7 +388,7 @@ WS.toSpaceMode = async () => (DP.mode === "space" || await DP.selectMode("space"
 
 // Remember which editor a temporary one (Print Space, New Space) was opened from.
 WS.rememberPrior = () => {
-  if (WS.task === "print" || WS.task === "newspace") return;
+  if (WS.task === "newspace") return;
   WS.prior = { task: WS.task, id: WS.task === "bin" && WS.open() ? state.designInventoryId || "" : "" };
 };
 
@@ -417,24 +417,18 @@ WS.transition = async (task, arg) => {
   }
   if (!WS.open()) return false;
   if (from === "settings" && task !== "settings" && !(await WS.closeSettings())) return false;
-  if (from === "print" && task !== "print") WS.prior = null; // Story 2816: picking from the tree leaves Print Space
   if (task === "settings") {
     // Story 2818: the left side swaps to the space details screen at once; the mode switch and
     // the form load below (the heavy part) fill it in. A failed switch puts the old screen back.
     const shown = WS.task;
+    WS.printPick = new Set();
+    WS.printContainer = false;
     WS.task = "settings";
     WS.sync();
     if (!(await WS.toSpaceMode())) { WS.task = shown; WS.sync(); return false; }
-    SP.editSpace();
+    if (!WS.containerKind()) SP.editSpace();
     // Story 2817: the space details screen is the layout row alone; an edited bin's old highlight clears.
     DL.selectedRow = null; DL.emit();
-    return true;
-  }
-  if (task === "print") {
-    WS.rememberPrior();
-    WS.printPick = new Set();
-    WS.printContainer = false;
-    WS.task = "print";
     return true;
   }
   if (task === "container") {
@@ -680,7 +674,6 @@ WS.onAction = async (act, button, event) => {
     }
     case "print-picked": return WS.printPicked(event);
     case "export-picked": return WS.exportPicked();
-    case "print-space": return WS.go("print");
     case "pick-all": return WS.pickAll();
     case "pick-none": WS.printPick = new Set(); WS.printContainer = false; WS.sync(); return null;
     case "cancel": return WS.resume();
@@ -779,7 +772,7 @@ WS.exportAll = async () => {
 
 WS.output = (kind, mode, button, event) => {
   if (!WS.rowLive({ kind })) return null;
-  if (kind === "settings") return mode === "print" ? WS.go("print") : WS.exportAll();
+  if (kind === "settings") return WS.go("settings");
   if (kind === "container") {
     const drawers = WS.containerKind() === "storage_drawers";
     if (mode === "print") return drawers ? SP.runStructural("print", event) : SP.printStructural(event);
@@ -832,7 +825,7 @@ WS.sync = () => {
   // The opening message ends once the Space's view has been drawn (or the open did not land).
   if (WS.landingPending && (WS.task !== "landing" || !WS.open())) WS.endOpening();
   // A task that needs an open Space falls back when that Space is gone.
-  if (["landing", "container", "settings", "print"].includes(WS.task) && !WS.open() && state.folderMode !== "space") {
+  if (["landing", "container", "settings"].includes(WS.task) && !WS.open() && state.folderMode !== "space") {
     WS.task = "bin";
   }
   // Story 2704: on the open screen nothing is chosen yet - no preview, nothing current, and the
@@ -898,7 +891,7 @@ WS.paintPreview = () => {
   const canvas = $("#drawer-canvas");
   const ctx = canvas?.getContext("2d");
   if (!ctx) return;
-  const printing = WS.task === "print";
+  const printing = WS.task === "settings";
   const marked = printing ? WS.printPick
     : WS.task === "bin" && state.designInventoryId ? new Set([state.designInventoryId]) : new Set();
   const containerMarked = printing ? WS.printContainer : WS.task === "container";
@@ -958,7 +951,7 @@ DV.render = () => { wsRender(); WS.paintPreview(); };
 
 // A click on a bin in the preview picks it (its form opens at once); the preview never edits.
 DP.onLayoutClick = key => {
-  if (!WS.open() || WS.task === "settings" || WS.task === "print" || WS.task === "newspace") return false;
+  if (!WS.open() || WS.task === "settings" || WS.task === "newspace") return false;
   const found = DL.findPlacement(key);
   const one = found && DL.bin(found.placement.bin);
   if (!one || !DL.isOrdinary(one)) return false;

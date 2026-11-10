@@ -106,6 +106,7 @@ body.ws-task-picker .controls > :not(#ws-stage):not(#ws-aux) { display: none !im
 body.ws-task-bin #space-head,
 body.ws-task-container #space-head .space-head-title,
 body.ws-task-container #space-actions > .button-row { display: none; }
+body.ws-task-settings #drawer-panel,
 body.ws-task-settings #space-actions,
 body.ws-task-settings #space-head .space-head-title { display: none; }
 /* Story 2841: the Inventory list (select, Print Selected, Export Space) stays on the space details screen, and so
