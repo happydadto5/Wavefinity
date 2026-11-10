@@ -86,7 +86,6 @@ from organizer_geometry import (
 # instead of one - and the bin above would be standing on nothing.
 STACK_LID_SKIN = 2.0      # minimum lid rise above the rim
 STACK_SEAT_DEPTH = 2.0    # resting-lid stack rim height == the skirt depth of the bin that sits in it
-STACK_LID_RIM_WIDTH = 1.2  # radial width of the resting-lid stack rim
 STACK_PLUG_DEPTH = 3.0    # how far a lid plug reaches into the mouth it closes
 STACK_INTERIOR_MARGIN = 0.5  # lidded bins: interior parts stop this far below the plug bottom
 STACK_SKIRT_DEPTH = 2.0   # direct mode: how far the skirt drops into the bin below
@@ -713,8 +712,10 @@ def _lid_stack_rim(eff: BoxSpec) -> trimesh.Trimesh:
     Its inside is the mouth outline, so the skirt of the bin above drops in with
     the direct-foot fit; the bin's wall bottom bears on the rim top.
     """
+    # Outside edge is the bin's own outline, so the rim is flush with the plate
+    # and the bin wall at every corner; the inside is the seat for the bin above.
     inner = _plug_polygon(eff).buffer(STACK_FIT)
-    ring = inner.buffer(STACK_LID_RIM_WIDTH).intersection(wavy_outer_polygon(eff)).difference(inner)
+    ring = wavy_outer_polygon(eff).difference(inner)
     rim = _extrude_polygon(ring, STACK_SEAT_DEPTH + 0.2)       # 0.2 mm into the plate: one solid
     rim.apply_translation((0.0, 0.0, eff.z + stack_lid_rise(eff) - STACK_SEAT_DEPTH - 0.2))
     return rim
