@@ -18,8 +18,6 @@ const WS = {
   task: "landing", // landing | container | bin | peek | settings | newspace | picker  (bin with no Space = My Bins)
   peekId: null,
   prior: null, // the editor Print Space / New Space was opened from
-  printPick: new Set(),
-  printContainer: false,
   busy: false,
   message: "",
   placeSeen: "",
@@ -172,37 +170,6 @@ WS.renderSelector = () => {
 
 // ------------------------------------------------------------------ left: temporary editors (B)
 
-WS.tickRows = items => items.map(one => {
-  if (one.kind === "group") return `<li class="ws-group" role="presentation">${wsEsc(one.label)}</li>`;
-  const on = one.kind === "container" ? WS.printContainer : WS.printPick.has(one.id);
-  const off = one.kind === "bin" && !one.printable;
-  return `<li class="ws-item"><label><input type="checkbox" data-ws-tick="${wsEsc(one.id)}"${on ? " checked" : ""}${off ? " disabled" : ""}>
-    <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</label></li>`;
-}).join("");
-
-WS.pickedIds = () => [...WS.printPick].filter(id => DL.bin(id) && DL.printEligible(DL.bin(id)));
-
-WS.renderPrint = () => {
-  const items = WS.items();
-  const hosted = Boolean(state.runtime.hosted);
-  const noSlicer = !state.slicer || !state.slicer.available;
-  const n = WS.pickedIds().length + (WS.printContainer ? 1 : 0);
-  const none = n === 0 || DL.busy;
-  const space = WS.spaceRows().find(one => one.current);
-  return `<div class="ws-page ws-print">
-    <h2>Manage Space</h2>
-    ${space ? `<p><strong>${wsEsc(space.name)}</strong><br>${wsEsc(space.meta)}</p>` : ""}
-    <p class="ws-printcount" role="status">${n === 0 ? "Select what to print. The preview stays live on the right." : `${n} ${n === 1 ? "item" : "items"} selected`}</p>
-    <ul class="ws-items" aria-label="Items to print">${WS.tickRows(items)}</ul>
-    <div class="ws-toprow" role="group" aria-label="Print Space">
-      ${hosted ? "" : `<button type="button" class="button primary dl-small" data-ws-act="print-picked"${none || noSlicer ? " disabled" : ""}${noSlicer ? ' title="A slicer is needed to print. Open Printer Settings… to choose one."' : ""}>Print Selected</button>`}
-      <button type="button" class="button secondary dl-small" data-ws-act="export-picked"${none ? " disabled" : ""}>Export Selected</button>
-      <button type="button" class="button secondary dl-small" data-ws-act="pick-all">Select all</button>
-      <button type="button" class="button secondary dl-small" data-ws-act="pick-none">Clear</button>
-    </div>
-  </div>`;
-};
-
 // Every kind is a full artwork choice, equal in size.
 WS.KINDS = [
   ["portable", "Storage Box", "A carrying case for your bins.", "B4B.png"],
@@ -257,7 +224,7 @@ WS.render = () => {
     const find = focused ? (focused.dataset.wsAct ? `[data-ws-act="${focused.dataset.wsAct}"]`
       : focused.dataset.wsPick ? `[data-ws-pick="${focused.dataset.wsPick}"][data-id="${CSS.escape(focused.dataset.id || "")}"]`
       : focused.dataset.wsOut !== undefined ? `[data-ws-out][data-kind="${focused.dataset.kind}"][data-id="${CSS.escape(focused.dataset.id || "")}"][data-output="${focused.dataset.output}"]`
-      : focused.dataset.wsTick ? `[data-ws-tick="${CSS.escape(focused.dataset.wsTick)}"]` : null) : null;
+      : null) : null;
     host.innerHTML = html;
     WS[key] = html;
     host.scrollTop = top;
@@ -444,8 +411,6 @@ WS.transition = async (task, arg) => {
     // Story 2818: the left side swaps to the space details screen at once; the mode switch and
     // the form load below (the heavy part) fill it in. A failed switch puts the old screen back.
     const shown = WS.task;
-    WS.printPick = new Set();
-    WS.printContainer = false;
     WS.task = "settings";
     WS.sync();
     if (!(await WS.toSpaceMode())) { WS.task = shown; WS.sync(); return false; }
@@ -505,8 +470,6 @@ WS.arrive = () => {
   WS.message = "";
   WS.peekId = null;
   WS.prior = null;
-  WS.printPick = new Set();
-  WS.printContainer = false;
   if (WS.open()) {
     Object.assign(DV.view, { zoom: 1, panX: 0, panY: 0 });
     // A drawer's space opens in Overhead: flat, fitted, not turned (Story 2750).
@@ -626,29 +589,6 @@ WS.printContainerNow = event => {
   return SP.printStructural(event);
 };
 
-WS.printPicked = async event => {
-  let ids = WS.pickedIds();
-  // The cabinet's own print already includes the bins placed in its drawers.
-  if (WS.printContainer && WS.containerKind() === "storage_drawers") ids = ids.filter(id => !DL.placedCount(id));
-  if (ids.length) await DL.printSelectedBins(Object.fromEntries(ids.map(id => [id, DL.printCount(DL.bin(id))])), true);
-  if (WS.printContainer) await WS.printContainerNow(event);
-};
-
-WS.exportPicked = async () => {
-  const ids = WS.pickedIds();
-  if (ids.length) await DL.saveSelectedBins(ids, true);
-  if (WS.printContainer) {
-    if (WS.containerKind() === "storage_drawers") await SP.runCabinetStructural("save");
-    else await SP.saveStructural();
-  }
-};
-
-WS.pickAll = () => {
-  WS.printPick = new Set((DL.bins || []).filter(one => DL.isOrdinary(one) && DL.printEligible(one)).map(one => one.id));
-  WS.printContainer = Boolean(WS.containerKind());
-  WS.sync();
-};
-
 WS.newBin = async () => {
   if (WS.open()) return WS.go("bin", null);
   if (!(await designerNewBin())) return false;
@@ -698,10 +638,6 @@ WS.onAction = async (act, button, event) => {
       if (!one) return null;
       return DP.deleteBinNow(one); // Story 2836: at once, no confirmation, nothing selected after
     }
-    case "print-picked": return WS.printPicked(event);
-    case "export-picked": return WS.exportPicked();
-    case "pick-all": return WS.pickAll();
-    case "pick-none": WS.printPick = new Set(); WS.printContainer = false; WS.sync(); return null;
     case "cancel": return WS.resume();
     default: return null;
   }
@@ -769,8 +705,7 @@ WS.rowOutputs = (one, picked) => {
   // Story 2829: the space line has no Export button either; the details screen exports the space's files.
   if (one.kind === "settings") return "";
   const printButton = `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live ? "" : " disabled"} title="${wsEsc(printTitle)}">Print</button>`;
-  return printButton
-    + `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live ? "" : " disabled"} title="${wsEsc(exportTitle)}">Export</button>`;
+  return printButton + (one.kind === "container" ? `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live ? "" : " disabled"} title="${wsEsc(exportTitle)}">Export</button>` : "");
 };
 
 // Story 2807: Duplicate and Delete sit on the selected bin's own row (and no other row). They are the same
@@ -878,7 +813,7 @@ WS.sync = () => {
   }
   WS.render();
   WS.measure();
-  const signature = `${WS.task}|${[...WS.printPick].join(",")}|${WS.printContainer}|${state.designInventoryId || ""}|${WS.peekId || ""}|${WS.prior?.id ?? ""}`;
+  const signature = `${WS.task}|${[...DP.printSelected].join(",")}|${DP.containerPinned}|${state.designInventoryId || ""}|${WS.peekId || ""}|${WS.prior?.id ?? ""}`;
   if (signature !== WS.previewSignature) {
     WS.previewSignature = signature;
     if (open && typeof DV !== "undefined") DV.paint();
@@ -923,7 +858,7 @@ WS.paintPreview = () => {
   const marked = printing ? DP.printSelected
     : WS.task === "peek" && WS.peekId ? new Set([WS.peekId])
     : WS.task === "bin" && state.designInventoryId ? new Set([state.designInventoryId]) : new Set();
-  const containerMarked = printing ? WS.printContainer : WS.task === "container";
+  const containerMarked = printing ? DP.containerPinned : WS.task === "container";
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1072,14 +1007,6 @@ SP.openTypedSpacePreferredView = async () => {
     WS.sync();
     DV.render();
   });
-  aux.addEventListener("change", event => {
-    const tick = event.target.dataset.wsTick;
-    if (!tick) return;
-    if (tick === "container") WS.printContainer = event.target.checked;
-    else if (event.target.checked) WS.printPick.add(tick); else WS.printPick.delete(tick);
-    WS.sync();
-  });
-
   // Story 2716: Manage Spaces is a plain button that opens the space management (picker) screen.
   $("#ws-spaces").addEventListener("click", () => WS.go("picker"));
   $("#part-name")?.addEventListener("input", () => WS.sync());

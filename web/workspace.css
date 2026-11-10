@@ -39,8 +39,7 @@ body.ws-on.ws-task-none .controls > :not(#ws-stage):not(#drawer-panel),
 body.ws-on.ws-task-settings .controls > :not(#ws-stage):not(#drawer-panel),
 body.ws-on.ws-task-none #ws-aux,
 body.ws-on.ws-task-settings #ws-aux,
-body.ws-on.ws-task-none #drawer-panel > :not([aria-label="Inventory"]),
-body.ws-on.ws-task-settings #drawer-panel > :not([aria-label="Inventory"]) { display: none !important; }
+body.ws-on.ws-task-none #drawer-panel > :not([aria-label="Inventory"]) { display: none !important; }
 
 /* The ordinary editor already lives in these control sections, outside #drawer-panel.
    Peek exposes that same form; the print list and other Space chrome step aside. */

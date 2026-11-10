@@ -12,6 +12,8 @@ const DP = {
   signatures: {},
   filter: { text: "", show: "all", sort: "height" },
   filtersBySpace: new Map(),
+  containerPinned: false,
+  containerSignature: null,
   printSelected: new Set(), // general ordinary-bin selection, keyed by durable row ID
 };
 
@@ -83,6 +85,7 @@ DP.build = () => {
     editor.prepend(header);
   }
   $("#drawer-panel").innerHTML = `
+    <p id="dl-manage-space-label" class="dl-note" hidden></p>
     <section id="dl-space-details-card" class="dl-card" aria-label="Space">
       <div class="dl-drawer-row">
         <label id="dl-drawer-label-row"><span id="dl-drawer-label">Drawer</span><select id="dl-drawer"></select></label>
@@ -299,9 +302,21 @@ DP.wire = () => {
   $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllPrintable());
   $("#dl-batch-clear").addEventListener("click", () => DP.clearPrintSelection());
   $("#dl-batch-delete").addEventListener("click", () => DP.deleteSelected());
-  $("#dl-batch-print").addEventListener("click", () => {
-    if (DP.printSelected.size) DL.printSelectedBins(DP.printSelectionPayload(), true);
-    else DL.printCompleteSpace();
+  $("#dl-batch-print").addEventListener("click", async event => {
+    const scope = DP.batchScope();
+    const container = DP.containerPinned;
+    const printContainer = container || (!scope.subset && WS.containerKind() && !WS.isPrinted({ kind: "container" }));
+    if (scope.subset) {
+      const payload = DP.printSelectionPayload();
+      if (container && WS.containerKind() === "storage_drawers") {
+        for (const id of Object.keys(payload)) if (DL.placedCount(id) > 0) delete payload[id];
+      }
+      if (Object.keys(payload).length) await DL.printSelectedBins(payload, true);
+    } else await DL.printCompleteSpace();
+    if (printContainer) {
+      await WS.printContainerNow(event);
+      DP.renderInventory(true);
+    }
   });
   $("#dl-sp-auto-height").addEventListener("change", event => {
     DL.change(() => { DL.layout.settings.spacers.height_auto = event.target.checked; });
@@ -342,6 +357,11 @@ DP.wire = () => {
   const list = $("#dl-inv-list");
   list.addEventListener("click", event => DP.onInventoryClick(event));
   list.addEventListener("change", event => {
+    if (event.target.matches("[data-container-select]")) {
+      DP.containerPinned = event.target.checked;
+      DP.renderBatch();
+      return;
+    }
     const printId = event.target.dataset.printSelect;
     if (!printId) return;
     if (event.target.checked) DP.printSelected.add(printId); else DP.printSelected.delete(printId);
@@ -380,13 +400,14 @@ DP.selectAllPrintable = () => {
 
 DP.clearPrintSelection = () => {
   DP.printSelected.clear();
+  DP.containerPinned = false;
   DP.renderInventory(true);
 };
 
 // Print uses the eligible ticked rows; an empty selection prints the Space.
 DP.batchScope = () => {
   const picked = [...DP.printSelected].map(id => DL.bin(id)).filter(one => DL.printEligible(one));
-  if (DP.printSelected.size) return { subset: true, save: picked, print: picked, picked };
+  if (DP.printSelected.size || DP.containerPinned) return { subset: true, save: picked, print: picked, picked };
   const eligible = DL.bins.filter(one => DL.printEligible(one));
   return {
     subset: false, picked: [], eligible,
@@ -410,7 +431,7 @@ DP.renderBatch = () => {
   const needFiles = scope.subset ? scope.picked.filter(one => DL.saveNeeded(one)).length : scope.save.length;
   let summary;
   if (scope.subset) {
-    summary = `${dlPlural(DP.printSelected.size, "bin")} selected · ${scope.picked.length} eligible to print · ${needFiles} need${needFiles === 1 ? "s" : ""} new files${connectorNote}`;
+    summary = `${dlPlural(DP.printSelected.size + (DP.containerPinned ? 1 : 0), "item")} selected · ${scope.picked.length} eligible to print · ${needFiles} need${needFiles === 1 ? "s" : ""} new files${connectorNote}`;
   } else if (!scope.eligible.length) {
     summary = "No designs to print yet.";
   } else summary = "";
@@ -419,7 +440,7 @@ DP.renderBatch = () => {
   summaryNode.hidden = !summary;
   const hiddenBins = DL.bins.filter(DL.isOrdinary).length > DP.filteredBins().filter(DL.isOrdinary).length;
   $("#dl-batch-filter-note").hidden = !hiddenBins;
-  $("#dl-batch-clear").disabled = !DP.printSelected.size;
+  $("#dl-batch-clear").disabled = !DP.printSelected.size && !DP.containerPinned;
   $("#dl-batch-delete").disabled = !DP.printSelected.size || Boolean(DL.busy);
   const busy = Boolean(DL.busy);
 
@@ -427,9 +448,9 @@ DP.renderBatch = () => {
   if (hosted) return;
   const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
-  const printCount = scope.subset ? scope.picked.length : 0;
+  const printCount = scope.subset ? scope.picked.length + (DP.containerPinned ? 1 : 0) : 0;
   button.textContent = (DL.busy === "print-bins" || DL.busy === "print-complete") ? DL.printBusyLabel
-    : scope.subset ? `Print ${printCount === 1 ? "bin" : `${printCount} bins`}` : "Print whole space";
+    : scope.subset ? `Print ${DP.containerPinned ? (printCount === 1 ? "container" : `${printCount} items`) : (printCount === 1 ? "bin" : `${printCount} bins`)}` : "Print whole space";
   button.disabled = noSlicer || busy || (scope.subset && !printCount);
   button.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."
     : scope.subset && !printCount ? "No selected bins are eligible to print."
@@ -656,7 +677,6 @@ DP.deleteBinNow = async one => {
       return false;
     }
     DP.printSelected.delete(one.id);
-    if (typeof WS !== "undefined" && WS.printPick) WS.printPick.delete(one.id);
     if (typeof discardStaleFileRefreshRows === "function") discardStaleFileRefreshRows([one.id]);
     // Nothing selected: drop the open bin's binding, draft and preview geometry.
     clearTimeout(spaceAutosaveTimer);
@@ -869,6 +889,10 @@ DP.update = () => {
 
 DP.renderDrawer = () => {
   const drawer = DL.drawer();
+  const label = $("#dl-manage-space-label");
+  const space = WS.task === "settings" && WS.containerKind() && WS.spaceRows().find(one => one.current);
+  label.hidden = !space;
+  label.textContent = space ? `${space.name} \u00b7 ${space.meta}` : "";
   const minima = DP.drawerMinima();
   DV.syncControls();
   $("#dl-width").min = minima.x;
@@ -1227,6 +1251,13 @@ DP.filteredBins = () => {
 
 DP.renderInventory = (force = false) => {
   DP.syncFilterSpace();
+  const containerSignature = WS.containerKind() ? `${WS.sigKey("container")}|${WS.currentSig("container")}` : "";
+  if (containerSignature !== DP.containerSignature) {
+    DP.containerSignature = containerSignature;
+    DP.containerPinned = false;
+  }
+  const containerRow = WS.task === "settings" && WS.containerKind()
+    ? `<label class="dl-bin"><input type="checkbox" data-container-select${DP.containerPinned ? " checked" : ""}><span class="dl-bin-main"><strong>${escapeHtml(WS.containerName())}</strong><small class="dl-status">${WS.isPrinted({ kind: "container" }) ? "printed" : "not printed"}</small></span></label>` : "";
   const drawer = DL.drawer();
   const list = $("#dl-inv-list");
   dlSet("#dl-inv-show", DP.filter.show);
@@ -1238,23 +1269,23 @@ DP.renderInventory = (force = false) => {
   const counts = DL.bins.map(one => [one.id, DL.placedCount(one.id)]);
   const signature = JSON.stringify([DL.bins, counts, Object.keys(DL.layout.design_specs || {}), DL.report?.planning_heights,
     Boolean(state.runtime.hosted), Boolean(state.slicer?.available),
-    DP.filter, selectedRow, deleteRowId, DP.designNavBlocked(), drawer.id, drawer.height, [...DP.printSelected],
+    DP.filter, selectedRow, deleteRowId, DP.designNavBlocked(), drawer.id, drawer.height, [...DP.printSelected], containerRow,
     DL.isStorageDrawers() ? DL.layout.drawers.map(one => [one.id, one.height, one.placements.map(p => p.bin)]) : null]);
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
   const bins = DP.filteredBins();
   if (!DL.bins.length) {
-    list.innerHTML = `<div class="dl-empty">${DL.loaded
+    list.innerHTML = containerRow + `<div class="dl-empty">${DL.loaded
       ? "No bins in this Space inventory yet."
       : "Loading the inventory…"}</div>`;
     return;
   }
-  if (!bins.length) { list.innerHTML = `<div class="dl-empty">No bins match.</div>`; return; }
+  if (!bins.length) { list.innerHTML = containerRow + `<div class="dl-empty">No bins match.</div>`; return; }
   const range = DV.heightRange();
   const kinds = { b4b: "Storage Box", manual: "Added by hand" };
   const kindLabel = one => one.kind === "spacer" ? (one.boundary === "edge" ? "Edge spacer" : "Spacer") : kinds[one.kind];
   const cabinet = DL.isStorageDrawers();
-  list.innerHTML = bins.map(one => {
+  list.innerHTML = containerRow + bins.map(one => {
     const placed = DL.placedCount(one.id);
     // A placed row is judged against the drawer that actually holds it; an
     // unplaced one against the active drawer.
