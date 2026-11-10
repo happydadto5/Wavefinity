@@ -97,6 +97,15 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
    into the auto first row of .workspace and fill only the top of the pane. */
 .canvas-wrap[data-canvas="drawer"].active { display: flex; grid-row: 2; }
 .canvas-wrap[data-canvas="drawer"] #drawer-canvas { flex: 1 1 0; width: auto; min-width: 0; height: 100%; }
+.dl-empty-hint {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1;
+  display: grid; gap: 3px; justify-items: center; padding: 12px 16px; border-radius: 8px;
+  color: var(--muted); background: rgba(255,255,255,.94); box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  pointer-events: none; text-align: center; white-space: nowrap;
+}
+.dl-empty-hint[hidden] { display: none; }
+.dl-empty-hint strong { color: var(--ink); font-size: 16px; font-weight: 650; }
+.dl-empty-hint span { font-size: 13px; }
 /* Fix 1091: legend for the yellow/red bin-height rims; sits above the hint. */
 .canvas-wrap[data-canvas="drawer"] .dl-height-legend { left: 10px; bottom: 54px; }
 .dl-height-swatch { display: inline-block; width: 9px; height: 9px; margin-right: 3px; border-radius: 2px; }

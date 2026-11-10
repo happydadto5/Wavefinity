@@ -407,6 +407,9 @@ DV.render = () => {
   const drawer = DL.drawer();
   DV.cam = DL.isPegboard(drawer) ? DV.pegboardCamera(box.width, box.height, drawer) : DV.camera(box.width, box.height, drawer);
   DV.hits = DL.isPegboard(drawer) ? DV.paintPegboardScene(ctx, drawer, DV.cam) : DV.paintScene(ctx, drawer, DV.cam);
+  const emptyHint = $("#dl-empty-hint");
+  if (emptyHint) emptyHint.hidden = DV.drag?.moved || DL.bins.some(one =>
+    DL.isOrdinary(one) && DL.placedCount(one.id) > 0);
   // Taking a bin off the Space is a drop onto the bin list.
   $("#dl-inv-list")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.overList));
   const heightLegend = $("#dl-height-legend");
@@ -1353,6 +1356,7 @@ DV.buildOverlay = () => {
       </div>
     </div>
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
+    <div id="dl-empty-hint" class="dl-empty-hint" hidden><strong>Drag bins to place</strong><span>Drag onto a bin to stack</span></div>
     <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag a bin onto the bin list to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
     <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden></div>`);
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
