@@ -311,6 +311,13 @@ def lid_refusal(lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
     return None
 
 
+def lid_takes_stack(lower: dict[str, Any], specs: dict[str, Any]) -> bool:
+    """Whether ``lower`` carries a lid that receives a stack (a Lid for stacking)."""
+    lid = (((specs.get(lower["id"]) or {}).get("box") or {}).get("lid"))
+    return (isinstance(lid, dict) and bool(lid.get("enabled")) and bool(lid.get("stack_rim"))
+            and lid_refusal(lower, specs) is None)
+
+
 def stack_compatibility_issue(upper: dict[str, Any], lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
     """The same physical stack rule used by placement and report."""
     upper_mode, lower_mode = upper.get("stack", "none"), lower.get("stack", "none")
@@ -327,9 +334,11 @@ def stack_compatibility_issue(upper: dict[str, Any], lower: dict[str, Any], spec
     same_footprint = _close(upper["x"], lower["x"]) and _close(upper["y"], lower["y"])
     # Only a lid carries a different footprint; whether the upper bin sits inside
     # the lid and clear of its siblings is decided where the offset is known.
-    if not same_footprint and upper.get("stack") == "direct":
+    # Story 2833: a stackable-base (direct) bin may share a Lid for stacking
+    # with others that together fill it; whether they do is judged in the report.
+    if not same_footprint and upper.get("stack") == "direct" and not lid_takes_stack(lower, specs):
         return "Direct stacking requires bins with the same footprint"
-    if not same_footprint and upper.get("stack") != "lid":
+    if not same_footprint and upper.get("stack") == "b4b":
         return "Storage Box stacking requires bins with the same footprint"
     top_wall, bottom_wall = stack_wall(upper, specs), stack_wall(lower, specs)
     if top_wall is None or bottom_wall is None:
@@ -595,6 +604,22 @@ def _stack_item(root: dict, drawer: dict[str, Any], by_id: dict[str, dict],
                     issues.append(
                         f"{_label(by_id[a['bin']])} and {_label(by_id[b['bin']])} overlap on "
                         f"{_label(by_id[layer_by_key[parent_key]['bin']])}")
+    # Story 2833: bins on a Lid for stacking must, as a finished arrangement,
+    # tile the lid exactly. Overhang and overlap are reported above; this adds
+    # any uncovered area. Placing them one at a time is fine until it is used.
+    for parent_key, group in children.items():
+        parent_layer = layer_by_key[parent_key]
+        lower = by_id[parent_layer["bin"]]
+        if not lid_takes_stack(lower, specs or {}):
+            continue
+        if not any(by_id[g["bin"]].get("stack") == "direct" for g in group):
+            continue
+        lid_cells = {(x, y) for x in range(int(parent_layer["gx"]), int(parent_layer["gx"] + parent_layer["w"]))
+                     for y in range(int(parent_layer["gy"]), int(parent_layer["gy"] + parent_layer["d"]))}
+        covered = {(x, y) for g in group for x in range(int(g["gx"]), int(g["gx"] + g["w"]))
+                   for y in range(int(g["gy"]), int(g["gy"] + g["d"]))}
+        if lid_cells - covered:
+            issues.append(f"Bins on a Lid for stacking must together cover the whole lid ({_label(lower)}).")
     ex = {"l": 0, "t": 0, "r": 0, "b": 0}
     rect = [min(layer["gx"] for layer in layers), min(layer["gy"] for layer in layers),
             max(layer["gx"] + layer["w"] for layer in layers), max(layer["gy"] + layer["d"] for layer in layers)]

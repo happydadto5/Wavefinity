@@ -415,6 +415,11 @@ DL.lidRefusalFor = (box, name) => {
   if (lid.label_enabled && lid.label_style === "raised") return `${name} has raised lettering on its lid, which stands too proud to take a stack.`;
   return "";
 };
+// Story 2833: whether `lower` carries a Lid for stacking (the lid check has passed).
+DL.lidTakesStack = lower => {
+  const lid = DL.layout?.design_specs?.[lower?.id]?.box?.lid;
+  return !!(lid?.enabled && lid.stack_rim) && !DL.lidRefusal(lower);
+};
 DL.lidRefusal = lower => DL.lidRefusalFor(DL.layout?.design_specs?.[lower?.id]?.box, DL.label(lower));
 
 // Why `upper` cannot snap onto `lower`, or "" if it can.
@@ -430,7 +435,9 @@ DL.stackRefusal = (upper, lower) => {
   // Only a lid can carry a different footprint. Whether the upper bin actually
   // fits on the lid (inside it, clear of its siblings) is decided where the
   // placement offset is known.
-  if (!sameFootprint && upper.stack === "direct") return "Direct stacking requires bins with the same footprint.";
+  // Several stackable-base bins may share a Lid for stacking when together they
+  // fill it; that is judged on the finished arrangement by the report.
+  if (!sameFootprint && upper.stack === "direct" && !DL.lidTakesStack(lower)) return "Direct stacking requires bins with the same footprint.";
   if (!sameFootprint && upper.stack === "b4b") return "Storage Box stacking requires bins with the same footprint.";
   const upperWall = DL.stackWall(upper), lowerWall = DL.stackWall(lower);
   if (upperWall === null || lowerWall === null) return "Stacking wall thickness is unknown. Save both bin designs before stacking.";
