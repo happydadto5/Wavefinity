@@ -27,7 +27,7 @@ const WS = {
   previewSignature: "",
   entered: "",
 };
-const WS_TASKS = ["landing", "container", "bin", "settings", "newspace", "picker"];
+const WS_TASKS = ["landing", "container", "bin", "settings", "newspace", "picker", "none"];
 
 WS.open = () => Boolean(typeof DL !== "undefined" && DL.active && DL.layout && state.folderMode === "space");
 
@@ -830,7 +830,7 @@ WS.sync = () => {
   }
   // Story 2704: on the open screen nothing is chosen yet - no preview, nothing current, and the
   // space-dependent actions stay off, though the restored session is kept for picking from the list.
-  const open = WS.open() && WS.task !== "picker";
+  const open = WS.open() && !["picker", "none"].includes(WS.task);
   if (WS.task === "picker") WS.warmSpaces();
   body.classList.add("ws-on");
   body.classList.toggle("ws-open", open);

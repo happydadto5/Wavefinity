@@ -35,6 +35,10 @@ body.ws-on.ws-open:not(.ws-task-settings) #dl-staging { display: none !important
 body.ws-on.ws-open:not(.ws-task-settings) #drawer-canvas { cursor: pointer; }
 /* Story 2704: the open screen has nothing selected, so the right pane shows no preview. */
 body.ws-on.ws-task-picker .workspace { visibility: hidden; }
+/* Story 2846: after Delete, keep the tree visible but leave both work areas blank until a row is chosen. */
+body.ws-on.ws-task-none .workspace { visibility: hidden; }
+body.ws-on.ws-task-none .controls > :not(#ws-stage),
+body.ws-on.ws-task-none #ws-aux { display: none !important; }
 
 /* (A) the selector: pinned and bounded, it scrolls within itself. (B) is the rest of the pane. */
 .controls > .ws-stage {

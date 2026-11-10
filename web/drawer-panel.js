@@ -661,7 +661,7 @@ DP.duplicateRow = async one => {
 
 // Story 2836: the workspace tree's Delete button on the selected bin. It deletes the bin the
 // button names, at once and without a confirmation; its unsaved draft is discarded rather
-// than saved first. Afterwards nothing is selected and the screen shows the blank landing.
+// than saved first. Afterwards nothing is selected and both work areas stay blank.
 DP.deleteBinNow = async one => {
   if (!one?.id) return false;
   if (DP.designNavBlocked()) {
@@ -702,10 +702,9 @@ DP.deleteBinNow = async one => {
     DL.selectedRow = null;
     DL.selected = null;
     DL.emit();
-    if (DP.mode !== "space") DP.setMode("space");
     DP.renderInventory(true);
     if (typeof WS !== "undefined") {
-      WS.task = "landing";
+      WS.task = "none";
       WS.prior = null;
       WS.sync();
     }
