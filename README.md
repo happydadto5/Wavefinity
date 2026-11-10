@@ -208,6 +208,9 @@ filed but not built yet.
     when the bin is taller *(planned, Story 2861)*;
   - with no slicer found, a line under Print says so and links to Printer
     Settings *(planned, Story 2860)*;
+  - the Spacers section says *N gaps could use spacers* or *Some spacers no
+    longer fit your bins* under Refresh Spacers, and says nothing once the
+    spacers match *(planned, Story 2865)*;
   - the very first launch, with no Spaces, says *No spaces yet - pick what
     you're organizing below* *(planned, Story 2862)*.
 - **Keep questions and choices to a minimum.** Prefer one sensible default
@@ -215,10 +218,10 @@ filed but not built yet.
 - **Two dynamic batch buttons.** Under the print list: with nothing ticked they
   read **Print whole space** and **Export whole space**; tick one bin and they
   read **Print bin** / **Export bin**; tick several, **Print N bins** /
-  **Export N bins** (Story 2851). Export goes away once files build themselves
-  *(planned, Story 2857)*, leaving Print as the one batch button. The container
-  gets its own tick row in that list, and Spacers / Fill Empty Space sit under
-  it *(planned, Story 2858)*.
+  **Export N bins** (Story 2851). Export went away once files built themselves
+  (Story 2857), leaving Print as the one batch button. The container gets its
+  own tick row in that list, and Spacers / Fill Empty Space sit under it
+  (Story 2858).
 - **Height colours with an always-on guide.** In the layout a bin at the
   Space's full height has no rim colour, a shorter bin has a yellow rim, and a
   bin taller than the Space has a red rim. A small guide under the layout
@@ -257,9 +260,10 @@ filed but not built yet.
    it. Click a bin to peek and adjust it; the layout updates in place. In a
    Storage Drawers Space the small 1 / 2 / 3 buttons on the Layout line switch
    drawers.
-6. **Fill gaps (optional).** Drawer, Storage Box and Storage Drawers Spaces
-   can add Spacers; a Surface can turn free cells into Fill bins *(on the
-   Manage screen once Story 2858 lands)*.
+6. **Fill gaps (optional).** On the Manage screen, Drawer, Storage Box and
+   Storage Drawers Spaces use **Refresh Spacers** to brace the placed bins
+   against the side and back walls (see *Spacers* below); a Surface turns free
+   cells into Fill bins instead. Pegboards have neither.
 7. **Print.** On the Manage screen tick bins (or nothing, for the whole Space)
    and press Print. The container prints from its own tree row, or from the
    print list *(planned, Story 2858)*. Bambu Studio opens with the parts; a bin
@@ -789,38 +793,41 @@ which suppress Inventory logging entirely.
 - **Space & spacers.** The drawer view itself shows the one or two biggest
   open rectangles a bin could still go into, each as both a millimetre size
   and a Wavefinity-unit size; the left panel covers connector and layout problems
-  instead of restating those as a summary. The **Spacers** section (below
-  Inventory, collapsed until opened) fills the drawer,
-  15 mm tall by default (*Height*). There is one filler part, the **Spacer**.
-  Spacers are repeated filler parts, so they keep their own placement counts.
-  Empty grid cells become **X spacers**: open frames whose outside is exactly
-  a bin's wavy wall, so they nest with the bins around them and take a
-  connector (the lock bumps are kept) - inside, they have no floor, just one
-  big X brace, or a row of X's when the patch is long and thin. The strips
-  between the grid and the drawer walls become **edge-facing spacers**, cut
-  from a virtual bin standing just outside the grid: wavy and interlocking on
-  the bin-facing side, flat on the wall side, and sized to the drawer's real
-  leftover millimetres. Neither kind of spacer is forced onto the whole 7 mm
-  grid a normal bin's own size must be - a genuine 4 mm-wide leftover, edge or
-  interior, is filled at its real size.
-  Only a genuine manufacturability floor - is there still room for a cavity
-  once both walls are subtracted? - rejects a spacer as too narrow to print.
-  A long edge is still split into pieces no longer than *Longest piece*,
-  each covering its own real share of the run exactly (the last piece can be
-  a genuine leftover shorter than a full grid cell), built oversized enough
-  to satisfy the wave engine's own grid requirement and trimmed back down to
-  its true length, so the piece ends still nest correctly. Files go to the
-  save location and rows go into
-  the inventory as the one Spacer kind; a folder saved before this
-  distinction existed still loads its old edge-shim rows and quietly
-  rewrites them as spacers the next time it saves. Spare copies of a matching
-  spacer already in the inventory are used first. *Keep gaps open from*
-  leaves any gap at least that wide both ways empty, for a bin you will print
-  later. **Place Selected Spacers**
-  also saves one connector file for each pair of rim heights the layout needs,
-  and says how many of each to print. Stacks join at their top bins; X spacers
-  need none, since their waves hold them. **Print Spacers…** selects spacer
-  copies for Bambu Studio. **Find Spacer Candidates** plans candidates before **Place Selected Spacers**.
+  instead of restating those as a summary.
+- **Spacers** (Drawer, Storage Box and Storage Drawers Spaces; never Surface or
+  Pegboard). A spacer is a filler part, not a bin: it braces the placed bins
+  against the Left, Back and Right walls so nothing slides. There is no
+  front-wall spacer, because bins are pulled toward you when the drawer opens.
+  The Spacers section on the Manage screen holds everything:
+  - *Spacer type*: **Flexible** (default) prints a zigzag 2 mm oversized so it
+    wedges in (PLA or PETG); **Rigid** is a solid block with 0.4 mm of play. A gap
+    too small for the zigzag (under 9 mm, or under 6 mm of bin edge to push on)
+    quietly gets a rigid spacer and says why.
+  - *Height*: Auto (default) is the full height of the tallest bin placed in
+    that drawer, kept between 6 mm and the drawer height; untick Auto to type one.
+  - *Spacer locations*: Left, Back and Right tick boxes, all on by default.
+  - **Refresh Spacers** is the one action. It removes the drawer's placed
+    spacers and makes new ones for the current bins: for each stretch of bin
+    edge facing a ticked wall, about one 28 mm-wide spacer per 100 mm of edge,
+    reaching from the bins to the wall at the real leftover millimetres. Gaps
+    over 200 mm are skipped with a note; at most 8 spacers are made per Refresh.
+    Each spacer is its own Inventory row (Kind *spacer*) with its 3MF in the
+    Space folder, and shows sand-coloured in the layout with a *Spacer* label.
+    Refresh is disabled until a bin is placed.
+  - **Print Spacers…** lists the placed spacers grouped by size and type and
+    sends the chosen ones (and quantities) to Bambu Studio. **Print whole
+    space** also sends the placed spacers with the bins and connectors.
+  - Spacers are not in the selection tree and cannot be dragged; a spacer row in
+    the Manage list has only **Delete**. Spacers do not take connectors.
+  - A spacer that later collides with a moved bin or sticks out of a resized
+    drawer is shown as a problem; Refresh Spacers remakes it.
+  - *(planned)* New spacers start as not printed, and Print whole space sends a
+    spacer only until it is printed (Story 2863); Print whole space covers every
+    drawer of a Storage Drawers Space (Story 2864); the section always says when
+    gaps could use spacers or spacers no longer fit, and print leaves out
+    spacers that no longer fit (Story 2865); Refresh and a spacer's Delete act
+    with no pop-up, and the spacer row shows only size, type and printed state
+    (Story 2866).
 - **Surface Fill** (Surface only) turns free Surface cells into ordinary editable
   bins. It first settles the Designer's autosave, then works from the authoritative
   Inventory and layout.
