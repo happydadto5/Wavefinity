@@ -312,9 +312,10 @@ SP.renderStructuralActions = () => {
   const box = document.getElementById("space-structural");
   if (!box) return;
   const kind = SP.structuralKind();
-  // The cabinet's Save/Print live in its workspace panel.
-  box.hidden = !kind || kind === "storage_drawers";
-  if (!kind || kind === "storage_drawers") return;
+  // The cabinet's Save/Print live in its workspace panel. A Storage Box's Print and
+  // Export live on its tree row (Story 2721), so this panel serves only Base Trim.
+  box.hidden = !kind || kind === "storage_drawers" || kind === "storage_box";
+  if (box.hidden) return;
   const save = document.getElementById("space-structural-save");
   const print = document.getElementById("space-structural-print");
   const hosted = Boolean(state.runtime.hosted);
