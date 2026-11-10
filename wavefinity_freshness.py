@@ -716,7 +716,6 @@ def _online(runtime: dict, listener: dict, remote: str, open_browser: bool) -> t
         _promote(stage, runtime, problems)
         record = start_server(commit, EXPECTED_BRANCH, verified_at)
     url = _open_browser(record, open_browser)
-    _ensure_poller()
     return READY, [
         f"READY - Wavefinity {commit[:12]} ({EXPECTED_BRANCH}) is running.",
         f"Verified against origin/main on {_local_text(verified_at)}; later changes are not reflected until the next launch.",
@@ -742,7 +741,6 @@ def _offline(runtime: dict, listener: dict, reason: str, open_browser: bool) -> 
             _stop_owned(listener)
         record = start_server(runtime["head"], EXPECTED_BRANCH, stamp["verified_at"])
     url = _open_browser(record, open_browser)
-    _ensure_poller()
     return OFFLINE_UNVERIFIED, [
         f"RUNNING UNVERIFIED - {reason}",
         f"Wavefinity {runtime['head'][:12]} was last verified against origin/main on {_local_text(stamp['verified_at'])}. "
