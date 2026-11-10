@@ -340,6 +340,8 @@ def _merge_design_source(
     bins = current["bins"]
     by_id = {one["id"]: one for one in bins}
     target = by_id.get(row_id) if row_id else None
+    if row_id and target is None:
+        raise ValueError(f"no bin {row_id!r} in the inventory")
     layout = current["layout"] if isinstance(current["layout"], dict) else {}
     canonical = copy.deepcopy(design)
     name = _text(record.get("name"))

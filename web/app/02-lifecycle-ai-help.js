@@ -62,6 +62,7 @@ async function settleDesignerWritesForRelocation() {
 }
 
 function queueSpaceDesignAutosave() {
+  if (DP.getDesignTarget().kind === "none") return;
   if (designTargetIsStructural()) return; // Fix 103
   if (state.relocating || !typedSpaceOrdinaryBin()) return;
   const context = DL.spaceContext();
@@ -76,6 +77,7 @@ function queueSpaceDesignAutosave() {
 
 function persistSpaceDesignSource(expectedContext = null, force = false) {
   const run = async () => {
+    if (DP.getDesignTarget().kind === "none") return true;
     if (designTargetIsStructural()) return true; // Fix 103
     if (!typedSpaceOrdinaryBin()) return true;
     const context = expectedContext || DL.spaceContext();
@@ -128,6 +130,7 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
 async function flushSpaceDesignAutosave({ visible = true, materialize = false,
     deferDraftPreview = false, noDeferredPreview = false, leavingDesign = false,
     abandonBuild = false } = {}) {
+  if (DP.getDesignTarget().kind === "none") return true;
   if (designTargetIsStructural()) return true; // Fix 103
   if (!typedSpaceOrdinaryBin()) return true;
   // Fix 109 A1: leaving Design for Space is where a first bin becomes durable.

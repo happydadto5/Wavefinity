@@ -500,10 +500,8 @@ DP.editableSourceFor = one => {
     !(typeof isStructuralDesign === "function" && isStructuralDesign(spec));
 };
 
-// Fix 103: the Design target model. kind is "structural" | "bin" | "new_bin".
-// state.designTarget is only ever set for the structural target ({ kind:
-// "structural", structural: true, structuralKind: "box" | "storage_drawers" });
-// "bin" and "new_bin" always derive from the legacy designInventoryId binding.
+// Explicit targets include structural objects and the empty state after deletion.
+// "bin" and "new_bin" derive from the legacy designInventoryId binding.
 DP.getDesignTarget = () => {
   const explicit = state.designTarget;
   if (explicit && typeof explicit === "object" && typeof explicit.kind === "string") return explicit;
@@ -692,7 +690,7 @@ DP.deleteBinNow = async one => {
     spaceAutosaveTimer = null;
     invalidatePendingPreview();
     state.designInventoryId = null;
-    DP.clearDesignTarget();
+    DP.setDesignTarget({ kind: "none", rowId: null, drawerId: null });
     state.design = freshDesignForCurrentFolder();
     state.cleanDesign = clone(state.design);
     state.drafts = {};
