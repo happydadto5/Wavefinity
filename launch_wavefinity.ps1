@@ -113,9 +113,6 @@ try {
     }
     if (-not $ready) { Fail "Wavefinity did not start within 60 seconds.`nDetails: $State\server.err.log" }
 
-    # Best-effort: make sure the NN dispatch poller is running (never blocks launch).
-    $shim = Join-Path $App 'Start_Wavefinity_Dispatch_Runner_Hidden.vbs'
-    if (Test-Path $shim) { try { Start-Process wscript.exe -ArgumentList "`"$shim`"" -WindowStyle Hidden } catch {} }
 
     Start-Process $Url
 }

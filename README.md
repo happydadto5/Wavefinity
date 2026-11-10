@@ -1855,7 +1855,6 @@ Non-Python files:
 | `Launch_Organizer_UI.bat` | normal launcher; silent unless something is wrong |
 | `Launch_Wavefinity_Clean.bat` | clean launcher; wipes saved data first |
 | `launch_wavefinity.ps1` | the launch logic both `.bat` files call |
-| `Start_Wavefinity_Dispatch_Runner.bat` | best-effort shim that asks the NN desktop Poller (which owns coder dispatch) to be running; never blocks startup |
 | `generated/WAVY_SAMPLE_SET.3mf` | regenerable local sample print plate; intentionally gitignored |
 
 ## Working on this

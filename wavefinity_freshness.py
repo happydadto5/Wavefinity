@@ -685,17 +685,6 @@ def start_server(commit: str, branch: str, verified_at: str) -> dict:
     return record
 
 
-def _ensure_poller() -> None:
-    """Fix 119 B2: best-effort, unwaited request that the NN Poller is running."""
-    shim = RUNTIME_DIR / "Start_Wavefinity_Dispatch_Runner_Hidden.vbs"
-    if not shim.is_file():
-        return
-    with contextlib.suppress(OSError):
-        subprocess.Popen([os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "wscript.exe"), str(shim)],
-                         cwd=str(_home()), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW)
-
-
 # ---------------------------------------------------------------- launch flow
 
 def _open_browser(record: dict, open_browser: bool) -> str:
