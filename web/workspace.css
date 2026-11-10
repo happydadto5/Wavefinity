@@ -119,6 +119,12 @@ body.ws-task-settings #space-head:not(:has(
   .space-type-fields:not([hidden]):not(#space-fields-portable):not(#space-fields-storage_drawers),
   #space-error:not([hidden]), #space-folder-help:not([hidden]))) { display: none; }
 
+/* Story 2834: the same for the Storage box / Storage Drawers design view, where the title and the
+   button row are hidden above; the empty card is not shown above "<kind> design". */
+body.ws-task-container #space-head:not(:has(
+  #space-structural:not([hidden]), #space-head-edit-host:not([hidden]),
+  #space-error:not([hidden]), #space-folder-help:not([hidden]))) { display: none; }
+
 /* The Space name is shown in the heading; the layout view has no (falsely editable) Name section. */
 body.ws-task-settings #space-name-row,
 body.ws-task-settings #space-note { display: none !important; }
