@@ -757,8 +757,7 @@ def make_lid_parts(
         parts.append(_lid_skirt(eff, rim))
 
     bumps = [] if hinge is not None else _lid_lock_bumps(eff, rim)
-    from organizer_features.lid_snap import snap_fingers
-    lid = union([*parts, *bumps, *snap_fingers(eff), *_lid_alignment_tabs(eff, rim)])
+    lid = union([*parts, *bumps, *_lid_alignment_tabs(eff, rim)])
 
     if lid_receives_stack(eff):
         # Rim the bin stacked on this one sits into. It keeps the direct-foot
@@ -880,10 +879,6 @@ def stack_summary(box: BoxSpec) -> dict:
     if lid_has_flip(box):
         summary["lid_flip"] = True
         summary["lid_flip_hinge"] = _flip_summary(eff)
-    if lid_enabled(box) and lid_spec(eff).snap_enabled:
-        from organizer_features.lid_snap import snap_status, snap_fingers
-        summary["lid_snap_note"] = snap_status(eff) or (
-            None if snap_fingers(eff) else "No reachable connector ridges; snap fit adds nothing on this bin.")
     return summary
 
 

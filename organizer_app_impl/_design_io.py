@@ -665,7 +665,6 @@ def design_to_dict(
             "label_depth_mm": lid_label_relief_mm(lid),
             # Written explicitly; a missing value only ever means an older file.
             "flip_enabled": bool(lid.flip_enabled),
-            "snap_enabled": bool(lid.snap_enabled),
             "stack_rim": bool(lid.stack_rim),
             "alignment": lid.alignment,
         }
@@ -809,9 +808,9 @@ def design_from_dict(
             fit=str(lid_raw.get("fit", "standard")),
             # A missing flip_enabled is an older file: a loose lid, no hinge.
             flip_enabled=bool(lid_raw.get("flip_enabled", False)),
-            snap_enabled=bool(lid_raw.get("snap_enabled", False)),
             # A missing stack_rim is an older file: a resting lid that cannot receive.
-            stack_rim=bool(lid_raw.get("stack_rim", False)),
+            # A saved Snap Fit lid (snap_enabled, option since removed) opens as a plain resting lid.
+            stack_rim=bool(lid_raw.get("stack_rim", False)) and not lid_raw.get("snap_enabled"),
             # A missing alignment is an older file: Off.
             alignment=str(lid_raw.get("alignment", "off")),
             # A missing depth is an older file: 0.4 mm inlaid, 0.6 mm raised.

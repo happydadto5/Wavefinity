@@ -67,13 +67,13 @@ the bin mouth has running clearance, set by **Lid fit** — **Tight 0.15**,
 **Standard 0.25** (default, and the fit older designs always had) or **Loose
 0.35 mm per side**. Lid fit changes only that plug; the direct bin-on-bin foot
 and a lid's stack rim keep the accepted 0.25 mm stack fit, and the
-lid's snap lock keeps the same interference at every fit. **Lid thickness** shows
+lid's lock bumps keep the same interference at every fit. **Lid thickness** shows
 each choice as a measurement first — for example `2.8 mm — Medium` — resolved
 for the current bin by the same geometry that builds the lid. **Lid labels** are
 **Inlaid** or **Raised**, with **Inlay depth** or **Raised height** of 0.2, 0.4,
 0.6 or 0.8 mm (new labels start at 0.4 mm; older files keep their 0.4 mm inlaid
 and 0.6 mm raised). Inlay never cuts into the lid's required floor or seat, and
-a lid with Raised lettering cannot receive a stack. A Resting lid has an optional **Stack rim**: a rim about 2 mm tall standing on its top face, which the Stackable Base of the bin above sits into (the lid counts once in stack heights as its thickness plus the 2 mm rim). A Snap lid has no rim option, a Hinged lid never receives a stack, and a lid with the Knob or Raised lettering cannot receive one either. The only handle is the **Knob**: a square post with a diamond head
+a lid with Raised lettering cannot receive a stack. A Resting lid has an optional **Stack rim**: a rim about 2 mm tall standing on its top face, which the Stackable Base of the bin above sits into (the lid counts once in stack heights as its thickness plus the 2 mm rim). A Hinged lid never receives a stack, and a lid with the Knob or Raised lettering cannot receive one either. The only handle is the **Knob**: a square post with a diamond head
 (flared at 45 degrees, tapered back to a small flat top, printable without supports); a handle too large for
 a very small lid is refused with a message to choose a smaller size or a larger
 lid, never shrunk. The reported closed height is the tallest point of the whole
@@ -652,7 +652,7 @@ which suppress Inventory logging entirely.
 - **Bins never turn a quarter turn on their own.** Left walls mate with right,
   and front with back; a bin turned 90 degrees meets its neighbours crest to
   crest, so there is no sideways option.
-- **Stacking.** A bin printed stackable (a snap-on lid, or a direct locating skirt) shows
+- **Stacking.** A bin printed stackable (a lid, or a direct locating skirt) shows
   a ⇅ on its swatch and its style under its name. Drop it on a bin of the same
   size that stacks the same way and it seats on top, sides aligned. Anything
   else is refused with the reason: a different size, a different style, a bin

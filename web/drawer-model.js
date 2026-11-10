@@ -273,7 +273,7 @@ DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "dir
 DL.stackIconHtml = one => DL.stackable(one)
   ? `<svg class="dl-stack-icon" viewBox="0 0 12 12" width="12" height="12" role="img" aria-label="Stackable" focusable="false"><title>Stackable</title><rect x="3.5" y="0.75" width="7.5" height="5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="1" y="6.25" width="7.5" height="5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>`
   : "";
-DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct stack", b4b: "Storage Box stacking" })[mode] || "Not stackable";
+DL.stackName = mode => ({ lid: "Lid", direct: "Direct stack", b4b: "Storage Box stacking" })[mode] || "Not stackable";
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
 DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
@@ -410,7 +410,6 @@ DL.lidRefusalFor = (box, name) => {
   const lid = box?.lid;
   if (!lid?.enabled) return "";
   if (lid.flip_enabled) return `${name} has a hinged lid, which cannot take a stack.`;
-  if (lid.snap_enabled) return `${name} has a snap lid, which cannot take a stack.`;
   if (!lid.stack_rim) return `${name} has a resting lid without a stack rim, which cannot take a stack.`;
   if (lid.handle_enabled) return `${name} has a lid with a knob, which stands too proud to take a stack.`;
   if (lid.label_enabled && lid.label_style === "raised") return `${name} has raised lettering on its lid, which stands too proud to take a stack.`;

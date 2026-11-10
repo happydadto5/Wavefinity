@@ -743,9 +743,9 @@ These modify the bin shell rather than behaving like ordinary interior parts. Li
 
 ## 7.1 Lid & Stacking
 
-The Specification area has **Stackable** (Not Stackable / Stackable) and a single **Lid** choice (No lid / Lid - Resting fit / Lid - Snap Fit / Lid - Hinged Lid). A stackable bin without a lid stacks directly: a plain 3 mm locating skirt under its base drops into the mouth of the bin below. The skirt only locates (nothing snaps or grips), sits inside the typed Height, and prints upright without supports; each bin added to a stack adds its Height less 3 mm. With a lid it stacks on the lid. Including a lid shows compact lid options. Width and Depth snap to whole 7 mm units on leaving the field and show the unit count; Height stays in millimetres.
+The Specification area has **Stackable** (Not Stackable / Stackable) and a single **Lid** choice (No lid / Lid - Resting fit / Lid - Hinged Lid). A stackable bin without a lid stacks directly: a plain 3 mm locating skirt under its base drops into the mouth of the bin below. The skirt only locates (nothing snaps or grips), sits inside the typed Height, and prints upright without supports; each bin added to a stack adds its Height less 3 mm. With a lid it stacks on the lid. Including a lid shows compact lid options. Width and Depth snap to whole 7 mm units on leaving the field and show the unit count; Height stays in millimetres.
 
-The lid kind is Resting fit, Snap Fit, or Hinged Lid. Lid fit is shown only for Snap Fit.
+The lid kind is Resting fit or Hinged Lid.
 
 ### Lid thickness
 
@@ -799,7 +799,7 @@ When on, the lid and bin gain a piano hinge across the full back edge, in the ba
 - A stackable flip lid keeps its stacking recess; the recess is cut through the knuckles too, and the pin sits lower by the recess depth so the recess floor leaves the same lid thickness over the barrels.
 - Open, the lid swings back past vertical and rests at 110 degrees on a flat stop: a square heel on each lid knuckle lands on a ledge cut in the back wall, not on the knuckle outlines. The back top of the bin is relieved over each bin knuckle by the lid plate's sweep, so the back of the lid clears it all the way to the stop. A bin with a neighbour directly behind it opens to about 90 degrees.
 - The below-rim plug is trimmed against the complete swing arcs at every depth, keeping at least the selected Lid fit (Tight / Standard / Loose) from the front and side waves throughout opening. This can leave extra plug clearance when closed; the rim seat remains unchanged.
-- A flip lid has no snap-fit lock bumps; holding the lid shut is a separate feature.
+- A flip lid has no lid lock bumps; holding the lid shut is a separate feature.
 - **Alignment** (hinged lid only; Off by default, saved as `box.lid.alignment`; Thin 1 mm / Standard 2 mm / Thick 3 mm; a design saved before it opens Off): adds an L-shaped alignment tab under the plate at each of the two front corners (opposite the hinge). Each tab's two legs follow the inside of the front wall and of the adjoining side wall, run one fifth of the lid's length in from the corner, and drop below the lid underside by the chosen depth, sitting inside the bin mouth with the usual 0.25 mm locating clearance so the front corners are guided into line on closing. The tabs clear the mouth through the swing. **Support note:** the hinged lid is otherwise printed without support, but a hinged lid with Alignment on will need support for these tabs; this is expected and fine (Andrew's ruling).
 
 Saved designs from before this option load with it off. A bin too small to hinge (very narrow, shallow or short) is rejected with a message rather than silently shrunk.
@@ -1390,6 +1390,3 @@ Authoritative implementation details live in the owning code, including areas su
 
 When this file disagrees with the current accepted code, fix the document.
 
-### Optional lid snap fit
-
-Snap fit is off by default and saved as `box.lid.snap_enabled`. On a loose stackable or handled lid, individual fingers mate with the existing connector ridges; the bin ridges are unchanged. The lid lifts off with an upward pull. Flip lids get no fingers. Bins with less than 5.5 mm interior depth, or no exposed reachable ridges, get no snap geometry; the preview explains why. Turning it off preserves the existing lid geometry.

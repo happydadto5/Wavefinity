@@ -409,7 +409,6 @@ const LID_DEFAULTS = {
   label_text: "", division_labels: [], handle_enabled: false, handle_type: "knob",
   handle_size: "medium", handle_position: "middle", fit: "standard",
   flip_enabled: false,
-  snap_enabled: false,
   stack_rim: false,
   alignment: "off",
 };
@@ -420,7 +419,7 @@ function lidThicknessKey(design = state.design) {
   const box = design?.box || {};
   return JSON.stringify([box.x, box.y, box.wall, box.corner_fillet, box.flat_inside,
     Boolean(box.lid?.enabled), (box.stack?.mode || "none"),
-    box.z, Boolean(box.lid?.snap_enabled), Boolean(box.lid?.flip_enabled), Boolean(box.lid?.stack_rim),
+    box.z, Boolean(box.lid?.flip_enabled), Boolean(box.lid?.stack_rim),
     Boolean(box.lid?.handle_enabled), box.lid?.label_enabled ? box.lid.label_style : ""]);
 }
 
@@ -631,18 +630,12 @@ function noteLidThicknessEdit() {
   if (key === state.lidThicknessFormKey) return;
   state.lidThicknessFormKey = key;
   state.lidThicknessEpoch += 1;
-  $("#lid-snap-note").hidden = true;
   renderLidThicknessOptions();
 }
 
 // A landed preview brings back the measurement-first labels only when it was
 // requested at the current epoch; an older response leaves the plain names.
 function applyLidThicknessReport(result, epochAtRequest) {
-  if (epochAtRequest === state.lidThicknessEpoch) {
-    const note = $("#lid-snap-note");
-    note.textContent = result.stack?.lid_snap_note || "";
-    note.hidden = !note.textContent;
-  }
   state.lidThicknessReport = result.stack?.lid_thickness_mm
     ? { key: lidThicknessKey(result.design), epoch: epochAtRequest,
         values: result.stack.lid_thickness_mm } : null;
@@ -671,7 +664,7 @@ function syncLidForm() {
   state.lidLabelEnabled = Boolean(lid.label_enabled);
   populateLidChoices();
   $("#bin-stackable").value = String(state.design?.box?.stack?.mode === "direct");
-  $("#lid-choice").value = !lid.enabled ? "none" : lid.flip_enabled ? "hinged" : lid.snap_enabled ? "snap" : "resting";
+  $("#lid-choice").value = !lid.enabled ? "none" : lid.flip_enabled ? "hinged" : "resting";
   $("#lid-stack-rim").value = String(Boolean(lid.stack_rim));
   const savedThickness = ({ thin: "1.2", medium: "1.4", thick: "1.6" })[lid.thickness] || lid.thickness;
   ensureLidThicknessOption(String(savedThickness));
@@ -696,11 +689,11 @@ function syncLidForm() {
   }
   const hasLid = lid.enabled;
   $("#lid-option-panel").hidden = !hasLid;
-  $("#lid-fit-row").hidden = lid.flip_enabled || !lid.snap_enabled;
+  $("#lid-fit-row").hidden = true;      // the fit was only offered with the removed lid option; a saved fit is kept
   $("#lid-flip-note").hidden = !(hasLid && lid.flip_enabled);
   // Only a resting lid can carry the stack rim; the knob needs the same space.
-  $("#lid-stack-rim-row").hidden = !(hasLid && !lid.flip_enabled && !lid.snap_enabled);
-  $("#lid-stack-rim-note").hidden = !(hasLid && lid.stack_rim && !lid.flip_enabled && !lid.snap_enabled && lid.handle_enabled);
+  $("#lid-stack-rim-row").hidden = !(hasLid && !lid.flip_enabled);
+  $("#lid-stack-rim-note").hidden = !(hasLid && lid.stack_rim && !lid.flip_enabled && lid.handle_enabled);
   $("#lid-alignment-row").hidden = !(hasLid && lid.flip_enabled);
   $("#lid-alignment-note").hidden = !(hasLid && lid.flip_enabled && (lid.alignment || "off") !== "off");
   const handleOn = hasLid && Boolean(lid.handle_enabled);
@@ -801,7 +794,7 @@ function applyStackVisibility() {
 function readStackForm(design) {
   design.box = design.box || {};
   // The Stackable Bin choice is the bin's own base (the top bin of a stack); a
-  // lid never changes it. Every snap or resting lid receives a stack on its own.
+  // lid never changes it. Every resting lid receives a stack on its own.
   const stackable = $("#bin-stackable").value === "true";
   const hasLid = $("#lid-choice").value !== "none";
   const remembered = lidState(design);
@@ -834,7 +827,6 @@ function readStackForm(design) {
     handle_size: $("#lid-handle-size").value || remembered.handle_size,
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
     flip_enabled: $("#lid-choice").value === "hinged",
-    snap_enabled: $("#lid-choice").value === "snap",
     stack_rim: $("#lid-choice").value === "resting" && $("#lid-stack-rim").value === "true",
     // Written explicitly on every save, so a missing value only ever means an
     // older file.

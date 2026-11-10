@@ -292,7 +292,7 @@ def lid_refusal(lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
     """Why the lid on ``lower`` cannot take a stack, or None.
 
     Read from the lower bin's saved design: only a resting lid with its stack
-    rim on receives a bin. Snap and hinged lids never do, and the knob or raised
+    rim on receives a bin. A hinged lid never does, and the knob or raised
     lettering needs the same space as the rim's bin. A bin with no saved design
     or no lid places no restriction.
     """
@@ -302,8 +302,6 @@ def lid_refusal(lower: dict[str, Any], specs: dict[str, Any]) -> str | None:
     name = _label(lower)
     if lid.get("flip_enabled"):
         return f"{name} has a hinged lid, which cannot take a stack"
-    if lid.get("snap_enabled"):
-        return f"{name} has a snap lid, which cannot take a stack"
     if not lid.get("stack_rim"):
         return f"{name} has a resting lid without a stack rim, which cannot take a stack"
     if lid.get("handle_enabled"):

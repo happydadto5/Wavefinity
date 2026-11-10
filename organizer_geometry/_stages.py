@@ -122,7 +122,7 @@ def checkpoint() -> None:
 def uninterruptible() -> Iterator[None]:
     """Let the work inside finish even if a newer request replaces the build.
 
-    For a shared, cached piece (e.g. the snap fingers): abandoning it half way
+    For a shared, cached piece (e.g. a cached lid or hinge piece): abandoning it half way
     throws the work away, so every later edit would start it again from nothing.
     The abandon takes effect at the first checkpoint after this block.
     """

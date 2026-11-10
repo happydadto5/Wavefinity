@@ -395,7 +395,6 @@ class LidSpec:
     # A back-edge interior hinge (filament pin) in place of a loose lid. Opt-in,
     # independent of handle and label.
     flip_enabled: bool = False
-    snap_enabled: bool = False
     # Resting lid only: a ~2 mm rim on the lid top that the bin above sits into.
     stack_rim: bool = False
     alignment: str = "off"            # hinged lid only; a missing value is an older file: Off
@@ -468,12 +467,11 @@ def lid_enabled(box: "BoxSpec") -> bool:
 def lid_receives_stack(box: "BoxSpec") -> bool:
     """Whether the lid carries the stack rim another bin can sit into.
 
-    Only a resting lid whose rim option is on. A snap lid has no such option, a
-    hinged lid never receives, and anything standing proud of the lid top (the
+    Only a resting lid whose rim option is on. A hinged lid never receives, and anything standing proud of the lid top (the
     knob, raised lettering) needs the same space as the rim's bin.
     """
     spec = lid_spec(box)
-    return (spec.enabled and spec.stack_rim and not spec.snap_enabled
+    return (spec.enabled and spec.stack_rim
             and not spec.flip_enabled and not spec.handle_enabled
             and not (spec.label_enabled and spec.label_style == "raised"))
 

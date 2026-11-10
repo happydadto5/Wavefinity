@@ -112,7 +112,7 @@ Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling:
 
 Spacers brace placed bins; they are Space filler, not AI-designed bins. Choose Rigid or Flexible (default; 2 mm oversized), manual height (at least 6 mm) or Auto height (default: full height of the tallest placed bin, rounded and bounded by the Space height; 15 mm fallback when none is placed). Left, Back and Right walls default on; there is no front-wall spacer. Plan and select candidates, place or refresh them, and choose quantities to print.
 
-Bins can stack when their modes, footprints and wall geometry match. Direct stacking requires the same footprint. A resting lid with its Stack rim option on carries a 2 mm rim that a same-footprint stackable bin sits into; snap lids, hinged lids, resting lids without the rim, lids with the knob and lids with raised lettering take no stack.
+Bins can stack when their modes, footprints and wall geometry match. Direct stacking requires the same footprint. A resting lid with its Stack rim option on carries a 2 mm rim that a same-footprint stackable bin sits into; hinged lids, resting lids without the rim, lids with the knob and lids with raised lettering take no stack.
 
 ---
 
@@ -360,15 +360,15 @@ These alter the ordinary bin shell rather than acting like independent interior 
 
 ## Lid & Stacking
 
-The bin Specification area has Stackable (Not Stackable / Stackable) and a single Lid choice (No lid / Lid - Resting fit / Lid - Snap Fit / Lid - Hinged Lid). Width and Depth snap to whole 7 mm units on blur and display the unit count; Height stays in millimetres.
+The bin Specification area has Stackable (Not Stackable / Stackable) and a single Lid choice (No lid / Lid - Resting fit / Lid - Hinged Lid). Width and Depth snap to whole 7 mm units on blur and display the unit count; Height stays in millimetres.
 
-Choosing Lid - Resting fit, Lid - Snap Fit, or Lid - Hinged Lid includes a lid and shows the lid options; Lid fit appears only for Snap Fit. A hinged lid also has Alignment (Off by default, saved as `box.lid.alignment`: off / thin 1 mm / standard 2 mm / thick 3 mm): L-shaped tabs under the two front corners. A hinged lid with Alignment on needs support for these tabs; that is expected and fine. Lid thickness, optional Dome knob or Pull handle, and label text are available. Editing non-empty label text enables its options; clearing it disables the label. A saved off label stays off until its text is edited, and division labels retain their editor. Older Mushroom knobs open as Dome.
+Choosing Lid - Resting fit, or Lid - Hinged Lid includes a lid and shows the lid options. A hinged lid also has Alignment (Off by default, saved as `box.lid.alignment`: off / thin 1 mm / standard 2 mm / thick 3 mm): L-shaped tabs under the two front corners. A hinged lid with Alignment on needs support for these tabs; that is expected and fine. Lid thickness, optional Dome knob or Pull handle, and label text are available. Editing non-empty label text enables its options; clearing it disables the label. A saved off label stays off until its text is edited, and division labels retain their editor. Older Mushroom knobs open as Dome.
 
 General rules:
 
 - direct bin-on-bin stacking uses no lid: a straight 3 mm locating skirt under the base, beveled and support-free, drops into the mouth of a same-size bin below. It only locates (nothing snaps), sits inside the typed Height, and needs no extra wall thickness;
 - a resting lid can carry a Stack rim (about 2 mm tall, on its top face) for another bin; there is no separate stackable-lid print choice;
-- a snap lid, a hinged lid, a resting lid without the rim, or a lid with the knob or raised lettering takes no stack;
+- a hinged lid, a resting lid without the rim, or a lid with the knob or raised lettering takes no stack;
 - Wavefinity may require stronger wall/base values (a lid needs the stronger wall; a direct skirt needs only a thicker base);
 - raised lid lettering means the lid takes no stack; a Divider can provide one lid label per compartment;
 - a handle that does not fit is rejected rather than silently shrunk;
@@ -608,6 +608,3 @@ Update this file whenever a fix changes anything an outside AI could reasonably 
 
 If a change is implementation-only and does not affect what the outside AI may legally choose or return, this file does not need a cosmetic update.
 
-### Optional lid snap fit
-
-Snap fit is off by default and saved as `box.lid.snap_enabled`. On a loose stackable or handled lid, individual fingers mate with the existing connector ridges; the bin ridges are unchanged. The lid lifts off with an upward pull. Flip lids get no fingers. Bins with less than 5.5 mm interior depth, or no exposed reachable ridges, get no snap geometry; the preview explains why. Turning it off preserves the existing lid geometry.
