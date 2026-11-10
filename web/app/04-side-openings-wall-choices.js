@@ -646,40 +646,31 @@ function syncWallControls() {
   }
 }
 
-// Fix 1066: renders "Storage Box is 120mm inside" / "Storage Drawer is
-// 85mm inside" below the bin Height field when the active space is a
-// storage box or storage drawer. Hidden for all other space kinds.
-// For drawer cabinets, reflects the currently active drawer's interior.
+// Story 2861: show the active space's bin height limit under Height.
 function syncContainerInsideHint() {
   const hint = $("#container-inside-hint");
   if (!hint) return;
   let text = null;
+  let overHeight = false;
   if (state.folderMode === "space" && state.activeSpace) {
     const kind = state.activeSpace.kind;
-    if (kind === "box") {
-      text = `Storage Box is ${fmt(state.activeSpace.z)}mm inside`;
-    } else if (kind === "drawer") {
-      const z = state.activeSpace.z;
-      if (Number.isFinite(Number(z))) text = `Storage Drawer is ${fmt(Number(z))}mm inside`;
-    } else if (kind === "storage_drawers") {
-      // Fix 1098 (Opus H1, option A, exact-cap authority per G2M-0360): the
-      // hint teaches the EXACT safe cap — usable drawer height minus 2 mm
-      // running clearance — the same authority the Layout report enforces.
-      // It must NOT show the floored New Bin default: a 40.6 mm drawer
-      // shows "safe bin height 38.6mm" while New Bin creates a 38 mm bin.
-      const z = typeof cabinetActiveLimits === "function"
-        ? (cabinetActiveLimits().z ?? state.activeSpace.z)
-        : state.activeSpace.z;
-      if (Number.isFinite(Number(z))) {
-        const safe = fmt(Number(z));
-        text = `Storage Drawer is ${fmt(Number(z))}mm inside · safe bin height ${safe}mm`;
-      }
+    const maximum = activeSpaceMaximumBinHeight();
+    if (Number.isFinite(maximum)) {
+      const storageBox = kind === "portable" || kind === "box";
+      const placeName = storageBox ? "storage box" : "drawer";
+      const height = Number(state.design?.box?.z);
+      overHeight = Number.isFinite(height) && height > maximum;
+      text = overHeight
+        ? `Taller than this ${placeName} (${fmt(maximum)} mm) - it won't fit when placed`
+        : `This ${placeName} fits bins up to ${fmt(maximum)} mm tall`;
     }
   }
   if (text) {
     hint.textContent = text;
+    hint.classList.toggle("field-error", overHeight);
     hint.hidden = false;
   } else {
+    hint.classList.remove("field-error");
     hint.hidden = true;
   }
 }

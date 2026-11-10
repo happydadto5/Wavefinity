@@ -806,6 +806,7 @@ function wireControls() {
       updateGenerateAvailability();
       changedDesign(previousDesign);
     }
+    syncContainerInsideHint();
   });
   ["#output-folder", "#connector-tolerance", "#connector-length",
     "#connector-arm-thickness", "#connector-bin-a-height", "#connector-bin-b-height"]
