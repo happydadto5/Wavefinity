@@ -481,13 +481,15 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         region[region < 0] = index
     # Edge-facing spacers were cut for the drawer as it was; resizing it,
     # moving the grid, changing the snap, or a since-placed bin can
-    # leave one stuck outside the drawer or colliding with something real.
+    # leave one stuck outside the drawer, colliding with something real, or
+    # no longer bracing a bin at its original edge.
     # Checked against the actual occupied cells (not the whole grid
     # rectangle) - a back/right spacer legitimately reaches from a
     # component's own edge to the real wall, and empty grid along the way is
     # not a conflict.
     for placement in drawer["placements"]:
-        if "gx" in placement or "on" in placement or placement.get("bin") not in by_id:
+        spacer = by_id.get(placement.get("bin"))
+        if "gx" in placement or "on" in placement or not spacer or spacer.get("kind") not in SPACER_KINDS:
             continue
         edge = {key: float(placement.get(key, 0.0)) for key in ("x", "y", "w", "d")}
         outside = (edge["x"] < -0.1 or edge["y"] < -0.1
@@ -500,7 +502,21 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
             ey1 = min(rows, math.ceil((edge["y"] + edge["d"] - grid["oy"]) / step - 1e-6))
             if ex1 > ex0 and ey1 > ey0:
                 collides = bool((owner[ey0:ey1, ex0:ex1] >= 0).any())
-        if outside or collides:
+        side = placement.get("side")
+        braced = any(
+            (side == "right" and abs((grid["ox"] + (layer["gx"] + layer["w"]) * step) - edge["x"]) <= 0.1
+             and min(grid["oy"] + (layer["gy"] + layer["d"]) * step, edge["y"] + edge["d"])
+             > max(grid["oy"] + layer["gy"] * step, edge["y"]))
+            or (side == "left" and abs((grid["ox"] + layer["gx"] * step) - (edge["x"] + edge["w"])) <= 0.1
+                and min(grid["oy"] + (layer["gy"] + layer["d"]) * step, edge["y"] + edge["d"])
+                > max(grid["oy"] + layer["gy"] * step, edge["y"]))
+            or (side == "back" and abs((grid["oy"] + (layer["gy"] + layer["d"]) * step) - edge["y"]) <= 0.1
+                and min(grid["ox"] + (layer["gx"] + layer["w"]) * step, edge["x"] + edge["w"])
+                > max(grid["ox"] + layer["gx"] * step, edge["x"]))
+            for item in items if item.get("kind") not in SPACER_KINDS
+            for layer in item["layers"]
+        )
+        if outside or collides or not braced:
             problems.append({"type": "edge_spacer", "keys": [_key(placement)], "message": "A spacer no longer fits - Refresh Spacers remakes it"})
     issues = _height_issues(items, reach)
     for front, back in issues:
