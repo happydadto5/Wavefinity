@@ -322,7 +322,7 @@ def stack_compatibility_issue(upper: dict[str, Any], lower: dict[str, Any], spec
     """The same physical stack rule used by placement and report."""
     upper_mode, lower_mode = upper.get("stack", "none"), lower.get("stack", "none")
     if upper_mode == "none":
-        return "The upper bin must be printed as stackable"
+        return f"{_label(upper)} can't stack: turn on Stackable base for it"
     lid_issue = lid_refusal(lower, specs)
     if lid_issue:
         return lid_issue
@@ -330,14 +330,14 @@ def stack_compatibility_issue(upper: dict[str, Any], lower: dict[str, Any], spec
     # an open-topped bin, so it need not be printed as stackable.
     plain_below = upper_mode == "direct" and lower_mode == "none"
     if upper_mode != lower_mode and not plain_below:
-        return "Stacking modes must match" if lower_mode != "none" else "Both bins must be printed for stacking"
+        return "Stacking modes must match" if lower_mode != "none" else f"{_label(lower)} can't take a stack: turn on Stackable base for it"
     same_footprint = _close(upper["x"], lower["x"]) and _close(upper["y"], lower["y"])
     # Only a lid carries a different footprint; whether the upper bin sits inside
     # the lid and clear of its siblings is decided where the offset is known.
     # Story 2833: a stackable-base (direct) bin may share a Lid for stacking
     # with others that together fill it; whether they do is judged in the report.
     if not same_footprint and upper.get("stack") == "direct" and not lid_takes_stack(lower, specs):
-        return "Direct stacking requires bins with the same footprint"
+        return "Stackable base requires bins with the same footprint"
     if not same_footprint and upper.get("stack") == "b4b":
         return "Storage Box stacking requires bins with the same footprint"
     top_wall, bottom_wall = stack_wall(upper, specs), stack_wall(lower, specs)
@@ -347,7 +347,8 @@ def stack_compatibility_issue(upper: dict[str, Any], lower: dict[str, Any], spec
         # The skirt is sized to the upper bin's own mouth; a thicker lower wall
         # narrows the lower mouth below the skirt. A thinner one only loosens it.
         if bottom_wall > top_wall + 0.05:
-            return "The bin below has thicker walls than the skirt of the bin above fits into"
+            return (f"{_label(lower)} has walls {bottom_wall:g} mm thick — too thick for {_label(upper)} to fit over. "
+                    f"Set {_label(lower)}'s wall thickness to {top_wall:g} mm or thinner.")
         return None
     if not _close(top_wall, bottom_wall):
         return ("Bins need the same footprint and compatible stacking wall thickness" if same_footprint

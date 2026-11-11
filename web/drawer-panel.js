@@ -83,6 +83,10 @@ DP.build = () => {
       if (typeof WS !== "undefined" && WS.task === "peek") WS.go("bin", WS.peekId);
     });
     editor.prepend(header);
+    const problems = document.createElement("div");
+    problems.id = "dl-peek-problems";
+    problems.className = "dl-note";
+    header.after(problems);
   }
   $("#drawer-panel").innerHTML = `
     <p id="dl-manage-space-label" class="dl-note" hidden></p>
@@ -1405,6 +1409,13 @@ DP.syncEditorVisibility = () => {
   if (tabs) tabs.hidden = space;
   const header = $("#dl-peek-header");
   if (header) header.hidden = !peek;
+  const problems = $("#dl-peek-problems");
+  if (problems) {
+    const key = DL.selected;
+    const messages = peek ? (DL.report?.problems || []).filter(problem => problem.type === "stack" && problem.keys.includes(key)).map(problem => problem.message) : [];
+    problems.replaceChildren(...messages.map(message => { const line = document.createElement("p"); line.textContent = message; return line; }));
+    problems.hidden = !messages.length;
+  }
   const button = $("#dl-peek-3d");
   if (button) button.disabled = !peek || WS.busy;
 };

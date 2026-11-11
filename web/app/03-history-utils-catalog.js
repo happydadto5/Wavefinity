@@ -582,6 +582,10 @@ function apiSideEffectStartOver(path, payload, opts = {}) {
 }
 
 let toastTimer;
+function dismissToast() {
+  clearTimeout(toastTimer);
+  $("#toast").classList.remove("show");
+}
 function showToast(message, error, hold, point = null) {
   const node = $("#toast");
   // Fix 096 F6: toasts always appear above the current top layer. While a

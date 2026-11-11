@@ -280,7 +280,7 @@ DL.stackIconForRoles = ({ top, bottom }) => {
   return `<svg class="dl-stack-icon" viewBox="0 0 16 16" width="16" height="16" role="img" aria-label="${label}" focusable="false"><title>${label}</title><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="8" height="3.5"/><rect x="3" y="8.5" width="8" height="3.5"/>${bottom ? '<path d="M8 3V0.8 M6.5 2.3 8 0.8 9.5 2.3"/>' : ""}${top ? '<path d="M8 13v2.2 M6.5 13.7 8 15.2 9.5 13.7"/>' : ""}</g></svg>`;
 };
 DL.stackIconHtml = one => DL.stackIconForRoles(DL.stackRoles(one));
-DL.stackName = mode => ({ lid: "Lid", direct: "Direct stack", b4b: "Storage Box stacking" })[mode] || "Not stackable";
+DL.stackName = mode => ({ lid: "Lid for stacking", direct: "Stackable base", b4b: "Storage Box stacking" })[mode] || "Not stackable";
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
 DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
@@ -431,25 +431,25 @@ DL.lidRefusal = lower => DL.lidRefusalFor(DL.layout?.design_specs?.[lower?.id]?.
 
 // Why `upper` cannot snap onto `lower`, or "" if it can.
 DL.stackRefusal = (upper, lower) => {
-  if (!DL.stackable(upper)) return `${DL.label(upper)} was not printed to stack.`;
+  if (!DL.stackable(upper)) return `${DL.label(upper)} can't stack: turn on Stackable base for it.`;
   const lidIssue = DL.lidRefusal(lower);
   if (lidIssue) return lidIssue;
   // A direct (skirted) bin's interface is its own base; the bin below is just an open-topped bin.
   const plainBelow = upper.stack === "direct" && !DL.stackable(lower);
-  if (!plainBelow && !DL.stackable(lower)) return `${DL.label(lower)} was not printed to stack.`;
-  if (!plainBelow && upper.stack !== lower.stack) return `A ${DL.stackName(upper.stack).toLowerCase()} bin cannot snap onto a ${DL.stackName(lower.stack).toLowerCase()} bin.`;
+  if (!plainBelow && !DL.stackable(lower)) return `${DL.label(lower)} can't take a stack: turn on Stackable base for it.`;
+  if (!plainBelow && upper.stack !== lower.stack) return `A ${DL.stackName(upper.stack)} bin cannot snap onto a ${DL.stackName(lower.stack)} bin.`;
   const sameFootprint = Math.abs(upper.x - lower.x) < 0.05 && Math.abs(upper.y - lower.y) < 0.05;
   // Only a lid can carry a different footprint. Whether the upper bin actually
   // fits on the lid (inside it, clear of its siblings) is decided where the
   // placement offset is known.
   // Several stackable-base bins may share a Lid for stacking when together they
   // fill it; that is judged on the finished arrangement by the report.
-  if (!sameFootprint && upper.stack === "direct" && !DL.lidTakesStack(lower)) return "Direct stacking requires bins with the same footprint.";
+  if (!sameFootprint && upper.stack === "direct" && !DL.lidTakesStack(lower)) return "Stackable base requires bins with the same footprint.";
   if (!sameFootprint && upper.stack === "b4b") return "Storage Box stacking requires bins with the same footprint.";
   const upperWall = DL.stackWall(upper), lowerWall = DL.stackWall(lower);
   if (upperWall === null || lowerWall === null) return "Stacking wall thickness is unknown. Save both bin designs before stacking.";
   // The skirt is sized to the upper bin's mouth: a thicker wall below narrows the mouth, a thinner one only loosens it.
-  if (plainBelow) return lowerWall > upperWall + 0.05 ? "The bin below has thicker walls than the skirt of the bin above fits into." : "";
+  if (plainBelow) return lowerWall > upperWall + 0.05 ? `${DL.label(lower)} has walls ${fmt(lowerWall)} mm thick — too thick for ${DL.label(upper)} to fit over. Set ${DL.label(lower)}'s wall thickness to ${fmt(upperWall)} mm or thinner.` : "";
   if (Math.abs(upperWall - lowerWall) >= 0.05) return sameFootprint
     ? "Bins need the same footprint and compatible stacking wall thickness."
     : "Bins need compatible stacking wall thickness.";
@@ -801,6 +801,11 @@ DL.fitsOn = (drawer, movingSet, target, movingKeys = null) => {
   const lower = support.bin;
   const root = moving.nodes[0];
   if (keys.has(support.key)) return { ok: false, reason: "A bin cannot stack on itself or on something stacked on it." };
+  const seat = DL.usesStackMetrics() ? support.z0 + DL.pitch(lower)
+    : support.z1 - (DL.stackSteps[root.bin.stack] ?? 0);
+  const height = seat + moving.height;
+  const cap = DL.heightCap(drawer);
+  if (!DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
   const refusal = DL.stackRefusal(root.bin, lower);
   if (refusal) return { ok: false, reason: refusal };
   const { cx, cy } = target;
@@ -824,11 +829,6 @@ DL.fitsOn = (drawer, movingSet, target, movingKeys = null) => {
       return { ok: false, reason: `The object in ${DL.label(lower)} reaches above the next stack seating plane.` };
     }
   }
-  const seat = DL.usesStackMetrics() ? support.z0 + DL.pitch(lower)
-    : support.z1 - (DL.stackSteps[root.bin.stack] ?? 0);
-  const height = seat + moving.height;
-  const cap = DL.heightCap(drawer);
-  if (!DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
   // Physical reach: the footprint this tree would then take, at every node's
   // real position, must stay inside the Space and clear of every other footprint.
   const standing = item.layers.filter(one => !keys.has(one.key));

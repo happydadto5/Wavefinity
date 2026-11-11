@@ -1067,6 +1067,16 @@ DV.stackTarget = (moving, sx, sy, skip) => {
   return fit.ok ? { target, refusal: "" } : { target: null, refusal: fit.reason };
 };
 
+// A valid placement may leave a stacking lid only partly covered.
+DV.lidCoverageNotice = (target, moving, movingKeys = new Set()) => {
+  if (!target || !DL.lidTakesStack(target.layer.bin)) return "";
+  const siblings = target.item.layers.filter(layer => layer.parent === target.layer.key && !movingKeys.has(layer.key));
+  if (moving.nodes[0].bin.stack !== "direct" && !siblings.some(layer => layer.bin.stack === "direct")) return "";
+  const covered = moving.nodes[0].w * moving.nodes[0].d + siblings.reduce((sum, layer) => sum + layer.w * layer.d, 0);
+  return covered < target.layer.w * target.layer.d
+    ? `Placed — bins on ${DL.label(target.layer.bin)} must together cover the whole lid. Add bins until no part of the lid is showing.` : "";
+};
+
 // ------------------------------------------------------------------ input
 
 DV.wire = () => {
@@ -1194,8 +1204,12 @@ DV.wire = () => {
       } else if (drag.outside) {
         // Released off the Space but not on the tree: nothing changes.
       } else if (drag.target) {
+        const notice = DV.lidCoverageNotice(drag.target, drag.moving, drag.keys);
+        dismissToast();
         DL.moveTo(drag.key, { target: drag.target });
+        if (notice) toastAt(notice, event.clientX, event.clientY);
       } else if (drag.valid) {
+        dismissToast();
         DL.moveTo(drag.key, { gx: drag.gx, gy: drag.gy });
       } else {
         toastAt(drag.reason || "It does not fit there.", event.clientX, event.clientY, true);
@@ -1240,7 +1254,12 @@ DV.wire = () => {
     DV.drop = null;
     if (drop && !readOnly()) {
       if (!drop.valid) toastAt(drop.reason || "It does not fit there.", event.clientX, event.clientY, true);
-      else DL.placeAt(drop.bin, drop.target ? { target: drop.target } : { gx: drop.gx, gy: drop.gy });
+      else {
+        const notice = DV.lidCoverageNotice(drop.target, drop.moving);
+        dismissToast();
+        if (DL.placeAt(drop.bin, drop.target ? { target: drop.target } : { gx: drop.gx, gy: drop.gy }) && notice)
+          toastAt(notice, event.clientX, event.clientY);
+      }
     }
     DV.render();
   });
@@ -1380,7 +1399,7 @@ DV.buildOverlay = () => {
     </div>
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
     <div id="dl-empty-hint" class="dl-empty-hint" hidden><strong>Drag bins to place</strong><span>Drag onto a bin to stack</span></div>
-    <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (a smaller lid bin can sit on any free part of a larger lid) · drag a bin onto the tree to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
+    <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (smaller bins on a Lid for stacking must together cover the whole lid) · drag a bin onto the tree to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
     <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden></div>`);
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
     if (button.dataset.dlView === "fit") DV.fit(); else DV.setView(DV.PRESETS[button.dataset.dlView]);
