@@ -163,7 +163,12 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   }
   // Story 2747: no save-location explainer under the Space name.
   const folderHelp = document.getElementById("space-folder-help");
-  if (folderHelp) { folderHelp.hidden = true; folderHelp.textContent = ""; }
+  if (folderHelp) {
+    folderHelp.hidden = !state.runtime.hosted || update;
+    folderHelp.textContent = state.runtime.hosted && !update
+      ? "Your browser will ask twice. Choose Allow both times."
+      : "";
+  }
   if (kind === 'drawer') {
       document.getElementById('drawer-x').value = prefillSpace?.x || '';
       document.getElementById('drawer-y').value = prefillSpace?.y || '';

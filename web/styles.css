@@ -1700,6 +1700,11 @@ body.relocating > :not(dialog) { pointer-events: none; }
 .folder-access-copy { display: flex; flex-direction: column; gap: 2px; flex: 1 1 260px; }
 .folder-access-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .folder-access-suppress { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.folder-access-notice #folder-access-dismiss {
+  background: white;
+  color: #16333d;
+  border: 1px solid #16333d;
+}
 
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 1fr; height: auto; }

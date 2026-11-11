@@ -303,7 +303,7 @@ async function generatePartsWithReport(target, report) {
         + `${fmt(connectorPlan.printed_height_mm)} mm printed height`
       : "";
     if (state.runtime.hosted) saveOutput = state.browserFolder?.name || "your download folder";
-    const savedMessage = `Saved to ${saveOutput}${uniqueFiles.length ? `\n${uniqueFiles.join("\n")}` : ""}${planNote}`;
+    const savedMessage = `Saved to ${saveOutput}${uniqueFiles.length ? `\n${uniqueFiles.join("\n")}` : ""}${planNote}${state.runtime.hosted ? "\nOpen the saved file in your slicer." : ""}`;
     report(
       checkpointSaveFailed
         ? `${savedMessage}\n\nThe current design could not be saved to this Space: ${checkpointSaveFailed.message}`

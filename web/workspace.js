@@ -134,11 +134,17 @@ WS.current = () => {
 // Launch screen: existing spaces, My Bins, and (beside it) the New Space kinds.
 WS.renderPicker = () => {
   const spaces = WS.spaceRows();
+  const browserRequirement = state.runtime.hosted
+    ? (window.WFFileSystem?.supportsDirectoryPicker()
+      ? "Use Chrome or Edge on a computer — then you can pick a folder to keep your designs in."
+      : "Use Chrome or Edge on a computer. This browser or device can't give Wavefinity a folder, so here you can design and download parts only.")
+    : "";
   const cards = spaces.map(one => `<li><button type="button" class="ws-menu-item" data-ws-act="open-space" data-src="${one.src}" data-index="${one.index ?? ""}"${one.invalid ? " disabled" : ""}>
       <span class="ws-card-icon" aria-hidden="true">${SP.compactKindIcon(one.kind)}</span>
       <span class="ws-card-text"><strong>${wsEsc(one.name)}</strong><small>${wsEsc([SP_KINDS[one.kind]?.label, one.meta].filter(Boolean).join(" · "))}</small></span></button></li>`).join("");
   return `<div class="ws-sel">
     <div class="ws-sel-head"><h2>${spaces.length ? "Open a Space" : "Welcome to Wavefinity"}</h2></div>
+    ${browserRequirement ? `<p>${wsEsc(browserRequirement)}</p>` : ""}
     ${spaces.length ? "" : '<p class="ws-links">No spaces yet - pick what you\'re organizing below.</p>'}
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
     <ul class="ws-menu-list" aria-label="Your Spaces">${cards}
@@ -758,11 +764,13 @@ WS.rowOutputs = (one, picked) => {
     && (one.kind === "container" ? currentOutputReport.owner === "container"
       : one.kind === "bin" && (currentOutputReport.rowIds.includes(one.id)
         || currentOutputReport.owner === "bin" && one.id === (state.designInventoryId || "")));
-  const label = mode => running && currentOutputReport.action === mode ? wsEsc(currentOutputReport.text) : mode === "print" ? "Print" : "Export";
+  const label = mode => running && currentOutputReport.action === mode ? wsEsc(currentOutputReport.text)
+    : one.kind === "bin" && hosted ? "Save file" : mode === "print" ? "Print" : "Export";
   // Story 2815: the space line has no Print button; clicking the line opens the space details screen.
   // Story 2829: the space line has no Export button either; the details screen exports the space's files.
   if (one.kind === "settings") return "";
-  const printButton = `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live && !running ? "" : " disabled"} title="${wsEsc(printTitle)}">${label("print")}</button>`;
+  const binHostedSave = one.kind === "bin" && hosted;
+  const printButton = `<button type="button" class="ws-out ${tone}" ${attrs} data-output="${binHostedSave ? "export" : "print"}"${live && !running ? "" : " disabled"} title="${wsEsc(binHostedSave ? "Save this bin's file" : printTitle)}">${label(binHostedSave ? "export" : "print")}</button>`;
   return printButton + (one.kind === "container" ? `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live && !running ? "" : " disabled"} title="${wsEsc(exportTitle)}">${label("export")}</button>` : "");
 };
 
@@ -996,7 +1004,9 @@ DP.layoutViewOnly = () => WS.open() && !["settings", "peek", "none"].includes(WS
 SP.showHome = (message = null) => {
   SP.close();
   WS.message = message || "";
-  if (WS.open()) WS.resume(); else WS.enterLoose();
+  if (WS.open()) WS.resume();
+  else if (state.runtime.hosted && !SP.canPersistSpace()) WS.task = "picker";
+  else WS.enterLoose();
   WS.sync();
   return null;
 };
