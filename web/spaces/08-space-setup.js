@@ -1025,7 +1025,8 @@ SP.launch = async () => {
       // The browser wants re-approval (needs a click). Offer one reconnect
       // action for the remembered folder instead of a fresh pick.
       SP.pendingReconnect = saved?.handle ? saved : null;
-      SP.showHome();
+      if (saved?.handle) SP.showHome();
+      else SP.showResume(null, { startup: true });
       return;
     }
     SP.pendingReconnect = null;
@@ -1042,7 +1043,7 @@ SP.launch = async () => {
     SP.otherSpacesFresh = Array.isArray(resp.other_spaces);
     SP.storage = resp.storage || null;
     const data = resp.folder;
-    if (!data || data.missing) { SP.showHome(); return; }
+    if (!data || data.missing) { SP.showResume(null, { startup: true }); return; }
     if (data.needs_setup) {
       SP.enterSetupFor(data.folder, data);
       return;
