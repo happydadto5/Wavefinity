@@ -360,9 +360,9 @@ These alter the ordinary bin shell rather than acting like independent interior 
 
 ## Lid & Stacking
 
-The bin Specification area has Stackable (Not Stackable / Stackable) and a single Lid choice (No lid / Lid - Resting fit / Lid - Hinged Lid). Width and Depth snap to whole 7 mm units on blur and display the unit count; Height stays in millimetres.
+The bin Specification area has Stackable (Not Stackable / Stackable) and a single Lid choice (No lid / Lid / Lid for stacking / Hinged lid). Width and Depth snap to whole 7 mm units on blur and display the unit count; Height stays in millimetres.
 
-Choosing Lid - Resting fit, or Lid - Hinged Lid includes a lid and shows the lid options. A hinged lid also has Alignment (Off by default, saved as `box.lid.alignment`: off / thin 1 mm / standard 2 mm / thick 3 mm): L-shaped tabs under the two front corners. A hinged lid with Alignment on needs support for these tabs; that is expected and fine. Lid thickness, optional Dome knob or Pull handle, and label text are available. Editing non-empty label text enables its options; clearing it disables the label. A saved off label stays off until its text is edited, and division labels retain their editor. Older Mushroom knobs open as Dome.
+Choosing Lid, Lid for stacking, or Hinged lid includes a lid and shows the lid options. A hinged lid also has Alignment (Off by default, saved as `box.lid.alignment`: off / thin 1 mm / standard 2 mm / thick 3 mm): L-shaped tabs under the two front corners. A hinged lid with Alignment on needs support for these tabs; that is expected and fine. Lid thickness, an optional Knob (the only handle), and label text are available. Older saved Pull handles open as a Knob. Editing non-empty label text enables its options; clearing it disables the label. A saved off label stays off until its text is edited, and division labels retain their editor.
 
 General rules:
 
@@ -529,16 +529,6 @@ Current request/build data can include connector settings such as:
 
 Connector wall fit follows actual bin wall thickness.
 
-## 3-Way Corner Connector
-
-- Joins three compatible bins around a grid corner.
-- Equal-height/equal-wall requirements apply.
-
-## 4-Way Corner Connector
-
-- Joins four compatible bins around a grid corner.
-- Equal-height/equal-wall requirements apply.
-
 The AI generally designs the bin; Wavefinity determines which connector outputs are legal for the final arrangement.
 
 ---
@@ -559,7 +549,6 @@ The running Wavefinity validator is authoritative. Important classes of conflict
 - Lid/stacking vs insufficient wall/base strength.
 - Raised lid label vs stacking contact.
 - Lid vs Side connector rim geometry.
-- Corner connectors vs unequal-height or unequal-wall bins.
 - Pegboard mounting fields vs non-Space ownership.
 - Surface base fields vs non-Space ownership.
 - Photo Nest contour data vs text-AI synthesis.
