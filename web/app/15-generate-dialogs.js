@@ -739,29 +739,6 @@ async function showAboutDialog() {
   } catch (err) {
     content.textContent = "Could not load brochure: " + err.message;
   }
-  const runtime = document.createElement("section");
-  runtime.className = "about-runtime";
-  try {
-    const response = await fetch("/api/health", { cache: "no-store" });
-    if (!response.ok) throw new Error("Health unavailable");
-    const health = await response.json();
-    if (!health.source_fingerprint) throw new Error("Runtime identity unavailable");
-    const heading = document.createElement("h3");
-    heading.textContent = "Runtime";
-    runtime.append(heading);
-    for (const [label, value] of [
-      ["Build", health.build], ["Source", health.source_root],
-      ["Fingerprint", health.source_fingerprint],
-    ]) {
-      if (value == null) continue;
-      const line = document.createElement("p");
-      line.textContent = `${label}: ${value}`;
-      runtime.append(line);
-    }
-  } catch (_error) {
-    runtime.textContent = "Runtime details unavailable";
-  }
-  content.append(runtime);
 }
 
 function renderSimpleMarkdown(md) {

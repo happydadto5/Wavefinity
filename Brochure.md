@@ -1,60 +1,41 @@
-# Introducing Wavefinity 🌊
-### Early Preview Trial — The Smarter, Lighter Modular Storage System for 3D Printing
+# Getting started with Wavefinity
 
-Tired of clunky drawer grids and wasting spools of filament just to get organized? Meet **Wavefinity** — a next-generation modular storage ecosystem engineered from the ground up to save filament, time, and drawer space.
+Wavefinity helps you design small storage bins and the places they live in, see them in 3D, and save print-ready files for your 3D printer.
 
-> **⚠️ Early Preview Notice:** Wavefinity is currently in an early **Preview Trial** phase! We want your feedback, feature ideas, and test prints as we actively refine the system.
+To get started, create a Space, add bins to it, place the bins, then open the print list to print or export them.
 
-🔗 **Try the Live Preview App Now:** [https://wavefinity.onrender.com](https://wavefinity.onrender.com)
+## Spaces and bins
 
----
+A Space is the drawer, box, surface or board your bins live in. Set its inside size, then design each bin's size, walls and inside parts.
 
-## 🎯 The Mission: Why Wavefinity?
+## Storage Box
 
-Traditional modular storage systems are great, but they come with common headaches: heavy grid bases that eat print time, massive filament waste, loose-fitting containers, and rigid sizing.
+A Storage Box is a printed box with its own lid, either latched or hinged. Set its size, then print its parts as a set.
 
-Wavefinity was built to rethink modular organization:
+## Surface
 
-- **Save Massive Filament:** Say goodbye to excessive plastic. Wavefinity minimizes print material while keeping high structural strength.
-- **Zero Grids Needed:** No more spending 20 hours printing base plates just to fill a drawer.
-- **Bins That Lock Together:** Small reusable staple connectors bridge neighboring bins so they stay firmly connected and organized, even when you yank the drawer open.
-- **Highly Customizable Insets:** Tailor compartments, dividers, and holder insets precisely to the tools and parts you own.
-- **Total Customization:** Adjust height, width, depth, wall thickness, and dividers directly in the app.
+A Surface is a flat area where you arrange bins standing on it.
 
----
+## Pegboard
 
-## ✨ Major Features
+A Pegboard is a board with a grid of holes where bins hang.
 
-### 🚫 1. No Grids Required
-Unlike older grid-bound systems, Wavefinity needs no base plate. Place bins anywhere, expand in any direction, and use small reusable connectors across shared seams to lock neighboring bins together.
+## Spacers
 
-### 🔒 2. Connector-Locked Bins
-Print a small staple connector and press it over the shared seam between two bins. The connector holds them securely side-by-side, keeping the layout solid and rattle-free inside toolboxes, drawers, or on shelves.
+Spacers are printed blocks that brace bins so they do not slide. Use **Refresh Spacers** to make the set that fits your layout.
 
-### ⚡ 3. Ultra-Efficient Filament Profiles
-Engineered geometry optimizes strength where you need it and sheds unnecessary weight where you don't. Print faster, finish sooner, and use fewer spools.
+## Lids
 
-### 🛠️ 4. Custom Inset & Layout Generator
-Need a bin split into 3 slots? Need custom angled holders, bit trays, or dedicated tool slots? Generate the exact bin you need in seconds.
+A bin can have no lid, a resting lid, a hinged lid, or a lid another bin can stack on.
 
-### 🗃️ 5. Printable Storage Drawers Cabinets
-Not just bins: design a whole mini cabinet with drawers sized for your bins. Pick the size and drawer heights, check it fits your printer, and save print-ready parts plus a one-page assembly guide. The cabinet slides together by hand.
+## Connectors
 
-### 🌐 6. Instant Browser-Based Tool
-No complicated CAD software needed. Hop onto our web app, dial in your exact drawer dimensions, customize your bins, and export clean, ready-to-slice 3D models immediately.
+Small printed connectors can join neighbouring bins.
 
----
+## Community
 
-## 💬 Community, Feedback & Discussions
+Your feedback shapes what Wavefinity does next.
 
-Since this is an active preview, your feedback shapes the next release!
-
-- 🗣️ **Join the GitHub Discussion:** [Wavefinity GitHub Discussions](https://github.com/happydadto5/Wavefinity/discussions)
-- 🐛 **Report a Bug or Request a Feature:** [Open an Issue](https://github.com/happydadto5/Wavefinity/issues)
-- 👤 **GitHub Profile:** [@happydadto5](https://github.com/happydadto5)
-
----
-
-## 🚀 Ready to test it out?
-
-👉 **[Launch Wavefinity Preview Trial](https://wavefinity.onrender.com)**
+- **Ask a question or share an idea:** [Wavefinity GitHub Discussions](https://github.com/happydadto5/Wavefinity/discussions)
+- **Report a problem or ask for a feature:** [Open an Issue](https://github.com/happydadto5/Wavefinity/issues)
+- **GitHub profile:** [@happydadto5](https://github.com/happydadto5)
