@@ -2311,6 +2311,10 @@ an old branch. The normal BAT updates this folder from GitHub before starting;
 it stops with a message if it cannot update safely. Preserve old audit work on
 its branch.
 
+## Local temp space
+
+This project keeps a folder named `local-temp/` at the repository root. It is local temp space: files that belong with this project on this machine but are never backed up to the cloud repo - captures, trial output, scratch files. The project's .gitignore ignores `local-temp/`, so nothing in it is ever committed. Its contents are disposable: never keep the only copy of anything that matters in it. The convention is defined once for every project in Help-Code (REVIEWER-CHAT.md, 'Local temp space').
+
 # Reference appendix
 
 Material kept for occasional use. It is not part of the everyday read above; follow a pointer from the main text when a task needs it.
