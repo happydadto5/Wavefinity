@@ -67,8 +67,18 @@ WS.items = () => {
       ? ($("#part-name")?.value || "").trim() : "";
     return typed || DL.label(one);
   };
-  const binItem = (one, drawerLabel = "") => add("bin", one.id, liveLabel(one), {
-    note: [drawerLabel, `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`].filter(Boolean).join(" · "),
+  const stackNote = (one, drawer = DL.drawer()) => {
+    const item = DL.items(drawer).find(entry => entry.layers.some(layer => String(layer.bin.id) === String(one.id)));
+    if (!item || item.layers.length < 2) return "";
+    const layer = item.layers.find(entry => String(entry.bin.id) === String(one.id));
+    if (layer.parent) {
+      const parent = item.layers.find(entry => entry.key === layer.parent);
+      return parent ? `Stacked on ${DL.label(parent.bin)}` : "";
+    }
+    return `Bottom of a stack of ${item.layers.length}`;
+  };
+  const binItem = (one, drawerLabel = "", drawer = DL.drawer()) => add("bin", one.id, liveLabel(one), {
+    note: [drawerLabel, `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`, stackNote(one, drawer)].filter(Boolean).join(" · "),
     printable: DL.printEligible(one),
   });
   const placed = new Set(bins.filter(one => DL.placedCount(one.id) > 0).map(one => one.id));
@@ -80,7 +90,7 @@ WS.items = () => {
       const here = [...new Map((drawer.placements || []).map(p => DL.bin(p.bin))
         .filter(one => one && DL.isOrdinary(one)).map(one => [one.id, one])).values()];
       const label = drawer.name || `Drawer ${index + 1}`;
-      if (here.length) { add("group", null, label); here.forEach(one => binItem(one, label)); }
+      if (here.length) { add("group", null, label); here.forEach(one => binItem(one, label, drawer)); }
     });
   } else if (placed.size) {
     add("group", null, "Placed");
