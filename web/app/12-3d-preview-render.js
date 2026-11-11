@@ -891,8 +891,18 @@ function currentPreviewPasses(buffers) {
   return { passes, aabb: state.interiorVisible ? buffers.allAabb : previewAabbWithoutMeasured(buffers), visible };
 }
 
+// Story 2929: the first view button names the thing shown.
+function updatePreviewModeLabels() {
+  const button = $('[data-camera-toggle="bin"]');
+  if (!button) return;
+  const kind = typeof structuralTargetKind === "function" ? structuralTargetKind() : null;
+  const word = kind === "storage_drawers" ? "Cabinet" : (kind === "box" || b4bEnabled()) ? "Storage Box" : "Bin";
+  if (button.textContent !== word) button.textContent = word;
+}
+
 function renderPreview3D() {
   updateLidToggle();
+  updatePreviewModeLabels();
   // Fix 103 (Section C): a structural target in Design renders from its own
   // slot through its own scene; the ordinary predicates below read
   // state.design and must never see the structural target.

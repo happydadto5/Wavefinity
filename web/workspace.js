@@ -161,8 +161,8 @@ WS.renderPicker = () => {
 WS.drawerButtons = locked => {
   if (!DL.isStorageDrawers() || !DL.layout?.drawers?.length) return "";
   const off = locked || SP.editing || SP.structuralBusy || DP.designNavBlocked();
-  return `<span class="ws-drawers" role="group" aria-label="Drawers">${DL.layout.drawers.map((row, index) =>
-    `<button type="button" class="ws-drawerbtn${DL.layout.active === row.id ? " selected" : ""}" data-ws-act="drawer" data-id="${wsEsc(row.id)}" aria-pressed="${DL.layout.active === row.id}" aria-label="${wsEsc(row.name || `Drawer ${index + 1}`)}"${off ? " disabled" : ""}>${index + 1}</button>`).join("")}</span>`;
+  return `<span class="ws-drawers" role="group" aria-label="Drawers"><span class="ws-drawers-word">Drawers:</span>${DL.layout.drawers.map((row, index) =>
+    `<button type="button" class="ws-drawerbtn${DL.layout.active === row.id ? " selected" : ""}" data-ws-act="drawer" data-id="${wsEsc(row.id)}" aria-pressed="${DL.layout.active === row.id}" aria-label="Show Drawer ${index + 1}"${off ? " disabled" : ""}>${index + 1}</button>`).join("")}</span>`;
 };
 
 WS.renderSelector = () => {

@@ -26,14 +26,19 @@
     for (const [key, title] of choices) { const option = document.createElement("option"); option.value = key; option.textContent = title; node.append(option); }
     node.value = String(value); return node;
   };
+  const checkbox = (title, checked) => {
+    const node = document.createElement("input"); node.type = "checkbox"; node.checked = Boolean(checked);
+    const label = el("label", "sd-field sd-check"); label.append(node, " ", title);
+    return { node, label };
+  };
   const group = host => { const section = el("div", "sd-form-group storage-box-group"); host.append(section); return section; };
   // Fix 1101 (Opus H4): drawer-wall choices must not offer values the backend
   // now rejects. Keep in sync with STORAGE_DRAWER_DRAWER_WALL_MIN_MM in
   // organizer_storage/drawers.py.
   const STORAGE_DRAWER_WALL_MIN_MM = 1.4;
   const DRAWER_MATERIAL_CHOICES = [
-    [0.8, "Super thin / light duty"], [1.2, "Thin"], [1.6, "Standard"],
-    [2.0, "Strong"], [2.4, "Extra strong / maximum"],
+    [0.8, "Very thin"], [1.2, "Thin"], [1.6, "Default"],
+    [2.0, "Strong"], [2.4, "Very strong"], [3.0, "Heavy duty"],
   ];
   const materialChoices = (catalog, kind, current, minMm = 0) => {
     const rows = DRAWER_MATERIAL_CHOICES.filter(row => {
@@ -44,7 +49,7 @@
       const [value, label] = Array.isArray(row)
         ? [String(row[0]), String(row[1])]
         : [String(row.value ?? row.mm), String(row.label ?? row.name)];
-      return [value, /\bmm\b/i.test(label) ? label : `${label} — ${value} mm`];
+      return [value, /\bmm\b/i.test(label) ? label : `${Number(value).toFixed(1)} mm — ${label}`];
     });
     if (!options.some(row => Number(row[0]) === Number(current))) options.push([String(current), `${current} mm — Current setting`]);
     return options;
@@ -116,10 +121,12 @@
     // resolve the same untouched request through resolveMm().
     const formatUnitsInline = field => {
       const resolved = resolveMm(field);
-      const notes = [rangeText];
-      if (resolved.ok && Math.abs(Number(field.value) - resolved.mm) > 1e-6) notes.push(`Uses ${resolved.mm} mm (${resolved.units} units).`);
-      const outside = lastSummary && Number(lastSummary.outside_xyz?.[field === x ? 0 : 1]);
-      if (Number.isFinite(outside)) notes.push(`Exterior ${fmt(outside)} mm.`);
+      // One note style, the same as every other kind setup note.
+      const notes = [];
+      if (resolved.ok) {
+        const outside = lastSummary && Number(lastSummary.outside_xyz?.[field === x ? 0 : 1]);
+        notes.push(`Uses ${fmt(resolved.mm)} mm (${resolved.units} units).` + (Number.isFinite(outside) ? ` Outside ${fmt(outside)} mm.` : ""));
+      } else notes.push(rangeText);
       const bad = !resolved.ok && (field.value.trim() !== "" || touchedFields.has(field));
       field.toggleAttribute("aria-invalid", bad);
       const note = sizeNotes.get(field);
@@ -163,9 +170,12 @@
     count.disabled = mode === "edit";
     const countNote = el("small", "sd-field-error"); countNote.hidden = true; countNote.id = `sd-count-note-${epoch}`;
     count.setAttribute("aria-describedby", countNote.id);
-    const countField = labeled("Number of drawers", count,
-      structural ? "Use Add Drawer or Delete below." : mode === "edit" ? "Add or remove drawers in Design." : null);
-    countField.append(countNote);
+    // Design scope: Add Drawer / Delete are the only count controls, so the
+    // number box stays detached (a value holder only) and a plain count shows.
+    const countField = structural ? el("div", "sd-field") : labeled("Number of drawers", count,
+      mode === "edit" ? "Add or remove drawers in Design." : null);
+    if (structural) countField.append(help("Use Add Drawer or Delete to change the number of drawers."));
+    else countField.append(countNote);
     const fit = select(block.drawer_fit_mm, NAMED(rules.fitChoices, ["Tight", "Standard", "Loose"]));
     let previousFit = Number(fit.value);
     const handles = select(String(block.drawer_handles), [["true", "Pull handles"], ["false", "No handles"]]);
@@ -185,9 +195,7 @@
     const drawerRows = el("div", "sd-drawer-rows"); drawersGroup.append(drawerRows);
     const cabinet = group(form); cabinet.classList.add("sd-cabinet-group");
     const style = select(block.cabinet_style, [["full", "Full"], ["open", "Open"]]);
-    style.title = "Full hides the drawer rails behind solid side panels. Open uses slim frames so the rails stay visible.";
     const rear = select(block.rear_support, [["cross", "Rear cross"], ["solid", "Rear solid"]]);
-    rear.title = "Rear cross is an X brace that uses less filament. Rear solid is a full back panel.";
     const wallMounting = select(block.wall_mounting, [["off", "Off"], ["keyholes", "Keyholes"]]);
     const keyholeCount = select(String(block.wall_mount_keyholes_per_drawer), [["2", "2 — left and right"], ["4", "4 — two rows, left and right"]]);
     const keyholeCountField = labeled("Keyholes per drawer level", keyholeCount);
@@ -195,10 +203,54 @@
     const stack = select(String(block.stacking), [["false", "Not stackable"], ["true", "Stackable"]]);
     const frame = select(block.open_frame_width_mm, NAMED(rules.frameChoices, ["Compact", "Standard", "Strong"]));
     const frameField = labeled("Open frame width", frame);
+    // Story 2929: each picture-less choice shows a small diagram of the chosen
+    // option and its one-line description right under the control.
+    const SVG = "http://www.w3.org/2000/svg";
+    const drawing = shapes => {
+      const svg = document.createElementNS(SVG, "svg");
+      svg.setAttribute("viewBox", "0 0 48 32"); svg.setAttribute("width", "48"); svg.setAttribute("height", "32");
+      svg.setAttribute("aria-hidden", "true"); svg.classList.add("sd-diagram");
+      for (const [tag, attrs] of shapes) {
+        const node = document.createElementNS(SVG, tag);
+        for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+        svg.append(node);
+      }
+      return svg;
+    };
+    const frameBox = { x: 4, y: 3, width: 40, height: 26, rx: 2 };
+    const PICTURES = {
+      full: [["rect", frameBox], ["rect", { x: 8, y: 7, width: 32, height: 8, rx: 1 }], ["rect", { x: 8, y: 17, width: 32, height: 8, rx: 1 }]],
+      open: [["rect", frameBox], ["line", { x1: 4, y1: 16, x2: 44, y2: 16 }], ["rect", { x: 14, y: 7, width: 20, height: 5, rx: 1 }], ["rect", { x: 14, y: 20, width: 20, height: 5, rx: 1 }]],
+      cross: [["rect", frameBox], ["line", { x1: 4, y1: 3, x2: 44, y2: 29 }], ["line", { x1: 44, y1: 3, x2: 4, y2: 29 }]],
+      solid: [["rect", { ...frameBox, class: "sd-diagram-fill" }]],
+      off: [["rect", frameBox]],
+      keyholes: [["rect", frameBox], ["circle", { cx: 12, cy: 9, r: 2.5 }], ["circle", { cx: 36, cy: 9, r: 2.5 }], ["line", { x1: 12, y1: 11.5, x2: 12, y2: 15 }], ["line", { x1: 36, y1: 11.5, x2: 36, y2: 15 }]],
+    };
+    const DESCRIPTIONS = {
+      full: "Full hides the drawer rails behind solid side panels.",
+      open: "Open uses slim frames so the rails stay visible.",
+      cross: "Rear cross is an X brace that uses less filament.",
+      solid: "Rear solid is a full back panel.",
+      off: "No wall mounting. The cabinet stands on its own.",
+      keyholes: "Keyholes let the cabinet hang on screws in a wall.",
+    };
+    const explained = (title, control) => {
+      const field = labeled(title, control);
+      const picture = el("div", "sd-choice-note"); picture.setAttribute("aria-live", "polite");
+      field.append(picture);
+      const refresh = () => {
+        const key = control.value;
+        const text = el("small", "sd-help", DESCRIPTIONS[key] || "");
+        picture.replaceChildren(...(PICTURES[key] ? [drawing(PICTURES[key])] : []), text);
+      };
+      control.addEventListener("change", refresh, { signal: events.signal });
+      refresh();
+      return field;
+    };
     const cabinetRowA = el("div", "sd-size-grid");
-    cabinetRowA.append(labeled("Cabinet style", style),
-      labeled("Rear support", rear),
-      labeled("Wall mounting", wallMounting),
+    cabinetRowA.append(explained("Cabinet style", style),
+      explained("Rear support", rear),
+      explained("Wall mounting", wallMounting),
       keyholeCountField);
     const cabinetRowB = el("div", "sd-size-grid");
     cabinetRowB.append(labeled("Stacking", stack),
@@ -207,17 +259,17 @@
     // Finish: labels + material in one area (Fix 117).
     const finish = group(form); finish.classList.add("sd-finish-group");
     const labels = el("div", "sd-subgroup");
-    const unitEnabled = select(String(block.unit_label_enabled), [["false", "Unit label off"], ["true", "Unit label on"]]);
+    const unitCheck = checkbox("Unit label", block.unit_label_enabled), unitEnabled = unitCheck.node;
     const unitText = input(block.unit_label_text); unitText.maxLength = labelLimit;
     unitText.id = `sd-unit-label-${epoch}`;
     unitText.dataset.heightNeutral = "1";
-    const drawerEnabled = select(String(block.drawer_labels_enabled), [["false", "Drawer labels off"], ["true", "Drawer labels on"]]);
+    const drawerCheck = checkbox("Drawer labels", block.drawer_labels_enabled), drawerEnabled = drawerCheck.node;
     const labelStyle = select(block.drawer_label_style, [["inlaid", "Inlaid"], ["raised", "Raised"]]);
     const unitTextField = labeled("Unit label text", unitText), styleField = labeled("Drawer label style", labelStyle);
     const labelsRowA = el("div", "sd-size-grid");
-    labelsRowA.append(labeled("Unit label", unitEnabled), unitTextField);
+    labelsRowA.append(unitCheck.label, unitTextField);
     const labelsRowB = el("div", "sd-size-grid");
-    labelsRowB.append(labeled("Drawer labels", drawerEnabled), styleField);
+    labelsRowB.append(drawerCheck.label, styleField);
     labels.append(labelsRowA, labelsRowB);
     const material = el("div", "sd-subgroup"); const matA = el("div", "sd-material-three"), matB = el("div", "sd-material-two");
     material.append(matA, matB);
@@ -250,7 +302,7 @@
     const syncVisibility = () => {
       frameField.hidden = style.value !== "open"; handleField.hidden = handles.value !== "true";
       keyholeCountField.hidden = wallMounting.value !== "keyholes";
-      unitTextField.hidden = unitEnabled.value !== "true"; styleField.hidden = drawerEnabled.value !== "true";
+      unitTextField.hidden = !unitEnabled.checked; styleField.hidden = !drawerEnabled.checked;
       // Fix 103 (Packet B): Basic Setup shows only Basics + Drawers.
       // Advanced controls are built but hidden, so draft() reads canonical
       // defaults for them exactly as before.
@@ -271,13 +323,13 @@
       heightInputs.clear();
       heightNotes.clear();
       block.drawers.forEach((row, index) => {
-        const line = el("div", `sd-drawer-row${drawerEnabled.value === "true" ? " sd-drawer-row-with-label" : ""}`);
+        const line = el("div", `sd-drawer-row${drawerEnabled.checked ? " sd-drawer-row-with-label" : ""}`);
         const head = el("div", "sd-drawer-head"); head.append(el("strong", "", `Drawer ${index + 1}`)); line.append(head);
         // Fix 103 Correction 1 (C2): full structural Design owns Add/Delete. The
         // buttons only ask the controller; the cabinet mutation authority
         // (SP.cabinetAdd / SP.cabinetDelete) does the work.
         if (structural && row.id && !String(row.id).startsWith("temporary:")) {
-          const remove = el("button", "link-button sd-drawer-delete", "Del"); remove.type = "button";
+          const remove = el("button", "link-button sd-drawer-delete", "Delete"); remove.type = "button";
           remove.disabled = disabled || block.drawers.length <= 1;
           remove.title = block.drawers.length <= 1 ? "A cabinet keeps at least one drawer." : `Delete Drawer ${index + 1}`;
           remove.addEventListener("click", event => { event.stopPropagation(); callbacks.deleteDrawer?.(row.id); }, { signal: events.signal });
@@ -327,7 +379,7 @@
         label.id = `sd-label-${epoch}-${index}`;
         label.dataset.heightNeutral = "1";
         label.addEventListener("input", () => { row.label_text = label.value; }, { signal: events.signal });
-        const labelField = labeled("Label text", label); labelField.hidden = drawerEnabled.value !== "true";
+        const labelField = labeled("Label text", label); labelField.hidden = !drawerEnabled.checked;
         const heightField = labeled("Usable height", height);
         const heightNote = help(""); heightNote.id = `${height.id}-note`; heightNote.setAttribute("aria-live", "polite");
         heightField.append(heightNote); heightNotes.set(row, heightNote); height.setAttribute("aria-describedby", heightNote.id);
@@ -340,8 +392,10 @@
       const addRow = el("div", "sd-drawer-actions");
       const add = el("button", "button secondary", "Add Drawer"); add.type = "button";
       add.addEventListener("click", () => callbacks.addDrawer?.(), { signal: events.signal });
-      addRow.append(add); drawersGroup.append(addRow);
+      const countText = el("span", "sd-drawer-count"); countText.setAttribute("aria-live", "polite");
+      addRow.append(add, " ", countText); drawersGroup.append(addRow);
       syncAddButton = () => {
+        const n = block.drawers.length; countText.textContent = `${n} ${n === 1 ? "drawer" : "drawers"}`; count.value = String(n);
         add.disabled = disabled || block.drawers.length >= maxDrawers;
         add.title = block.drawers.length >= maxDrawers ? `A cabinet holds at most ${maxDrawers} drawers.` : "";
       };
@@ -441,8 +495,8 @@
       b.wall_mount_keyholes_per_drawer = Number(keyholeCount.value);
       b.open_frame_width_mm = Number(frame.value); b.drawer_fit_mm = Number(fit.value);
       b.stacking = stack.value === "true"; b.drawer_handles = handles.value === "true"; b.drawer_handle_size = handleSize.value;
-      b.unit_label_enabled = unitEnabled.value === "true"; b.unit_label_text = unitText.value;
-      b.drawer_labels_enabled = drawerEnabled.value === "true"; b.drawer_label_style = labelStyle.value;
+      b.unit_label_enabled = unitEnabled.checked; b.unit_label_text = unitText.value;
+      b.drawer_labels_enabled = drawerEnabled.checked; b.drawer_label_style = labelStyle.value;
       for (const [key, control] of Object.entries(materialFields)) b[key] = Number(control.value);
       next.z = b.drawers.reduce((sum, row) => sum + row.height_mm, 0); return next;
     };
@@ -469,9 +523,9 @@
           return fail(`Drawer ${i + 1} is taller than the ${fmt(maxUsableHeight)} mm usable-height maximum`, `sd-height-${epoch}-${i}`);
         }
       }
-      if (unitEnabled.value === "true" && !unitText.value.trim()) return fail("Enter unit label text", unitText.id);
+      if (unitEnabled.checked && !unitText.value.trim()) return fail("Enter unit label text", unitText.id);
       if (unitText.value.length > labelLimit) return fail("Shorten the unit label", unitText.id);
-      if (drawerEnabled.value === "true") {
+      if (drawerEnabled.checked) {
         for (let i = 0; i < block.drawers.length; i++) {
           if ((block.drawers[i].label_text || "").length > labelLimit) return fail(`Shorten Drawer ${i + 1}'s label`, `sd-label-${epoch}-${i}`);
         }
@@ -627,7 +681,7 @@
       block.drawers.map(row => [row.id || "", row.height_mm, row.label_text]),
       style.value, rear.value, wallMounting.value, keyholeCount.value,
       stack.value, frame.value, fit.value, handles.value, handleSize.value,
-      unitEnabled.value, unitText.value, drawerEnabled.value, labelStyle.value,
+      unitEnabled.checked, unitText.value, drawerEnabled.checked, labelStyle.value,
       Object.values(materialFields).map(control => control.value)]);
     syncVisibility(); renderRows(); schedule();
     let baseline = snapshot();

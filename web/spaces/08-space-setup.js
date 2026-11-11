@@ -157,7 +157,8 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   else SP.destroyStorageDrawersForm();
   const spaceNameField = document.getElementById("space-name");
   spaceNameField.value = prefillSpace?.name || "";
-  spaceNameField.placeholder = kind === "surface" ? "e.g. Kitchen worktop, Desk top" : "e.g. Tool chest, drawer 2";
+  spaceNameField.placeholder = kind === "surface" ? "e.g. Kitchen worktop, Desk top"
+    : kind === "portable" ? "e.g. Small parts box" : "e.g. Tool chest, drawer 2";
   // The display name can change without moving the Space's folder or identity.
   spaceNameField.disabled = false;
   document.getElementById("space-error").hidden = true;

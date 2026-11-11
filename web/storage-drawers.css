@@ -11,8 +11,15 @@
 .sd-size-grid, .sd-material-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .sd-material-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .sd-drawer-rows { display: grid; gap: 6px; }
-.sd-drawer-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 8px; }
-.sd-drawer-row.sd-drawer-row-with-label { grid-template-columns: 72px minmax(0, 1fr) minmax(0, 1fr); }
+.sd-drawer-row { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 8px; }
+.sd-drawer-row.sd-drawer-row-with-label { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.sd-size-grid > .sd-field, .sd-drawer-row > .sd-field { height: auto; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.sd-field.sd-check { display: flex; align-items: center; gap: 6px; }
+.sd-field.sd-check input { width: auto; }
+.sd-choice-note { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; align-items: center; }
+.sd-diagram { stroke: currentColor; stroke-width: 1.5; fill: none; opacity: .75; }
+.sd-diagram .sd-diagram-fill { fill: currentColor; fill-opacity: .25; }
+.sd-drawer-actions { display: flex; align-items: center; gap: 8px; }
 .sd-printer-row, .sd-printer-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .sd-summary { color: var(--ink); font-size: 12px; line-height: 1.4; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
 .sd-summary .sd-fit-verdict, .sd-summary-warning, .sd-summary .sd-summary-line:last-child { grid-column: 1 / -1; }

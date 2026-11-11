@@ -160,7 +160,8 @@ body.ws-on #welcome-dialog[open]:has(#space-form:not([hidden])) {
 body.ws-item-switching .canvas-wrap > canvas { visibility: hidden; }
 
 /* Story 2752: small drawer buttons in the Layout row. */
-.ws-drawers { display: flex; gap: 4px; align-items: stretch; }
+.ws-drawers { display: flex; gap: 4px; align-items: center; }
+.ws-drawers-word { font-size: 12px; }
 .ws-drawerbtn { min-width: 28px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font-size: 12px; cursor: pointer; }
 .ws-drawerbtn:hover:not(:disabled) { border-color: var(--teal); background: var(--teal-soft); }
 .ws-drawerbtn.selected { font-weight: 700; border-color: var(--teal); box-shadow: inset 0 -3px var(--teal); }
