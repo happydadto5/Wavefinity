@@ -130,10 +130,16 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
 
 async function flushSpaceDesignAutosave({ visible = true, materialize = false,
     deferDraftPreview = false, noDeferredPreview = false, leavingDesign = false,
-    abandonBuild = false } = {}) {
+    abandonBuild = false, spaceSwitch = false, mutationOwned = false } = {}) {
   if (DP.getDesignTarget().kind === "none") return true;
   if (designTargetIsStructural()) return true; // Fix 103
   if (!typedSpaceOrdinaryBin()) return true;
+  visible = visible && SP.binEditorVisible();
+  // Landing on a Space's container/first bin can also replace a hidden
+  // starter. It gets the same recovery guarantee as the folder switch.
+  if (!spaceSwitch && !visible) return SP.leaveBinForSpaceSwitch({
+    visible: false, materialize, noDeferredPreview,
+  });
   // Fix 109 A1: leaving Design for Space is where a first bin becomes durable.
   // state.designInventoryId is the idempotency key - once the save below
   // stores the returned row id, every later exit is an update, never a create.
@@ -144,11 +150,19 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false,
   try {
     clearTimeout(spaceAutosaveTimer);
     spaceAutosaveTimer = null;
-    if (visible && !(await flushVisibleDesignEditsBeforeModeSwitch({
+    if (spaceSwitch && visible) {
+      // A Space switch never enters a draft-conflict or small-label dialog.
+      // Unfinished work takes the exact recovery path instead.
+      if (draftNeedsSaving() || $(".controls input:invalid")) return false;
+      const candidate = visibleDesignSnapshot();
+      if (newModifierConflict(pendingPreEditDesign || state.design, candidate)) return false;
+      state.design = candidate;
+    }
+    if (!spaceSwitch && visible && !(await flushVisibleDesignEditsBeforeModeSwitch({
       previewAfterCommit: !deferDraftPreview,
     }))) return false;
-    if (visible && !(await maybePromptSurfaceObjectHeight())) return false;
-    if (!beginDesignMutation()) return false;
+    if (!spaceSwitch && visible && !(await maybePromptSurfaceObjectHeight())) return false;
+    if (!mutationOwned && !beginDesignMutation({ readForm: visible && !spaceSwitch, quiet: spaceSwitch })) return false;
     let saved = false;
     try {
       // Story 2773: leaving (e.g. Manage Spaces) with an already-current preview
@@ -173,14 +187,14 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false,
       await SP.flushDefaults();
       saved = true;
     } catch (error) {
-      toast(`Could not autosave this bin: ${error.message}`, true, 6000);
+      if (!spaceSwitch) toast(`Could not autosave this bin: ${error.message}`, true, 6000);
       return false;
     } finally {
-      finishDesignMutation();
+      if (!mutationOwned) finishDesignMutation();
     }
     return saved;
   } finally {
-    if (visible && deferDraftPreview && !noDeferredPreview && state.design !== originalDesign &&
+    if (!spaceSwitch && visible && deferDraftPreview && !noDeferredPreview && state.design !== originalDesign &&
         fullPreviewStarts === ownerAtStart) refreshPreview();
   }
 }

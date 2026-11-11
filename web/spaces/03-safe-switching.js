@@ -2,11 +2,8 @@
 
 // ------------------------------------------------------------ safe Drawer/Space switch (Fix 019 Item 2)
 //
-// Folder identity must never change until leaving the current Drawer layout
-// either succeeds or the user deliberately discards it. Fix 034 K1: autosave
-// has no off state any more, so this always just flushes a dirty layout and
-// ABORTS the switch (old Space stays active, DL.layout/DL.dirty stay intact)
-// if that save fails - never an ambiguous native confirm().
+// Bin save failures set the exact work aside and never veto a Space switch.
+// The independent layout and structural save owners still settle their work.
 
 // Resolves true when it is safe to proceed (nothing dirty, or a successful
 // flush) and false when the switch must be aborted with everything -
@@ -14,8 +11,7 @@
 SP.leaveDrawerLayoutSafely = async ({ noDeferredPreview = false, visible = true } = {}) => {
   // visible:false - no editor is on screen (the open screen is up), so there are no
   // uncommitted form edits and no prompt may be raised while flushing.
-  if (typeof flushSpaceDesignAutosave === "function" &&
-      !(await flushSpaceDesignAutosave({ deferDraftPreview: true, noDeferredPreview, visible }))) return false;
+  await SP.leaveBinForSpaceSwitch({ noDeferredPreview, visible });
   if (SP._inventoryWriteChain) await SP._inventoryWriteChain;
   if (typeof DL === "undefined") return true;
   if (DL.savePromise) {
@@ -169,6 +165,7 @@ SP.applyFolder = async (info, options = {}) => {
     resumeDesign,
     resumePending,
   );
+  SP.readBinRecoveryCheckpoint();
   if (initDesign && info.folder_mode === "space") await SP.initializeDesignForActiveSpace();
   syncForm();
   if (SP.renderSpaceInfo) SP.renderSpaceInfo();

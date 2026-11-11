@@ -748,8 +748,7 @@ SP.initializeDesignForActiveSpace = async () => {
       // The stored checkpoint itself is left untouched - a validation
       // failure here must never delete or rewrite recoverable user data.
       resumeValidationFailed = true;
-      console.error(error);
-      toast("The last design for this Space could not be restored. You can start a new design.", true, 7000);
+      await SP.setAsideBin(SP.snapshotStoredBin(state.spaceResumeDesign));
     }
   }
 
@@ -775,7 +774,10 @@ SP.initializeDesignForActiveSpace = async () => {
       // the same owner every other meaningful change already uses, before
       // it is exposed as editable.
       const untouched = JSON.stringify(freshDesignForCurrentFolder()) === key;
-      if (!untouched) await persistSpaceDesignSource(null, true);
+      if (!untouched) {
+        try { await persistSpaceDesignSource(null, true); }
+        catch (_error) { await SP.setAsideBin(SP.snapshotStoredBin(state.spaceResumeDesign)); }
+      }
     }
   }
 

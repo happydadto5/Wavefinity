@@ -973,6 +973,30 @@ function designHasChanges() {
 async function openDesign(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+  // A recovery export imports as a set-aside entry, without validating away
+  // its fault or replacing whatever the person is currently working on.
+  let parsed;
+  try {
+    parsed = JSON.parse(await file.text());
+    const records = parsed?.[SP.BIN_RECOVERY_FIELD];
+    if (Array.isArray(records) && records.length) {
+      SP.loadBrowserBinRecovery();
+      for (const record of records) {
+        if (!SP.isBinRecovery(record)) continue;
+        const entry = { ...record, id: crypto.randomUUID(), tier: "memory" };
+        SP._binRecovery.set(entry.id, entry);
+        SP._binRecoveryNotices.add(entry.id);
+        await SP.saveBinRecovery(entry);
+      }
+      SP.renderBinRecovery();
+      event.target.value = "";
+      return;
+    }
+  } catch (error) {
+    toast("This design file could not be read. Choose the file again.", true, 5000);
+    event.target.value = "";
+    return;
+  }
   if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) {
     event.target.value = "";
     return;
@@ -987,7 +1011,6 @@ async function openDesign(event) {
   }
   if (!beginDesignMutation()) return;
   try {
-    const parsed = JSON.parse(await file.text());
     const result = await api("/api/design/validate", { design: parsed });
     if (isStructuralDesign(result.design)) {
       throw new Error("A Storage Box or Base Trim is saved from its Space, not opened in the Designer.");

@@ -13,9 +13,12 @@ function surfaceTrimHeight(trimSize) {
 // One prompt per unfinished Surface bin. The setting lives in this Space's
 // saved layout, while the number belongs to this bin and its Inventory row.
 async function maybePromptSurfaceObjectHeight() {
+  if (SP.busy || !SP.binEditorVisible()) return true;
+  const design = state.design, spaceId = state.activeSpaceId;
   if (!isSurfaceBinDesign() || state.design.layout.object_height_mm != null ||
       state.surfaceHeightPromptSkipped || typeof DL === "undefined") return true;
   if (!(await DL.ensureLoaded())) return false;
+  if (SP.busy || !SP.binEditorVisible() || state.design !== design || state.activeSpaceId !== spaceId) return true;
   const context = DL.spaceContext();
   if (DL.layout?.settings?.surface?.ask_object_height === false) return true;
   const dialog = $("#surface-object-height-dialog");

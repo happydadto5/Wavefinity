@@ -44,6 +44,16 @@ Wavefinity has two top-level work areas:
 
 A **Space** owns the real-world context and inventory. The Designer owns one ordinary bin at a time.
 
+Opening or switching Spaces always proceeds past a bin that cannot save. Its
+exact design and unfinished edits are kept as a named set-aside entry in its
+own Space, with browser recovery storage as the fallback. A note names the bin,
+its Space, and where the copy is kept. Reopen the Space to open and fix the bin,
+retry saving, export its design file, or discard the recovery copy. If neither
+store can write, the live copy stays for the session; the note explains that
+closing the app or reloading the page loses that session-only copy. Object
+height is asked only while that Surface bin is visible in its editor, never
+during a Space switch. Healthy bins still autosave normally.
+
 On **Welcome back**, click the last-Space summary card or **Open Last Space** to resume that Space. The card also supports keyboard focus and Enter/Space activation.
 
 Structural Space outputs are not ordinary Designer bins:

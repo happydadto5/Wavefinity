@@ -131,10 +131,17 @@ function setMutationSurfacesInert(inert) {
   });
 }
 
-function beginDesignMutation() {
+let designMutationDone = Promise.resolve();
+let resolveDesignMutation = null;
+
+async function waitForDesignMutation() {
+  while (state.designMutationBusy) await designMutationDone;
+}
+
+function beginDesignMutation({ readForm = true, quiet = false } = {}) {
   if (relocationBlocksWrites()) return false;
   if (state.designMutationBusy) {
-    toast("Finish the current design change first.", true);
+    if (!quiet) toast("Finish the current design change first.", true);
     return false;
   }
 
@@ -146,7 +153,7 @@ function beginDesignMutation() {
   cancelChangedDesignDebounce();
   pendingPreEditDesign = null;
 
-  if (!applyLiveFormWithModifierConflictGuard(beforeForm, previousCanGenerate)) {
+  if (readForm && !applyLiveFormWithModifierConflictGuard(beforeForm, previousCanGenerate)) {
     return false;
   }
 
@@ -154,6 +161,7 @@ function beginDesignMutation() {
   // work calculated against the old snapshot must not land afterward.
   cancelPendingDraftWork();
   state.designMutationBusy = true;
+  designMutationDone = new Promise(resolve => { resolveDesignMutation = resolve; });
   setMutationSurfacesInert(true);
   mutationControls().forEach(control => control.disabled = true);
   updateSelectionButtons();
@@ -163,6 +171,8 @@ function beginDesignMutation() {
 
 function finishDesignMutation() {
   state.designMutationBusy = false;
+  resolveDesignMutation?.();
+  resolveDesignMutation = null;
   flushBoreReconcile();
   setMutationSurfacesInert(false);
   mutationControls().forEach(control => control.disabled = false);
@@ -481,12 +491,12 @@ function blankTextPreviewError(result) {
 // preview currentness key, checkpoints/autosave and every render. refreshPreview()
 // calls it for its own result, and AI Help calls it for a candidate it already
 // proved, so an accepted design never costs a second identical geometry build.
-function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = state.lidThicknessEpoch } = {}) {
+function adoptPreviewResult(result, { persistResume = true, recovery = false, lidEpochAtRequest = state.lidThicknessEpoch } = {}) {
   const grownX = result.design?.box?.x !== state.design?.box?.x;
   const grownY = result.design?.box?.y !== state.design?.box?.y;
   const grownZ = result.design?.box?.z !== state.design?.box?.z;
   state.preview = result;
-  state.design = result.design;
+  if (!recovery) state.design = result.design;
   // Bind the three backend-measured lid thicknesses to the design and edit
   // epoch they were measured for; a later bin or a newer edit never shows them.
   applyLidThicknessReport(result, lidEpochAtRequest);
@@ -525,9 +535,11 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "";
   $("#preview-state").classList.toggle("status-error", Boolean(previewHasErrors));
   $("#preview-state").classList.remove("status-ok");
-  formatDimField("x");
-  formatDimField("y");
-  formatHeightField();
+  if (!recovery) {
+    formatDimField("x");
+    formatDimField("y");
+    formatHeightField();
+  }
   // The backend may have grown X/Y. Their displayed values now match the
   // accepted report, so an unrelated next edit must not look like a size edit.
   if (lidEpochAtRequest === state.lidThicknessEpoch) settleLidThicknessFormKey();
@@ -540,7 +552,7 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   // reporting fit/feature/draft errors - replaces the last valid one.
   // Placed after the controls above so the checkpoint is the same canonical
   // design the user now sees, including any server-adjusted X/Y/Z.
-  if (!rawPreviewHasErrors && typedSpaceOrdinaryBin()) {
+  if (!recovery && !rawPreviewHasErrors && typedSpaceOrdinaryBin()) {
     if (state.spaceStarterPreviewPending) {
       state.cleanDesign = clone(state.design);
       state.spaceStarterPreviewPending = false;
@@ -649,7 +661,7 @@ function keepPreviewForLabelOnlyChange({ persistResume = true } = {}) {
   }
 }
 
-async function refreshPreview({ persistResume = true } = {}) {
+async function refreshPreview({ persistResume = true, recovery = false } = {}) {
   // Fix 103: the structural target owns its own preview (refreshStructuralPreview);
   // an ordinary design must never preview or checkpoint under it.
   if (typeof designTargetIsStructural === "function" && designTargetIsStructural()) return;
@@ -692,7 +704,7 @@ async function refreshPreview({ persistResume = true } = {}) {
     if (request !== state.previewRequest) return;
     if (result.superseded) throw new Error("Current preview was unexpectedly superseded. Try again.");
     endPreviewWait(request);
-    adoptPreviewResult(result, { persistResume, lidEpochAtRequest });
+    adoptPreviewResult(result, { persistResume, recovery, lidEpochAtRequest });
     state.previewSettledRequest = request;
   } catch (error) {
     if (request !== state.previewRequest) return;

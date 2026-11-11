@@ -252,8 +252,9 @@ WS.closeSettings = async () => {
   return true;
 };
 
-WS.flushBin = async () => {
+WS.flushBin = async ({ spaceSwitch = false } = {}) => {
   if (["bin", "peek"].includes(WS.task) && WS.open() && typeof flushSpaceDesignAutosave === "function") {
+    if (spaceSwitch) return SP.leaveBinForSpaceSwitch();
     return flushSpaceDesignAutosave({ deferDraftPreview: true });
   }
   return true;
@@ -385,7 +386,7 @@ WS.rememberPrior = () => {
 WS.transition = async (task, arg) => {
   const from = WS.task;
   if (task === "newspace") {
-    if (!(await WS.closeSettings()) || !(await WS.flushBin())) return false;
+    if (!(await WS.closeSettings()) || !(await WS.flushBin({ spaceSwitch: true }))) return false;
     SP.close?.();
     WS.rememberPrior();
     WS.task = "newspace";
@@ -393,7 +394,7 @@ WS.transition = async (task, arg) => {
     return true;
   }
   if (task === "picker") {
-    if (!(await WS.closeSettings()) || !(await WS.flushBin())) return false;
+    if (!(await WS.closeSettings()) || !(await WS.flushBin({ spaceSwitch: true }))) return false;
     SP.close?.();
     WS.prior = null;
     WS.task = "picker";
@@ -842,6 +843,7 @@ WS.sync = () => {
     if (wrap && !wrap.classList.contains("active")) wsActivatePreview(view);
   }
   WS.render();
+  SP.renderBinRecovery();
   WS.measure();
   const signature = `${WS.task}|${[...DP.printSelected].join(",")}|${DP.containerPinned}|${state.designInventoryId || ""}|${WS.peekId || ""}|${WS.prior?.id ?? ""}`;
   if (signature !== WS.previewSignature) {
