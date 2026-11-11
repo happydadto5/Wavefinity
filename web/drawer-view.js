@@ -424,6 +424,13 @@ DV.render = () => {
   }
   // Taking a bin off the Space is a drop onto the tree.
   $("#ws-stage")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.overTree));
+  // Story 2932: one plain-text key for colours, front numbers and the stacking icon, in every Space kind.
+  // Pegboard bins are one flat teal, so the height-shade segment is left out there.
+  const colorKey = $("#dl-color-key");
+  if (colorKey) {
+    const shades = DL.isPegboard(drawer) ? [] : ["light teal = shortest bins, dark teal = tallest bins"];
+    colorKey.textContent = `Colours: ${[...shades, "purple = Storage Box bin", "sand = spacer", "red = a problem to fix", "dashed orange outline = too tall to fit", "pale green = empty space"].join(" · ")}. The number on a bin's front is its place in the bin list (Bin 1, Bin 2… — it changes if an earlier bin is deleted); S1, S2… marks a spacer. The stacked-boxes icon means the bin can take a stack on top, can sit on another bin, or both, as its arrows show.`;
+  }
   const heightLegend = $("#dl-height-legend");
   if (heightLegend) {
     const showLegend = DL.isStorageBox() || DL.isStorageDrawers();
@@ -1403,6 +1410,7 @@ DV.buildOverlay = () => {
     <div id="dl-empty-hint" class="dl-empty-hint" hidden><strong>Drag bins to place</strong><span>Drag onto a bin to stack</span></div>
     <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (smaller bins on a Lid for stacking must together cover the whole lid) · drag a bin onto the tree to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
     <div id="dl-layout-action-note" class="layout-hint" role="status" hidden></div>
+    <div class="layout-hint dl-color-key" id="dl-color-key"></div>
     <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden></div>`);
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
     if (button.dataset.dlView === "fit") DV.fit(); else DV.setView(DV.PRESETS[button.dataset.dlView]);
