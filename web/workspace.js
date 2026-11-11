@@ -184,7 +184,7 @@ WS.renderSelector = () => {
     const drawerButtons = one.kind === "settings" ? WS.drawerButtons(locked) : "";
     // Story 2840: the Layout line's one button, Manage, opens the same space details screen as a click on the line.
     const manage = one.kind === "settings"
-      ? `<button type="button" class="ws-out" data-ws-pick="settings" data-id="" title="Open the space details"${locked ? " disabled" : ""}>Manage</button>` : "";
+      ? `<button type="button" class="ws-out" data-ws-pick="settings" data-id="" title="Layout or print your space"${locked ? " disabled" : ""}>Print</button>` : "";
 
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     // Story 2840: Print and Export are rendered only on the selected row; other rows carry no output buttons.
@@ -880,7 +880,7 @@ WS.sync = () => {
   const switcher = $("#ws-spaces");
   if (switcher) switcher.disabled = WS.task === "picker";
   const place = $("#ws-place");
-  if (place) place.textContent = "Manage Spaces";
+  if (place) place.textContent = "All Spaces";
   if (open || (WS.task === "none" && WS.open())) {
     const view = WS.task === "bin" || WS.task === "container" ? "3d" : "drawer";
     const wrap = $(`.canvas-wrap[data-canvas="${view}"]`);

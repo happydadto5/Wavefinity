@@ -168,7 +168,7 @@
     const handle = select([["false", "No handle"], ["true", "Add handle"]], String(!!box.handle));
     handle.id = id("handle");
     const handleRow = labeled("Carrying handle", handle);
-    optRow.append(labeled("Case stacking", stacking), handleRow);
+    optRow.append(labeled("Storage Box stacking", stacking), handleRow);
     optGroup.append(optRow);
     caseWrap.append(optGroup);
 

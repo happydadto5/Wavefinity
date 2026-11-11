@@ -102,7 +102,7 @@
     rowLocationText(layout, rowId) {
       const id = api.drawerHoldingRow(layout, rowId);
       const number = (layout?.drawers || []).findIndex(row => row.id === id) + 1;
-      return number ? `Placed · Drawer ${number}` : "Unplaced";
+      return number ? `Placed · Drawer ${number}` : "Not placed";
     },
     reconcileProjection: projection,
     prepareCreateDraft(raw) {

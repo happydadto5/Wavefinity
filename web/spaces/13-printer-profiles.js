@@ -69,17 +69,9 @@ SP.closePrinterSettings = () => {
   if (dialog?.open) dialog.close();
 };
 
-// ---- Header Settings menu: Printer Settings and Change slicer.
-const designerSettingsMenu = document.getElementById("designer-settings-menu");
-designerSettingsMenu?.addEventListener("toggle", event => {
-  document.getElementById("designer-settings-open")?.setAttribute("aria-expanded", String(event.newState === "open"));
-});
-document.getElementById("settings-printer-open")?.addEventListener("click", () => {
-  designerSettingsMenu?.hidePopover();
-  SP.openPrinterSettings();
-});
+// ---- Header Settings opens Printer Settings directly; Change slicer lives in that dialog.
+document.getElementById("designer-settings-open")?.addEventListener("click", () => SP.openPrinterSettings());
 document.getElementById("settings-slicer-picker")?.addEventListener("click", event => {
-  designerSettingsMenu?.hidePopover();
   browseSlicer(event.currentTarget);
 });
 

@@ -120,7 +120,7 @@ DP.build = () => {
             <option value="in_design">In Design</option>
             <option value="saved">Saved</option>
             <option value="printed">Printed</option>
-            <option value="unplaced">Unplaced</option>
+            <option value="unplaced">Not placed</option>
             <option value="placed">Placed</option>
             <option value="unprinted">Not printed</option>
             <option value="stackable">Stackable</option>
@@ -313,7 +313,7 @@ DP.wire = () => {
       DP.renderInventory(true);
     }
   });
-  $("#dl-no-slicer-settings").addEventListener("click", () => $("#settings-printer-open")?.click());
+  $("#dl-no-slicer-settings").addEventListener("click", () => $("#designer-settings-open")?.click());
   $("#dl-sp-height-choice").addEventListener("change", event => {
     DL.change(() => { DL.layout.settings.spacers.height_choice = event.target.value; });
     $("#dl-sp-height").disabled = event.target.value !== "manual";
@@ -1227,7 +1227,7 @@ DP.renderInventory = (force = false) => {
     const check = `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.binNumberLabel(one))} ${escapeHtml(DL.label(one))}"${picked ? " checked" : ""}>`;
     const lifecycle = spacer
       ? `<small>${one.status === "printed" ? "Printed" : "Not printed"}</small>`
-      : `<small class="dl-status">${cabinet ? StorageDrawers.rowLocationText(DL.layout, one.id) : (placed ? "Placed" : "Unplaced")} · ${DL.statusLabel(one)}</small>`;
+      : `<small class="dl-status">${cabinet ? StorageDrawers.rowLocationText(DL.layout, one.id) : (placed ? "Placed" : "Not placed")} · ${DL.statusLabel(one)}</small>`;
     const actions = `<div class="dl-row-actions">
           ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>`
             : sourceMissing ? `<button type="button" class="button secondary dl-small" data-act="edit" disabled title="The original editable design for this row is unavailable, so it can't be edited.">Edit</button>` : ""}
