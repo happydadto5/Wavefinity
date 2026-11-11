@@ -5,8 +5,8 @@ function updateDesignFromForm() {
   const prevBoxX = design.box.x;
   if (isSurfaceBinDesign(design)) resolveSurfaceBase(design, { fromForm: true });
   const prevBoxY = design.box.y;
-  const newBoxX = normalizeBinDimension("x", $("#x-size").value, design.box.x);
-  const newBoxY = normalizeBinDimension("y", $("#y-size").value, design.box.y);
+  const newBoxX = readBinSizeField("x");
+  const newBoxY = readBinSizeField("y");
   design.box.x = newBoxX;
   design.box.y = newBoxY;
   const boxFootprintChanged = design.box.x !== prevBoxX || design.box.y !== prevBoxY;
@@ -15,7 +15,7 @@ function updateDesignFromForm() {
   // contain the new values.
   const sideOpeningResizeChanged = state.binFootprintResizePending || boxFootprintChanged;
   const prevBoxZ = design.box.z;
-  design.box.z = normalizeBinDimension("z", $("#z").value, design.box.z);
+  design.box.z = readBinSizeField("z");
   if (boxFootprintChanged) {
     turnOffNestAutoSizeForManualEdit();
   }
@@ -327,24 +327,64 @@ function binInsideExtent(box) {
   return [Math.max(1, number(box.x) - trim), Math.max(1, number(box.y) - trim)];
 }
 
-function formatDimField(axis) {
-  const selector = axis === "x" ? "#x-size" : "#y-size";
-  const input = $(selector);
-  if (!input) return;
-  const val = state.design?.box?.[axis];
-  if (val == null) return;
-  const unit = state.catalog?.base_unit || 7;
-  const units = Math.round(val / unit);
-  if (document.activeElement !== input) input.value = `${fmt(val)} (${units} unit${units === 1 ? "" : "s"})`;
+const binSizeSelector = axis => axis === "x" ? "#x-size" : axis === "y" ? "#y-size" : "#z";
+
+// Bind only when opening/replacing a design. Routine refreshes and server
+// auto-sizing keep the person's text, even when the effective size changes.
+function bindBinSizeFields(design = state.design) {
+  state.binSizeFields = {};
+  for (const axis of ["x", "y", "z"]) {
+    const raw = String(design.box[axis]);
+    state.binSizeFields[axis] = { raw };
+    const input = $(binSizeSelector(axis));
+    if (input) input.value = raw;
+  }
 }
 
-function formatHeightField() {
-  const input = $("#z");
-  if (!input || document.activeElement === input) return;
-  const val = state.design?.box?.z;
-  if (val == null) return;
-  input.value = `${fmt(val)} mm`;
+function readBinSizeField(axis) {
+  if (!state.binSizeFields) bindBinSizeFields();
+  const input = $(binSizeSelector(axis));
+  const previous = state.binSizeFields[axis];
+  // An unchanged request must not undo a later automatic size adjustment.
+  const requested = !previous.edited && input.value === previous.raw ? state.design.box[axis] : input.value;
+  previous.raw = input.value;
+  previous.edited = false;
+  return normalizeBinDimension(axis, requested, state.design.box[axis]);
 }
+
+function formatDimField(axis) {
+  if (!state.binSizeFields) bindBinSizeFields();
+  const input = $(binSizeSelector(axis));
+  if (!input) return;
+  const raw = input.value.trim();
+  const requested = Number(raw);
+  const valid = raw !== "" && Number.isFinite(requested) && requested > 0;
+  const used = normalizeBinDimension(axis,
+    !state.binSizeFields[axis].edited && input.value === state.binSizeFields[axis].raw ? state.design.box[axis] : requested,
+    state.design.box[axis]);
+  const unit = state.catalog?.base_unit || 7;
+  const max = Math.floor((state.catalog?.max_box_size || 350) / unit) * unit;
+  const notes = [];
+  if (!valid) notes.push("Enter a size in mm greater than zero.");
+  if (axis !== "z" && requested > max) notes.push(`A bin can be at most ${fmt(max)} mm on this side.`);
+  if (valid && Math.abs(requested - used) > 1e-6) {
+    notes.push(`Uses ${fmt(used)} mm${axis === "z" ? "" : ` (${fmt(used / unit)} units)`}.`);
+  }
+  let note = document.getElementById(`${input.id}-size-note`);
+  if (!note) {
+    note = document.createElement("small");
+    note.id = `${input.id}-size-note`;
+    note.className = "field-help";
+    note.setAttribute("aria-live", "polite");
+    input.after(note);
+    input.setAttribute("aria-describedby", [input.getAttribute("aria-describedby"), note.id].filter(Boolean).join(" "));
+  }
+  note.textContent = notes.join(" ");
+  note.hidden = !notes.length;
+  input.toggleAttribute("aria-invalid", !valid || (axis !== "z" && requested > max));
+}
+
+function formatHeightField() { formatDimField("z"); }
 
 
 function wireSidebar() {
@@ -561,6 +601,12 @@ function wireControls() {
 
   ["#x-size", "#y-size", "#z", "#base-thickness", "#wall-thickness", "#part-name"]
     .forEach(selector => $(selector).addEventListener("input", () => {
+      if (["#x-size", "#y-size", "#z"].includes(selector)) {
+        const axis = selector === "#x-size" ? "x" : selector === "#y-size" ? "y" : "z";
+        if (!state.binSizeFields) bindBinSizeFields();
+        state.binSizeFields[axis].edited = true;
+        formatDimField(axis);
+      }
       if (selector === "#x-size" || selector === "#y-size") {
         state.starterHintActive = false;
         syncStarterSizeHint();
@@ -594,7 +640,7 @@ function wireControls() {
       const resolved = resolveSurfaceBase(state.design, { fromForm: true });
       if (resolved === false) return;
       if (selector === "#surface-base-mode" || selector === "#surface-base-custom") {
-        $("#z").value = fmt(state.design.box.z);
+        formatHeightField();
         state.binResizePending = true;
       }
       syncSurfaceControls();
@@ -731,14 +777,11 @@ function wireControls() {
     const input = $(selector);
     input.addEventListener("input", () => markBinAxisManual(axis));
     input.addEventListener("focus", () => {
-      input.value = fmt(state.design.box[axis]);
       input.select();
     });
     input.addEventListener("blur", () => {
       const previousDesign = clone(state.design);
-      const unit = state.catalog.base_unit;
-      const rawVal = number(input.value, state.design.box[axis]);
-      const snapped = normalizeBinDimension(axis, rawVal, state.design.box[axis]);
+      const snapped = readBinSizeField(axis);
       const prev = state.design.box[axis];
       if (snapped !== prev) markBinAxisManual(axis);
       state.design.box[axis] = snapped;
@@ -759,11 +802,12 @@ function wireControls() {
         const unit = state.catalog.base_unit;
         const current = number(input.value, state.design.box[axis]);
         const delta = event.key === "ArrowUp" ? unit : -unit;
-        const next = snapToUnit(current + delta, unit);
+        const next = current + delta;
         markBinAxisManual(axis);
         input.value = String(next);
         input.select();
-        state.design.box[axis] = next;
+        state.design.box[axis] = readBinSizeField(axis);
+        formatDimField(axis);
         state.canGenerate = false;
         updateGenerateAvailability();
         changedDesign(previousDesign);
@@ -775,16 +819,15 @@ function wireControls() {
       const unit = state.catalog.base_unit;
       const current = number(input.value, state.design.box[axis]);
       const delta = event.deltaY < 0 ? unit : -unit;
-      const next = snapToUnit(current + delta, unit);
+      const next = current + delta;
       if (next === current && delta < 0) return;
       markBinAxisManual(axis);
-      state.design.box[axis] = next;
+      input.value = String(next);
+      state.design.box[axis] = readBinSizeField(axis);
       if (document.activeElement === input) {
-        input.value = String(next);
         input.select();
-      } else {
-        formatDimField(axis);
       }
+      formatDimField(axis);
       state.canGenerate = false;
       updateGenerateAvailability();
       changedDesign(previousDesign);
@@ -792,12 +835,11 @@ function wireControls() {
   });
   const heightInput = $("#z");
   heightInput.addEventListener("focus", () => {
-    heightInput.value = fmt(state.design.box.z);
     heightInput.select();
   });
   heightInput.addEventListener("blur", () => {
     const previousDesign = clone(state.design);
-    const next = normalizeBinDimension("z", heightInput.value, state.design.box.z);
+    const next = readBinSizeField("z");
     const changed = next !== state.design.box.z;
     state.design.box.z = next;
     formatHeightField();

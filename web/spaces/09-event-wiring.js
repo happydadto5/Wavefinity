@@ -156,19 +156,12 @@ SP.wire = () => {
     const input = document.getElementById(id);
     if (input) input.addEventListener("input", SP.updateReadouts);
   });
-  // Usable inside width/depth correct like a bin's: leaving the field (Enter
-  // leaves it too) snaps the value to the nearest unit and shows that value.
-  // SP.snap is the same rounding and clamp the saved Storage Box size uses.
-  // Drawer and Storage Box are the two types with Usable inside width/depth.
+  // Leaving a size field never changes its text. Storage Box rounding is
+  // explained below the field; physical Drawer measurements stay exact.
   ["drawer-x", "drawer-y", "portable-x", "portable-y"].forEach(id => {
     const input = document.getElementById(id);
     if (!input) return;
-    input.addEventListener("blur", () => {
-      const raw = Number(input.value);
-      if (!(raw > 0)) return;
-      input.value = fmt(SP.snap(raw));
-      SP.updateReadouts();
-    });
+    input.addEventListener("blur", SP.updateReadouts);
     input.addEventListener("keydown", event => {
       if (event.key === "Enter") input.blur();
     });
@@ -238,5 +231,6 @@ SP.updateReadouts = () => {
           document.getElementById("pegboard-border-readout").textContent = `${fmt(resolved.residualX / 2)} mm sides, ${fmt(resolved.residualY / 2)} mm top/bottom`;
         }
     }
+    SP.refreshSetupError();
 };
 

@@ -135,10 +135,8 @@ function updateDimensionDrag(clientX, clientY) {
   const projectedPixels = dx * drag.screenAxis[0] + dy * drag.screenAxis[1];
   const pixelsPerMm = drag.pixelSpan / Math.max(1e-6, drag.displayStartValue);
   const requested = drag.startValue + projectedPixels / pixelsPerMm;
-  drag.currentValue = normalizeBinDimension(drag.axis, requested, drag.startValue);
-  const field = drag.axis === "x" ? "#x-size" : drag.axis === "y" ? "#y-size" : "#z";
-  const input = $(field);
-  if (input && document.activeElement !== input) input.value = fmt(drag.currentValue);
+  drag.requestedValue = Math.round(requested * 10) / 10;
+  drag.currentValue = normalizeBinDimension(drag.axis, drag.requestedValue, drag.startValue);
 }
 
 function releaseDimensionPointerCapture(canvas, pointerId) {
@@ -154,9 +152,14 @@ function commitDimensionDrag(canvas) {
   if (!drag) return;
   state.dimensionDrag = null;
   releaseDimensionPointerCapture(canvas, drag.pointerId);
-  if (drag.currentValue === drag.startValue) return;
+  if (drag.requestedValue == null) return;
   const previousDesign = drag.originalDesign;
+  $(binSizeSelector(drag.axis)).value = String(drag.requestedValue ?? drag.currentValue);
   state.design.box[drag.axis] = drag.currentValue;
+  state.binSizeFields[drag.axis].raw = $(binSizeSelector(drag.axis)).value;
+  state.binSizeFields[drag.axis].edited = false;
+  formatDimField(drag.axis);
+  if (drag.currentValue === drag.startValue) return;
   if (drag.axis !== "z") {
     formatDimField(drag.axis);
     markBinAxisManual(drag.axis);

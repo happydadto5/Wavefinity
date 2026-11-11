@@ -689,11 +689,7 @@ function syncForm() {
   formatDimField("x");
   formatDimField("y");
   syncStarterSizeHint();
-  if (document.activeElement === $("#z")) {
-    $("#z").value = fmt(box.z);
-  } else {
-    formatHeightField();
-  }
+  formatHeightField();
   // Fix 1066: show the container's interior height below the Height field
   // so the user knows what will just fit inside (storage box/drawer only).
   syncContainerInsideHint();

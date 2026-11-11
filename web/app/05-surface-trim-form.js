@@ -485,6 +485,8 @@ function rememberedLidSnapshot(design = state.design) {
 // and before the resulting syncForm()/syncLidForm() call reads it.
 function bindLidMemoryForDesign(design = state.design) {
   state.lidMemory = rememberedLidSnapshot(design);
+  // The same explicit design boundary also owns the editable size text.
+  bindBinSizeFields(design);
 }
 
 function lidPartActive(design = state.design) {

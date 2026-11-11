@@ -108,38 +108,40 @@
     const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
     const x = input(space.x), y = input(space.y);
     x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
-    // Fix 1137: after the user leaves the field it shows "325 (40 units)"
-    // like bins do; resolveMm tolerates that suffix so arrow/wheel/3D-handle
-    // stepping, validation and save keep working on the displayed value.
-    // Story 2747: the finished entry reads "238 mm Interior (34 Units) (Exterior 243.9 mm)".
-    const stripUnitsSuffix = value => value.replace(/\s*mm\s+Interior[\s\S]*$/i, "").replace(/\s*\(\d+\s*units\)\s*$/i, "").trim();
+    const sizeNotes = new Map();
+    const rangeText = `From ${minUnits} to ${maxUnits} whole units of ${baseUnit} mm (${minUnits * baseUnit} to ${maxUnits * baseUnit} mm).`;
     const resolveMm = field => {
-      const raw = stripUnitsSuffix(field.value);
+      const raw = field.value.trim();
       const requested = Number(raw);
-      if (!raw || !Number.isFinite(requested) || requested <= 0) return { ok: false };
+      if (!raw || !Number.isFinite(requested) || requested < minUnits * baseUnit || requested > maxUnits * baseUnit) return { ok: false };
       const units = Math.round(requested / baseUnit);
       if (units < minUnits || units > maxUnits) return { ok: false };
       return { ok: true, units, mm: units * baseUnit };
     };
+    // Refresh the note, never the input. Preview, save, blur and stepping all
+    // resolve the same untouched request through resolveMm().
     const formatUnitsInline = field => {
       const resolved = resolveMm(field);
-      if (!resolved.ok) return;
-      const outside = lastSummary && Array.isArray(lastSummary.outside_xyz) ? Number(lastSummary.outside_xyz[field === x ? 0 : 1]) : NaN;
-      field.value = `${resolved.mm} mm Interior (${resolved.units} Units)` +
-        (Number.isFinite(outside) ? ` (Exterior ${fmt(outside)} mm)` : "");
+      const notes = [rangeText];
+      if (resolved.ok && Math.abs(Number(field.value) - resolved.mm) > 1e-6) notes.push(`Uses ${resolved.mm} mm (${resolved.units} units).`);
+      const outside = lastSummary && Number(lastSummary.outside_xyz?.[field === x ? 0 : 1]);
+      if (Number.isFinite(outside)) notes.push(`Exterior ${fmt(outside)} mm.`);
+      const bad = !resolved.ok && (field.value.trim() !== "" || touchedFields.has(field));
+      field.toggleAttribute("aria-invalid", bad);
+      const note = sizeNotes.get(field);
+      if (note) { note.textContent = notes.join(" "); note.classList.toggle("status-error", bad); }
     };
     for (const field of [x, y]) { field.inputMode = "decimal"; field.required = true; }
-    // Usable height is local: the stored clear height plus the selected fit.
     const structural = scope === "full" && callbacks.structural === true;
     const zField = input("", "number"); zField.id = `sd-z-${epoch}`; zField.step = "any";
     zField.dataset.usableHeight = "1";
     const zHelp = help("");
     for (const [field, title] of [[x, "Interior Width"], [y, "Interior Depth"]]) {
       const label = labeled(title, field); sizeGrid.append(label);
-      // Fix 1137: exiting the field shows "325 (40 units)" inline like bins;
-      // focusing it again restores the plain mm value for editing.
+      const note = help(rangeText); note.id = `${field.id}-note`; note.setAttribute("aria-live", "polite");
+      label.append(note); sizeNotes.set(field, note); field.setAttribute("aria-describedby", note.id);
+      field.addEventListener("input", () => formatUnitsInline(field), { signal: events.signal });
       field.addEventListener("blur", () => formatUnitsInline(field), { signal: events.signal });
-      field.addEventListener("focus", () => { field.value = stripUnitsSuffix(field.value); }, { signal: events.signal });
     }
     // Story 2755: zField is not shown; height is edited per drawer below. It stays
     // detached as the value holder for the 3D height handle.
@@ -268,9 +270,12 @@
     let syncAddButton = () => {};
     let renderRowHeights = () => {};
     const heightInputs = new Map();
+    const heightRequests = new Map();
+    const heightNotes = new Map();
     const renderRows = () => {
       drawerRows.replaceChildren();
       heightInputs.clear();
+      heightNotes.clear();
       block.drawers.forEach((row, index) => {
         const line = el("div", `sd-drawer-row${drawerEnabled.value === "true" ? " sd-drawer-row-with-label" : ""}`);
         const head = el("div", "sd-drawer-head"); head.append(el("strong", "", `Drawer ${index + 1}`)); line.append(head);
@@ -313,24 +318,26 @@
           }, { signal: events.signal });
         }
         // Usable height never waits for summary or preview work.
-        const height = input(""); height.inputMode = "decimal"; height.required = true;
+        if (!heightRequests.has(row)) heightRequests.set(row, String(usableOf(row)));
+        const height = input(heightRequests.get(row)); height.inputMode = "decimal"; height.required = true;
         height.disabled = disabled;
         height.id = `sd-height-${epoch}-${index}`;
         height.dataset.usableHeight = "1";
         heightInputs.set(row, height);
         height.addEventListener("input", () => {
-          if (!height.value.trim() || !Number.isFinite(setUsable(row, stripHeightSuffix(height.value)))) row.height_mm = NaN;
+          heightRequests.set(row, height.value);
+          if (!height.value.trim() || !Number.isFinite(setUsable(row, height.value))) row.height_mm = NaN;
           renderRowHeights(); syncHeightField(); schedule();
         }, { signal: events.signal });
-        // Story 2747: leaving the field shows "30 mm (Usable height)"; typing is unchanged.
-        height.addEventListener("blur", () => { if (Number.isFinite(usableOf(row))) height.value = heightText(usableOf(row)); }, { signal: events.signal });
-        height.addEventListener("focus", () => { height.value = stripHeightSuffix(height.value); }, { signal: events.signal });
         const label = input(row.label_text); label.maxLength = labelLimit; label.disabled = disabled;
         label.id = `sd-label-${epoch}-${index}`;
         label.dataset.heightNeutral = "1";
         label.addEventListener("input", () => { row.label_text = label.value; }, { signal: events.signal });
         const labelField = labeled("Label text", label); labelField.hidden = drawerEnabled.value !== "true";
-        line.append(labeled("Usable height", height), labelField);
+        const heightField = labeled("Usable height", height);
+        const heightNote = help(""); heightNote.id = `${height.id}-note`; heightNote.setAttribute("aria-live", "polite");
+        heightField.append(heightNote); heightNotes.set(row, heightNote); height.setAttribute("aria-describedby", heightNote.id);
+        line.append(heightField, labelField);
         drawerRows.append(line);
       });
       renderRowHeights();
@@ -348,8 +355,6 @@
     }
     let activeDrawerId = block.drawers.find(row => row.id && !String(row.id).startsWith("temporary:"))?.id || null;
     const roundMm = value => Math.round(value * 1000) / 1000;
-    const heightText = usable => `${usable} mm (Usable height)`;
-    const stripHeightSuffix = value => value.replace(/\s*mm\s*\(Usable height\)\s*$/i, "").trim();
     const getDrawerFitMm = () => Number(fit.value);
     const usableOf = row => roundMm(row.height_mm + getDrawerFitMm());
     // Fix 1098 (G2M-0360): the visible usable-height floor is the max of
@@ -375,7 +380,13 @@
         field.min = String(usableMinOf());
         field.max = String(maxUsableHeight);
         field.toggleAttribute("aria-invalid", !Number.isFinite(usable) || usable < usableMinOf() || usable > maxUsableHeight);
-        if (document.activeElement !== field) field.value = Number.isFinite(usable) ? heightText(usable) : "";
+        const note = heightNotes.get(row);
+        const bad = !Number.isFinite(usable) || usable < usableMinOf() || usable > maxUsableHeight;
+        const used = Number.isFinite(usable) && Math.abs(Number(field.value) - usable) > 1e-6 ? ` Uses ${fmt(usable)} mm.` : "";
+        if (note) {
+          note.textContent = `Usable height must be at least ${fmt(usableMinOf())} mm and at most ${fmt(maxUsableHeight)} mm.${used}`;
+          note.classList.toggle("status-error", bad);
+        }
       });
       syncAddButton();
     };
@@ -406,6 +417,10 @@
         if (!row) return NaN;
         const applied = setUsable(row, requested);
         if (!Number.isFinite(applied)) row.height_mm = NaN;
+        const raw = Number.isFinite(Number(requested)) ? String(requested) : "";
+        heightRequests.set(row, raw);
+        const field = heightInputs.get(row);
+        if (field) field.value = raw;
         renderRowHeights(); syncHeightField(); schedule();
         return applied;
       }
@@ -495,8 +510,8 @@
       const lines = [];
       for (const warning of response.warnings || []) lines.push(el("p", "sd-summary-warning", `Note: ${warning}`));
       summary.replaceChildren(...lines);
-      // The finished outside size now shows in the width/depth fields.
-      for (const field of [x, y]) if (document.activeElement !== field) formatUnitsInline(field);
+      // The finished outside size shows in the notes below Width and Depth.
+      for (const field of [x, y]) formatUnitsInline(field);
       updatePrinterRow();
       renderRowHeights();
       syncHeightField();
@@ -505,6 +520,12 @@
     const showSummaryText = (text, bad = false) => { summary.replaceChildren(...(bad ? [el("p", "sd-fit-verdict bad", text)] : [])); updatePrinterRow(); };
     const schedule = () => {
       summaryState = "pending"; summaryError = ""; summaryKey = null; summaryIdentity = null; lastSummary = null; showSummaryText("Checking cabinet…"); notifyReady();
+      form.querySelectorAll("[data-sd-error]").forEach(note => {
+        const field = document.getElementById(note.id.replace(/-error$/, ""));
+        field?.removeAttribute("aria-invalid");
+        note.remove();
+      });
+      formatUnitsInline(x); formatUnitsInline(y);
       renderRowHeights();
       syncHeightField();
       callbacks.onChange?.();
@@ -512,7 +533,17 @@
       const pEpoch = profileEpoch; const checked = readFields();
       if (!checked.ok) { summaryState = "error"; summaryError = checked.message; const field = checked.focusId && document.getElementById(checked.focusId);
         const untouchedEmpty = field && !String(field.value || "").trim() && !touchedFields.has(field);
-        showSummaryText(checked.message, !untouchedEmpty); notifyReady(); markSettled(); return; }
+        if (field) {
+          if (!untouchedEmpty) {
+            const note = help(checked.message); note.classList.add("status-error"); note.dataset.sdError = "1";
+            note.id = `${field.id}-error`; note.setAttribute("aria-live", "polite"); field.after(note);
+            field.setAttribute("aria-invalid", "true");
+            const described = (field.getAttribute("aria-describedby") || "").split(" ").filter(id => id && id !== note.id);
+            field.setAttribute("aria-describedby", [...described, note.id].join(" "));
+          }
+          showSummaryText("");
+        } else showSummaryText(checked.message, true);
+        notifyReady(); markSettled(); return; }
       const next = checked.spaceDraft;
       const key = window.StorageDrawers.structuralDraftKey(next, printerProfile);
       timer = setTimeout(async () => {
@@ -579,7 +610,7 @@
       zField.addEventListener("input", () => { setInterior("z", zField.value.trim() ? Number(zField.value) : NaN); }, { signal: events.signal });
       for (const [axis, field] of [["x", x], ["y", y], ["z", zField]]) {
         const step = axis === "z" ? 1 : baseUnit;
-        const current = () => (axis === "z" ? Number(zField.value) : (resolveMm(field).ok ? resolveMm(field).mm : NaN));
+        const current = () => (axis === "z" ? Number(zField.value) : Number(field.value));
         field.addEventListener("keydown", event => {
           if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
           event.preventDefault();

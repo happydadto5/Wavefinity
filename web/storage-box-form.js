@@ -75,7 +75,7 @@
     const catalog = (typeof state !== "undefined" && state.catalog) || null;
     const rules = catalog?.b4b_rules || {};
     const unit = Number(catalog?.base_unit || 7);
-    const maxXY = Math.floor(Number(catalog?.max_box_size || 350) / unit) * unit;
+    const maxMM = 2000; // Container authority; never the single-bin ceiling.
     const minField = Number(rules.min_field_mm) || unit;
     const minHeight = Number(rules.min_secure_height_mm) || 1;
     const box = { ...defaults(catalog), ...(initialSpace?.storage_box || {}), edge_bevel: bevelOf(initialSpace) };
@@ -235,51 +235,50 @@
       const match = String(value ?? "").trim().match(/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/);
       return match ? Number(match[0]) : NaN;
     }
-    function formatAxis(axis, value) {
-      if (!(value > 0)) return "";
-      if (axis === "z") return `${value} mm`;
-      const units = Math.round(value / unit);
-      return `${value} (${units} unit${units === 1 ? "" : "s"})`;
+    const sizeNotes = new Map();
+    function normalizeAxis(axis, requested) {
+      const value = typeof requested === "number" ? requested : parseLeadingNumber(requested);
+      if (!Number.isFinite(value)) return NaN;
+      return axis === "z" ? Math.round(value) : Math.round(value / unit) * unit;
     }
     function displayAxis(axis, input) {
-      const value = parseLeadingNumber(input.value);
-      if (!Number.isFinite(value)) return;
-      input.value = document.activeElement === input ? String(value) : formatAxis(axis, value);
-    }
-    function normalizeAxis(axis, requested, fallback) {
-      const parsed = typeof requested === "number" ? requested : parseLeadingNumber(requested);
-      const fallbackValue = typeof fallback === "number" ? fallback : parseLeadingNumber(fallback);
-      const value = Number.isFinite(parsed) ? parsed : fallbackValue;
-      if (!Number.isFinite(value)) return NaN;
-      if (axis === "z") return Math.max(minHeight, Math.round(value));
-      return Math.min(maxXY, Math.max(minField, Math.round(value / unit) * unit));
+      const raw = input.value.trim() ? Number(input.value) : NaN;
+      const used = normalizeAxis(axis, raw);
+      const minimum = axis === "z" ? minHeight : minField;
+      const bad = !Number.isFinite(raw) || raw <= 0 || used < minimum || raw > maxMM || used > maxMM;
+      const notes = [`At least ${minimum} mm and at most ${maxMM} mm.`];
+      if (Number.isFinite(used) && Math.abs(raw - used) > 1e-6) notes.push(`Uses ${used} mm${axis === "z" ? "" : ` (${used / unit} units)`}.`);
+      let note = sizeNotes.get(axis);
+      if (!note) {
+        note = el("small", "field-help"); note.id = `${input.id}-note`; note.setAttribute("aria-live", "polite");
+        input.after(note); input.setAttribute("aria-describedby", note.id); sizeNotes.set(axis, note);
+      }
+      note.textContent = notes.join(" "); note.classList.toggle("status-error", bad);
+      input.toggleAttribute("aria-invalid", bad);
+      return bad ? { ok: false, message: notes[0], focusId: input.id } : { ok: true };
     }
     const inputFor = axis => (axis === "x" ? xInput : axis === "y" ? yInput : zInput);
     function getInterior() {
       return {
-        x: normalizeAxis("x", parseLeadingNumber(xInput.value), NaN),
-        y: normalizeAxis("y", parseLeadingNumber(yInput.value), NaN),
-        z: normalizeAxis("z", parseLeadingNumber(zInput.value), NaN),
+        x: normalizeAxis("x", xInput.value.trim() ? Number(xInput.value) : NaN),
+        y: normalizeAxis("y", yInput.value.trim() ? Number(yInput.value) : NaN),
+        z: normalizeAxis("z", zInput.value.trim() ? Number(zInput.value) : NaN),
       };
     }
     // Typed input, arrow/wheel steps and the 3D handles all land here.
     function setInterior(axis, requested, { silent = false } = {}) {
       const input = inputFor(axis);
-      const value = normalizeAxis(axis, requested, input.value);
-      if (!Number.isFinite(value)) return NaN;
-      input.value = document.activeElement === input ? String(value) : formatAxis(axis, value);
+      input.value = String(requested);
+      const value = normalizeAxis(axis, requested);
+      displayAxis(axis, input);
       if (axis === "x") syncLatchChoices();
       if (!silent) onChange();
       return value;
     }
     for (const axis of ["x", "y", "z"]) {
       const input = inputFor(axis);
-      input.addEventListener("focus", () => displayAxis(axis, input), { signal: events.signal });
-      input.addEventListener("blur", () => {
-        setInterior(axis, parseLeadingNumber(input.value));
-        displayAxis(axis, input);
-      }, { signal: events.signal });
-      input.addEventListener("change", () => setInterior(axis, parseLeadingNumber(input.value)), { signal: events.signal });
+      input.addEventListener("blur", () => displayAxis(axis, input), { signal: events.signal });
+      input.addEventListener("change", onChange, { signal: events.signal });
       input.addEventListener("keydown", event => {
         if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
         event.preventDefault();
@@ -318,6 +317,9 @@
     // ---- Draft ----
     // The current form values carry normalized sizes for preview and autosave.
     function read() {
+      const checks = ["x", "y", "z"].map(axis => displayAxis(axis, inputFor(axis)));
+      const invalid = checks.find(check => !check.ok);
+      if (invalid) return invalid;
       const { x, y, z } = getInterior();
       if (!(x > 0 && y > 0 && z > 0)) {
         return { ok: false, message: "Enter a width, depth, and height greater than zero.", focusId: id("x") };

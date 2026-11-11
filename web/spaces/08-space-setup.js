@@ -117,6 +117,8 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   SP.isUpdate = update;
   SP.setupKind = kind;
   SP.setupValidationStarted = false;
+  $("#space-form").querySelectorAll("[data-setup-touched]").forEach(input => delete input.dataset.setupTouched);
+  $("#space-form").querySelectorAll('[id$="-setup-error"]').forEach(note => { note.hidden = true; note.textContent = ""; });
   SP.dialog().classList.toggle("storage-drawers-config", kind === "storage_drawers" && !update);
   const typeLabel = SP_KINDS[kind]?.label || kind;
   const title = document.getElementById("space-form-title");
@@ -330,131 +332,139 @@ SP.readSetupValues = async () => {
 
 // Live feedback uses the same rules as Create/Save, without moving focus or
 // entering the cabinet's asynchronous Continue path.
-SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
-  const fail = (message, selector) => {
-    SP.fail(message, focus ? selector : null);
-    return null;
-  };
-
-  const kind = SP.setupKind;
-  const name = document.getElementById("space-name").value.trim();
-  if (!name) return fail("Give the Space a name.", "#space-name");
-
-  const unit = Number(state.catalog?.base_unit || 7);
-
-  if (kind === "drawer") {
-    const x = Number(document.getElementById("drawer-x").value);
-    const y = Number(document.getElementById("drawer-y").value);
-    const z = Number(document.getElementById("drawer-z").value);
-    if (![x, y, z].every(Number.isFinite)) {
-      return fail("Enter valid drawer dimensions in mm.", "#drawer-x");
-    }
-    // Client-side early feedback only: the server's normalise_drawer() in
-    // organizer_drawer/_core.py (MAX_DRAWER_MM = 2000) is the authority and
-    // rejects anything larger with a clean 400.
-    const maxMM = 2000;
-    if (x > maxMM || y > maxMM || z > maxMM) {
-      return fail("Dimensions must be at most 2000 mm.", "#drawer-x");
-    }
-    if (SP.drawerCapacity(x) < 1 || SP.drawerCapacity(y) < 1) {
-      return fail(
-        "The drawer must have room for at least one Wavefinity unit after wall clearance.",
-        "#drawer-x",
-      );
-    }
-    const minHeight = ordinaryBinMinimumHeight();
-    if (z < minHeight) {
-      return fail(
-        `Usable drawer height must be at least ${fmt(minHeight)} mm.`,
-        "#drawer-z",
-      );
-    }
-    return { kind, name, x, y, z, trimSize: null };
+// Field notes have separate hint/error slots so a limit stays visible even
+// before an invalid entry. All Create, Edit and live reads share these rules.
+SP.setupFieldNote = (selector, text, slot = "hint") => {
+  const input = $(selector);
+  if (!input) return;
+  const id = `${input.id}-setup-${slot}`;
+  let note = document.getElementById(id);
+  if (!note) {
+    note = document.createElement("small");
+    note.id = id;
+    note.className = slot === "error" ? "field-help status-error" : "field-help";
+    note.setAttribute("aria-live", "polite");
+    input.after(note);
+    input.setAttribute("aria-describedby", [input.getAttribute("aria-describedby"), id].filter(Boolean).join(" "));
   }
-
-  if (kind === "surface") {
-    const trimSize = document.getElementById("surface-trim").value;
-    const maxX = Number(document.getElementById("surface-x").value);
-    const maxY = Number(document.getElementById("surface-y").value);
-    const resolved = SP.resolveSurface(maxX, maxY, trimSize);
-    if (!resolved.ok) {
-      return fail(
-        resolved.error,
-        SP.surfacePresetMap()[trimSize] === undefined ? "#surface-trim" : "#surface-x",
-      );
-    }
-    return {
-      kind,
-      name,
-      x: resolved.fieldX,
-      y: resolved.fieldY,
-      z: SP.surfacePresetMap()[trimSize],
-      trimSize,
-      extra: { max_x_mm: maxX, max_y_mm: maxY },
-    };
-  }
-
-  if (kind === "portable") {
-    const rawX = Number(document.getElementById("portable-x").value);
-    const rawY = Number(document.getElementById("portable-y").value);
-    const z = Number(document.getElementById("portable-z").value);
-    if (![rawX, rawY, z].every(Number.isFinite)) {
-      return fail("Enter valid Storage Box dimensions in mm.", "#portable-x");
-    }
-    // Client-side early feedback only: these become the drawer's width/depth/height,
-    // and the server's normalise_drawer() (MAX_DRAWER_MM = 2000) is the authority.
-    const maxMM = 2000;
-    if (rawX > maxMM || rawY > maxMM || z > maxMM) {
-      return fail("Dimensions must be at most 2000 mm.", "#portable-x");
-    }
-
-    const x = SP.snap(rawX);
-    const y = SP.snap(rawY);
-    const minField = Number(state.catalog?.b4b_rules?.min_field_mm);
-    const minHeight = Number(state.catalog?.b4b_rules?.min_secure_height_mm);
-
-    if (x < minField || y < minField) {
-      return fail(
-        `A Storage Box needs at least ${fmt(minField)} × ${fmt(minField)} mm of child-bin field.`,
-        "#portable-x",
-      );
-    }
-    if (z < minHeight) {
-      return fail(
-        `A Storage Box's usable height must be at least ${fmt(minHeight)} mm.`,
-        "#portable-z",
-      );
-    }
-    return { kind, name, x, y, z, trimSize: null, extra: { storage_box: SP.readStorageBoxForm() } };
-  }
-
-  if (kind === "pegboard") {
-    const resolved = SP.resolvePegboard();
-    if (!resolved.ok) return fail(resolved.error, resolved.mode === "holes" ? "#pegboard-holes-x" : "#pegboard-x");
-    return {
-      kind, name, x: resolved.width, y: resolved.height, z: 350, trimSize: null,
-      extra: {
-        pegboard_standard: resolved.standard.id,
-        pegboard_thickness_mm: Number(document.getElementById("pegboard-thickness").value),
-        pegboard_size_mode: resolved.mode,
-        pegboard_holes_x: resolved.holesX,
-        pegboard_holes_y: resolved.holesY,
-      },
-    };
-  }
-
-  return fail("Choose a Space type.", "#space-name");
+  note.textContent = text;
+  note.hidden = !text;
 };
 
-// Once a check has failed, keep its feedback current while editing. The
-// cabinet already owns live field/server feedback inside its embedded form;
-// discard its old Continue message and let that owner show current problems.
-SP.refreshSetupError = () => {
-  const error = document.getElementById("space-error");
-  if (!error || (error.hidden && !SP.setupValidationStarted)) return;
-  if (SP.setupKind !== "storage_drawers" && !SP.readOrdinarySetupValues({ focus: false })) return;
-  error.textContent = "";
-  error.hidden = true;
+SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
+  const form = $("#space-form");
+  form.querySelectorAll('[id$="-setup-error"]').forEach(note => { note.hidden = true; note.textContent = ""; });
+  form.querySelectorAll('[aria-invalid]').forEach(input => input.removeAttribute("aria-invalid"));
+  $("#space-error").hidden = true;
+  let firstInvalid = null;
+  const fail = (message, selector) => {
+    const input = $(selector);
+    firstInvalid ||= input;
+    const show = focus || SP.setupValidationStarted || input?.dataset.setupTouched || input?.value.trim();
+    if (show) {
+      SP.setupFieldNote(selector, message, "error");
+      input?.setAttribute("aria-invalid", "true");
+    }
+  };
+  const readNumber = selector => {
+    const input = $(selector);
+    return input.value.trim() && !input.validity.badInput ? Number(input.value) : NaN;
+  };
+  const kind = SP.setupKind;
+  const name = $("#space-name").value.trim();
+  if (!name) fail("Give the Space a name.", "#space-name");
+  const unit = Number(state.catalog?.base_unit || 7);
+  let values = null;
+
+  if (kind === "drawer" || kind === "portable") {
+    const prefix = kind === "drawer" ? "drawer" : "portable";
+    const dimensions = {};
+    for (const axis of ["x", "y", "z"]) {
+      const selector = `#${prefix}-${axis}`;
+      const raw = readNumber(selector);
+      const used = kind === "portable" && axis !== "z" ? SP.snap(raw) : raw;
+      dimensions[axis] = used;
+      const notes = ["At most 2000 mm."];
+      if (Number.isFinite(raw) && raw > 0 && Math.abs(raw - used) > 1e-6) {
+        notes.push(`Uses ${fmt(used)} mm (${fmt(used / unit)} units).`);
+      }
+      SP.setupFieldNote(selector, notes.join(" "));
+      if (!Number.isFinite(raw) || raw <= 0) fail("Enter a dimension in mm greater than zero.", selector);
+      else if (raw > 2000 || used > 2000) fail("Dimensions must be at most 2000 mm.", selector);
+      else if (axis === "z") {
+        const minimum = kind === "drawer" ? ordinaryBinMinimumHeight() : Number(state.catalog?.b4b_rules?.min_secure_height_mm);
+        if (raw < minimum) fail(kind === "drawer"
+          ? `Usable drawer height must be at least ${fmt(minimum)} mm.`
+          : `A Storage Box's usable height must be at least ${fmt(minimum)} mm.`, selector);
+      } else if (kind === "drawer" && SP.drawerCapacity(raw) < 1) {
+        fail("The drawer must have room for at least one Wavefinity unit after wall clearance.", selector);
+      } else if (kind === "portable" && used < Number(state.catalog?.b4b_rules?.min_field_mm)) {
+        fail(`A Storage Box needs at least ${fmt(state.catalog.b4b_rules.min_field_mm)} mm of child-bin field.`, selector);
+      }
+    }
+    values = { kind, name, ...dimensions, trimSize: null,
+      ...(kind === "portable" ? { extra: { storage_box: SP.readStorageBoxForm() } } : {}) };
+  } else if (kind === "surface") {
+    const trimSize = $("#surface-trim").value;
+    const maxX = readNumber("#surface-x"), maxY = readNumber("#surface-y");
+    const trimValid = SP.surfacePresetMap()[trimSize] !== undefined;
+    if (!trimValid) fail("Choose Small, Medium, or Large trim.", "#surface-trim");
+    for (const [axis, raw] of [["x", maxX], ["y", maxY]]) {
+      const selector = `#surface-${axis}`;
+      const resolvedAxis = SP.resolveSurface(raw, raw, trimSize);
+      SP.setupFieldNote(selector, "");
+      if (trimValid) {
+        if (!resolvedAxis.ok) fail(resolvedAxis.error, selector);
+        else if (Math.abs(raw - resolvedAxis.outerX) > 1e-6) {
+          SP.setupFieldNote(selector, `Uses ${fmt(resolvedAxis.outerX)} mm outside (${fmt(resolvedAxis.unitsX)} units inside).`);
+        }
+      }
+    }
+    const resolved = SP.resolveSurface(maxX, maxY, trimSize);
+    if (resolved.ok) values = { kind, name, x: resolved.fieldX, y: resolved.fieldY,
+      z: SP.surfacePresetMap()[trimSize], trimSize, extra: { max_x_mm: maxX, max_y_mm: maxY } };
+  } else if (kind === "pegboard") {
+    const mode = $("#pegboard-size-mode").value;
+    const standard = SP.pegboardStandard($("#pegboard-standard").value);
+    for (const axis of ["x", "y"]) {
+      const selector = mode === "holes" ? `#pegboard-holes-${axis}` : `#pegboard-${axis}`;
+      const raw = readNumber(selector);
+      SP.setupFieldNote(selector, mode === "holes" ? "From 1 to 500 whole holes or slots." : "At most 2000 mm.");
+      if (mode === "holes") {
+        if (!Number.isInteger(raw) || raw < 1 || raw > 500) fail("Enter a whole hole or slot count from 1 to 500.", selector);
+      } else if (!Number.isFinite(raw) || raw <= 0 || raw > 2000) fail("Enter a dimension greater than zero and at most 2000 mm.", selector);
+      else if (standard && Math.floor(raw / standard[`pitch_${axis}_mm`] + 1e-9) < 1) {
+        fail("The board must contain at least one mount position on this side.", selector);
+      }
+    }
+    const resolved = SP.resolvePegboard();
+    if (!resolved.ok && !firstInvalid) fail(resolved.error, "#pegboard-standard");
+    if (resolved.ok) values = { kind, name, x: resolved.width, y: resolved.height, z: 350, trimSize: null,
+      extra: { pegboard_standard: resolved.standard.id,
+        pegboard_thickness_mm: Number($("#pegboard-thickness").value), pegboard_size_mode: resolved.mode,
+        pegboard_holes_x: resolved.holesX, pegboard_holes_y: resolved.holesY } };
+  } else {
+    SP.fail("Choose a Space type.");
+    return null;
+  }
+  if (firstInvalid) {
+    if (focus) firstInvalid.focus();
+    return null;
+  }
+  return values;
+};
+
+SP.refreshSetupError = event => {
+  if (event?.target?.matches?.("input, select, textarea")) event.target.dataset.setupTouched = "1";
+  if (SP.setupKind === "storage_drawers") {
+    $("#space-error").hidden = true;
+    $("#space-form").querySelectorAll('[id$="-setup-error"]').forEach(note => {
+      note.textContent = "";
+      note.hidden = true;
+    });
+    return;
+  }
+  SP.readOrdinarySetupValues({ focus: false });
 };
 
 SP.create = async () => {
@@ -935,9 +945,15 @@ SP.useUntypedFolder = async () => {
 
 
 SP.fail = (message, selector) => {
-  $("#space-error").textContent = message;
-  $("#space-error").hidden = false;
-  if (selector) $(selector)?.focus();
+  const input = selector && $(selector);
+  if (input?.matches("input, select, textarea")) {
+    SP.setupFieldNote(selector, message, "error");
+    input.setAttribute("aria-invalid", "true");
+  } else {
+    $("#space-error").textContent = message;
+    $("#space-error").hidden = false;
+  }
+  input?.focus();
 };
 
 // Reopens the remembered hosted folder (permission already granted). A folder

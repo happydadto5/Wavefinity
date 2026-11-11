@@ -76,6 +76,8 @@ Wavefinity can also be used **without a typed Space**, in which case the user ca
 
 ### Setup
 
+- Size fields keep the characters entered. Whole-unit adjustments appear in a note under the field, along with its own limits and live validation messages.
+- A physical Drawer keeps its exact measurements up to 2000 mm per side; the single-bin ceiling never caps the Space. Storage Drawers keeps its published cabinet unit range.
 - Space name.
 - Usable inside width.
 - Usable inside depth.

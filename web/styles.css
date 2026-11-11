@@ -864,6 +864,8 @@ dialog .button-row { justify-content: flex-end; gap: 8px; }
 .pegboard-border-row { display: contents; }
 .pegboard-border-row[hidden] { display: none; }
 .field-help { margin: 8px 0 13px; font-size: 11px; color: var(--muted); line-height: 1.45; }
+.bin-dimensions-row .field-help, .space-field > .field-help { display: block; margin: 4px 0 0; }
+.field-help.status-error, .sd-help.status-error { color: var(--danger, #b3261e); }
 .field-error { margin: 6px 0 0; font-size: 11px; color: var(--danger); line-height: 1.4; }
 .portable-fit-warning { margin: 6px 0 0; font-size: 12px; color: var(--danger, #b3261e); line-height: 1.4; }
 .output-panel { position: static; margin-top: 6px; padding: 10px 12px 12px; background: rgba(235,241,242,.97); border-top: 1px solid var(--line-dark); box-shadow: 0 -10px 24px rgba(30,51,61,.09); backdrop-filter: blur(8px); }
