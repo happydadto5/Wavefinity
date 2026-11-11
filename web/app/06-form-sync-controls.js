@@ -766,7 +766,7 @@ function wireControls() {
         const choice = $("#lid-choice").value;
         note.hidden = true;
         if (state.design.box.wall > previous.box.wall) {
-          note.textContent = `${choice === "hinged" ? "Hinged lids" : "Lids"} need ${fmt(state.design.box.wall)} mm walls ? changed for you.`;
+          note.textContent = `${choice === "hinged" ? "Hinged lids" : "Lids"} need ${fmt(state.design.box.wall)} mm walls — changed for you.`;
           note.dataset.choice = choice;
           note.hidden = false;
         }
