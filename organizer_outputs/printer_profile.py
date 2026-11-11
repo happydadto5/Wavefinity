@@ -11,7 +11,7 @@ PRINTER_PREF_KEYS = _PREF_KEYS
 _AXES = ("x_mm", "y_mm", "z_mm")
 
 
-_AXIS_NAMES = {"x_mm": "Width (X)", "y_mm": "Depth (Y)", "z_mm": "Height (Z)"}
+_AXIS_NAMES = {"x_mm": "width", "y_mm": "depth", "z_mm": "height"}
 
 
 def normalise_printer_profile(raw: object) -> dict:
@@ -21,10 +21,10 @@ def normalise_printer_profile(raw: object) -> dict:
     for axis in _AXES:
         value = raw.get(axis)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"Printer {_AXIS_NAMES.get(axis, axis)} must be a positive number")
+            raise ValueError(f"Printer {_AXIS_NAMES.get(axis, axis)} must be between 10 and 1000 mm.")
         value = float(value)
-        if not math.isfinite(value) or value <= 0:
-            raise ValueError(f"Printer {_AXIS_NAMES.get(axis, axis)} must be a positive number")
+        if not math.isfinite(value) or value < 10 or value > 1000:
+            raise ValueError(f"Printer {_AXIS_NAMES.get(axis, axis)} must be between 10 and 1000 mm.")
         result[axis] = value
     return result
 

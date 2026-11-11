@@ -16,7 +16,7 @@
     const result = {};
     for (const key of ["x_mm", "y_mm", "z_mm"]) {
       const value = raw[key];
-      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) throw new Error(`Enter a positive number for printer ${AXIS_NAMES[key[0]].toLowerCase()}`);
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 10 || value > 1000) throw new Error(`Printer ${AXIS_NAMES[key[0]].toLowerCase()} must be between 10 and 1000 mm.`);
       result[key] = value;
     }
     return result;
@@ -40,8 +40,8 @@
       const old = JSON.parse(localStorage.getItem(LEGACY) || "null");
       const x = old?.["space-structural-bed-x"];
       const y = old?.["space-structural-bed-y"];
-      return typeof x === "number" && Number.isFinite(x) && x > 0 &&
-        typeof y === "number" && Number.isFinite(y) && y > 0 ? { x_mm: x, y_mm: y, z_mm: 256 } : null;
+      return typeof x === "number" && Number.isFinite(x) && x >= 10 && x <= 1000 &&
+        typeof y === "number" && Number.isFinite(y) && y >= 10 && y <= 1000 ? { x_mm: x, y_mm: y, z_mm: 256 } : null;
     } catch (_) { return null; }
   };
   const api = {
@@ -104,12 +104,12 @@
       change.type = "button"; change.textContent = "Change";
       row.append(summary, change);
       const edit = document.createElement("form");
-      edit.className = "sd-printer-edit"; edit.hidden = true;
+      edit.className = "sd-printer-edit"; edit.hidden = true; edit.noValidate = true;
       const inputs = {};
       for (const axis of ["x", "y", "z"]) {
         const label = document.createElement("label"); label.textContent = `${AXIS_NAMES[axis]} mm`;
         const input = document.createElement("input");
-        input.type = "number"; input.min = "0.01"; input.step = "any"; input.required = true;
+        input.type = "number"; input.min = "10"; input.max = "1000"; input.step = "any"; input.required = true;
         label.append(input); edit.append(label); inputs[axis] = input;
       }
       const save = document.createElement("button"); save.type = "submit"; save.textContent = "Save";

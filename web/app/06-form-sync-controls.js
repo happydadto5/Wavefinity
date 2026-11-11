@@ -352,6 +352,7 @@ function bindBinSizeFields(design = state.design) {
     const input = $(binSizeSelector(axis));
     if (input) input.value = raw;
   }
+  syncBinPrinterWarning();
 }
 
 function readBinSizeField(axis) {
@@ -363,6 +364,34 @@ function readBinSizeField(axis) {
   previous.raw = input.value;
   previous.edited = false;
   return normalizeBinDimension(axis, requested, state.design.box[axis]);
+}
+
+// Ordinary bin print bounds use the entered dimensions; the editor has no
+// resolved separate printed-bin size. Match component_fit's two bed rotations.
+function binPrinterWarning() {
+  if (!state.design?.box || !window.PrinterProfile) return "";
+  const sizes = ["x", "y", "z"].map(axis => {
+    const input = $(binSizeSelector(axis));
+    const raw = input?.value.trim();
+    return raw && Number.isFinite(Number(raw)) && Number(raw) > 0 ? Number(raw) : Number(state.design.box[axis]);
+  });
+  const [x, y, z] = sizes;
+  const printer = PrinterProfile.current();
+  const epsilon = 1e-6;
+  const bedFits = (x <= printer.x_mm + epsilon && y <= printer.y_mm + epsilon) ||
+    (y <= printer.x_mm + epsilon && x <= printer.y_mm + epsilon);
+  const warnings = [];
+  if (!bedFits) warnings.push(`This bin is ${fmt(x)} x ${fmt(y)} mm; the printer bed in Printer Settings is ${fmt(printer.x_mm)} x ${fmt(printer.y_mm)} mm.`);
+  if (z > printer.z_mm + epsilon) warnings.push(`This bin is ${fmt(z)} mm tall; the printer in Printer Settings is ${fmt(printer.z_mm)} mm tall.`);
+  return warnings.join(" ");
+}
+
+function syncBinPrinterWarning() {
+  const node = $("#bin-printer-warning");
+  if (!node) return;
+  const message = binPrinterWarning();
+  node.textContent = message;
+  node.hidden = !message;
 }
 
 function formatDimField(axis) {
@@ -395,6 +424,7 @@ function formatDimField(axis) {
   note.textContent = notes.join(" ");
   note.hidden = !notes.length;
   input.toggleAttribute("aria-invalid", !valid || (axis !== "z" && requested > max));
+  syncBinPrinterWarning();
 }
 
 function formatHeightField() { formatDimField("z"); }
@@ -586,6 +616,8 @@ function preferredDesignView() {
 }
 
 function wireControls() {
+  PrinterProfile.subscribe(syncBinPrinterWarning);
+  syncBinPrinterWarning();
   wireSidebar();
   wireCameraControls();
   wireNest2DControls();

@@ -1,5 +1,11 @@
 "use strict";
 
+function setGenerationPrinterWarning(message) {
+  const node = $("#generation-printer-warning");
+  node.textContent = message;
+  node.hidden = !message;
+}
+
 // Use the existing item status area for Print and inventory batches as well as Export.
 function beginGenerationReport(working, rows = [{ id: "bin", title: "Bin" }], batch = false) {
   const place = beginOutputReport(working, batch ? "batch" : "bin",
@@ -17,6 +23,7 @@ function beginGenerationReport(working, rows = [{ id: "bin", title: "Bin" }], ba
   renderGenerationItems(items.map(one => ({ ...one, status: "generating", text: working })));
   $("#generation-dialog-title").textContent = working;
   $("#generation-dialog-subtitle").textContent = "";
+  setGenerationPrinterWarning(batch ? "" : binPrinterWarning());
   $("#generation-error").hidden = true;
   $("#generation-actions").hidden = true;
   if (!dialog.open) dialog.showModal();
@@ -113,6 +120,7 @@ async function generatePartsWithReport(target, report) {
 
   if (dialogTitle) dialogTitle.textContent = "Exporting…";
   if (dialogSubtitle) dialogSubtitle.textContent = "Please wait while your files are being saved.";
+  setGenerationPrinterWarning((target === "all" || target === "bin") ? binPrinterWarning() : "");
   if (dialogError) {
     dialogError.hidden = true;
     dialogError.textContent = "";
