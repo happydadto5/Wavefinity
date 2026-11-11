@@ -173,12 +173,13 @@ DP.build = () => {
     <details id="dl-spacers" class="dl-section dl-spacers" aria-label="Spacers" open>
       <summary>Spacers</summary>
       <div class="section-body">
-        <p class="dl-note">Spacers are filler parts that brace your bins against the drawer walls so nothing slides around. Flexible spacers print 2mm oversized to wedge in snugly — print them in PLA or PETG.</p>
+        <p class="dl-note">Spacers are filler parts that brace your bins against the drawer walls so nothing slides around. Flexible spacers are printed about 2 mm too wide and bend as you push them in, so they grip the gap and hold the bin — that bend is what “flexible” means, and it works in ordinary PLA or PETG.</p>
         <div class="field-grid two">
           <label>Spacer type<select id="dl-sp-type"><option value="rigid">Rigid</option><option value="flexible">Flexible</option></select></label>
+          <label>Height choice<select id="dl-sp-height-choice"><option value="full">Full height</option><option value="quarter">Quarter height</option><option value="manual">Manual</option></select></label>
           <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
         </div>
-        <label class="checkbox-row"><span>Auto height (the full height of the tallest bin)</span><input id="dl-sp-auto-height" type="checkbox" checked></label>
+        <p class="dl-note">Quarter height is one quarter of the full height of the tallest placed bin, rounded to whole millimetres, with the same minimum and drawer height limits.</p>
         <fieldset class="dl-sp-walls">
           <legend>Spacer locations</legend>
           <label class="checkbox-row"><span>Left</span><input id="dl-sp-wall-left" type="checkbox" checked></label>
@@ -188,7 +189,6 @@ DP.build = () => {
         <p class="dl-note" style="font-size: 12px;">No front-wall spacers: bins are pulled toward you when opening the drawer, so front bracing would fight you every time.</p>
         <div class="dl-action-grid">
           <button type="button" id="dl-sp-refresh" class="button secondary" title="Remove the existing spacers, then generate and place new ones">Refresh Spacers</button>
-          <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
         </div>
         <p id="dl-sp-reason" class="dl-note" hidden></p>
         <p id="dl-sp-status" class="dl-note" hidden></p>
@@ -202,18 +202,6 @@ DP.build = () => {
     </section>`;
   DV.buildOverlay();
   DP.wire();
-  // Hosted capability (Fix 019 Item 3) is recalculated on every render in
-  // DP.renderStats() below, not only here - this first pass just avoids a
-  // flash of enabled buttons before the first render.
-  if (state.runtime.hosted) {
-    ["#dl-sp-print"].forEach(selector => {
-      const button = $(selector);
-      if (button) {
-        button.disabled = true;
-        button.title = DP.HOSTED_SLICER_TOOLTIP;
-      }
-    });
-  }
 };
 
 // Fix 096 C4: spacer file generation now works hosted; only opening a local
@@ -318,6 +306,8 @@ DP.wire = () => {
         for (const id of Object.keys(payload)) if (DL.placedCount(id) > 0) delete payload[id];
       }
       if (Object.keys(payload).length) await DL.printSelectedBins(payload, true);
+      const spacers = Object.fromEntries(scope.print.filter(DL.isSpacer).map(one => [one.id, Math.max(1, DL.placedCount(one.id))]));
+      if (Object.keys(spacers).length) await DL.printSelectedSpacers(spacers);
     } else await DL.printCompleteSpace();
     if (printContainer) {
       await WS.printContainerNow(event);
@@ -325,9 +315,9 @@ DP.wire = () => {
     }
   });
   $("#dl-no-slicer-settings").addEventListener("click", () => $("#settings-printer-open")?.click());
-  $("#dl-sp-auto-height").addEventListener("change", event => {
-    DL.change(() => { DL.layout.settings.spacers.height_auto = event.target.checked; });
-    $("#dl-sp-height").disabled = event.target.checked;
+  $("#dl-sp-height-choice").addEventListener("change", event => {
+    DL.change(() => { DL.layout.settings.spacers.height_choice = event.target.value; });
+    $("#dl-sp-height").disabled = event.target.value !== "manual";
   });
   for (const side of ["left", "back", "right"]) {
     $(`#dl-sp-wall-${side}`).addEventListener("change", event => {
@@ -337,12 +327,6 @@ DP.wire = () => {
   $("#dl-sp-refresh").addEventListener("click", () => {
     DL.refreshSpacers();
   });
-  $("#dl-sp-print").addEventListener("click", () => DP.openSpacerPrintDialog());
-  $("#spacer-print-cancel").addEventListener("click", () => $("#spacer-print-dialog").close());
-  $("#spacer-print-dialog").addEventListener("click", event => {
-    if (event.target === $("#spacer-print-dialog")) $("#spacer-print-dialog").close();
-  });
-  $("#spacer-print-confirm").addEventListener("click", () => DP.confirmSpacerPrint());
   const filterChanged = () => {
     DP.renderInventory();
   };
@@ -383,18 +367,18 @@ DP.wire = () => {
 
 DP.prunePrintSelection = () => {
   DP.printSelected = new Set(
-    [...DP.printSelected].filter(id => DL.isOrdinary(DL.bin(id))));
+    [...DP.printSelected].filter(id => Boolean(DL.bin(id))));
 };
 
 DP.selectAllNotPrinted = () => {
   DP.printSelected = new Set(
-    DP.filteredBins().filter(one => DL.isOrdinary(one) && one.status !== "printed").map(one => one.id));
+    DP.filteredBins().filter(one => one.status !== "printed").map(one => one.id));
   DP.renderInventory(true);
 };
 
 DP.selectAllPrintable = () => {
   DP.printSelected = new Set(
-    DP.filteredBins().filter(DL.isOrdinary).map(one => one.id));
+    DP.filteredBins().map(one => one.id));
   DP.renderInventory(true);
 };
 
@@ -406,7 +390,7 @@ DP.clearPrintSelection = () => {
 
 // Print uses the eligible ticked rows; an empty selection prints the Space.
 DP.batchScope = () => {
-  const picked = [...DP.printSelected].map(id => DL.bin(id)).filter(one => DL.printEligible(one));
+  const picked = [...DP.printSelected].map(id => DL.bin(id)).filter(one => DL.printEligible(one) || (DL.isSpacer(one) && one.file && DL.placedCount(one.id)));
   if (DP.printSelected.size || DP.containerPinned) return { subset: true, save: picked, print: picked, picked };
   const eligible = DL.bins.filter(one => DL.printEligible(one));
   return {
@@ -419,7 +403,7 @@ DP.batchScope = () => {
 DP.batchSaveIds = () => DP.batchScope().save.map(one => one.id);
 
 DP.printSelectionPayload = () => Object.fromEntries(
-  DP.batchScope().print.map(one => [one.id, DL.printCount(one)]));
+  DP.batchScope().print.filter(DL.isOrdinary).map(one => [one.id, DL.printCount(one)]));
 
 DP.renderBatch = () => {
   renderOutputReport();
@@ -475,7 +459,10 @@ DP.onInventoryClick = async event => {
   const action = event.target.closest("[data-act]")?.dataset.act;
   if (action === "duplicate") DP.duplicateRow(one);
   else if (action === "save") DL.saveSelectedBins([one.id], false);
-  else if (action === "print") DL.printSelectedBins({ [one.id]: DL.printCount(one) }, false);
+  else if (action === "print") {
+    if (DL.isSpacer(one)) DL.printSelectedSpacers({ [one.id]: Math.max(1, DL.placedCount(one.id)) });
+    else DL.printSelectedBins({ [one.id]: DL.printCount(one) }, false);
+  }
   else if (action === "printed") DL.markPrinted(one);
   else if (action === "not-printed") DL.markNotPrinted(one);
   else if (action === "edit") DP.openInventoryRow(one.id);
@@ -812,60 +799,6 @@ DP.newBinFromSpace = async () => {
 DP.isCanonicalDrawer = () => state.folderMode === "space" && ["drawer", "pegboard"].includes(state.activeSpace?.kind)
   && DL.layout?.drawers?.length === 1;
 
-// Opens the grouped selection dialog before anything is sent to the slicer -
-// clicking Print Spacers… must never silently print every unprinted row.
-DP.openSpacerPrintDialog = () => {
-  // Fix 1042: material guidance — users must know what to print Flexible in.
-  const groups = DL.spacerPrintGroups();
-  if (!groups.length) { toast("No spacers placed in this Space yet.", true); return; }
-  DP.spacerPrintGroups = groups;
-  const container = $("#spacer-print-table-container");
-  // Fix 1042: material guidance, inserted once before the table (the id guard
-  // stops it duplicating when the dialog is reopened).
-  if (!$("#spacer-print-guidance")) {
-    const guidance = document.createElement("p");
-    guidance.id = "spacer-print-guidance";
-    guidance.className = "dl-note";
-    guidance.textContent = "Print Flexible spacers in PLA or PETG (2mm oversized to wedge in). Rigid spacers print in any material.";
-    container.before(guidance);
-  }
-  container.innerHTML = `
-    <table class="spacer-print-table">
-      <thead><tr><th>Include</th><th>Size</th><th>Spacer type</th><th>Qty in Space</th><th>Printed</th><th>Qty to print</th></tr></thead>
-      <tbody>${groups.map((g, index) => `
-        <tr data-group="${index}">
-          <td><input type="checkbox" data-sp-check aria-label="Include ${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm ${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible" : "Rigid"} spacer" ${g.toPrint > 0 ? "checked" : ""}></td>
-          <td>${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm</td>
-          <td>${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible" : "Rigid"}</td>
-          <td>${g.qty}</td>
-          <td>${g.printed}</td>
-          <td><input type="number" data-sp-qty min="1" max="${g.qty}" value="${Math.max(1, g.toPrint || g.qty)}" aria-label="Quantity to print for ${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm ${(g.bin.flexible ?? /^Spacer Flex /.test(String(g.bin.file || ""))) ? "Flexible" : "Rigid"} spacer" ${g.toPrint > 0 ? "" : "disabled"}></td>
-        </tr>`).join("")}</tbody>
-    </table>`;
-  $$("[data-sp-check]", container).forEach(box => box.addEventListener("change", event => {
-    const qtyInput = event.target.closest("tr").querySelector("[data-sp-qty]");
-    qtyInput.disabled = !event.target.checked;
-  }));
-  $("#spacer-print-dialog").showModal();
-};
-
-DP.confirmSpacerPrint = () => {
-  const dialog = $("#spacer-print-dialog");
-  const selection = {};
-  let badRow = false;
-  $$("tr[data-group]", $("#spacer-print-table-container")).forEach(row => {
-    const group = DP.spacerPrintGroups[Number(row.dataset.group)];
-    const checked = row.querySelector("[data-sp-check]").checked;
-    const qty = dlNum(row.querySelector("[data-sp-qty]").value, 0);
-    if (checked && qty > 0) selection[group.bin.id] = qty;
-    else if (checked) badRow = true;
-  });
-  if (badRow) { toast("Enter a quantity of at least 1 for each checked spacer.", true); return; }
-  if (!Object.keys(selection).length) { toast("Select at least one spacer to print.", true); return; }
-  dialog.close();
-  DL.printSelectedSpacers(selection);
-};
-
 // ------------------------------------------------------------------ rendering
 
 DP.update = () => {
@@ -1070,38 +1003,36 @@ DP.spacerAutoHeight = () => {
     }
   }
   const auto = tallest > 0 ? roundHalfEven(tallest) : 15;
-  return Math.min(Number(drawer.height), Math.max(6, auto));
+  const full = Math.min(Number(drawer.height), Math.max(6, auto));
+  return DL.layout.settings.spacers.height_choice === "quarter"
+    ? Math.min(Number(drawer.height), Math.max(6, roundHalfEven(full / 4))) : full;
 };
 
 DP.renderStats = () => {
   const box = $("#dl-stats");
   const spacers = DL.layout.settings.spacers;
   dlSet("#dl-sp-type", spacers.flexible ? "flexible" : "rigid");
-  const heightAuto = spacers.height_auto !== false;
+  const heightAuto = spacers.height_choice !== "manual";
   $("#dl-sp-height").disabled = heightAuto;
   // Fix 1053: when Auto height is on, the disabled field shows the computed
   // height (what will actually print) instead of the stored manual setting.
   dlSet("#dl-sp-height", fmt(heightAuto ? DP.spacerAutoHeight() : spacers.height));
   // Fix 088: wall toggles + auto height reflect the Space's spacer settings.
-  dlSet("#dl-sp-auto-height", spacers.height_auto !== false, "checked");
+  dlSet("#dl-sp-height-choice", spacers.height_choice);
   for (const side of ["left", "back", "right"]) {
     dlSet(`#dl-sp-wall-${side}`, Boolean(spacers.walls?.[side]), "checked");
   }
 
   const busy = Boolean(DL.busy);
-  const hosted = Boolean(state.runtime.hosted);
   // Fix 096 F9: a visible reason next to disabled spacer actions (tooltips
   // alone are not enough). The last branch to disable a button wins, same as
   // the titles.
-  let spacerReasonText = "";
   const spacerReason = (text) => {
     const reason = $("#dl-sp-reason");
-    spacerReasonText = text || "";
     if (!reason) return;
     reason.hidden = !text;
     reason.textContent = text || "";
   };
-  const spacerReasonCurrent = () => spacerReasonText;
   spacerReason("");
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
   label("#dl-sp-refresh", "Refresh Spacers", "Refreshing…", "spacers");
@@ -1116,26 +1047,6 @@ DP.renderStats = () => {
       spacerReason("Place a bin in the Space first.");
     } else {
       refreshNode.title = "Remove the existing spacers, then generate and place new ones";
-    }
-  }
-  const hasPlacedSpacers = DL.drawer().placements.some(
-    placement => DL.isSpacer(DL.bin(placement.bin))
-  );
-  const spacerPrint = $("#dl-sp-print");
-  if (spacerPrint) spacerPrint.hidden = !hasPlacedSpacers;
-  label("#dl-sp-print", "Print Spacers", "Printing…", "print");
-  if (spacerPrint) spacerPrint.disabled = busy || !hasPlacedSpacers;
-
-  // Hosted: only opening a local slicer stays unavailable on every render -
-  // see DP.HOSTED_SLICER_TOOLTIP (Fix 019 Item 3, narrowed by Fix 096 C4).
-  if (hosted) {
-    const node = $("#dl-sp-print");
-    if (node) {
-      node.disabled = true;
-      node.title = DP.HOSTED_SLICER_TOOLTIP;
-    }
-    if (!spacerReasonCurrent()) {
-      spacerReason(DP.HOSTED_SLICER_TOOLTIP);
     }
   }
 
@@ -1196,15 +1107,8 @@ DP.updateSpacerHint = () => {
         layout: DL.layout,
         drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
       }, { write: false });
-      // run_count is cap-limited; run_count_total includes the remaining gaps.
-      const runs = result.run_count ?? (result.selected || []).length;
-      const totalRuns = result.run_count_total ?? runs;
-      if (runs > 0 && totalRuns > runs) {
-        const more = totalRuns - runs;
-        text = `${runs} gap${runs === 1 ? "" : "s"} could use spacers — ${more} more gap${more === 1 ? "" : "s"} need${more === 1 ? "s" : ""} spacers too. Refresh Spacers adds them.`;
-      } else if (runs > 0) {
-        text = `${runs} gap${runs === 1 ? "" : "s"} could use spacers. Refresh Spacers adds them.`;
-      }
+      const count = (result.selected || []).length;
+      if (count > 0) text = `${count} spacer${count === 1 ? "" : "s"} could be added. Refresh Spacers adds them.`;
     } catch (error) { text = ""; /* a hint must never fail visibly */ }
     // Publish only if the world hasn't moved on while planning.
     const now = JSON.stringify([DL.spaceContext(), DL.spacerSignature(), DL.layout.settings.spacers]);
@@ -1282,7 +1186,7 @@ DP.renderInventory = (force = false) => {
   if (!bins.length) { list.innerHTML = containerRow + `<div class="dl-empty">No bins match.</div>`; return; }
   const range = DV.heightRange();
   const kinds = { b4b: "Storage Box", manual: "Added by hand" };
-  const kindLabel = one => one.kind === "spacer" ? "Spacer" : kinds[one.kind];
+  const kindLabel = one => kinds[one.kind];
   const cabinet = DL.isStorageDrawers();
   list.innerHTML = containerRow + bins.map(one => {
     const placed = DL.placedCount(one.id);
@@ -1299,7 +1203,6 @@ DP.renderInventory = (force = false) => {
         : `Object height ${fmt(one.object_height_mm)} mm · Installed planning ${plan?.estimated ? "~" : ""}${fmt(plan?.effective_mm ?? one.z)} mm${plan?.estimated ? " (estimated)" : ""}`
       : "";
     const spacer = DL.isSpacer(one);
-    const spacerFlexible = Boolean(one.flexible ?? /^Spacer Flex /.test(String(one.file || "")));
     const color = DV.binColor(one, range);
     const flags = [
       DL.stackable(one) ? DL.stackName(one.stack) : "", kindLabel(one),
@@ -1307,7 +1210,7 @@ DP.renderInventory = (force = false) => {
     ].filter(Boolean);
     const classes = [one.id === selectedRow ? "selected" : "", tooTall ? "too-tall" : "",
       spacer ? "spacer-row" : "", one.status === "printed" ? "printed" : ""].filter(Boolean).join(" ");
-    const eligible = DL.printEligible(one);
+    const eligible = DL.printEligible(one) || (spacer && Boolean(one.file) && placed > 0);
     const designSource = ["bin", "b4b"].includes(one.kind) && Boolean(DL.layout?.design_specs?.[one.id]);
     // A Storage Box case saved by an older version is not a Designer object.
     const editable = DP.editableSourceFor(one);
@@ -1319,22 +1222,20 @@ DP.renderInventory = (force = false) => {
       && currentOutputReport.rowIds.includes(one.id);
     const outputLabel = mode => outputRunning && currentOutputReport.action === mode
       ? escapeHtml(currentOutputReport.text) : mode === "print" ? "Print" : "Save";
-    const statusTracked = !spacer && ["bin", "b4b", "manual"].includes(one.kind);
+    const statusTracked = spacer || ["bin", "b4b", "manual"].includes(one.kind);
     const printed = one.status === "printed";
-    const picked = !spacer && DP.printSelected.has(one.id);
+    const picked = DP.printSelected.has(one.id);
     const swatch = `<span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${fmt(one.z)} mm tall">${DL.swatchLabel(one)}</span>`;
-    const check = !spacer
-      ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.binNumberLabel(one))} ${escapeHtml(DL.label(one))}"${picked ? " checked" : ""}>`
-      : `<span class="dl-print-placeholder" aria-hidden="true"></span>`;
+    const check = `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.binNumberLabel(one))} ${escapeHtml(DL.label(one))}"${picked ? " checked" : ""}>`;
     const lifecycle = spacer
-      ? `<small>${spacerFlexible ? "Flexible" : "Rigid"} · ${one.status === "printed" ? "Printed" : "Not printed"}</small>`
+      ? `<small>${one.status === "printed" ? "Printed" : "Not printed"}</small>`
       : `<small class="dl-status">${cabinet ? StorageDrawers.rowLocationText(DL.layout, one.id) : (placed ? "Placed" : "Unplaced")} · ${DL.statusLabel(one)}</small>`;
-    const actions = spacer ? "" : `<div class="dl-row-actions">
+    const actions = `<div class="dl-row-actions">
           ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>`
             : sourceMissing ? `<button type="button" class="button secondary dl-small" data-act="edit" disabled title="The original editable design for this row is unavailable, so it can't be edited.">Edit</button>` : ""}
           ${one.id === deleteRowId ? `<button type="button" class="button danger dl-small" data-act="delete" ${DP.designNavBlocked() ? "disabled" : ""}>Delete</button>` : ""}
           ${designSource && one.id === deleteRowId ? `<button type="button" class="button secondary dl-small" data-act="duplicate" ${DP.designNavBlocked() ? "disabled" : ""}>Duplicate</button>` : ""}
-          ${eligible ? `<button type="button" class="button secondary dl-small" data-act="save"${outputRunning ? " disabled" : ""}>${outputLabel("export")}</button>` : ""}
+          ${eligible && !spacer ? `<button type="button" class="button secondary dl-small" data-act="save"${outputRunning ? " disabled" : ""}>${outputLabel("export")}</button>` : ""}
           ${printable ? `<button type="button" class="button secondary dl-small" data-act="print"${outputRunning ? " disabled" : ""}>${outputLabel("print")}</button>` : ""}
           ${statusTracked ? (printed
             ? `<button type="button" class="button secondary dl-small" data-act="not-printed">Mark Not Printed</button>`
@@ -1346,7 +1247,7 @@ DP.renderInventory = (force = false) => {
         ${swatch}
         <span class="dl-bin-main">
           <strong>${escapeHtml(DL.label(one))}${DL.stackIconHtml(one)}</strong>
-          <small>${spacer ? `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm` : `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units`}</small>
+          <small>${spacer ? `${Math.round(one.x)} × ${Math.round(one.y)} × ${Math.round(one.z)} mm` : `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units`}</small>
           ${!spacer && planningText ? `<small>${escapeHtml(planningText)}</small>` : ""}
           ${lifecycle}
           ${flags.length ? `<small class="dl-flags">${escapeHtml(flags.join(" · "))}</small>` : ""}

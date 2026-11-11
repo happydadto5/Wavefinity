@@ -152,7 +152,8 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
     # Fix 088 S88-2: Auto height is the default - the full height of the
     # tallest bin, clamped like a manual height. A manual height is honoured
     # only when Auto is off.
-    if options.get("height_auto", True):
+    choice = options.get("height_choice") or ("full" if options.get("height_auto", True) else "manual")
+    if choice in ("full", "quarter"):
         # Fix 090: "tallest bin" means the tallest non-spacer bin actually
         # placed in THIS drawer - not the whole Space inventory (which also
         # holds unplaced bins and other drawers' bins).
@@ -163,7 +164,8 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
                 if one and one.get("kind") not in SPACER_KINDS:
                     tallest = max(tallest, float(one.get("z") or 0.0))
         auto_height = round(tallest) if tallest > 0 else DEFAULT_SPACER_HEIGHT
-        height = min(drawer["height"], max(MIN_SPACER_HEIGHT, auto_height))
+        full_height = min(drawer["height"], max(MIN_SPACER_HEIGHT, auto_height))
+        height = min(drawer["height"], max(MIN_SPACER_HEIGHT, round(full_height / 4))) if choice == "quarter" else full_height
     else:
         height = min(drawer["height"], max(MIN_SPACER_HEIGHT, float(options.get("height") or DEFAULT_SPACER_HEIGHT)))
     # Fix 088 S88-1: per-wall toggles, persisted under the layout's spacer

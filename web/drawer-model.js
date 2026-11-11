@@ -65,7 +65,7 @@ DL.defaultSettings = () => ({
   autosave: true,
   // Fix 088: per-wall spacer toggles (no front wall by product decision) and
   // Auto height (the full height of the tallest bin) - both default on.
-  spacers: { flexible: true, height: 15, height_auto: true, walls: { left: true, back: true, right: true } },
+  spacers: { flexible: true, height: 15, height_choice: "full", walls: { left: true, back: true, right: true } },
   surface: { ask_object_height: true },
   // Fix 061 F6: per-Space choice to refresh a bin's saved files after an edit
   // without asking. Default Ask.
@@ -129,7 +129,12 @@ DL.normaliseLayout = raw => {
   delete layout.settings.new_bins_printed; // retired: generating always means Qty 0
   delete layout.settings.auto;             // retired: there is no Auto layout
   delete layout.settings.show_empty;      // the empty-cell grid is always visible
-  layout.settings.spacers = { ...defaults.spacers, ...(layout.settings.spacers || {}) };
+  const savedSpacers = layout.settings.spacers || {};
+  layout.settings.spacers = { ...defaults.spacers, ...savedSpacers };
+  if (!["full", "quarter", "manual"].includes(savedSpacers.height_choice)) {
+    layout.settings.spacers.height_choice = savedSpacers.height_auto === false ? "manual" : "full";
+  }
+  delete layout.settings.spacers.height_auto;
   layout.settings.spacers.walls = { ...defaults.spacers.walls, ...(layout.settings.spacers.walls || {}) };
   layout.settings.surface = { ...defaults.surface, ...(layout.settings.surface || {}) };
   // Fix 034 K1: autosave has no user-off path any more; a legacy
@@ -1316,7 +1321,9 @@ DL.setBinPrinted = async (one, printed) => {
       return false;
     }
   }
-  return DL.editBins({ bin_updates: [{ id: one.id, qty: printed ? 1 : 0 }] });
+  const spacerQty = DL.isSpacer(one) ? Math.max(1, ...DL.layout.drawers.flatMap(drawer =>
+    drawer.placements.filter(placement => placement.bin === one.id).map(placement => (placement.copy ?? 0) + 1))) : 1;
+  return DL.editBins({ bin_updates: [{ id: one.id, qty: printed ? spacerQty : 0 }] });
 };
 DL.markPrinted = one => DL.setBinPrinted(one, true);
 DL.markNotPrinted = one => DL.setBinPrinted(one, false);
@@ -1520,8 +1527,7 @@ DL.refreshSpacers = () => DL.busyWith("spacers", async context => {
 DL.spacerPrintGroups = (layout = DL.layout) => {
   const groups = new Map();
 
-  const drawer = layout.drawers.find(one => one.id === layout.active) || layout.drawers[0];
-  drawer.placements.forEach(placement => {
+  layout.drawers.flatMap(drawer => drawer.placements).forEach(placement => {
     const bin = DL.bin(placement.bin);
     if (!DL.isSpacer(bin)) return;
 
@@ -1622,7 +1628,7 @@ DL.promoteSpacerCopies = (group, requestedCount, layout = DL.layout) => {
 };
 
 // selection: { [group's representative bin id]: requested copy count }, as
-// built by DP.confirmSpacerPrint() from DL.spacerPrintGroups(). One real
+// built from selected inventory rows. One real
 // file is sent per group; any newly-printed logical copies are then spread
 // across that group's own previously-unprinted member rows, and reprints
 // never increase the logical quantity in the drawer.
@@ -1656,7 +1662,10 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async context => {
       omittedFiles.push(String(group.bin.file || id));
       continue;
     }
-    updates.push(...DL.promoteSpacerCopies(group, count, stagedLayout));
+    const entries = group.entries.filter(entry => entry.bin.id === id);
+    const rowGroup = { ...group, members: group.members.filter(member => member.id === id),
+      unprintedEntries: entries.filter(entry => (entry.placement.copy ?? 0) >= (Number(entry.bin.qty) || 0)) };
+    updates.push(...DL.promoteSpacerCopies(rowGroup, count, stagedLayout));
   }
 
   if (updates.length > 0) {
