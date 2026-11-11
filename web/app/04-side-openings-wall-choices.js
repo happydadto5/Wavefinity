@@ -659,7 +659,8 @@ function syncContainerInsideHint() {
       const storageBox = kind === "portable" || kind === "box";
       const placeName = storageBox ? "storage box" : "drawer";
       const height = Number(state.design?.box?.z);
-      overHeight = Number.isFinite(height) && height > maximum;
+      overHeight = typeof DP !== "undefined" && DP.getDesignTarget().kind === "bin"
+        && Number.isFinite(height) && height > maximum;
       text = overHeight
         ? `Taller than this ${placeName} (${fmt(maximum)} mm) - it won't fit when placed`
         : `This ${placeName} fits bins up to ${fmt(maximum)} mm tall`;

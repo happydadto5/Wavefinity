@@ -86,6 +86,12 @@
     // Drawers + a quiet status line. Full scope (Design) adds Cabinet and Finish.
     const compact = scope === "basic";
     const form = el("div", compact ? "sd-form sd-form-compact" : "sd-form"); host.append(form);
+    const touchedFields = new WeakSet();
+    for (const eventName of ["input", "change", "focusout"]) {
+      form.addEventListener(eventName, event => {
+        if (event.target.matches("input, select, textarea")) touchedFields.add(event.target);
+      }, { capture: true, signal: events.signal });
+    }
     const name = input(space.name); name.maxLength = 80; name.required = true;
     // Fix 1137: like the drawer count below, the Space name is tied to the
     // folder name, so it is set at creation and never editable afterwards.
@@ -504,7 +510,9 @@
       callbacks.onChange?.();
       clearTimeout(timer); const n = ++requestNumber; const identity = callbacks.identity?.() ?? space.id ?? space.name;
       const pEpoch = profileEpoch; const checked = readFields();
-      if (!checked.ok) { summaryState = "error"; summaryError = checked.message; showSummaryText(checked.message, true); notifyReady(); markSettled(); return; }
+      if (!checked.ok) { summaryState = "error"; summaryError = checked.message; const field = checked.focusId && document.getElementById(checked.focusId);
+        const untouchedEmpty = field && !String(field.value || "").trim() && !touchedFields.has(field);
+        showSummaryText(checked.message, !untouchedEmpty); notifyReady(); markSettled(); return; }
       const next = checked.spaceDraft;
       const key = window.StorageDrawers.structuralDraftKey(next, printerProfile);
       timer = setTimeout(async () => {

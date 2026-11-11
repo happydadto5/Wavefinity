@@ -64,6 +64,7 @@ const SHADE_STEPS = 128;
 const shadeCache = new Map();
 
 function shadedColor(kind, normal) {
+  if (kind === "draft_invalid" && blankTextPreviewError(state.preview)) kind = "draft_incomplete";
   const step = Math.round(faceLighting(normal) * SHADE_STEPS);
   const key = `${kind}|${step}`;
   let hit = shadeCache.get(key);

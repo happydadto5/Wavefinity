@@ -472,6 +472,10 @@ function endPreviewWait(requestId) {
   if (typeof WS !== "undefined" && WS.endItemSwitch) WS.endItemSwitch();
 }
 
+function blankTextPreviewError(result) {
+  return isBlankTextDraft(state.draft) && /^(?:text: )?this text part has no text; type what it should say$/i.test(result?.draft_error || "");
+}
+
 // Everything a finished, current preview does to the browser: geometry and pick
 // data, fit/error state, generation availability, the canonical design, the
 // preview currentness key, checkpoints/autosave and every render. refreshPreview()
@@ -507,12 +511,15 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   if (grownX) flashField($("#x-size"));
   if (grownY) flashField($("#y-size"));
   if (grownZ) flashField($("#z"));
-  const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
+  const incompleteText = blankTextPreviewError(result);
+  const visibleDraftError = incompleteText ? null : result.draft_error;
+  const previewHasErrors = Boolean(result.message || result.feature_errors.length || visibleDraftError || (!result.fits && !incompleteText));
+  const rawPreviewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
   // Fix 078: the overlay's primary message follows a deterministic priority -
   // result.message, then the first feature error, then the draft error, then
   // a generic fallback. Only the latest preview request may set it.
   setDesignInvalidOverlay(previewHasErrors
-    ? (result.message || result.feature_errors[0] || result.draft_error
+    ? (result.message || result.feature_errors[0] || visibleDraftError
       || "The current settings cannot build a valid design.")
     : "");
   $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "";
@@ -533,13 +540,13 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   // reporting fit/feature/draft errors - replaces the last valid one.
   // Placed after the controls above so the checkpoint is the same canonical
   // design the user now sees, including any server-adjusted X/Y/Z.
-  if (!previewHasErrors && typedSpaceOrdinaryBin()) {
+  if (!rawPreviewHasErrors && typedSpaceOrdinaryBin()) {
     if (state.spaceStarterPreviewPending) {
       state.cleanDesign = clone(state.design);
       state.spaceStarterPreviewPending = false;
     } else queueSpaceDesignAutosave();
   }
-  if (persistResume && !previewHasErrors && state.folderMode === "space" && typeof SP !== "undefined") {
+  if (persistResume && !rawPreviewHasErrors && state.folderMode === "space" && typeof SP !== "undefined") {
     SP.queueResumeCheckpoint(state.design, false);
   }
   const messages = [result.message, ...result.feature_errors, result.draft_error].filter(Boolean);
@@ -557,8 +564,8 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
       },
     });
   });
-  if (result.draft_error) actions.push({
-    message: result.draft_error,
+  if (visibleDraftError) actions.push({
+    message: visibleDraftError,
     activate: () => {
       $(".support-editor").scrollIntoView({ behavior: "smooth", block: "center" });
       const invalidField = $('#draft-fields input:invalid') || $('#draft-fields input');
@@ -568,11 +575,11 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   });
   state.canGenerate = !messages.length;
   updateGenerateAvailability();
-  if (actions.length) setError("", actions);
+  if (actions.length || incompleteText) setError("", actions);
   updateBoreCeilingWarning(result.bore_ceiling_warning);
   updateStorageBoxHeightWarning(result.storage_box_height_warning);
-  state.fitError = Boolean(result.feature_errors.length || result.draft_error);
-  updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
+  state.fitError = Boolean(result.feature_errors.length || visibleDraftError);
+  updateDraftStatusColor(state.draft && !incompleteText ? Boolean(visibleDraftError) : null);
   updateAutoExpandButton();
   if (typeof SP !== "undefined" && SP.renderSpaceInfo) {
     SP.renderSpaceInfo();

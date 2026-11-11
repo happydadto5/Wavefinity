@@ -304,7 +304,7 @@ function renderLayout2D() {
     }
   });
   if (state.draft) {
-    const draftHasError = Boolean(state.preview.draft_error);
+    const draftHasError = Boolean(state.preview.draft_error && !blankTextPreviewError(state.preview));
     const draftColor = draftHasError ? COLORS.invalid : DRAFT_HIGHLIGHT;
     const zone = state.draft.zone;
     const zonePath = worldRect(zone);
