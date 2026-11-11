@@ -17,13 +17,13 @@
 <div id="boot">Loading tests…</div>
 <div id="results"></div>
 <div id="hosts"><div id="hostA"></div><div id="hostB"></div></div>
-<script src="storage-drawers.js"></script>
+<script src="../web/storage-drawers.js"></script>
 <script>
 /* Test doubles for app globals used by storage-drawers-form.js */
 function fmt(value){ const n = Number(value); const r = Math.round((Number.isFinite(n)?n:0)*100)/100; return String(r); }
 function friendlyError(e){ return (e && e.message) || String(e) || "Cabinet is invalid"; }
 </script>
-<script src="storage-drawers-form.js"></script>
+<script src="../web/storage-drawers-form.js"></script>
 <script>
 (() => {
   "use strict";
