@@ -491,7 +491,7 @@ function aiSpaceViolation(design, baseline) {
   return null;
 }
 
-function aiSetStatus(message = "", { error = false, repair = false } = {}) {
+function aiSetStatus(message = "", { error = false, repair = false, actions = false } = {}) {
   const status = $("#ai-help-status");
   if (!status) return;
   status.textContent = message;
@@ -499,6 +499,8 @@ function aiSetStatus(message = "", { error = false, repair = false } = {}) {
   status.classList.toggle("error", error);
   const repairButton = $("#ai-help-repair");
   if (repairButton) repairButton.hidden = !repair;
+  const actionRow = $("#ai-help-failure-actions");
+  if (actionRow) actionRow.hidden = !(actions && message);
 }
 
 function aiSetBusy(busy) {
@@ -885,10 +887,17 @@ async function aiAsk() {
   if (!aiHelp.session || aiHelp.generatedFor !== $("#ai-help-description").value.trim()) await aiGeneratePrompt();
   if (!aiHelp.session || aiHelp.busy) return;
   aiSetBusy(true);
+  let callFailed = false;
   try {
     aiCheckSession(null, aiHelp.session);
     aiSetStatus("Asking your AI...");
-    const result = await api("/api/ai/ask", { prompt: $("#ai-help-prompt").value });
+    let result;
+    try {
+      result = await api("/api/ai/ask", { prompt: $("#ai-help-prompt").value });
+    } catch (callError) {
+      callFailed = true;
+      throw callError;
+    }
     $("#ai-help-response").value = result.answer;
     const envelope = aiParseEnvelope(result.answer);
     aiCheckSession(envelope, aiHelp.session);
@@ -898,8 +907,19 @@ async function aiAsk() {
   } catch (error) {
     const repairable = error instanceof AiHelpError && !error.stale && !error.operational && Boolean(aiHelp.session);
     if (repairable) aiHelp.failure = { response: $("#ai-help-response").value, message: error.message, session: aiHelp.session };
-    aiSetStatus(friendlyError(error), { error: true, repair: repairable });
+    aiSetStatus(friendlyError(error), { error: true, repair: repairable, actions: callFailed });
   } finally { aiSetBusy(false); }
+}
+
+function aiPasteManually() {
+  $("#ai-help-prompt-block").hidden = false;
+  aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
+  $("#ai-help-response").focus();
+}
+
+function aiOpenConnectionSettings() {
+  aiConnectionForm(true);
+  $("#ai-connection-url").focus();
 }
 
 function aiWireHelp() {
@@ -918,6 +938,8 @@ function aiWireHelp() {
   $("#ai-connection-test").addEventListener("click", () => aiConnectionAction("test"));
   $("#ai-connection-save").addEventListener("click", () => aiConnectionAction("save"));
   $("#ai-help-ask").addEventListener("click", aiAsk);
+  $("#ai-help-paste-manual").addEventListener("click", aiPasteManually);
+  $("#ai-help-open-connection").addEventListener("click", aiOpenConnectionSettings);
   $("#ai-help-description").addEventListener("input", aiUpdateGenerateAvailability);
   $("#ai-help-generate").addEventListener("click", aiGeneratePrompt);
   $("#ai-help-modify").addEventListener("click", () => aiProcessResponse("modify"));

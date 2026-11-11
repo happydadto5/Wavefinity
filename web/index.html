@@ -697,7 +697,7 @@
     </div>
     <div id="ai-connection-form" hidden>
       <label class="ai-help-field">Connection name <input id="ai-connection-name" type="text"></label>
-      <label class="ai-help-field">Endpoint base URL <input id="ai-connection-url" type="url" placeholder="http://localhost:11434/v1"></label>
+      <label class="ai-help-field">Endpoint base URL <input id="ai-connection-url" type="url" placeholder="http://api.example.com:PORT/v1"></label>
       <label class="ai-help-field">API key (optional) <input id="ai-connection-key" type="password" autocomplete="off"></label>
       <label class="ai-help-field">Model name <input id="ai-connection-model" type="text"></label>
       <p id="ai-connection-status" role="status"></p>
@@ -738,6 +738,10 @@
       <textarea id="ai-help-response" rows="5" placeholder="Paste the JSON answer here"></textarea>
     </label>
     <p id="ai-help-status" class="ai-help-status" role="status" hidden></p>
+    <div id="ai-help-failure-actions" class="button-row ai-help-row" hidden>
+      <button id="ai-help-paste-manual" type="button" class="button secondary">Paste the answer manually</button>
+      <button id="ai-help-open-connection" type="button" class="button secondary">AI connection settings</button>
+    </div>
     <div class="button-row ai-help-row">
       <button id="ai-help-repair" type="button" class="button secondary" hidden>Make AI Fix Its Answer</button>
       <button id="ai-help-cancel" type="button" class="button secondary">Cancel</button>
