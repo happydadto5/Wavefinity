@@ -257,7 +257,7 @@ DL.prune = () => {
 
 // ------------------------------------------------------------------ lookups
 
-DL.drawer = () => DL.layout.drawers.find(one => one.id === DL.layout.active) || DL.layout.drawers[0];
+DL.drawer = () => DL.layout?.drawers?.find(one => one.id === DL.layout.active) || DL.layout?.drawers?.[0];
 DL.bin = id => DL.bins.find(one => one.id === id);
 DL.key = p => `${p.bin}:${p.copy ?? 0}`;
 // Spacer rows saved before the "unvalidated" qualifier was dropped still store

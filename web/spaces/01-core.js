@@ -77,7 +77,7 @@ SP.run = async task => {
   SP.busy = true;
   SP.dialog().classList.add("busy");
   try { await task(); }
-  catch (error) { toast(error.message, true, 6000); }
+  catch (error) { console.error(error); toast("Something went wrong. Please try again.", true, 6000); }
   finally {
     SP.busy = false;
     SP.dialog().classList.remove("busy");

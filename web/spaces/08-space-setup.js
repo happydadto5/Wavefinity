@@ -561,10 +561,9 @@ SP.create = async () => {
         // Fix 096 A3: a failed restore is a partial commit, not a clean
         // failure - say so explicitly instead of reporting the original
         // error while the new Inventory may still be durable.
-        throw new Error(
-          "The Space could not be " + (migrating ? "updated" : "created") +
-          ", and the previous Inventory could not be restored either. " +
-          "The Inventory may have changed - reopen the Space and check it before continuing.");
+        console.error(error, _restore);
+        toast("The Space could not be saved and the previous Inventory could not be restored. Open the folder and check its Inventory before continuing.", true, 7000);
+        return;
       }
       throw error;
     }
@@ -614,7 +613,8 @@ SP.create = async () => {
           message.includes("Space name") ||
           message.includes("space name") ||
           message.includes("Windows folder");
-        SP.fail(message, nameError ? "#space-name" : "#space-create");
+        console.error(error);
+        SP.fail(nameError ? "Please check the Space name and try again." : "The Space could not be created. Please try again.", nameError ? "#space-name" : "#space-create");
         return;
       }
       throw error;
@@ -626,34 +626,45 @@ SP.create = async () => {
     if (data.remember_warning) toast(data.remember_warning, true);
   }
 
-  // The leave decision is already resolved above - clear the old Drawer
-  // state exactly once, with no second prompt.
-  if (!(await SP.resetDrawer({ skipSafeLeave: true }))) return;
-  // SP.create() always follows with an explicit
-  // loadFreshOrdinaryDesignForCurrentFolder call below, which installs the
-  // starter design itself - skip applyFolder's own (redundant) activation.
-  const applyOptions = { initDesign: false, reset: false };
-  // `folder` is a real handle-bearing object only in the hosted branch
-  // above - in the local branch it may be a plain output path string, so
-  // state.browserFolder must not be set from it there.
-  if (state.runtime.hosted) applyOptions.browserFolder = folder;
-  await SP.applyFolder(info, applyOptions);
-  SP.storageDrawersForm?.markPristine?.();
-  SP.setupFormSnapshot = null;
-  SP.close();
+  try {
+    if (state.runtime.hosted) {
+      try { await SP.rememberHostedRecent(folder, info); }
+      catch (error) { console.error(error); }
+    }
+    // The leave decision is already resolved above - clear the old Drawer
+    // state exactly once, with no second prompt.
+    if (!(await SP.resetDrawer({ skipSafeLeave: true }))) throw new Error("Could not leave the previous Space");
+    // SP.create() always follows with an explicit
+    // loadFreshOrdinaryDesignForCurrentFolder call below, which installs the
+    // starter design itself - skip applyFolder's own (redundant) activation.
+    const applyOptions = { initDesign: false, reset: false };
+    // `folder` is a real handle-bearing object only in the hosted branch
+    // above - in the local branch it may be a plain output path string, so
+    // state.browserFolder must not be set from it there.
+    if (state.runtime.hosted) applyOptions.browserFolder = folder;
+    await SP.applyFolder(info, applyOptions);
+    SP.storageDrawersForm?.markPristine?.();
+    SP.setupFormSnapshot = null;
+    SP.close();
 
-  // Fix 103 (Section F): a structural Space lands on its structural Design
-  // (cabinet / case), never on an ordinary starter bin. No generic bin is
-  // created until the user explicitly chooses New Bin.
-  const createdStructural = DP.structuralTargetEnabled ? DP.structuralKindFor({ kind }) : null;
-  if (createdStructural) {
-    await SP.landOnStructuralDesign(createdStructural);
-  } else {
-    // Ordinary typed Spaces land Space-first on the Space just created: the
-    // starter design is installed for the session, then the Space workspace
-    // opens in Space mode - never an unbound generic starter bin in Design.
-    await loadFreshOrdinaryDesignForCurrentFolder();
-    await DP.enter("space");
+    // Fix 103 (Section F): a structural Space lands on its structural Design
+    // (cabinet / case), never on an ordinary starter bin. No generic bin is
+    // created until the user explicitly chooses New Bin.
+    const createdStructural = DP.structuralTargetEnabled ? DP.structuralKindFor({ kind }) : null;
+    if (createdStructural) {
+      await SP.landOnStructuralDesign(createdStructural);
+    } else {
+      // Ordinary typed Spaces land Space-first on the Space just created: the
+      // starter design is installed for the session, then the Space workspace
+      // opens in Space mode - never an unbound generic starter bin in Design.
+      await loadFreshOrdinaryDesignForCurrentFolder();
+      await DL.ensureLoaded();
+      if (!(await DP.enter("space"))) throw new Error("Space workspace did not open");
+    }
+  } catch (error) {
+    console.error(error);
+    SP.showHome();
+    toast("The Space was created, but could not be opened. Try opening it from the Space list or choose its folder again.", true, 7000);
   }
 };
 
@@ -727,7 +738,8 @@ SP.initializeDesignForActiveSpace = async () => {
       // The stored checkpoint itself is left untouched - a validation
       // failure here must never delete or rewrite recoverable user data.
       resumeValidationFailed = true;
-      toast(`The last design for this Space could not be restored: ${error.message}`, true, 7000);
+      console.error(error);
+      toast("The last design for this Space could not be restored. You can start a new design.", true, 7000);
     }
   }
 
@@ -776,6 +788,7 @@ SP.initializeDesignForActiveSpace = async () => {
     DP.setDesignTarget({ kind: "structural", structural: true, structuralKind, rowId: null, drawerId: null });
     return;
   }
+  await DL.ensureLoaded();
   if (!restored) await SP.installSpaceStarterDesign();
   // Fix 060 Correction 3: this is the one shared syncForm() call for every
   // way a typed Space activates/resumes a design (restored checkpoint or a
@@ -947,7 +960,8 @@ SP.resumeSavedHosted = async saved => {
       SP.showHome(`The folder "${saved.handle?.name || "you used last time"}" was moved or deleted. Choose a folder to continue - you can make a new one in the folder dialog.`);
       return;
     }
-    SP.showHome(error.message);
+    console.error(error);
+    SP.showHome("The Space could not be opened. Choose it from the Space list and try again.");
   }
 };
 
@@ -1039,7 +1053,8 @@ SP.launch = async () => {
     if (data.folder_mode === "space") SP.showResume(data, { startup: true });
     else SP.close();
   } catch (error) {
-    SP.showHome(error.message);
+    console.error(error);
+    SP.showHome("The Space could not be opened. Choose it from the Space list and try again.");
   }
 };
 

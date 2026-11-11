@@ -67,7 +67,7 @@ const dlChanged = (name, value) => {
 DP.singleTypedSpace = () => state.folderMode === "space"
   && Boolean(state.activeSpace)
   && Boolean(DL.layout)
-  && DL.layout.drawers.length === 1;
+  && DL.layout?.drawers?.length === 1;
 
 DP.build = () => {
   if (DP.built) return;
@@ -805,7 +805,7 @@ DP.newBinFromSpace = async () => {
 
 // A normal typed one-drawer Space: name and size are owned by the Space.
 DP.isCanonicalDrawer = () => state.folderMode === "space" && ["drawer", "pegboard"].includes(state.activeSpace?.kind)
-  && DL.layout.drawers.length === 1;
+  && DL.layout?.drawers?.length === 1;
 
 // Opens the grouped selection dialog before anything is sent to the slicer -
 // clicking Print Spacers… must never silently print every unprinted row.
@@ -1471,7 +1471,7 @@ DP.enter = async (preferredMode, inventoryLoaded = false) => {
     if (preferredMode === "space" || preferredMode === "design") return DP.selectMode(preferredMode);
     return DL.loaded || DP.ensureInventoryLoaded();
   }
-  if (!inventoryLoaded && !(await DP.ensureInventoryLoaded())) return false;
+  if (!(await DP.ensureInventoryLoaded())) return false;
   DL.active = true;
   DP.mode = preferredMode === "design" ? "design" : "space";
   DP.build();

@@ -228,7 +228,8 @@ SP.offerSpacePlanning = async () => {
         : (await api("/api/space/inspect", { output: folder })).folder;
     SP.enterSetupFor(folder, data);
   } catch (error) {
-    toast(error.message, true, 6000);
+    console.error(error);
+    toast("The Space could not be opened. Please try again.", true, 6000);
   }
 };
 
