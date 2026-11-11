@@ -126,8 +126,8 @@ function modifierConflicts(design) {
       conflicts.push({
         key: "edge-mount-separate:direct-stack",
         message:
-          "A Separate Edge Mount label cannot be used with direct Stackable Bin because " +
-          "its inside clip occupies the stacking opening. Use Integrated or turn off direct stacking.",
+          "A Separate Edge Mount label cannot be used with a Stackable base because " +
+          "its inside clip occupies the stacking opening. Use Integrated, or turn off Stackable base.",
       });
     }
   }
@@ -555,7 +555,7 @@ function baseRequiredMin(box) {
 function baseRequiredLabel(box) {
   if (box?.b4b?.enabled) return "Required for stacking";
   const mode = (box?.stack?.mode || "none") === "direct" ? "direct" : "none";
-  if (mode === "direct") return "Required for direct stacking";
+  if (mode === "direct") return "Required for Stackable base";
   return "";
 }
 
