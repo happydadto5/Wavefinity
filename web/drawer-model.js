@@ -1345,10 +1345,12 @@ DL.requestReport = debounce(async () => {
 
 // The server launches Bambu before replying; that instant is not observable
 // here. Keep the honest waiting label through the whole outstanding request.
-DL.printBusyLabel = "Finishing files…";
-DL.busyWith = async (what, work) => {
+DL.printBusyLabel = "Printing…";
+DL.busyWith = async (what, work, outputRows = null) => {
+  if (outputRows && DL.busy) return null;
+  const report = outputRows ? beginGenerationReport(what === "save-bins" ? "Exporting…" : "Printing…", outputRows, true) : null;
   if (state.relocating) {
-    toast("Wavefinity is changing its folder. Try again in a moment.", true);
+    (report || toast)("Wavefinity is changing its folder. Try again in a moment.", true);
     return null;
   }
   const context = DL.spaceContext();
@@ -1356,11 +1358,15 @@ DL.busyWith = async (what, work) => {
   DL.busy = what;
   DL.emit();
   try {
-    return await work(context);
+    return await work(context, report);
   } catch (error) {
-    if (!DL.isStaleSpaceError(error)) toast(friendlyError(error), true, 7000);
+    if (report) report(DL.isStaleSpaceError(error)
+      ? "This operation belongs to the Space you left. The current Space was not changed."
+      : friendlyError(error), true);
+    else if (!DL.isStaleSpaceError(error)) toast(friendlyError(error), true, 7000);
     return null;
   } finally {
+    if (report) report.finish();
     if (ticket === DL.busyTicket && DL.spaceContextCurrent(context)) {
       DL.busy = "";
       DL.emit();
@@ -1696,13 +1702,13 @@ DL.adoptBatchResult = result => {
 
 // Shared start of a batch Save/Print: flush the visible Designer, then the
 // Space layout, so the server prepares the latest saved designs.
-DL.prepareBatch = async (selection, { printing = false } = {}) => {
+DL.prepareBatch = async (selection, { printing = false, report = toast } = {}) => {
   if (typeof flushSpaceDesignAutosave === "function" &&
       !(await flushSpaceDesignAutosave({
         materialize: selection.includes(state.designInventoryId),
       }))) return false;
   if (printing && state.runtime.hosted) {
-    toast("Hosted Wavefinity saves files to your folder instead of opening a local slicer.", true);
+    report("Hosted Wavefinity saves files to your folder instead of opening a local slicer.", true);
     return false;
   }
   return true;
@@ -1710,8 +1716,8 @@ DL.prepareBatch = async (selection, { printing = false } = {}) => {
 
 // Batch Save: make the chosen bins' files current (only rows without current
 // files are generated) and never open Bambu Studio or change Printed status.
-DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", async context => {
-  if (!(await DL.prepareBatch(rowIds || [], { printing: false }))) return;
+DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", async (context, report) => {
+  if (!(await DL.prepareBatch(rowIds || [], { printing: false, report }))) return;
   const chosen = [...new Set(rowIds || [])];
   if (!chosen.length) return;
   if (!(await DL.save())) return;
@@ -1721,10 +1727,10 @@ DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", as
     result = await DL.inventoryCall("/api/drawer/save-bins", {
       selection: chosen,
       include_connectors: Boolean(includeConnectors),
-    }, { context, sideEffect: true });
+    }, { context, sideEffect: true, ...report.options });
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) throw error;
-    toast("Files were saved for the Space you left. The current Space was not changed.");
+    report("Files were saved for the Space you left. The current Space was not changed.");
     return;
   }
   DL.adoptBatchResult(result);
@@ -1733,28 +1739,21 @@ DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", as
     DP.renderInventory(true);
     DL.emit();
     DL.requestReport();
-    toast(result.error || "Not every file could be saved.", true, 10000);
+    report.batchResult(result, false, context.output);
     return;
   }
   DP.renderInventory(true);
   DL.emit();
   DL.requestReport();
-  const made = (result.generated_rows || []).length;
-  const kept = (result.reused_rows || []).length;
-  toast([
-    `Saved ${chosen.length} bin${chosen.length === 1 ? "" : "s"}`,
-    ...(made ? [`${made} new`] : []),
-    ...(kept ? [`${kept} ${kept === 1 ? "bin" : "bins"} already had current files`] : []),
-    ...(result.connector_copies ? [`${result.connector_copies} connector ${result.connector_copies === 1 ? "copy" : "copies"}`] : []),
-    ...(result.notes || []),
-  ].join("\n"), false, 8000);
-});
+  report.batchResult(result, false, context.output);
+}, (rowIds || []).map(id => ({ id, title: DL.bin(id) ? DL.label(DL.bin(id)) : "Bin" })));
+
 
 // The server re-reads saved Inventory; each selected row opens once in Bambu.
-DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async context => {
-  if (!(await DL.prepareBatch(Object.keys(selection || {}), { printing: true }))) return;
+DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async (context, report) => {
+  if (!(await DL.prepareBatch(Object.keys(selection || {}), { printing: true, report }))) return;
   if (!state.slicer || !state.slicer.available) {
-    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 7000);
+    report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
     return;
   }
   const chosen = Object.fromEntries(Object.entries(selection || {}).filter(([, count]) => count > 0));
@@ -1767,10 +1766,10 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
       selection: chosen,
       include_connectors: Boolean(includeConnectors),
       slicer_path: state.slicer?.path || null,
-    }, { context, sideEffect: true });
+    }, { context, sideEffect: true, ...report.options });
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) throw error;
-    toast("Bambu Studio opened for the Space you left. The current Space was not changed.");
+    report("Bambu Studio opened for the Space you left. The current Space was not changed.");
     return;
   }
   DL.adoptBatchResult(result);
@@ -1781,30 +1780,25 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
     DP.renderInventory(true);
     DL.emit();
     DL.requestReport();
-    const recorded = result.partial_stage === "status" ? "" : "\nNo bins were marked Printed.";
-    toast(`${result.error || "Bambu Studio did not open."}${recorded}`, true, 10000);
+    report.batchResult(result, true, context.output);
     return;
   }
   DP.renderInventory(true);
   DL.emit();
   DL.requestReport();
-  toast([
-    "Opened in Bambu Studio",
-    `${result.bin_copies} bin ${result.bin_copies === 1 ? "copy" : "copies"}`,
-    ...(result.connector_copies ? [`${result.connector_copies} connector ${result.connector_copies === 1 ? "copy" : "copies"}`] : []),
-    ...(result.notes || []),
-  ].join("\n"), false, 10000);
-});
+  report.batchResult(result, true, context.output);
+}, Object.keys(selection || {}).map(id => ({ id, title: DL.bin(id) ? DL.label(DL.bin(id)) : "Bin" })));
+
 
 // (Fix 096 C11) One local complete Space handoff: every placed bin + every
 // placed spacer with a file + the Space's connectors, one preflight, one
 // slicer launch. Hosted is rejected by the backend with a plain message.
-DL.printCompleteSpace = () => DL.busyWith("print-complete", async context => {
+DL.printCompleteSpace = () => DL.busyWith("print-complete", async (context, report) => {
   const drawers = DL.layout && Array.isArray(DL.layout.drawers) ? DL.layout.drawers : [];
   const placedIds = [...new Set(drawers.flatMap(drawer => (drawer.placements || []).map(placement => placement.bin)))];
-  if (!(await DL.prepareBatch(placedIds, { printing: true }))) return;
+  if (!(await DL.prepareBatch(placedIds, { printing: true, report }))) return;
   if (!state.slicer || !state.slicer.available) {
-    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 7000);
+    report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
     return;
   }
   if (!(await DL.save())) return;
@@ -1814,24 +1808,15 @@ DL.printCompleteSpace = () => DL.busyWith("print-complete", async context => {
     result = await DL.inventoryCall("/api/drawer/print-complete", {
       layout: DL.layout, bins: DL.bins,
       drawer_id: DL.layout.active, slicer_path: state.slicer?.path || null,
-    }, { context, sideEffect: true });
+    }, { context, sideEffect: true, ...report.options });
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) throw error;
-    toast("Bambu Studio opened for the Space you left. The current Space was not changed.");
+    report("Bambu Studio opened for the Space you left. The current Space was not changed.");
     return;
   }
   DL.adoptBatchResult(result);
   DP.renderInventory(true);
   DL.emit();
   DL.requestReport();
-  const parts = [
-    `${result.bin_copies ?? 0} bin ${(result.bin_copies ?? 0) === 1 ? "copy" : "copies"}`,
-    `${result.spacer_copies ?? 0} spacer ${(result.spacer_copies ?? 0) === 1 ? "copy" : "copies"}`,
-    ...(result.connector_copies ? [`${result.connector_copies} connector ${result.connector_copies === 1 ? "copy" : "copies"}`] : []),
-  ];
-  if (result.partial) {
-    toast([(result.error || "Bambu Studio did not open."), `Kept: ${parts.join(", ")}.`, ...(result.notes || [])].join("\n"), true, 10000);
-    return;
-  }
-  toast([`Opened in Bambu Studio: ${parts.join(", ")}.`, ...(result.notes || [])].join("\n"), false, 10000);
-});
+  report.batchResult(result, true, context.output);
+}, (DL.bins || []).filter(DL.isOrdinary).map(one => ({ id: one.id, title: DL.label(one) })));

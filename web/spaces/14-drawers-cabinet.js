@@ -381,6 +381,7 @@ SP.settleCabinetJournal = async () => {
 // and one slicer handoff. Hosted stays unavailable: it has no local slicer.
 SP.printCabinetAndBins = async event => {
   if (SP.structuralBusy) return;
+  const report = SP.beginStructuralReport("Printing…");
   let savedName, savedWhere, wroteFiles = false;
   SP.structuralBusy = true;
   SP.structuralBusyLabel = "Preparing cabinet and bins…";
@@ -391,9 +392,9 @@ SP.printCabinetAndBins = async event => {
     // output stays blocked while the user keeps editing.
     if (!(await SP.confirmLeaveStructuralEditor())) return;
     const hosted = Boolean(state.runtime.hosted);
-    if (hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
+    if (hosted) { report(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true); return; }
     if (!state.slicer?.available) {
-      toast("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true, 8000);
+      report("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true);
       return;
     }
     const context = DL.spaceContext();
@@ -410,7 +411,7 @@ SP.printCabinetAndBins = async event => {
       space: clone(state.activeSpace),
       output: state.output, space_id: state.activeSpaceId,
       slicer_path: state.slicer?.path || null,
-    });
+    }, report.options);
     wroteFiles = true;
     DL.requireSpaceContext(context);
     DL.adoptBatchResult(result);
@@ -418,20 +419,21 @@ SP.printCabinetAndBins = async event => {
     DL.emit();
     DL.requestReport();
     if (result.partial) {
-      toast(result.error || "Cabinet + bins files were saved, but the slicer did not open.", true, 8000);
+      report(result.error || "Cabinet + bins files were saved, but the slicer did not open.", true);
     } else {
-      toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\n${names(result.files)}`, false, 7000);
+      report(`Sent ${names(result.files)} to ${state.slicer?.name || "the slicer"}`, false);
       if (typeof WS !== "undefined") WS.markContainerPrinted();
     }
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
-      toast(wroteFiles
+      report(wroteFiles
         ? `Cabinet + bins files for "${savedName}" were saved to ${savedWhere}. The Space you switched to was not changed.`
         : `You switched Spaces before "${savedName}" was saved, so nothing was written.`, false, 8000);
     } else {
-      toast(error.message, true, 8000);
+      report(error.message, true);
     }
   } finally {
+    report.finish();
     SP.structuralBusy = false;
     SP.structuralBusyLabel = "";
     SP.cabinetInfo.commitSerial += 1;
@@ -440,6 +442,7 @@ SP.printCabinetAndBins = async event => {
 };
 SP.runCabinetStructural = async mode => {
   if (SP.structuralBusy) return;
+  const report = SP.beginStructuralReport(mode === "save" ? "Saving cabinet…" : "Printing…");
   let savedName, savedWhere, wroteFiles = false;
   SP.structuralBusy = true;
   SP.structuralBusyLabel = mode === "save" ? "Saving cabinet…" : "Printing cabinet…";
@@ -450,10 +453,10 @@ SP.runCabinetStructural = async mode => {
     // output stays blocked while the user keeps editing.
     if (!(await SP.confirmLeaveStructuralEditor())) return;
     const hosted = Boolean(state.runtime.hosted);
-    if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
-    if (mode === "print" && hosted) { toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000); return; }
+    if (hosted && !state.browserFolder) { report("Choose a folder before saving files.", true); return; }
+    if (mode === "print" && hosted) { report(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true); return; }
     if (mode === "print" && !state.slicer?.available) {
-      toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
+      report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
       return;
     }
     const context = DL.spaceContext();
@@ -467,36 +470,37 @@ SP.runCabinetStructural = async mode => {
     const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\/]/).pop()))].join("\n");
     let saved;
     if (mode === "print") {
-      const result = await apiSideEffect("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
+      const result = await apiSideEffect("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null }, report.options);
       wroteFiles = true;
       DL.requireSpaceContext(context);
       if (result.partial) {
-        toast(result.error || "Cabinet files were saved, but the slicer did not open.", true, 8000);
+        report(result.error || "Cabinet files were saved, but the slicer did not open.", true);
       } else {
-        toast(`Sent to ${state.slicer?.name || "the slicer"}!\n${names(result.files)}`, false, 7000);
+        report(`Sent ${names(result.files)} to ${state.slicer?.name || "the slicer"}`, false);
         if (typeof WS !== "undefined") WS.markContainerPrinted();
       }
       saved = result;
     } else if (hosted) {
-      saved = await SP.hostedCabinetSave(payload, context);
+      saved = await SP.hostedCabinetSave(payload, context, report.options);
       wroteFiles = true;
       DL.requireSpaceContext(context);
-      toast(`Saved cabinet files\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false, 8000);
+      report(`Saved Cabinet files to ${savedWhere}\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false);
     } else {
-      saved = await apiSideEffect("/api/space/structural-generate", payload);
+      saved = await apiSideEffect("/api/space/structural-generate", payload, report.options);
       wroteFiles = true;
       DL.requireSpaceContext(context);
-      toast(`Saved cabinet to ${saved.output || state.output}\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false, 8000);
+      report(`Saved Cabinet files to ${saved.output || state.output}\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false);
     }
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
-      toast(wroteFiles
+      report(wroteFiles
         ? `Cabinet files for "${savedName}" were saved to ${savedWhere}. The Space you switched to was not changed.`
         : `You switched Spaces before "${savedName}" was saved, so nothing was written.`, false, 8000);
     } else {
-      toast(error.message, true, 8000);
+      report(error.message, true);
     }
   } finally {
+    report.finish();
     SP.structuralBusy = false;
     SP.structuralBusyLabel = "";
     SP.cabinetInfo.commitSerial += 1;
@@ -593,12 +597,12 @@ SP.recoverHostedCabinetJournal = async (handle, spaceId, { own = false } = {}) =
 // only files this cabinet already owns (same bytes as its committed manifest)
 // are replaced, and the manifest is committed only after every write succeeded.
 // Any failure - or a lost tab - is settled from the durable journal.
-SP.hostedCabinetSave = async (payload, context) => {
+SP.hostedCabinetSave = async (payload, context, options = {}) => {
   const handle = state.browserFolder.handle;
   const spaceId = state.activeSpaceId;
   // Settle any earlier interrupted save before ownership is compared.
   await SP.recoverHostedCabinetJournal(handle, spaceId);
-  const exported = await apiSideEffect("/api/space/structural-generate", payload);
+  const exported = await apiSideEffect("/api/space/structural-generate", payload, options);
   DL.requireSpaceContext(context);
   const candidate = exported.manifest;
   if (!candidate?.components?.length) throw new Error("The server did not return the cabinet files.");

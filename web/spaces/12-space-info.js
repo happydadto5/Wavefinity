@@ -21,6 +21,7 @@ SP.placeNewBin = () => {
 SP.renderSpaceInfo = () => {
     SP.renderSpaceInfoBody();
     SP.placeNewBin();
+    renderOutputReport();
 };
 
 SP.renderSpaceInfoBody = () => {

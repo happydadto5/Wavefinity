@@ -165,11 +165,25 @@ SP.structuralBusy = false;
 SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP = "Printing needs local Wavefinity and a slicer. Use Export to get the files.";
 SP.HOSTED_SURFACE_PRINT_TOOLTIP = "Printing needs local Wavefinity and a slicer. Use Export to get the files.";
 
+SP.beginStructuralReport = working => {
+  const report = beginOutputReport(working, "container", []);
+  SP.structuralBusyLabel = working;
+  const update = report.working;
+  report.working = message => {
+    SP.structuralBusyLabel = message;
+    update(message);
+    SP.renderSpaceInfo();
+  };
+  report.options.onStillFinishing = () => report.working("Still working…");
+  return report;
+};
+
 SP.runStructural = async (mode, event) => {
   const kind = SP.structuralKind();
   if (kind === "storage_drawers") return SP.runCabinetStructural(mode);
   if (!kind || SP.structuralBusy) return;
   const label = SP.structuralLabel(kind);
+  const report = SP.beginStructuralReport(mode === "print" ? "Printing…" : "Exporting…");
   SP.structuralBusy = true;
   SP.renderSpaceInfo();
   try {
@@ -178,16 +192,16 @@ SP.runStructural = async (mode, event) => {
     // output stays blocked while the user keeps editing.
     if (!(await SP.confirmLeaveStructuralEditor())) return;
     const hosted = Boolean(state.runtime.hosted);
-    if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
+    if (hosted && !state.browserFolder) { report("Choose a folder before saving files.", true); return; }
     // Hosted Wavefinity has no local slicer: Print is disabled there (Save stays
     // available) and never quietly becomes a Save.
     if (mode === "print" && hosted) {
-      toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000);
+      report(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true);
       return;
     }
     const printing = mode === "print";
     if (printing && !state.slicer?.available) {
-      toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
+      report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
       return;
     }
     // Fix 056 D: hidden maintainer shortcut restored at its new owner - local
@@ -205,28 +219,30 @@ SP.runStructural = async (mode, event) => {
       ...(jointTest ? { joint_test_sample: true } : {}),
     };
     if (printing) {
-      const result = await apiSideEffect("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
+      const result = await apiSideEffect("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null }, report.options);
       DL.requireSpaceContext(context);
       if (result.partial) {
         // Files are a real side effect even though the slicer step failed -
         // never claim "Sent to Bambu Studio" when it did not open.
-        toast(result.error || `${label} files were saved, but the slicer did not open.`, true, 8000);
+        report(result.error || `${label} files were saved, but the slicer did not open.`, true);
       } else {
         const names = (result.files || []).map(file => String(file).split(/[\\/]/).pop());
-        toast(`Sent to ${state.slicer?.name || "the slicer"}!\n${names.join("\n")}`, false, 7000);
+        report(`Sent ${names.join(", ")} to ${state.slicer?.name || "the slicer"}`, false);
         if (typeof WS !== "undefined") WS.markContainerPrinted();
       }
     }
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
-      toast(`${label} finished for the Space you left. Nothing was changed in the current Space.`);
+      report(`${label} finished for the Space you left. Nothing was changed in the current Space.`);
     } else if (/different name to avoid overwriting/i.test(String(error.message))) {
-      toast(`A file with that ${label} name already exists in this folder. Rename or move it, then try again.`, true, 8000);
+      report(`A file with that ${label} name already exists in this folder. Rename or move it, then try again.`, true);
     } else {
-      toast(error.message, true, 8000);
+      report(error.message, true);
     }
   } finally {
+    report.finish();
     SP.structuralBusy = false;
+    SP.structuralBusyLabel = "";
     SP.renderSpaceInfo();
   }
 };
@@ -236,6 +252,7 @@ SP.saveStructural = () => {
 };
 SP.printStorageBox = async (mode = "print") => {
   if (SP.structuralBusy || SP.structuralKind() !== "storage_box") return;
+  const report = SP.beginStructuralReport(mode === "print" ? "Printing…" : "Exporting…");
   SP.structuralBusy = true;
   SP.renderSpaceInfo();
   try {
@@ -244,14 +261,15 @@ SP.printStorageBox = async (mode = "print") => {
     // output stays blocked while the user keeps editing.
     if (!(await SP.confirmLeaveStructuralEditor())) return;
     if (mode === "print" && state.runtime.hosted) {
-      toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000);
+      report(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true);
       return;
     }
     if (mode === "export") {
+      if (state.runtime.hosted && !state.browserFolder) { report("Choose a folder before saving files.", true); return; }
       const context = DL.spaceContext();
       const result = await apiSideEffect("/api/space/structural-generate", {
         space: clone(state.activeSpace), output: state.output,
-      });
+      }, report.options);
       DL.requireSpaceContext(context);
       if (!result.files?.length) throw new Error("The server did not return any print files.");
       if (state.runtime.hosted) {
@@ -261,11 +279,11 @@ SP.printStorageBox = async (mode = "print") => {
           await WFFileSystem.writeBlob(null, file.name, await response.blob());
         }
       }
-      toast(state.runtime.hosted ? "Storage Box files downloaded." : `Storage Box files saved to ${result.output || state.output}.`, false, 7000);
+      report(`Saved Storage Box files to ${state.runtime.hosted ? "your browser’s download folder" : result.output || state.output}: ${outputFileNames(result.files)}`);
       return;
     }
     if (!state.slicer?.available) {
-      toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
+      report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
       return;
     }
     const context = DL.spaceContext();
@@ -278,25 +296,27 @@ SP.printStorageBox = async (mode = "print") => {
     const result = await apiSideEffect("/api/space/storage-box-print", {
       output: context.output, space_id: context.spaceId,
       slicer_path: state.slicer?.path || null,
-    });
+    }, report.options);
     DL.requireSpaceContext(context);
     DL.adoptBatchResult(result);
     DP.renderInventory(true);
     DL.emit();
     DL.requestReport();
-    if (result.partial) toast(result.error || "Storage Box print stopped before Bambu Studio opened.", true, 10000);
+    if (result.partial) report(result.error || "Storage Box print stopped before Bambu Studio opened.", true);
     else {
-      toast(`Sent Storage Box + Bins to ${state.slicer?.name || "the slicer"}!\n${(result.files || []).map(file => String(file).split(/[\\/]/).pop()).join("\n")}`, false, 8000);
+      report(`Sent ${outputFileNames(result.files)} to ${state.slicer?.name || "the slicer"}`);
       if (typeof WS !== "undefined") WS.markContainerPrinted();
     }
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
-      toast("Storage Box print belongs to the Space you left. The current Space was not changed.");
+      report("Storage Box print belongs to the Space you left. The current Space was not changed.");
     } else {
-      toast(error.message, true, 8000);
+      report(error.message, true);
     }
   } finally {
+    report.finish();
     SP.structuralBusy = false;
+    SP.structuralBusyLabel = "";
     SP.renderSpaceInfo();
   }
 };
@@ -320,9 +340,9 @@ SP.renderStructuralActions = () => {
   const print = document.getElementById("space-structural-print");
   const hosted = Boolean(state.runtime.hosted);
   save.hidden = false;
-  save.textContent = "Export";
+  save.textContent = SP.structuralBusy ? SP.structuralBusyLabel : "Export";
   save.title = "Create files for you to save.";
-  print.textContent = "Print";
+  print.textContent = SP.structuralBusy ? SP.structuralBusyLabel : "Print";
   const summary = document.getElementById("space-structural-summary");
   if (summary) {
     const text = kind === "base_trim" ? SP.baseTrimSummaryText() : "";

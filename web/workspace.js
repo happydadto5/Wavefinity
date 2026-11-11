@@ -235,6 +235,7 @@ WS.render = () => {
   const auxHtml = WS.task === "newspace" || WS.task === "picker" ? WS.renderNewSpace() : "";
   aux.hidden = !auxHtml;
   draw(aux, auxHtml, "auxSignature");
+  renderOutputReport();
 };
 
 // ------------------------------------------------------------------ navigation
@@ -701,11 +702,16 @@ WS.rowOutputs = (one, picked) => {
   const exportTitle = !live ? "Select this row to export it."
     : `Create the 3MF file for the ${what}`;
   const attrs = `data-ws-out data-kind="${one.kind}" data-id="${wsEsc(one.id)}"`;
+  const running = currentOutputReport?.busy && DL.spaceContextCurrent(currentOutputReport.context)
+    && (one.kind === "container" ? currentOutputReport.owner === "container"
+      : one.kind === "bin" && (currentOutputReport.rowIds.includes(one.id)
+        || currentOutputReport.owner === "bin" && one.id === (state.designInventoryId || "")));
+  const label = mode => running && currentOutputReport.action === mode ? wsEsc(currentOutputReport.text) : mode === "print" ? "Print" : "Export";
   // Story 2815: the space line has no Print button; clicking the line opens the space details screen.
   // Story 2829: the space line has no Export button either; the details screen exports the space's files.
   if (one.kind === "settings") return "";
-  const printButton = `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live ? "" : " disabled"} title="${wsEsc(printTitle)}">Print</button>`;
-  return printButton + (one.kind === "container" ? `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live ? "" : " disabled"} title="${wsEsc(exportTitle)}">Export</button>` : "");
+  const printButton = `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live && !running ? "" : " disabled"} title="${wsEsc(printTitle)}">${label("print")}</button>`;
+  return printButton + (one.kind === "container" ? `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live && !running ? "" : " disabled"} title="${wsEsc(exportTitle)}">${label("export")}</button>` : "");
 };
 
 // Story 2807: Duplicate and Delete sit on the selected bin's own row (and no other row). They are the same

@@ -265,7 +265,99 @@ function friendlyError(error) {
   return text;
 }
 
+// Export/Print errors are mapped at the receive boundary, including polled failures.
+function outputErrorText(text, label = "bin", internal = false) {
+  text = String(text || "");
+  const report = /mesh|watertight|component[s_ ]|bounds|traceback|manifold|validation failed|volume_mm|NoneType|RuntimeError|KeyError|division by zero/i.test(text);
+  if (!internal && !report) return text;
+  // Keep actionable messages even when an older server uses HTTP 500 for them.
+  if (!report && /slicer|choose .*folder|different name|already exists|permission|access denied|disk.*full/i.test(text)) return text;
+  const part = report ? text.match(/^([\w.-]+)(?=[:\s])/u)?.[1] : null;
+  return `A part of the ${label} could not be made, so nothing was saved.${part ? ` Part: ${part}.` : ""}`;
+}
+
+function outputLabel(path, payload) {
+  if (/structural|storage-box|surface-print/.test(path)) {
+    const kind = payload?.space?.kind || state.activeSpace?.kind;
+    return /storage-box/.test(path) || ["portable", "box"].includes(kind) ? "Storage Box"
+      : kind === "storage_drawers" ? "Cabinet" : "Base Trim";
+  }
+  return "bin";
+}
+
+function isOutputRequest(path) {
+  return /\/(generate|print|connector)$|structural-(generate|print)|storage-box-print|surface-print|\/(save-bins|print-bins|print-complete)$/.test(path);
+}
+
+function outputFileNames(files) {
+  return [...new Set((files || []).map(file => String(file?.name || file).split(/[\\/]/).pop()))].join(", ");
+}
+
+function outputResultFiles(result) {
+  if (result.files?.length) return result.files;
+  const ids = result.saved_rows || Object.keys(result.selected_rows || result.selection || {});
+  return [...(result.bins || []).filter(one => ids.includes(one.id))
+    .flatMap(one => String(one.file || "").split(/,\s*/).filter(Boolean)),
+    ...Object.keys(result.connector_counts || {})];
+}
+
+let currentOutputReport = null;
+function beginOutputReport(working, owner = "bin", rowIds = [state.designInventoryId].filter(Boolean)) {
+  const context = typeof DL !== "undefined" ? DL.spaceContext() : null;
+  const origin = state.activeSpace?.name || "this folder";
+  const entry = { context, origin, owner, rowIds, action: /^Print/i.test(working) ? "print" : "export",
+    text: working, busy: true, error: false, lateAt: null };
+  currentOutputReport = entry;
+  const report = (message, error = false) => {
+    entry.text = friendlyError(message);
+    entry.error = error;
+    entry.busy = false;
+    entry.lateAt = context && !DL.spaceContextCurrent(context) ? DL.spaceContext() : null;
+    currentOutputReport = entry;
+    renderOutputReport();
+    if (typeof WS !== "undefined") WS.syncOutput();
+  };
+  report.working = message => {
+    entry.text = message;
+    renderOutputReport();
+    if (typeof WS !== "undefined") WS.syncOutput();
+  };
+  report.options = { onStillFinishing: () => report.working("Still working…") };
+  report.finish = () => { if (entry.busy) report("Action stopped before files were sent or saved.", true); };
+  renderOutputReport();
+  if (typeof WS !== "undefined") WS.syncOutput();
+  return report;
+}
+
+function renderOutputReport() {
+  const entry = currentOutputReport;
+  const visible = entry && (!entry.context || DL.spaceContextCurrent(entry.context) ||
+    (entry.lateAt && DL.spaceContextCurrent(entry.lateAt)));
+  for (const id of ["space-head-view", "dl-batch-tools", "ws-frame"]) {
+    const host = document.getElementById(id);
+    if (!host) continue;
+    let line = document.getElementById(`${id}-output-result`);
+    if (!line) {
+      line = document.createElement("p");
+      line.id = `${id}-output-result`;
+      line.setAttribute("role", "status");
+      line.setAttribute("aria-live", "polite");
+      line.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;grid-column:1/-1";
+      host.append(line);
+    }
+    line.hidden = !visible;
+    line.textContent = visible ? `${entry.lateAt ? `For “${entry.origin}”: ` : ""}${entry.text}` : "";
+    line.classList.toggle("error", Boolean(entry?.error));
+    if (id === "ws-frame") {
+      host.style.flexWrap = "wrap";
+      line.style.flexBasis = "100%";
+      line.style.margin = "0";
+    }
+  }
+}
+
 async function api(path, payload = null, { timeoutMs = 60000, onStillFinishing = null } = {}) {
+  const label = outputLabel(path, payload);
   // Every backend call is bounded: a stalled request must surface as an
   // error, never wedge the UI forever (e.g. the drawers configure form's
   // live validation, which blocks Create while its summary is pending).
@@ -283,10 +375,14 @@ async function api(path, payload = null, { timeoutMs = 60000, onStillFinishing =
     try {
       data = await response.json();
     } catch (_error) {
-      throw new Error(`The local Wavefinity service returned ${response.status}.`);
+      throw new Error(isOutputRequest(path) && response.status >= 500
+        ? outputErrorText("", label, true)
+        : `The local Wavefinity service returned ${response.status}.`);
     }
     if (!response.ok) {
-      const error = new Error(data.error || `Request failed (${response.status}).`);
+      const text = data.error || `Request failed (${response.status}).`;
+      const error = new Error(isOutputRequest(path)
+        ? outputErrorText(text, label, response.status >= 500) : text);
       error.status = response.status;
       throw error;
     }
@@ -306,7 +402,7 @@ async function api(path, payload = null, { timeoutMs = 60000, onStillFinishing =
         try {
           (typeof onStillFinishing === "function" ? onStillFinishing : defaultStillFinishing)();
         } catch (_ignored) { /* the poll below still runs */ }
-        return pollOperationResult(operationId);
+        return pollOperationResult(operationId, path, label);
       }
       throw new Error("The request took too long. Please try again.");
     }
@@ -326,7 +422,7 @@ function defaultStillFinishing() {
 // named operation is terminal, then return its result or throw its stored
 // error. The overall wait is capped so the UI can never wedge if the server
 // goes away mid-operation.
-async function pollOperationResult(operationId) {
+async function pollOperationResult(operationId, path = "", label = "bin") {
   const deadline = Date.now() + 10 * 60 * 1000;
   for (;;) {
     let status;
@@ -339,7 +435,8 @@ async function pollOperationResult(operationId) {
       throw error;
     }
     if (status.operation_status === "done") return status.result;
-    if (status.operation_status === "error") throw new Error(status.error || "The earlier request failed.");
+    if (status.operation_status === "error") throw new Error(isOutputRequest(path)
+      ? outputErrorText(status.error, label) : status.error || "The earlier request failed.");
     if (status.operation_status === "unknown") {
       // The server has no record of this operation id: the first request may
       // have completed and been pruned from the registry, or it may never
@@ -410,6 +507,7 @@ function mintOperationId() {
 // apiSideEffectStartOver() (separately confirmed in the UI as potentially
 // duplicating) may proceed.
 async function apiSideEffect(path, payload, { timeoutMs = 60000, operationId = null, onStillFinishing = null } = {}) {
+  const label = outputLabel(path, payload);
   const fingerprint = operationId ? null : operationFingerprint(path, payload);
   let id = operationId || inFlightOperationIds.get(fingerprint);
   if (!id) {
@@ -442,13 +540,23 @@ async function apiSideEffect(path, payload, { timeoutMs = 60000, operationId = n
     // A retry that reused an in-flight id: the server answered synchronously
     // instead of executing again. Poll it exactly like a timed-out request.
     try {
-      data = await pollOperationResult(id);
+      if (onStillFinishing) onStillFinishing();
+      data = await pollOperationResult(id, path, label);
     } catch (error) {
       if (!error || (!error.operationStillRunning && !error.operationUnknown)) forget();
       throw error;
     }
   }
   forget();
+  if (isOutputRequest(path) && data?.partial && data.error) {
+    const detail = data.failed_row?.error || data.error;
+    const plain = outputErrorText(detail, label);
+    if (plain !== detail) {
+      const kept = outputFileNames(outputResultFiles(data));
+      data.error = plain.replace(", so nothing was saved.", ".") +
+        (kept ? ` Files already saved were kept: ${kept}.` : " No new files were saved.");
+    }
+  }
   return data;
 }
 

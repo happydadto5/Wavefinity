@@ -418,6 +418,7 @@ DP.printSelectionPayload = () => Object.fromEntries(
   DP.batchScope().print.map(one => [one.id, DL.printCount(one)]));
 
 DP.renderBatch = () => {
+  renderOutputReport();
   const hosted = Boolean(state.runtime.hosted);
   const tools = $("#dl-batch-tools");
   if (!tools) return;
@@ -447,7 +448,7 @@ DP.renderBatch = () => {
   const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
   const printCount = scope.subset ? scope.picked.length + (DP.containerPinned ? 1 : 0) : 0;
-  button.textContent = (DL.busy === "print-bins" || DL.busy === "print-complete") ? DL.printBusyLabel
+  button.textContent = (DL.busy === "print-bins" || DL.busy === "print-complete") ? currentOutputReport?.text || DL.printBusyLabel
     : scope.subset ? `Print ${DP.containerPinned ? (printCount === 1 ? "container" : `${printCount} items`) : (printCount === 1 ? "bin" : `${printCount} bins`)}` : "Print whole space";
   button.disabled = noSlicer || busy || (scope.subset && !printCount);
   button.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."
@@ -1310,6 +1311,10 @@ DP.renderInventory = (force = false) => {
     // but gets a disabled Edit with the reason, never a silent omission.
     const sourceMissing = ["bin", "b4b"].includes(one.kind) && !designSource;
     const printable = eligible && !state.runtime.hosted && Boolean(state.slicer?.available);
+    const outputRunning = currentOutputReport?.busy && DL.spaceContextCurrent(currentOutputReport.context)
+      && currentOutputReport.rowIds.includes(one.id);
+    const outputLabel = mode => outputRunning && currentOutputReport.action === mode
+      ? escapeHtml(currentOutputReport.text) : mode === "print" ? "Print" : "Save";
     const statusTracked = !spacer && ["bin", "b4b", "manual"].includes(one.kind);
     const printed = one.status === "printed";
     const picked = !spacer && DP.printSelected.has(one.id);
@@ -1325,8 +1330,8 @@ DP.renderInventory = (force = false) => {
             : sourceMissing ? `<button type="button" class="button secondary dl-small" data-act="edit" disabled title="The original editable design for this row is unavailable, so it can't be edited.">Edit</button>` : ""}
           ${one.id === deleteRowId ? `<button type="button" class="button danger dl-small" data-act="delete" ${DP.designNavBlocked() ? "disabled" : ""}>Delete</button>` : ""}
           ${designSource && one.id === deleteRowId ? `<button type="button" class="button secondary dl-small" data-act="duplicate" ${DP.designNavBlocked() ? "disabled" : ""}>Duplicate</button>` : ""}
-          ${eligible ? `<button type="button" class="button secondary dl-small" data-act="save">Save</button>` : ""}
-          ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}
+          ${eligible ? `<button type="button" class="button secondary dl-small" data-act="save"${outputRunning ? " disabled" : ""}>${outputLabel("export")}</button>` : ""}
+          ${printable ? `<button type="button" class="button secondary dl-small" data-act="print"${outputRunning ? " disabled" : ""}>${outputLabel("print")}</button>` : ""}
           ${statusTracked ? (printed
             ? `<button type="button" class="button secondary dl-small" data-act="not-printed">Mark Not Printed</button>`
             : `<button type="button" class="button secondary dl-small" data-act="printed">Mark Printed</button>`) : ""}

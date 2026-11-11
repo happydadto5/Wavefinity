@@ -1,20 +1,88 @@
 "use strict";
 
+// Use the existing item status area for Print and inventory batches as well as Export.
+function beginGenerationReport(working, rows = [{ id: "bin", title: "Bin" }], batch = false) {
+  const place = beginOutputReport(working, batch ? "batch" : "bin",
+    batch ? rows.map(one => one.id) : [state.designInventoryId].filter(Boolean));
+  const dialog = $("#generation-dialog");
+  dialog.dataset.outputBusy = "true";
+  if (!dialog.dataset.outputCancelWired) {
+    dialog.dataset.outputCancelWired = "true";
+    dialog.addEventListener("cancel", event => {
+      if (dialog.dataset.outputBusy === "true") event.preventDefault();
+    });
+  }
+  const context = DL.spaceContext();
+  const items = rows.length ? rows : [{ id: "bin", title: "Parts" }];
+  renderGenerationItems(items.map(one => ({ ...one, status: "generating", text: working })));
+  $("#generation-dialog-title").textContent = working;
+  $("#generation-dialog-subtitle").textContent = "";
+  $("#generation-error").hidden = true;
+  $("#generation-actions").hidden = true;
+  if (!dialog.open) dialog.showModal();
+  let settled = false;
+  const report = (message, error = false) => {
+    settled = true;
+    dialog.dataset.outputBusy = "false";
+    place(message, error);
+    const text = DL.spaceContextCurrent(context) ? message : `For the Space you left: ${message}`;
+    for (const one of items) setItemStatus(one.id, error ? "error" : "done", text);
+    $("#generation-dialog-title").textContent = error ? "Needs attention" : "Finished";
+    $("#generation-actions").hidden = false;
+  };
+  report.working = message => {
+    place.working(message);
+    if (typeof DP !== "undefined" && DP.built) DP.renderInventory(true);
+    for (const one of items) setItemStatus(one.id, "generating", message);
+  };
+  report.batchResult = (result, printing, folder) => {
+    const files = outputResultFiles(result);
+    const message = result.partial ? result.error || "Some files could not be prepared."
+      : printing ? `Sent ${outputFileNames(files)} to ${state.slicer?.name || "the slicer"}`
+        : `Saved files to ${folder}: ${outputFileNames(files)}`;
+    report(message, Boolean(result.partial));
+    if (result.partial) {
+      for (const one of items) {
+        const saved = result.saved_rows?.includes(one.id);
+        const file = (result.bins || []).find(bin => bin.id === one.id)?.file;
+        const status = saved ? `Files saved to ${folder}: ${file || ""}. ${printing ? "Print did not finish. " : ""}` : "";
+        setItemStatus(one.id, saved ? "done" : "error", status + message);
+      }
+    }
+  };
+  report.options = { onStillFinishing: () => report.working("Still working…") };
+  report.finish = () => { if (!settled) report("Action stopped before files were sent or saved.", true); };
+  return report;
+}
+
 async function generateParts(target) {
+  if (state.designMutationBusy || isGenerating || currentOutputReport?.busy) return;
+  const report = beginOutputReport("Exporting…");
+  try {
+    await generatePartsWithReport(target, report);
+  } catch (error) {
+    report(friendlyError(error), true);
+  } finally {
+    report.finish();
+  }
+}
+
+
+async function generatePartsWithReport(target, report) {
   // Ordinary output entry points defensively reject structural ownership:
   // a Storage Box or Storage Drawers target has its own Save/Print chrome.
   if (designTargetIsStructural()) {
-    toast("These outputs are for ordinary bins. The structural editor has its own Save and Print actions.", true);
+    report("These outputs are for ordinary bins. The structural editor has its own Save and Print actions.", true);
     return;
   }
   if (relocationBlocksWrites()) return;
   if (state.designMutationBusy || isGenerating) {
-    toast("Finish the current action before saving files.", true);
+    report("Finish the current action before saving files.", true);
     return;
   }
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (state.runtime.hosted && !state.browserFolder) {
-    toast("Choose a folder before saving files.", true);
+    report("Choose a folder before saving files.", true);
     return;
   }
   const beforeForm = pendingPreEditDesign || clone(state.design);
@@ -28,7 +96,7 @@ async function generateParts(target) {
   }
 
   if ((target === "all" || target === "bin") && !state.canGenerate) {
-    toast("Resolve the highlighted issue before saving.", true);
+    report("Resolve the highlighted issue before saving.", true);
     return;
   }
   if (typedSpaceOrdinaryBin() &&
@@ -43,7 +111,7 @@ async function generateParts(target) {
   const dialogError = $("#generation-error");
   const dialogActions = $("#generation-actions");
 
-  if (dialogTitle) dialogTitle.textContent = "Saving Parts…";
+  if (dialogTitle) dialogTitle.textContent = "Exporting…";
   if (dialogSubtitle) dialogSubtitle.textContent = "Please wait while your files are being saved.";
   if (dialogError) {
     dialogError.hidden = true;
@@ -58,7 +126,7 @@ async function generateParts(target) {
 
   const items = [];
   if (target === "all" || target === "bin") {
-    items.push({ id: "bin", title: boxTitle, status: "waiting", text: "Waiting…" });
+    items.push({ id: "bin", title: boxTitle, status: "generating", text: "Exporting…" });
   }
   if (target === "all" || target === "connector") {
     items.push({ id: "connector", title: connTitle, status: "waiting", text: "Waiting…" });
@@ -122,8 +190,11 @@ async function generateParts(target) {
     // Step 1: Generate Bin if requested
     if (target === "all" || target === "bin") {
       saveStage = "bin";
-      setItemStatus("bin", "generating", "Saving…");
-      const binResult = await apiSideEffect("/api/generate", payload, { onStillFinishing: () => setItemStatus("bin", "generating", "Still finishing…") });
+      setItemStatus("bin", "generating", "Exporting…");
+      const binResult = await apiSideEffect("/api/generate", payload, { onStillFinishing: () => {
+        report.working("Still working…");
+        setItemStatus("bin", "generating", "Still working…");
+      } });
       if (designSpaceContext) DL.requireSpaceContext(designSpaceContext);
       saveOutput = binResult.output || saveOutput;
       const binFiles = await saveGeneratedFiles(binResult, { ownedStale: staleFileNamesForRow(designRowId) });
@@ -146,7 +217,7 @@ async function generateParts(target) {
       }
       allFiles.push(...binFiles);
       binSaved = true;
-      setItemStatus("bin", "done", "Done");
+      setItemStatus("bin", "done", "Saved to " + (state.runtime.hosted ? state.browserFolder?.name || "your download folder" : saveOutput) + ": " + binFiles.join(", "));
       // The just-saved bin is the next resume target. The generated files and
       // inventory entry already exist by this point, so a checkpoint-save
       // failure here must not be reported as the generation itself
@@ -164,9 +235,9 @@ async function generateParts(target) {
     // Step 2: Generate Connector if requested
     if (target === "all" || target === "connector") {
       saveStage = "connector";
-      setItemStatus("connector", "generating", "Saving…");
+      setItemStatus("connector", "generating", "Exporting…");
       const connectorPayload = { ...payload, replace_existing_connectors: false };
-      let connResult = await apiSideEffect("/api/connector", connectorPayload, { onStillFinishing: () => setItemStatus("connector", "generating", "Still finishing…") });
+      let connResult = await apiSideEffect("/api/connector", connectorPayload, { onStillFinishing: () => { report.working("Still working…"); setItemStatus("connector", "generating", "Still working…"); } });
       if (connResult.requires_connector_replace) {
         const names = connResult.conflict_files || [];
         if (!(await confirmReplaceConnectorFiles(names))) {
@@ -175,7 +246,7 @@ async function generateParts(target) {
         connResult = await apiSideEffect("/api/connector", {
           ...connectorPayload,
           replace_existing_connectors: true,
-        }, { onStillFinishing: () => setItemStatus("connector", "generating", "Still finishing…") });
+        }, { onStillFinishing: () => { report.working("Still working…"); setItemStatus("connector", "generating", "Still working…"); } });
       }
       saveOutput = connResult.output || saveOutput;
       if (connResult.connector_plan) {
@@ -190,6 +261,7 @@ async function generateParts(target) {
         const savedList = [...new Set(allFiles)];
         const message = `${binSaved ? "The bin was saved. " : ""}Some connector files were saved, but not all.\n${connResult.error || ""}`
           + `${savedList.length ? `\nSaved to ${saveOutput}\n${savedList.join("\n")}` : ""}`;
+        setItemStatus("connector", "error", message);
         if (dialogTitle) dialogTitle.textContent = binSaved ? "Bin Saved; Connectors Partly Saved" : "Connectors Partly Saved";
         if (dialogSubtitle) dialogSubtitle.textContent = "Some connector files were saved before the remaining connector failed.";
         if (dialogError) {
@@ -197,10 +269,10 @@ async function generateParts(target) {
           dialogError.hidden = false;
         }
         if (dialogActions) dialogActions.hidden = false;
-        toast(message, true, 9000);
+        report(message, true, 9000);
         return;
       }
-      setItemStatus("connector", "done", "Done");
+      setItemStatus("connector", "done", "Saved to " + (state.runtime.hosted ? state.browserFolder?.name || "your download folder" : saveOutput) + ": " + connFiles.join(", "));
     }
 
     // Fix 032 Correction 2 (C2.3): the generated output is real either way,
@@ -215,20 +287,16 @@ async function generateParts(target) {
       if (dialogSubtitle) dialogSubtitle.textContent = "All parts saved.";
     }
 
-    // Pause briefly so user clearly sees checkmarks
-    await new Promise(resolve => setTimeout(resolve, 650));
-
-    if (dialog && dialog.open) {
-      dialog.close();
-    }
+    if (dialogActions) dialogActions.hidden = false;
 
     const uniqueFiles = [...new Set(allFiles)];
     const planNote = connectorPlan && connectorPlan.webbed
       ? `\nConnector: ${fmt(connectorPlan.length_mm)} mm long, ${fmt(connectorPlan.web_thickness_mm)} mm web, `
         + `${fmt(connectorPlan.printed_height_mm)} mm printed height`
       : "";
+    if (state.runtime.hosted) saveOutput = state.browserFolder?.name || "your download folder";
     const savedMessage = `Saved to ${saveOutput}${uniqueFiles.length ? `\n${uniqueFiles.join("\n")}` : ""}${planNote}`;
-    toast(
+    report(
       checkpointSaveFailed
         ? `${savedMessage}\n\nThe current design could not be saved to this Space: ${checkpointSaveFailed.message}`
         : savedMessage,
@@ -239,13 +307,13 @@ async function generateParts(target) {
     if (target === "all" || target === "bin") {
       const binRow = $("#gen-item-bin");
       if (binRow && !binRow.classList.contains("status-done")) {
-        setItemStatus("bin", "error", "Failed");
+        setItemStatus("bin", "error", error.message);
       }
     }
     if (target === "all" || target === "connector") {
       const connRow = $("#gen-item-connector");
       if (connRow && !connRow.classList.contains("status-done")) {
-        setItemStatus("connector", "error", "Failed");
+        setItemStatus("connector", "error", error.message);
       }
     }
 
@@ -268,7 +336,7 @@ async function generateParts(target) {
       dialogActions.hidden = false;
     }
     setError(failureText);
-    toast(failureText, true, 7000);
+    report(failureText, true, 7000);
   } finally {
     isGenerating = false;
     state.designMutationBusy = false;
@@ -278,20 +346,33 @@ async function generateParts(target) {
 }
 
 async function printModel(target = "bin", initiatingButton = null) {
+  if (state.designMutationBusy || isGenerating || currentOutputReport?.busy) return;
+  const report = beginGenerationReport("Printing…");
+  try {
+    await printModelWithReport(target, initiatingButton, report);
+  } catch (error) {
+    report(friendlyError(error), true);
+  } finally {
+    report.finish();
+  }
+}
+
+
+async function printModelWithReport(target, initiatingButton, report) {
   // Ordinary output entry points defensively reject structural ownership:
   // a Storage Box or Storage Drawers target has its own Save/Print chrome.
   if (designTargetIsStructural()) {
-    toast("These outputs are for ordinary bins. The structural editor has its own Save and Print actions.", true);
+    report("These outputs are for ordinary bins. The structural editor has its own Save and Print actions.", true);
     return;
   }
   if (relocationBlocksWrites()) return;
   if (state.runtime.hosted) {
-    toast("Printing needs local Wavefinity and a slicer. Use Export to get the files.", true, 6000);
+    report("Printing needs local Wavefinity and a slicer. Use Export to get the files.", true, 6000);
     return;
   }
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
-    toast("A slicer prepares 3D-print files for your printer. Use Settings > Change slicer to choose one.", true, 8000);
+    report("A slicer prepares 3D-print files for your printer. Use Settings > Change slicer to choose one.", true, 8000);
     return;
   }
   if (typedSpaceOrdinaryBin() &&
@@ -300,10 +381,10 @@ async function printModel(target = "bin", initiatingButton = null) {
     ? state.designInventoryId : null;
   const designSpaceContext = designRowId ? DL.spaceContext() : null;
   if (!beginDesignMutation()) return;
-  const button = initiatingButton;
+  const button = initiatingButton || document.createElement("button");
   const old = button.textContent;
   const slicerName = state.slicer?.name || "the slicer";
-  button.textContent = `Sending to ${slicerName}…`;
+  button.textContent = "Printing…";
   setError();
   try {
     await commitVisibleDraft();
@@ -335,7 +416,10 @@ async function printModel(target = "bin", initiatingButton = null) {
         throw new Error(`The current design could not be saved to this Space, so nothing was sent: ${error.message}`);
       }
     }
-    const result = await apiSideEffect("/api/print", payload, { onStillFinishing: () => { button.textContent = "Still finishing…"; } });
+    const result = await apiSideEffect("/api/print", payload, { onStillFinishing: () => {
+      button.textContent = "Still working…";
+      report.working("Still working…");
+    } });
     if (result.partial) {
       // Bin/design files are a real side effect even though connectors or
       // the slicer step failed after them: never mark this row Printed, and
@@ -361,7 +445,7 @@ async function printModel(target = "bin", initiatingButton = null) {
       }
       const partialMessage = result.error || "Files were saved, but the print could not finish.";
       setError(partialMessage);
-      toast(
+      report(
         savedStatusFailed
           ? `${partialMessage}\n\nSaved status could not be recorded: ${savedStatusFailed.message}`
           : partialMessage,
@@ -389,7 +473,7 @@ async function printModel(target = "bin", initiatingButton = null) {
     }
     const files = result.files || [];
     const fileNames = files.map(f => f.split(/[\\/]/).pop());
-    const sentMessage = `Sent to ${slicerName}!\n${fileNames.join("\n")}`;
+    const sentMessage = "Sent " + fileNames.join(", ") + " to " + slicerName;
     if (!designRowId && (target === "bin" || target === "all") && typeof WS !== "undefined") WS.markLooseBinPrinted();
     if (target === "bin" || target === "all") {
       // Fix 032 Correction 2 (C2.3): the slicer handoff already succeeded
@@ -404,7 +488,7 @@ async function printModel(target = "bin", initiatingButton = null) {
           checkpointSaveFailed = error;
         }
       }
-      toast(
+      report(
         checkpointSaveFailed
           ? `${sentMessage}\n\nThe current design could not be saved to this Space: ${checkpointSaveFailed.message}`
           : sentMessage,
@@ -412,12 +496,13 @@ async function printModel(target = "bin", initiatingButton = null) {
         checkpointSaveFailed ? 9000 : 7000,
       );
     } else {
-      toast(sentMessage, false, 7000);
+      report(sentMessage, false, 7000);
     }
   } catch (error) {
     setError(error.message);
-    toast(error.message, true, 8000);
+    report(error.message, true, 8000);
   } finally {
+    report.finish();
     button.textContent = old;
     finishDesignMutation();
   }

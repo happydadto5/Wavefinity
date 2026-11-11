@@ -187,12 +187,12 @@ SP.fileNames = files => [...new Set((files || []).map(file => String(file?.name 
 // committed only after every write succeeded. A durable journal plus on-disk
 // backups make an interrupted save recoverable: the next status or save settles
 // the journal first, idempotently. (Fix 096 A8)
-SP.hostedBaseTrimSave = async (payload, context) => {
+SP.hostedBaseTrimSave = async (payload, context, options = {}) => {
   const handle = state.browserFolder.handle;
   const spaceId = state.activeSpaceId;
   // Settle any earlier interrupted save before ownership is compared.
   await SP.recoverBaseTrimJournal(handle, spaceId);
-  const exported = await apiSideEffect("/api/space/structural-generate", { ...payload, space_id: spaceId });
+  const exported = await apiSideEffect("/api/space/structural-generate", { ...payload, space_id: spaceId }, options);
   DL.requireSpaceContext(context);
   const candidate = exported.manifest;
   if (!candidate?.pieces?.length) throw new Error("The server did not return the Base Trim files.");
@@ -290,8 +290,9 @@ SP.hostedBaseTrimSave = async (payload, context) => {
 
 SP.saveBaseTrim = async () => {
   if (SP.structuralBusy || SP.structuralKind() !== "base_trim") return;
+  const report = SP.beginStructuralReport("Exporting…");
   const hosted = Boolean(state.runtime.hosted);
-  if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
+  if (hosted && !state.browserFolder) { report("Choose a folder before saving files.", true); return; }
   const context = DL.spaceContext();
   const payload = {
     space: clone(state.activeSpace), space_id: state.activeSpaceId,
@@ -301,19 +302,21 @@ SP.saveBaseTrim = async () => {
   SP.renderSpaceInfo();
   try {
     const saved = hosted
-      ? await SP.hostedBaseTrimSave(payload, context)
-      : await apiSideEffect("/api/space/structural-generate", payload);
+      ? await SP.hostedBaseTrimSave(payload, context, report.options)
+      : await apiSideEffect("/api/space/structural-generate", payload, report.options);
     DL.requireSpaceContext(context);
     const warnings = saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : "";
-    toast(`Saved Base Trim${hosted ? "" : ` to ${saved.output || state.output}`}\n${SP.fileNames(saved.files)}${warnings}`, false, 7000);
+    report(`Saved Base Trim files to ${hosted ? state.browserFolder?.name || "your chosen folder" : saved.output || state.output}\n${SP.fileNames(saved.files)}${warnings}`, false);
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
-      toast("Base Trim finished for the Space you left. Nothing was changed in the current Space.");
+      report("Base Trim finished for the Space you left. Nothing was changed in the current Space.");
     } else {
-      toast(error.message, true, 8000);
+      report(error.message, true);
     }
   } finally {
+    report.finish();
     SP.structuralBusy = false;
+    SP.structuralBusyLabel = "";
     SP.baseTrimInfo.serial += 1;
     SP.renderSpaceInfo();
   }
@@ -324,9 +327,10 @@ SP.saveBaseTrim = async () => {
 // maintainer joint-fit sample (no bins, connectors or status changes).
 SP.printSurface = async event => {
   if (SP.structuralBusy || SP.structuralKind() !== "base_trim") return;
-  if (state.runtime.hosted) { toast(SP.HOSTED_SURFACE_PRINT_TOOLTIP, true, 6000); return; }
+  const report = SP.beginStructuralReport("Printing…");
+  if (state.runtime.hosted) { report(SP.HOSTED_SURFACE_PRINT_TOOLTIP, true); return; }
   if (!state.slicer?.available) {
-    toast("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true, 8000);
+    report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
     return;
   }
   if (event?.ctrlKey && event?.shiftKey) return SP.runStructural("print", event);
@@ -343,25 +347,27 @@ SP.printSurface = async event => {
     const result = await apiSideEffect("/api/space/surface-print", {
       output: context.output, space_id: context.spaceId,
       slicer_path: state.slicer?.path || null,
-    });
+    }, report.options);
     DL.requireSpaceContext(context);
     DL.adoptBatchResult(result);
     DP.renderInventory(true);
     DL.emit();
     DL.requestReport();
-    if (result.partial) toast(result.error || "Surface print stopped before Bambu Studio opened.", true, 10000);
+    if (result.partial) report(result.error || "Surface print stopped before Bambu Studio opened.", true);
     else {
-      toast(`Sent Surface + Bins to ${state.slicer?.name || "the slicer"}!\n${SP.fileNames(result.files)}`, false, 8000);
+      report(`Sent Surface + Bins to ${state.slicer?.name || "the slicer"}!\n${SP.fileNames(result.files)}`, false);
       if (typeof WS !== "undefined") WS.markContainerPrinted();
     }
   } catch (error) {
     if (DL.isStaleSpaceError(error)) {
-      toast("Surface print belongs to the Space you left. The current Space was not changed.");
+      report("Surface print belongs to the Space you left. The current Space was not changed.");
     } else {
-      toast(error.message, true, 8000);
+      report(error.message, true);
     }
   } finally {
+    report.finish();
     SP.structuralBusy = false;
+    SP.structuralBusyLabel = "";
     SP.baseTrimInfo.serial += 1;
     SP.renderSpaceInfo();
   }

@@ -1136,6 +1136,11 @@ is secondary to the overlay.
 
 # 13. Printing, saving, and generated files
 
+Export and Print show their working state immediately. Long jobs say **Still working…**.
+Results stay beside the Space controls or in the dialog's item status until the next output
+action or a Space switch. Saved results name the files and folder; Print names the files
+and slicer. Failures use plain words, and partial saves say which files were kept.
+
 ## 13.1 Ordinary-bin output
 
 Depending on current features, Wavefinity can produce:
