@@ -11,6 +11,7 @@ from typing import Any
 from organizer_inserts import FEATURE_DEFINITIONS
 from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED
 
+from organizer_engine import GRID_PITCH
 from ._runtime import default_design
 from ._designs import _is_base_trim_design, validate_design_payload
 
@@ -71,9 +72,9 @@ _AI_PATH_RE = re.compile(r"[A-Za-z]:[\\/][^\s\"']*|(?:/[\w.\-]+){2,}")
 
 
 def _ai_example_base() -> dict[str, Any]:
-    """A roomy blank bin, so every example part and modifier is legal in it."""
+    """A roomy blank bin (a whole multiple of the 7 mm grid), so every example part and modifier is legal in it."""
     design = default_design()
-    design["box"].update({"x": 64.0, "y": 64.0, "z": 60.0})
+    design["box"].update({"x": 70.0, "y": 70.0, "z": 60.0})
     return design
 
 
@@ -230,6 +231,20 @@ def _ai_clean_text(text: str, limit: int = 600) -> str:
     return _AI_PATH_RE.sub("[path]", text).strip()[:limit]
 
 
+_AI_GRID_RE = re.compile(
+    r"box ([XY]) must be a whole multiple of the (\d+) mm grid[^;]*;\s*([\d.]+) mm is not[^.]*")
+_AI_AXIS_WORDS = {"X": "width", "Y": "depth"}
+
+
+def _ai_plain_size_words(text: str) -> str:
+    """Say a bin size problem in plain words: never "box X", never a "try N mm" fix."""
+    text = _AI_GRID_RE.sub(
+        lambda m: (f"The bin's {_AI_AXIS_WORDS[m.group(1)]} ({m.group(3)} mm) must be a whole "
+                   f"multiple of {m.group(2)} mm so it interlocks with bins of other sizes"),
+        text)
+    return re.sub(r"\bbox ([XY])\b", lambda m: f"bin {_AI_AXIS_WORDS[m.group(1)]}", text)
+
+
 def _ai_safe_message(error: BaseException) -> str:
     if isinstance(error, KeyError):
         key = error.args[0] if error.args else "a required field"
@@ -237,7 +252,7 @@ def _ai_safe_message(error: BaseException) -> str:
     if isinstance(error, TypeError):
         return "The design has a value of the wrong type."
     if isinstance(error, ValueError):
-        return _ai_clean_text(str(error)) or "The design is not valid."
+        return _ai_plain_size_words(_ai_clean_text(str(error))) or "The design is not valid."
     return "The design could not be read as a Wavefinity bin design."
 
 
@@ -260,6 +275,38 @@ def _ai_bin_design(raw: Any) -> dict[str, Any]:
                 "Remove that part and add it in Wavefinity."
             )
     return canonical
+
+
+def _ai_baseline_design(raw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(shape, checkable) for the open bin used by prompt generation.
+
+    A Pegboard bin may legitimately be off the 7 mm grid.  Only that one check
+    is relaxed here: ``checkable`` is the same design with width/depth rounded
+    to the grid, used to measure the interior; ``shape`` keeps the real size.
+    Every other baseline failure still raises as before.  Candidate proof
+    (``_ai_bin_design``) is untouched and still enforces the grid.
+    """
+    try:
+        shape = _ai_bin_design(raw)
+        return shape, shape
+    except ValueError:
+        box = raw.get("box") if isinstance(raw, dict) else None
+        snapped: dict[str, Any] = {}
+        if isinstance(box, dict):
+            for axis in ("x", "y"):
+                value = _ai_num(box.get(axis))
+                if value is None or not math.isfinite(value) or value <= 0:
+                    continue
+                units = value / GRID_PITCH
+                if abs(units - round(units)) > 1e-6:
+                    snapped[axis] = max(1, round(units)) * GRID_PITCH
+        if not snapped:
+            raise
+        checkable = _ai_bin_design({**raw, "box": {**box, **snapped}})  # raises if anything else is wrong
+        shape = json.loads(json.dumps(checkable))
+        for axis in snapped:
+            shape["box"][axis] = round(float(box[axis]), 3)
+        return shape, checkable
 
 
 def _ai_space_context(raw: Any) -> dict[str, Any]:
@@ -341,6 +388,7 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "=== HOW TO WORK ===",
         "- Design exactly ONE object. If the request describes several, ask the person to narrow it to one BEFORE giving the final answer.",
         "- If any critical measurement is missing, ambiguous, suspicious or has conflicting units, ASK the person first. Do not guess it and do not reinterpret the units they gave.",
+        "- The bin you design must have a width and depth that are whole multiples of 7 mm (for example 63 mm or 70 mm), so it interlocks with bins of other sizes.",
         "- All values in the design are millimetres. Convert nothing silently; ask if unsure.",
         "- You may use any legal part, option or modifier in the CAPABILITY MANIFEST that best solves the request.",
         "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",

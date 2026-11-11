@@ -448,6 +448,7 @@ from wavefinity_web_impl._ai import (
     _ai_clean_text,
     _ai_safe_message,
     _ai_bin_design,
+    _ai_baseline_design,
     _ai_space_context,
     _capped_space_height,
     _ai_controlled_fields,
@@ -3026,11 +3027,11 @@ def ai_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
     description = description.strip()
     if len(description) > AI_MAX_DESCRIPTION:
         raise ValueError(f"Keep the description under {AI_MAX_DESCRIPTION} characters.")
-    design = _ai_bin_design(payload.get("design"))
+    design, checkable = _ai_baseline_design(payload.get("design"))
     space = _ai_space_context(payload.get("space"))
     request_id = "wf-ai-" + secrets.token_hex(6)
     fingerprint = _ai_fingerprint(design, space)
-    box, layout, *_ = _design(design)
+    box, layout, *_ = _design(checkable)
     bounds = layout_zone(box, layout.mode)
     # Fix 078: existing Inventory names are advisory context only for the
     # prompt, so they are added after the fingerprint - an unrelated
