@@ -690,6 +690,22 @@
 
   <dialog id="ai-help-dialog" class="support-layout-dialog ai-help-dialog" aria-labelledby="ai-help-title">
     <h2 id="ai-help-title">AI Design</h2>
+    <div id="ai-connection-offer" hidden>
+      <p>Use AI Design by copying and pasting with your usual chat tool, with nothing to set up. Or connect your own AI service or local model so Wavefinity can send the prompt and receive the design.</p>
+      <button type="button" id="ai-connection-configure" class="button secondary">Configure automatic AI</button>
+      <button type="button" id="ai-connection-later" class="button secondary">Not now</button>
+    </div>
+    <div id="ai-connection-form" hidden>
+      <label class="ai-help-field">Connection name <input id="ai-connection-name" type="text"></label>
+      <label class="ai-help-field">Endpoint base URL <input id="ai-connection-url" type="url" placeholder="http://localhost:11434/v1"></label>
+      <label class="ai-help-field">API key (optional) <input id="ai-connection-key" type="password" autocomplete="off"></label>
+      <label class="ai-help-field">Model name <input id="ai-connection-model" type="text"></label>
+      <p id="ai-connection-status" role="status"></p>
+      <button type="button" id="ai-connection-test" class="button secondary">Test connection</button>
+      <button type="button" id="ai-connection-save" class="button primary">Save</button>
+      <button type="button" id="ai-connection-cancel" class="button secondary">Cancel</button>
+    </div>
+    <button type="button" id="ai-connection-edit" class="button secondary" hidden>AI connection settings</button>
     <p class="ai-help-guide">
       <span>Describe object</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
       <span>Generate Prompt</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
@@ -707,6 +723,7 @@
     </div>
     <div class="button-row ai-help-row">
       <button id="ai-help-dictate" type="button" class="button secondary" hidden>Dictate</button>
+      <button id="ai-help-ask" type="button" class="button primary" hidden>Ask my AI</button>
       <button id="ai-help-generate" type="button" class="button primary" disabled>2. Generate Prompt</button>
     </div>
     <div id="ai-help-prompt-block" class="ai-help-field" hidden>

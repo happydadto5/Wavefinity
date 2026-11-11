@@ -662,14 +662,14 @@ def served_preferences() -> dict[str, Any]:
         prefs = load_preferences()
         path = connector_settings_path(prefs)
         if path is None:
-            return prefs
+            return {key: value for key, value in prefs.items() if key != "ai_connection"}
 
         legacy = prefs.get("connector_settings")
         if not path.exists() and isinstance(legacy, dict):
             try:
                 _write_connector_settings_path(path, legacy)
             except OSError:
-                return prefs
+                return {key: value for key, value in prefs.items() if key != "ai_connection"}
 
         if path.exists():
             if "connector_settings" in prefs:
@@ -684,7 +684,7 @@ def served_preferences() -> dict[str, Any]:
             prefs.pop("connector_settings", None)
             if file_settings:
                 prefs["connector_settings"] = file_settings
-        return prefs
+        return {key: value for key, value in prefs.items() if key != "ai_connection"}
 
 
 def nest_trace_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1220,7 +1220,8 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
             # No usable Wavefinity folder yet: keep the legacy prefs location
             # rather than creating or redirecting a Wavefinity root for settings.
             update["connector_settings"] = settings
-    return {"preferences": save_preferences(update)}
+    save_preferences(update)
+    return {"preferences": served_preferences()}
 
 
 def browse_slicer_path_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2944,6 +2945,78 @@ def ai_capability_manifest() -> dict[str, Any]:
     }
 
 
+def _ai_connection(payload: dict[str, Any]) -> dict[str, str]:
+    from urllib.parse import urlsplit
+    if HOSTED:
+        raise ValueError("Automatic AI is available only in the local app.")
+    values = {key: str(payload.get(key, "")).strip() for key in ("name", "url", "model", "key")}
+    parts = urlsplit(values["url"])
+    if not values["name"] or not values["model"] or parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
+        raise ValueError("Enter a connection name, a valid endpoint address, and a model name.")
+    values["url"] = values["url"].rstrip("/")
+    return values
+
+
+def ai_connection_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if HOSTED:
+        return {"configured": False}
+    action = payload.get("action")
+    saved = load_preferences().get("ai_connection")
+    if action == "status":
+        if not isinstance(saved, dict):
+            return {"configured": False}
+        return {"configured": True, "name": saved.get("name", ""), "url": saved.get("url", ""),
+                "model": saved.get("model", ""), "has_key": bool(saved.get("key"))}
+    if action in ("save", "test"):
+        connection = _ai_connection(payload)
+        if payload.get("keep_key") and isinstance(saved, dict) and not connection["key"]:
+            connection["key"] = saved.get("key", "")
+        if action == "save":
+            save_preferences({"ai_connection": connection})
+            return {"configured": True}
+        _ai_chat(connection, "Reply with OK.")
+        return {"ok": True}
+    raise ValueError("Choose an action for the AI connection.")
+
+
+def _ai_chat(connection: dict[str, str], prompt: str) -> str:
+    import urllib.error
+    import urllib.request
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    request = urllib.request.Request(connection["url"] + "/chat/completions",
+        data=json.dumps({"model": connection["model"], "messages": [{"role": "user", "content": prompt}]}).encode("utf-8"),
+        headers={"Content-Type": "application/json", **({"Authorization": "Bearer " + connection["key"]} if connection["key"] else {})})
+    try:
+        with urllib.request.build_opener(NoRedirect).open(request, timeout=120) as response:
+            result = json.loads(response.read(4 * 1024 * 1024).decode("utf-8"))
+        answer = result["choices"][0]["message"]["content"]
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError()
+        return answer
+    except urllib.error.HTTPError as error:
+        if error.code in (401, 403):
+            raise ValueError("The AI service refused the key. Check your API key.") from None
+        if error.code == 404:
+            raise ValueError("The endpoint or model was not found. Check the address and model name.") from None
+        raise ValueError("The AI service could not complete the request. Check the address and model name.") from None
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        raise ValueError("The AI endpoint did not answer properly. Check that it is running and the address and model are correct.") from None
+
+
+def ai_ask_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if HOSTED:
+        raise ValueError("Automatic AI is available only in the local app.")
+    saved = load_preferences().get("ai_connection")
+    if not isinstance(saved, dict):
+        raise ValueError("Configure an AI connection first.")
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("Generate a prompt first.")
+    return {"answer": _ai_chat(_ai_connection(saved), prompt)}
+
+
 def ai_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
     description = payload.get("description")
     if not isinstance(description, str) or not description.strip():
@@ -3103,6 +3176,8 @@ POST_ROUTES = {
     "/api/preview": preview_payload,
     "/api/space/warm": warm_spaces_payload,
     "/api/design/validate": _validate_design_open_guard,
+    "/api/ai/connection": ai_connection_payload,
+    "/api/ai/ask": ai_ask_payload,
     "/api/ai/prompt": ai_prompt_payload,
     "/api/ai/candidate": ai_candidate_payload,
     "/api/ai/repair-prompt": ai_repair_prompt_payload,

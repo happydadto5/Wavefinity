@@ -1200,7 +1200,9 @@ re-edits or reverts by making a new change.
 
 **Status: Current — accepted and integrated into `main`.**
 
-AI Design is a Designer workflow for turning a natural-language object description into a legal Wavefinity bin design **without Wavefinity directly calling an AI provider**.
+AI Design is a Designer workflow for turning a natural-language object description into a legal Wavefinity bin design **using copy and paste or, in the local app, an optional OpenAI-compatible connection to the user's own AI**.
+
+The local app can connect to an OpenAI-compatible chat endpoint with a connection name, base URL, model and optional API key. The server keeps the connection in local master settings and masks the key in the dialog. Test connection checks the endpoint. Ask my AI uses the same prompt and candidate checks as copy and paste, including repair prompts. The hosted app retains copy and paste.
 
 ## 16.1 User flow
 

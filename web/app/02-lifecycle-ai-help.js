@@ -503,7 +503,7 @@ function aiSetStatus(message = "", { error = false, repair = false } = {}) {
 
 function aiSetBusy(busy) {
   aiHelp.busy = busy;
-  ["#ai-help-modify", "#ai-help-generate-new", "#ai-help-repair", "#ai-help-cancel"].forEach(selector => {
+  ["#ai-help-modify", "#ai-help-generate-new", "#ai-help-repair", "#ai-help-cancel", "#ai-help-ask"].forEach(selector => {
     const button = $(selector);
     if (button) button.disabled = busy;
   });
@@ -785,7 +785,7 @@ async function aiMakeRepairPrompt() {
     // Never auto-copy behind the user's back (Fix 078): show it and let the
     // explicit Copy Prompt button own copy state, same as the initial prompt.
     aiShowPrompt(result.prompt);
-    aiSetStatus("Repair prompt ready above. Copy it to your AI, then paste its new answer below.", { repair: true });
+    aiSetStatus(aiConnection?.configured ? "Repair prompt ready. Choose Ask my AI, or copy it to your AI and paste its new answer below." : "Repair prompt ready above. Copy it to your AI, then paste its new answer below.", { repair: true });
   } catch (error) {
     aiSetStatus(friendlyError(error), { error: true, repair: true });
   } finally {
@@ -850,13 +850,74 @@ function aiResetDialog() {
   aiRenderRecentDescriptions();
 }
 
+let aiConnection = null;
+async function aiConnectionRefresh() {
+  if (state.runtime.hosted) return;
+  try {
+    aiConnection = await api("/api/ai/connection", { action: "status" });
+    $("#ai-connection-offer").hidden = aiConnection.configured;
+    $("#ai-connection-edit").hidden = !aiConnection.configured;
+    $("#ai-help-ask").hidden = !aiConnection.configured;
+  } catch (error) { aiSetStatus(friendlyError(error), { error: true }); }
+}
+function aiConnectionForm(show) {
+  $("#ai-connection-form").hidden = !show;
+  $("#ai-connection-offer").hidden = show || state.runtime.hosted || Boolean(aiConnection?.configured);
+  $("#ai-connection-edit").hidden = show || !aiConnection?.configured;
+  $("#ai-connection-key").value = "";
+  $("#ai-connection-key").placeholder = aiConnection?.has_key ? "Saved key: ******** (leave blank to keep)" : "Optional";
+  for (const field of ["name", "url", "model"]) $("#ai-connection-" + field).value = aiConnection?.[field] || "";
+  $("#ai-connection-status").textContent = "";
+}
+async function aiConnectionAction(action) {
+  const payload = { action, keep_key: Boolean(aiConnection?.has_key && aiConnection.url === $("#ai-connection-url").value.trim().replace(/\/$/, "")) };
+  for (const field of ["name", "url", "model", "key"]) payload[field] = $("#ai-connection-" + field).value;
+  const status = $("#ai-connection-status");
+  status.textContent = action === "test" ? "Contacting your AI..." : "Saving...";
+  try {
+    await api("/api/ai/connection", payload);
+    if (action === "save") { await aiConnectionRefresh(); aiConnectionForm(false); }
+    else status.textContent = "Connection worked. Your AI answered.";
+  } catch (error) { status.textContent = friendlyError(error); }
+}
+async function aiAsk() {
+  if (aiHelp.busy) return;
+  if (!aiHelp.session || aiHelp.generatedFor !== $("#ai-help-description").value.trim()) await aiGeneratePrompt();
+  if (!aiHelp.session || aiHelp.busy) return;
+  aiSetBusy(true);
+  try {
+    aiCheckSession(null, aiHelp.session);
+    aiSetStatus("Asking your AI...");
+    const result = await api("/api/ai/ask", { prompt: $("#ai-help-prompt").value });
+    $("#ai-help-response").value = result.answer;
+    const envelope = aiParseEnvelope(result.answer);
+    aiCheckSession(envelope, aiHelp.session);
+    await aiProveCandidate(envelope, aiHelp.session);
+    aiHelp.failure = null;
+    aiSetStatus("Your AI's design is ready. Choose Modify Current Bin or Generate as New Bin.");
+  } catch (error) {
+    const repairable = error instanceof AiHelpError && !error.stale && !error.operational && Boolean(aiHelp.session);
+    if (repairable) aiHelp.failure = { response: $("#ai-help-response").value, message: error.message, session: aiHelp.session };
+    aiSetStatus(friendlyError(error), { error: true, repair: repairable });
+  } finally { aiSetBusy(false); }
+}
+
 function aiWireHelp() {
   const dialog = $("#ai-help-dialog");
   if (!dialog) return;
   $("#ai-help-open").addEventListener("click", () => {
     aiResetDialog();
+    aiConnectionForm(false);
+    aiConnectionRefresh();
     if (!dialog.open) dialog.showModal();
   });
+  $("#ai-connection-configure").addEventListener("click", () => aiConnectionForm(true));
+  $("#ai-connection-edit").addEventListener("click", () => aiConnectionForm(true));
+  $("#ai-connection-later").addEventListener("click", () => { $("#ai-connection-offer").hidden = true; });
+  $("#ai-connection-cancel").addEventListener("click", () => aiConnectionForm(false));
+  $("#ai-connection-test").addEventListener("click", () => aiConnectionAction("test"));
+  $("#ai-connection-save").addEventListener("click", () => aiConnectionAction("save"));
+  $("#ai-help-ask").addEventListener("click", aiAsk);
   $("#ai-help-description").addEventListener("input", aiUpdateGenerateAvailability);
   $("#ai-help-generate").addEventListener("click", aiGeneratePrompt);
   $("#ai-help-modify").addEventListener("click", () => aiProcessResponse("modify"));
