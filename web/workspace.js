@@ -19,6 +19,7 @@ const WS = {
   peekId: null,
   prior: null, // the editor Print Space / New Space was opened from
   busy: false,
+  queuedDeleteId: null,
   message: "",
   placeSeen: "",
   signature: "",
@@ -322,12 +323,30 @@ WS.waitStructuralPreview = async token => {
   }
 };
 
+WS.commitQueuedDelete = async () => {
+  if (!WS.queuedDeleteId) return true;
+  const one = DL.bin(WS.queuedDeleteId);
+  WS.queuedDeleteId = null;
+  WS.sync();
+  if (!one) {
+    toast("Could not delete bin: the bin is no longer available.", true, 6000);
+    return false;
+  }
+  return DP.deleteBinNow(one);
+};
+
 WS.go = async (task, arg = null) => {
   if (WS.busy) return false;
+  WS.busy = true;
+  const sameBin = ["bin", "peek"].includes(task) && arg && String(arg) === String(WS.queuedDeleteId);
+  if (WS.queuedDeleteId && !sameBin && !(await WS.commitQueuedDelete())) {
+    WS.busy = false;
+    WS.sync();
+    return false;
+  }
   const switching = WS.switchingMessage(task);
   const pending = WS.itemSwitchTarget(task, arg);
   const token = WS.switchToken = (WS.switchToken || 0) + 1;
-  WS.busy = true;
   if (pending) {
     WS.pending = pending;
     WS.sync(); // highlight the new row now
@@ -507,6 +526,7 @@ WS.endOpening = () => {
 };
 
 WS.pickSpace = (folder, name = "") => SP.run(async () => {
+  if (!(await WS.commitQueuedDelete())) return;
   WS.message = "";
   WS.landingPending = false;
   if (name) WS.showSwitching(`Opening ${name}...`);
@@ -574,6 +594,7 @@ WS.newSpace = async kind => {
 // My Bins / No Space: leave any Space and land on the loose bin.
 WS.enterLoose = async () => {
   if (WS.busy) return;
+  if (!(await WS.commitQueuedDelete())) return;
   if (state.folderMode === "space") {
     await SP.startNoSpace();
     if (state.folderMode === "space") return;
@@ -637,7 +658,9 @@ WS.onAction = async (act, button, event) => {
     case "delete-bin": {
       const one = DL.bin(button.dataset.id);
       if (!one) return null;
-      return DP.deleteBinNow(one); // Story 2836: at once, no confirmation, nothing selected after
+      WS.queuedDeleteId = String(WS.queuedDeleteId) === String(one.id) ? null : one.id;
+      WS.sync();
+      return true;
     }
     case "cancel": return WS.resume();
     default: return null;
@@ -724,7 +747,8 @@ WS.rowBinActions = (one, selected, locked) => {
   const attrs = `data-ws-act="%A" data-id="${wsEsc(one.id)}"${off}`;
   const duplicate = ["bin", "b4b"].includes(bin.kind) && Boolean(DL.layout?.design_specs?.[bin.id])
     ? `<button type="button" class="ws-out" ${attrs.replace("%A", "duplicate-bin")} title="Duplicate this bin">Duplicate</button>` : "";
-  return `${duplicate}<button type="button" class="ws-out" ${attrs.replace("%A", "delete-bin")} title="Delete this bin">Delete</button>`;
+  const queued = String(WS.queuedDeleteId) === String(one.id);
+  return `${duplicate}<button type="button" class="ws-out" ${attrs.replace("%A", "delete-bin")} title="${queued ? "Cancel queued deletion" : "Delete this bin"}">${queued ? "Will delete when another row is selected (cancel)" : "Delete"}</button>`;
 };
 
 // Layout: every printable bin's file, and the container's, brought up to date.
