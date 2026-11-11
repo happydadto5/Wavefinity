@@ -204,9 +204,15 @@ const applyChangedDesign = debounce(() => {
   const previousCanGenerate = state.canGenerate;
   pendingPreEditDesign = null;
   if (!applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate)) {
+    state.pendingStackableBaseBefore = null;
     return;
   }
 
+  if (state.pendingStackableBaseBefore !== null && state.pendingStackableBaseBefore !== undefined) {
+    if (state.design.box.stack?.mode === "direct" && state.design.box.base_thickness > state.pendingStackableBaseBefore)
+      showStackableBaseChange(state.design.box.base_thickness);
+    state.pendingStackableBaseBefore = null;
+  }
   if (checkWall) maybeWarnSpaceWallMismatch(state.design.box.wall);
   // Fix 1137: undo is gone, but the starter-preview lifecycle is not. A real
   // design change committed before the first preview must clear the pending
@@ -249,6 +255,13 @@ function reflowDraftToBin(one) {
   if (one.kind === "bore") return sizeBoreToGrid(one);
   if (one.kind === "post") return sizePostToRow(one);
   if (one.kind === "slot") return sizeSlotToBank(one);
+}
+
+function showStackableBaseChange(value) {
+  const note = $("#stackable-base-change-note");
+  note.textContent = `Base thickness changed to ${fmt(value)} mm — changed for you. A stackable bin sits directly on the bin below, with no lid in between, so its base has to be this thick to carry the stack.`;
+  note.dataset.choice = "true";
+  note.hidden = false;
 }
 
 function changedDesign(previousDesign = null) {
@@ -716,6 +729,21 @@ function wireControls() {
       const previous = clone(state.design);
       readStackForm(state.design);
       normalizeStackSettings(state.design);
+      if (selector === "#lid-choice") {
+        const note = $("#lid-wall-change-note");
+        const choice = $("#lid-choice").value;
+        note.hidden = true;
+        if (state.design.box.wall > previous.box.wall) {
+          note.textContent = `${choice === "hinged" ? "Hinged lids" : "Lids"} need ${fmt(state.design.box.wall)} mm walls ? changed for you.`;
+          note.dataset.choice = choice;
+          note.hidden = false;
+        }
+      }
+      if (selector === "#bin-stackable") {
+        state.pendingStackableBaseBefore = $("#bin-stackable").value === "true" ? previous.box.base_thickness : null;
+        if (state.pendingStackableBaseBefore !== null && state.design.box.base_thickness > state.pendingStackableBaseBefore)
+          showStackableBaseChange(state.design.box.base_thickness);
+      }
       clampSideOpeningTopForLid(state.design, true);
       syncLidForm();
       syncSideOpeningControls();

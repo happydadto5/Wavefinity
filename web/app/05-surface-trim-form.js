@@ -488,6 +488,11 @@ function rememberedLidSnapshot(design = state.design) {
 // and before the resulting syncForm()/syncLidForm() call reads it.
 function bindLidMemoryForDesign(design = state.design) {
   state.lidMemory = rememberedLidSnapshot(design);
+  ["#lid-wall-change-note", "#stackable-base-change-note"].forEach(selector => {
+    const note = $(selector);
+    if (note) { note.hidden = true; delete note.dataset.choice; }
+  });
+  state.pendingStackableBaseBefore = null;
   // The same explicit design boundary also owns the editable size text.
   bindBinSizeFields(design);
 }
@@ -670,6 +675,10 @@ function syncLidForm() {
   populateLidChoices();
   $("#bin-stackable").value = String(state.design?.box?.stack?.mode === "direct");
   $("#lid-choice").value = !lid.enabled ? "none" : lid.flip_enabled ? "hinged" : lid.stack_rim ? "stacking" : "resting";
+  for (const [noteSelector, controlSelector] of [["#lid-wall-change-note", "#lid-choice"], ["#stackable-base-change-note", "#bin-stackable"]]) {
+    const note = $(noteSelector);
+    if (note && note.dataset.choice !== $(controlSelector).value) note.hidden = true;
+  }
   const savedThickness = ({ thin: "1.2", medium: "1.4", thick: "1.6" })[lid.thickness] || lid.thickness;
   ensureLidThicknessOption(String(savedThickness));
   $("#lid-thickness").value = String(savedThickness);
