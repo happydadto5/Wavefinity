@@ -388,6 +388,7 @@ async function refreshStructuralPreview() {
         space: draft.space, ...(hosted ? { printer_profile: profile } : {}),
       });
       if (!current()) return;
+      if (kind === "box") record.form?.setSummary?.(structural?.summary);
       if (!structural?.design) throw new Error(kind === "base_trim"
         ? "The Base Trim preview is not available right now."
         : "The case preview is not available right now.");

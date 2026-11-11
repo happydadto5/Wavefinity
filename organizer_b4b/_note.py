@@ -13,9 +13,9 @@ import re
 from collections import Counter
 
 import trimesh
-from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
+from shapely.geometry import LineString, MultiPolygon, Polygon, box as shapely_box
 from shapely.affinity import translate as translate_polygon
-from shapely.ops import unary_union
+from shapely.ops import nearest_points, unary_union
 
 from organizer_engine import BoxSpec, text_outline, text_prism
 from organizer_geometry import _extrude_polygon, union
@@ -88,6 +88,19 @@ def make_b4b_screw_note(box: BoxSpec) -> list[tuple[str, trimesh.Trimesh]] | Non
         maxx + B4B_NOTE_MARGIN, maxy + B4B_NOTE_MARGIN,
     )
     plate_2d = card.difference(glyphs)
+    while isinstance(plate_2d, MultiPolygon):
+        pieces = sorted(plate_2d.geoms, key=lambda piece: piece.area, reverse=True)
+        main = pieces[0]
+        for island in pieces[1:]:
+            start, end = nearest_points(island.boundary, main.boundary)
+            dx, dy = end.x - start.x, end.y - start.y
+            length = (dx * dx + dy * dy) ** 0.5
+            extension = 0.1 / length
+            bridge = LineString([
+                (start.x - dx * extension, start.y - dy * extension),
+                (end.x + dx * extension, end.y + dy * extension),
+            ]).buffer(0.5, cap_style=2)
+            plate_2d = plate_2d.union(bridge)
     pieces = list(plate_2d.geoms) if hasattr(plate_2d, "geoms") else [plate_2d]
     plate = union([_extrude_polygon(p, B4B_NOTE_THICKNESS) for p in pieces if p.area > 0])
     text = text_prism(glyphs, top_z=B4B_NOTE_THICKNESS, depth=B4B_NOTE_THICKNESS)

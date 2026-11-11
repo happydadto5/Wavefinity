@@ -155,7 +155,9 @@
     const hingeTypeRow = labeled("Hinge type", hingeType);
     const snugnessRow = labeled("Lid snugness", snugness);
     lidRow.append(labeled("Lid type", lidType), snugnessRow, latchRow, latchTightnessRow, hingeTypeRow, hingeRow);
-    lidGroup.append(lidRow);
+    const screwsLine = el("p", "dl-note");
+    screwsLine.hidden = true;
+    lidGroup.append(lidRow, screwsLine);
     caseWrap.append(lidGroup);
 
     // Options group
@@ -360,6 +362,7 @@
     function markPristine() { pristine = JSON.stringify(read()); }
 
     function onChange() {
+      screwsLine.hidden = true;
       if (callbacks.onChange) callbacks.onChange(read());
     }
     hingeType.addEventListener("change", syncVisibility, { signal: events.signal });
@@ -397,6 +400,14 @@
       markPristine();
     }
 
+    function setSummary(summary) {
+      const totals = summary?.screw_totals || [];
+      screwsLine.textContent = totals.length
+        ? `Screws needed: ${totals.map(([family, length, count]) => `${family} × ${length} mm (${count})`).join(", ")}`
+        : "";
+      screwsLine.hidden = !totals.length;
+    }
+
     function setError(message) {
       errorBox.textContent = message || "";
       errorBox.hidden = !message;
@@ -418,7 +429,7 @@
       }
     }
 
-    return { read, draft: read, fill, destroy, isDirty, markPristine, setError, setInterior, getInterior, setDisabled };
+    return { read, draft: read, fill, destroy, isDirty, markPristine, setError, setSummary, setInterior, getInterior, setDisabled };
   }
 
   window.StorageBoxForm = { mount };
