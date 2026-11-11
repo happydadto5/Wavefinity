@@ -66,12 +66,12 @@ window.WFFileSystem = (() => {
 
   // Returns a status, never a fabricated folder: "ok", "cancelled",
   // "denied" or "unsupported".
-  const pickDirectory = async () => {
+  const pickDirectory = async (options = {}) => {
     if (!supportsDirectoryPicker()) {
       return { status: "unsupported", handle: null };
     }
     try {
-      const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+      const handle = await window.showDirectoryPicker({ mode: "readwrite", ...options });
       if (
         !handle ||
         handle.kind !== "directory" ||

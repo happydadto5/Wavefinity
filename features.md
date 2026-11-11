@@ -319,6 +319,10 @@ A Pegboard Space has a **Print Pegboard Hooks** button (hidden for other Space t
 - Save Storage Box / Export print files when in a Storage Box Space.
 - Save Base Trim / Print Surface + Bins when in a Surface Space.
 
+On the hosted site, choose a home folder once; new Spaces get their own
+subfolders inside it. The browser may ask to reconnect the home folder on a
+later visit. Older Spaces remain in their existing folders.
+
 ## 3.2 Inventory
 
 Every ordinary bin in a typed Space is represented by one Inventory row.

@@ -5,7 +5,7 @@
 // Returns a real folder or null - never a pretend one. With stayOnSetup the
 // caller is mid-setup, so a refusal explains itself inline instead of
 // throwing the person's entered Space details away.
-SP.pickFolder = async ({ stayOnSetup = false, spaceRoot = false, accessContext = null } = {}) => {
+SP.pickFolder = async ({ stayOnSetup = false, spaceRoot = false, accessContext = null, home = false } = {}) => {
   if (state.runtime.hosted) {
     if (!window.WFFileSystem?.supportsDirectoryPicker()) {
       if (stayOnSetup) {
@@ -19,7 +19,9 @@ SP.pickFolder = async ({ stayOnSetup = false, spaceRoot = false, accessContext =
       return null;
     }
 
-    const picked = await WFFileSystem.pickDirectory();
+    const picked = home
+      ? await WFFileSystem.pickDirectory({ startIn: "documents", id: "wavefinity" })
+      : await WFFileSystem.pickDirectory();
     // A cancel is silent and leaves everything as it was.
     if (!picked || picked.status === "cancelled") return null;
 
@@ -56,6 +58,14 @@ SP.pickFolder = async ({ stayOnSetup = false, spaceRoot = false, accessContext =
 SP.afterPick = async (folder, leaveOptions) => {
   if (!folder) return null;
   if (state.runtime.hosted) {
+    if (folder.home_name) {
+      const home = await WFFileSystem.load("home");
+      if (!home?.handle || !(await WFFileSystem.requestReadWritePermission(home.handle))) {
+        SP.showFolderAccessNeeded("denied");
+        return null;
+      }
+      folder = { ...folder, handle: await home.handle.getDirectoryHandle(folder.home_name) };
+    }
     // A hosted object with no handle is not a folder and is never adopted.
     if (!folder.handle) {
       SP.showFolderAccessNeeded("unsupported");
@@ -198,6 +208,7 @@ SP.rememberHostedRecent = async (folder, info) => {
     kind: space?.kind || null,
     size: space ? [space.x, space.y, space.z] : null,
     summary_text: info?.summary_text || "",
+    ...(folder.home_name ? { home_name: folder.home_name } : {}),
   };
   SP.recent = [row, ...kept].slice(0, 10);
   await SP.saveHostedRecent(SP.recent);

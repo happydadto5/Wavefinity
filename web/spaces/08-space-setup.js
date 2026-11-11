@@ -157,17 +157,14 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
     kind === "drawer" ? 'Drawer name <span class="required-cue">required</span>' : "Name";
   const createButton = document.getElementById("space-create");
   if (createButton && !update) {
-    createButton.textContent = state.runtime.hosted
-      ? "Choose Folder & Create"
-      : "Create Space";
+    createButton.textContent = state.runtime.hosted && !SP.hostedHome && !SP.configureData
+      ? "Choose Home Folder & Create" : "Create Space";
   }
   // Story 2747: no save-location explainer under the Space name.
   const folderHelp = document.getElementById("space-folder-help");
   if (folderHelp) {
-    folderHelp.hidden = !state.runtime.hosted || update;
-    folderHelp.textContent = state.runtime.hosted && !update
-      ? "Your browser will ask twice. Choose Allow both times."
-      : "";
+    folderHelp.hidden = !state.runtime.hosted || update || Boolean(SP.hostedHome) || Boolean(SP.configureData);
+    folderHelp.textContent = "In the folder window that opens, go to Documents, make a new folder called Wavefinity, and select it.";
   }
   if (kind === 'drawer') {
       document.getElementById('drawer-x').value = prefillSpace?.x || '';
@@ -498,8 +495,27 @@ SP.create = async () => {
   let folder = SP.configureData || null;
 
   if (!migrating && state.runtime.hosted) {
-    folder = await SP.pickFolder({ stayOnSetup: true });
-    if (!folder) return;
+    let home = SP.hostedHome || await WFFileSystem.load("home");
+    if (home?.handle) {
+      if (!(await WFFileSystem.requestReadWritePermission(home.handle))) {
+        SP.fail("Folder access was not granted. Your Space details are still here; choose the folder again and allow read/write access.", "#space-create");
+        return;
+      }
+    } else {
+      const picked = await SP.pickFolder({ stayOnSetup: true, home: true });
+      if (!picked) return;
+      home = { handle: picked.handle };
+      await WFFileSystem.save("home", home);
+      SP.hostedHome = home;
+      document.getElementById("space-folder-help").hidden = true;
+      document.getElementById("space-create").textContent = "Create Space";
+    }
+    try {
+      folder = { handle: await home.handle.getDirectoryHandle(name, { create: true }), name, home_name: name };
+    } catch (_error) {
+      SP.fail("That Space name can't be used as a folder name. Change the name and try again.", "#space-name");
+      return;
+    }
   }
 
   if (!migrating && state.runtime.hosted) {
@@ -591,7 +607,8 @@ SP.create = async () => {
     // truthfully, and continue activation instead of reporting a failed
     // create/update.
     try {
-      await WFFileSystem.save("active", { handle: folder.handle, space_id: metadata.space_id });
+      await WFFileSystem.save("active", { handle: folder.handle, space_id: metadata.space_id, ...(folder.home_name ? { home_name: folder.home_name } : {}) });
+      SP.pendingReconnect = null;
     } catch (_remember) {
       toast(migrating
         ? "The Space was updated, but it could not be remembered as the current Space. Open it again from the Space list."
@@ -967,7 +984,9 @@ SP.fail = (message, selector) => {
 // that was moved or deleted is reported plainly and the one pick is offered.
 SP.resumeSavedHosted = async saved => {
   try {
-    const folder = { handle: saved.handle, name: saved.handle.name };
+    const home = saved.home_name ? await WFFileSystem.load("home") : null;
+    const handle = saved.home_name ? await home.handle.getDirectoryHandle(saved.home_name) : saved.handle;
+    const folder = { handle, name: saved.home_name || handle.name, ...(saved.home_name ? { home_name: saved.home_name } : {}) };
     const data = await SP.inspectHosted(folder);
     SP.assertExpectedHostedIdentity(data, saved.space_id || null);
     if (data.needs_setup) {
@@ -1008,7 +1027,9 @@ SP.reconnectSavedFolder = () => SP.run(async () => {
     return;
   }
   SP.pendingReconnect = null;
-  await SP.resumeSavedHosted(saved);
+  if (saved.active) await SP.resumeSavedHosted(saved.active);
+  else if (!saved.homeReconnect) await SP.resumeSavedHosted(saved);
+  else SP.showHome();
 });
 
 // Fix 019 Item 6: "no remembered folder" and "permission not (yet) granted"
@@ -1029,11 +1050,15 @@ SP.launch = async () => {
     let hasPermission = false;
     try {
       saved = await WFFileSystem.load("active");
+      SP.hostedHome = await WFFileSystem.load("home");
+      const reconnectHome = Boolean(SP.hostedHome?.handle && (!saved?.handle || saved.home_name));
+      const permissionRecord = reconnectHome ? SP.hostedHome : saved;
       // Startup is not a user gesture: only already-granted permission may
       // resume silently. A handle whose permission needs renewing falls
       // through to Welcome, where an explicit action supplies the gesture.
       // The saved record itself is kept.
-      hasPermission = Boolean(saved?.handle) && await WFFileSystem.queryReadWritePermission(saved.handle);
+      hasPermission = Boolean(permissionRecord?.handle) && await WFFileSystem.queryReadWritePermission(permissionRecord.handle);
+      SP.pendingReconnect = permissionRecord?.handle ? (reconnectHome ? { ...permissionRecord, homeReconnect: true, active: saved } : saved) : null;
     } catch (error) {
       // A thrown exception here means the saved-handle read or the
       // permission query itself failed (damaged storage, a read error, a
@@ -1047,13 +1072,13 @@ SP.launch = async () => {
     if (!hasPermission) {
       // The browser wants re-approval (needs a click). Offer one reconnect
       // action for the remembered folder instead of a fresh pick.
-      SP.pendingReconnect = saved?.handle ? saved : null;
-      if (saved?.handle) SP.showHome();
+      if (SP.pendingReconnect) SP.showHome();
       else SP.showResume(null, { startup: true });
       return;
     }
     SP.pendingReconnect = null;
-    await SP.resumeSavedHosted(saved);
+    if (saved?.handle) await SP.resumeSavedHosted(saved);
+    else SP.showResume(null, { startup: true });
     return;
   }
 

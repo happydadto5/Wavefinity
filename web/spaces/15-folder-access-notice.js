@@ -57,6 +57,8 @@ SP.showFolderAccessNoticeIfNeeded = () => {
   if (checkbox) checkbox.checked = false;
   const choose = document.getElementById("folder-access-choose");
   if (choose) choose.textContent = SP.pendingReconnect ? "Reconnect folder" : "Choose folder";
+  const homeHelp = document.getElementById("folder-access-home-help");
+  if (homeHelp) homeHelp.hidden = !SP.pendingReconnect?.homeReconnect;
   notice.hidden = false;
   // Choosing a folder happens elsewhere (Welcome / Spaces); drop the banner as
   // soon as access exists, without touching the suppression preference.

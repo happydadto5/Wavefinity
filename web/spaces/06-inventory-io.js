@@ -506,7 +506,7 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   // live editor identity, so it may run before the atomic identity
   // transition below (Fix 032 Correction 2, item 7). state.browserFolder
   // itself is set inside SP.applyFolder(), never here.
-  await WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null });
+  await WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null, ...(folder.home_name ? { home_name: folder.home_name } : {}) });
   await SP.applyFolder(info, { reset: false, browserFolder: folder });
   await SP.rememberHostedRecent(folder, info);
   SP.close();

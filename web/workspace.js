@@ -147,6 +147,7 @@ WS.renderPicker = () => {
     ${browserRequirement ? `<p>${wsEsc(browserRequirement)}</p>` : ""}
     ${spaces.length ? "" : '<p class="ws-links">No spaces yet - pick what you\'re organizing below.</p>'}
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
+    ${SP.pendingReconnect ? `<p><button type="button" class="button primary" data-ws-act="reconnect">Reconnect folder</button>${SP.pendingReconnect.homeReconnect ? '<span> Your browser may offer "Allow on every visit" — choose it so you are not asked again.</span>' : ""}</p>` : ""}
     <ul class="ws-menu-list" aria-label="Your Spaces">${cards}
       <li><button type="button" class="ws-menu-item" data-ws-act="my-bins">
         <span class="ws-card-icon" aria-hidden="true">📦</span>
@@ -610,7 +611,7 @@ WS.openSpaceRow = button => {
     return null;
   }
   const one = SP.recent[index];
-  if (one) WS.pickSpace(state.runtime.hosted ? { handle: one.handle, name: one.folder_name || one.name } : one.folder, one.name);
+  if (one) WS.pickSpace(state.runtime.hosted ? { handle: one.handle, name: one.folder_name || one.name, home_name: one.home_name } : one.folder, one.name);
   return null;
 };
 
@@ -679,6 +680,7 @@ WS.openDrawer = async id => {
 WS.onAction = async (act, button, event) => {
   switch (act) {
     case "open-space": return WS.openSpaceRow(button);
+    case "reconnect": return SP.reconnectSavedFolder();
     case "my-bins": return WS.enterLoose();
     case "open-welcome": return WS.go("picker");
     case "open-folder": return SP.run(SP.openExisting);

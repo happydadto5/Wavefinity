@@ -139,7 +139,7 @@ SP.wire = () => {
     });
     else SP.run(() => SP.afterPick(
       state.runtime.hosted
-        ? { handle: one.handle, name: one.folder_name || one.name }
+        ? { handle: one.handle, name: one.folder_name || one.name, home_name: one.home_name }
         : one.folder
     ));
   });
