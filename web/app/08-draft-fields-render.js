@@ -40,8 +40,8 @@ function renderDraftFields() {
     // kept but ignored, so the editable field gives way to a note.
     const yieldsToDividers = dividerLabelsPresent();
     let textGroup = yieldsToDividers
-      ? `<label>Label name<span class="inline-help" data-label-yields-to-dividers>Use divider labels</span></label>`
-      : `<label>Label name${textInput}</label>`;
+      ? `<label>Label text<span class="inline-help" data-label-yields-to-dividers>Use divider labels</span></label>`
+      : `<label>Label text${textInput}</label>`;
     // At most one rim Text is allowed per bin (Fix 078). Another Text's At-rim
     // choices are disabled once one rim Text already exists elsewhere. Shared
     // conditional-state explanation rule: the disabled choice names its

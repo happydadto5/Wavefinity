@@ -220,7 +220,6 @@ function updateDraftFromFields(event) {
     let letteringChanged = false;
     if (said) {
       one.options.text = said.value;
-      seedPartNameFromText(one);
       letteringChanged = changed === "option:text" && said.value.trim() !== "";
     }
     const type = get("option:text_type") || "base_inlaid";
@@ -259,7 +258,9 @@ function updateDraftFromFields(event) {
       Number(one.options.cap_height) < 5;
     if (sizingRelevant) {
       const remembered = spaceRememberedTextHeight();
-      if (recoveringFromSub5AutoFit) {
+      if (letteringChanged && newLevel === "base") {
+        delete one.options.cap_height;
+      } else if (recoveringFromSub5AutoFit) {
         // Latest PM rule: a Text that had been auto-fitted below 5 mm may
         // recover upward to 5 mm, but never automatically above 5 mm.
         one.options.cap_height = 5;
@@ -743,15 +744,6 @@ function seedPartNameFromLabel(said) {
   if (state.design) state.design.part_name = tidy;
 }
 
-// "Real" means the user typed it. A text part starts life blank (Fix 082 H),
-// so any lettering it now carries is something the user actually said.
-function seedPartNameFromText(one) {
-  if (!one || one.kind !== "text") return;
-  const said = String(one.options?.text ?? "").trim();
-  if (said === String(state.draftStartingText ?? "").trim()) return;
-  seedPartNameFromLabel(said);
-}
-
 // Where /api/feature/apply should land the current draft:
 //   number -> update that already-placed support in place
 //   null   -> append it as a brand-new support (a fresh palette draft only)
@@ -791,7 +783,6 @@ async function autoCommitDraft(request) {
     const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index });
     if (request !== state.draftRequest) return;
     state.design = result.design;
-    seedPartNameFromText(state.draft);
     // Fix 1137: undo is gone, but the starter-preview lifecycle is not. This
     // commit bypasses the debounced commit, so a real change committed here
     // must clear the pending flag itself, or the first preview after the
@@ -869,7 +860,6 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
   // A deferred final preview must not leave an older in-flight preview able
   // to adopt its pre-commit design while the transition is still in progress.
   if (!previewAfterCommit) invalidatePendingPreview();
-  seedPartNameFromText(draft);
   // Fix 1137: undo is gone, but the starter-preview lifecycle is not. This
   // commit bypasses the debounced commit, so a real change committed here
   // must clear the pending flag itself, or the first preview after the

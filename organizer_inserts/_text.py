@@ -197,9 +197,16 @@ def retargeted_text(box: BoxSpec, one: Feature, mode: str = "fused") -> Feature:
         return canonical_text_feature(replace(
             one, zone=Zone(*top_label_zone(box, side).bounds), options=options))
     zone = layout_zone(box, mode)
-    seeded = replace(one, zone=zone, options=options)
+    # The derived interaction zone includes a margin around the lettering.
+    # Reserve it before choosing a whole-millimetre default.
+    margin = TEXT_INTERACTION_MARGIN
+    fit_zone = Zone(zone.x0 + margin, zone.y0 + margin,
+                    zone.x1 - margin, zone.y1 - margin)
+    seeded = replace(one, zone=fit_zone, options=options)
     try:
-        cap = text_fitted(seeded)[0]
+        cap = float(math.floor(text_fitted(seeded)[0]))
+        if cap < 1:
+            raise ValueError("Label has no room for a whole-millimetre letter height")
     except ValueError:
         cap = TEXT_CAP_HEIGHT_IDEAL
     options["cap_height"] = cap

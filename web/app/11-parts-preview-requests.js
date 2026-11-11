@@ -943,7 +943,12 @@ async function autoExpandBin({ keepDraft = false, silent = false, fit = false, b
     return "skipped";
   }
   if (!beginDesignMutation()) return "skipped";
-  if (button) button.disabled = true;
+  let mutationHeld = true;
+  const buttonLabel = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Growing the bin…";
+  }
   try {
     // Grow for what the user is actually looking at: an open draft may hold
     // edits (a flipped direction, a raised count) that never committed because
@@ -969,7 +974,7 @@ async function autoExpandBin({ keepDraft = false, silent = false, fit = false, b
       design,
       anchor,
       fit,
-    });
+    }, { timeoutMs: 10000 });
     if (guard && !guard()) return "stale";
     const changed = result.changed ?? result.grew;
     state.design = result.design;
@@ -982,6 +987,12 @@ async function autoExpandBin({ keepDraft = false, silent = false, fit = false, b
       state.spaceStarterPreviewPending = false;
     }
     state.fitError = false;
+    finishDesignMutation();
+    mutationHeld = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = buttonLabel;
+    }
     if (opts.keepDraft && state.draft) {
       // Keep editing the same part with whatever zone the resize settled on.
       const at = anchorIndex < state.design.layout.features.length ? anchorIndex : null;
@@ -1014,11 +1025,20 @@ async function autoExpandBin({ keepDraft = false, silent = false, fit = false, b
     }
     return "done";
   } catch (error) {
-    if (!opts.silent) toast(error.message, true, 5000);
-    return "failed";
+    if (!opts.silent) {
+      const status = $("#draft-status");
+      if (status) {
+        status.textContent = mutationHeld ? friendlyError(error) : `Bin resized, but the preview could not be updated: ${friendlyError(error)}`;
+        status.classList.add("error");
+      } else toast(error.message, true, 5000);
+    }
+    return mutationHeld ? "failed" : "done";
   } finally {
-    if (button) button.disabled = false;
-    finishDesignMutation();
+    if (button) {
+      button.disabled = false;
+      button.textContent = buttonLabel;
+    }
+    if (mutationHeld) finishDesignMutation();
   }
 }
 

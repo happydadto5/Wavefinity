@@ -237,6 +237,26 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     start_x, start_y = box.x, box.y
     ceiling = math.floor(MAX_BOX_SIZE / BASE_UNIT) * BASE_UNIT
 
+    # Reject an explicitly sized base label that cannot fit even the largest
+    # legal floor before entering the grid search.
+    from organizer_inserts._text import _oriented_text, text_of, TEXT_INTERACTION_MARGIN
+    maximum_zone = layout_zone(replace(box, x=ceiling, y=ceiling), mode)
+    for one in originals:
+        cap = one.options.get("cap_height")
+        if (one.kind != "text" or one.options.get("level") == "rim"
+                or one.options.get("retarget") or not text_of(one)
+                or cap in (None, "")):
+            continue
+        outline = _oriented_text(text_of(one), float(cap),
+                                 int(one.options.get("quarter_turns", 0) or 0) % 4)
+        x0, y0, x1, y1 = outline.bounds
+        margin = 2 * TEXT_INTERACTION_MARGIN
+        if x1 - x0 + margin > maximum_zone.width or y1 - y0 + margin > maximum_zone.depth:
+            raise ValueError(
+                f"This label cannot fit in the largest bin at {float(cap):g} mm letter height. "
+                "Lower the Letter height or use shorter text."
+            )
+
     if fit:
         # Smallest legal footprint that fits the whole current layout: every
         # X/Y pair on the grid, tried in deterministic increasing order of
@@ -265,7 +285,7 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
         while result is None:
             x = round(x + BASE_UNIT)
             y = round(y + BASE_UNIT)
-            if x > ceiling:
+            if x > ceiling or y > ceiling:
                 raise ValueError(
                     "this layout will not fit within Wavefinity's maximum "
                     f"{ceiling:g} mm bin size - remove or shrink a support"
