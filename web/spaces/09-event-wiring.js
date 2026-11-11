@@ -4,9 +4,9 @@ SP.wire = () => {
   wireInfoButtons();
   document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close")
     .forEach(el => el?.addEventListener("click", SP.close));
-  // A changed cabinet setup asks before it is discarded: X, backdrop, Escape and Back.
+  // Deliberate exits still ask before discarding changed setup.
   document.getElementById("space-form-close")?.addEventListener("click", SP.requestClose);
-  SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.requestClose(); });
+  SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog() && $("#space-form").hidden) SP.requestClose(); });
   SP.dialog().addEventListener("cancel", event => {
     if (SP.setupIsDirty()) { event.preventDefault(); SP.requestClose(); }
   });

@@ -576,6 +576,10 @@ def _recent_entry(info: dict[str, Any]) -> dict[str, Any]:
         "size": None if cabinet or not space else [space["x"], space["y"], space["z"]],
         "missing": info["missing"],
     }
+    if space.get("kind") == "surface":
+        for key in ("max_x_mm", "max_y_mm"):
+            if key in space:
+                entry[key] = space[key]
     if cabinet:
         entry["summary_text"] = f"{storage_drawers_recent_summary(space)} each"
     return entry

@@ -420,7 +420,7 @@ DV.render = () => {
       if (title) title.textContent = "No bins yet";
       if (detail) detail.textContent = "Choose New Bin to make one";
     }
-    emptyHint.hidden = Boolean(DV.drag?.moved || (hasBins && drawerHasBins));
+    emptyHint.hidden = Boolean(!hasBins || DV.drag?.moved || drawerHasBins);
   }
   // Taking a bin off the Space is a drop onto the tree.
   $("#ws-stage")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.overTree));

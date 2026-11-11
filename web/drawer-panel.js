@@ -151,7 +151,6 @@ DP.build = () => {
     </section>
 
     <section id="dl-surface-planning" class="control-section open dl-section" aria-label="Object planning" hidden>
-      <div class="section-heading no-toggle"><span>Object planning</span></div>
       <div class="section-body">
         <label class="checkbox-row"><span>Ask for missing Object height</span><input id="dl-surface-ask-height" type="checkbox" checked></label>
         <p id="dl-surface-missing" class="dl-note" role="status"></p>
@@ -159,12 +158,11 @@ DP.build = () => {
     </section>
 
     <section id="dl-surface-fill" class="control-section open dl-section" aria-label="Fill Empty Space" hidden>
-      <div class="section-heading no-toggle"><span>Fill Empty Space</span></div>
       <div class="section-body">
-        <p class="dl-note">Turn free Surface cells into ordinary editable bins.</p>
+        <p class="dl-note">Turn the empty parts of this Surface into ordinary bins you can edit.</p>
         <div class="dl-action-grid">
-          <button type="button" id="dl-fill-plan" class="button secondary">Plan / Update Fill Bins</button>
-          <button type="button" id="dl-fill-create" class="button secondary">Create Selected Fill Bins</button>
+          <button type="button" id="dl-fill-plan" class="button secondary">Plan fill bins</button>
+          <button type="button" id="dl-fill-create" class="button secondary">Create selected bins</button>
         </div>
         <div id="dl-fill-candidates"></div>
       </div>
@@ -414,11 +412,16 @@ DP.renderBatch = () => {
   $("#dl-batch-print").hidden = hosted;
   const noSlicerNote = $("#dl-no-slicer-note");
   if (noSlicerNote) noSlicerNote.hidden = hosted || Boolean(state.slicer?.available);
+  const hasBins = DL.bins.some(DL.isOrdinary);
+  tools.hidden = !hasBins;
+  $(".dl-inv-tools").hidden = !hasBins;
   const scope = DP.batchScope();
   const connectorNote = " · Space connectors included";
   const needFiles = scope.subset ? scope.picked.filter(one => DL.saveNeeded(one)).length : scope.save.length;
   let summary;
-  if (scope.subset) {
+  if (!hasBins) {
+    summary = "";
+  } else if (scope.subset) {
     summary = `${dlPlural(DP.printSelected.size + (DP.containerPinned ? 1 : 0), "item")} selected · ${scope.picked.length} eligible to print · ${needFiles} need${needFiles === 1 ? "s" : ""} new files${connectorNote}`;
   } else if (!scope.eligible.length) {
     summary = "No designs to print yet.";
@@ -935,15 +938,15 @@ DP.renderSurfaceFill = () => {
   if (!DL.isSurface()) return;
   const busy = Boolean(DL.busy);
   $("#dl-fill-plan").disabled = busy;
-  $("#dl-fill-plan").textContent = DL.busy === "fill" ? "Working…" : "Plan / Update Fill Bins";
+  $("#dl-fill-plan").textContent = DL.busy === "fill" ? "Working…" : "Plan fill bins";
   $("#dl-fill-create").disabled = busy || !DL.fillPlan || !DL.fillSelected.size;
   const signature = JSON.stringify([DL.fillPlan, [...DL.fillSelected]]);
   if (!dlChanged("surface-fill", signature)) return;
   $("#dl-fill-candidates").innerHTML = !DL.fillPlan ? ""
     : DL.fillPlan.length ? `<p class="dl-note">${dlPlural(DL.fillPlan.length, "bin")} fit${DL.fillPlan.length === 1 ? "s" : ""}. Select the ones to create.</p>`
-      + DL.fillPlan.map(one => `<label class="checkbox-row"><span>${fmt(one.x_mm)} × ${fmt(one.y_mm)} mm · cell ${one.gx + 1}, ${one.gy + 1}</span>`
+      + DL.fillPlan.map(one => `<label class="checkbox-row"><span>${fmt(one.x_mm)} × ${fmt(one.y_mm)} mm · ${one.gx + 1} across, ${one.gy + 1} back</span>`
         + `<input type="checkbox" data-fill-candidate="${escapeHtml(one.id)}"${DL.fillSelected.has(one.id) ? " checked" : ""}></label>`).join("")
-      : '<p class="dl-note">No empty Surface cells remain.</p>';
+      : '<p class="dl-note">No empty space remains on this Surface.</p>';
 };
 
 // Fix 1053: client-side mirror of the backend auto-height expression in
@@ -1174,10 +1177,8 @@ DP.renderInventory = (force = false) => {
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
   const bins = DP.filteredBins();
-  if (!DL.bins.length) {
-    list.innerHTML = containerRow + `<div class="dl-empty">${DL.loaded
-      ? "No bins in this Space inventory yet."
-      : "Loading the inventory…"}</div>`;
+  if (!DL.bins.some(DL.isOrdinary)) {
+    list.innerHTML = containerRow + (DL.loaded ? "" : '<div class="dl-empty">Loading the inventory…</div>');
     return;
   }
   if (!bins.length) { list.innerHTML = containerRow + `<div class="dl-empty">No bins match.</div>`; return; }

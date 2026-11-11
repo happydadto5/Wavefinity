@@ -1511,6 +1511,12 @@ body.relocating > :not(dialog) { pointer-events: none; }
 .space-size { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .space-size[hidden] { display: none; }
 .space-note { margin: 8px 0 0; min-height: 1.4em; font-size: 12px; color: var(--muted); }
+#space-form .space-field > small[id*="-setup-"] { display: block; height: 3em; overflow-y: auto; margin: 0; }
+#space-form .setup-readout-slot { height: 130px; }
+#space-form .setup-readout-slot .derived-readout { box-sizing: border-box; max-height: 110px; overflow: auto; }
+#space-form .portable-fit-warning { min-height: 3em; max-height: 3em; overflow: auto; }
+#space-form .portable-fit-warning[hidden] { display: block; visibility: hidden; }
+.dl-inv-tools[hidden], .dl-batch-tools[hidden] { display: none; }
 .space-buttons { justify-content: flex-end; margin-top: 16px; }
 .space-tutorial-launch {
   display: flex;

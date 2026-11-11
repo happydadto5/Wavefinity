@@ -229,7 +229,7 @@ WS.spaceRows = () => {
   const here = state.folderMode === "space" && state.activeSpace;
   if (here) {
     rows.push({ src: "current", name: state.activeSpace.name, kind: state.activeSpace.kind, current: true,
-      meta: state.activeSpace.kind === "storage_drawers" ? SP.storageDrawersSummaryText(state.activeSpace) : SP.sizeText([state.activeSpace.x, state.activeSpace.y, state.activeSpace.z]) });
+      meta: state.activeSpace.kind === "storage_drawers" ? SP.storageDrawersSummaryText(state.activeSpace) : SP.spaceListSize({ ...state.activeSpace, size: [state.activeSpace.x, state.activeSpace.y, state.activeSpace.z] }) });
   }
   const seen = new Set(here ? [String(state.activeSpace.name).toLowerCase()] : []);
   const add = (src, index, one) => {
@@ -237,7 +237,7 @@ WS.spaceRows = () => {
     if (seen.has(key)) return;
     seen.add(key);
     rows.push({ src, index, name: one.name, kind: one.kind, invalid: Boolean(one.invalid || one.missing || one.conflict),
-      meta: one.invalid ? one.error || "unavailable" : one.summary_text || SP.sizeText(one.size) });
+      meta: one.invalid ? one.error || "unavailable" : SP.spaceListSize(one) });
   };
   if (state.runtime.hosted) {
     SP.recent.forEach((one, index) => { if (one.folder_mode === "space") add("recent", index, one); });

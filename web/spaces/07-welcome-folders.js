@@ -124,7 +124,7 @@ SP.renderRecent = () => {
     const unavailable = one.missing || one.invalid || one.conflict;
     const space = one.folder_mode === "space";
     const kind = SP_KINDS[one.kind];
-    const meta = [one.conflict ? "duplicate Space identity" : one.invalid ? "metadata unavailable" : space ? `${kind?.label || "Space"}` : "Design folder", one.summary_text || SP.sizeText(one.size), one.missing ? "folder not found" : ""]
+    const meta = [one.conflict ? "duplicate Space identity" : one.invalid ? "metadata unavailable" : space ? `${kind?.label || "Space"}` : "Design folder", SP.spaceListSize(one), one.missing ? "folder not found" : ""]
       .filter(Boolean).join(" · ");
     const current = state.runtime.hosted
       ? (one.handle && state.browserFolder?.handle === one.handle ? " <em>current</em>" : "")
@@ -151,7 +151,7 @@ SP.renderOtherSpaces = () => {
       const unavailable = Boolean(one.invalid);
       const meta = unavailable
         ? [one.error || "Space unavailable"]
-        : [kind?.label || "Space", one.summary_text || SP.sizeText(one.size)].filter(Boolean);
+        : [kind?.label || "Space", SP.spaceListSize(one)].filter(Boolean);
       return `<li class="welcome-recent-item welcome-other-space-item${unavailable ? " missing" : ""}"><button type="button" class="welcome-recent-open welcome-other-space-open" data-other-index="${index}" title="${escapeHtml(one.folder)}"${unavailable ? " disabled" : ""}>
         <span class="welcome-recent-icon" aria-hidden="true">${SP.compactKindIcon(one.kind)}</span>
         <span class="welcome-other-space-name">${escapeHtml(one.name)}</span><span class="welcome-other-space-meta">${escapeHtml(meta.join(" · "))}</span>
@@ -175,9 +175,21 @@ SP.HOSTED_RECENT_KEY = "recent-folders-v1";
 
 SP.loadHostedRecent = async () => {
   const rows = await WFFileSystem.load(SP.HOSTED_RECENT_KEY);
-  return Array.isArray(rows)
+  const recent = Array.isArray(rows)
     ? rows.filter(one => one?.handle && one.handle.kind === "directory").slice(0, 10)
     : [];
+  await Promise.all(recent.map(async one => {
+    if (one.kind !== "surface" || (one.max_x_mm != null && one.max_y_mm != null)) return;
+    try {
+      if (await one.handle.queryPermission({ mode: "read" }) !== "granted") return;
+      const info = await SP.inspectHosted({ handle: one.handle, name: one.folder_name || one.name });
+      if (info.space?.kind === "surface") {
+        one.max_x_mm = info.space.max_x_mm;
+        one.max_y_mm = info.space.max_y_mm;
+      }
+    } catch (_error) { /* Keep the existing display when the folder cannot be read. */ }
+  }));
+  return recent;
 };
 
 SP.saveHostedRecent = async rows => {
@@ -208,6 +220,8 @@ SP.rememberHostedRecent = async (folder, info) => {
     kind: space?.kind || null,
     size: space ? [space.x, space.y, space.z] : null,
     summary_text: info?.summary_text || "",
+    max_x_mm: space?.max_x_mm,
+    max_y_mm: space?.max_y_mm,
     ...(folder.home_name ? { home_name: folder.home_name } : {}),
   };
   SP.recent = [row, ...kept].slice(0, 10);

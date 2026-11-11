@@ -118,13 +118,25 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   SP.setupKind = kind;
   SP.setupValidationStarted = false;
   $("#space-form").querySelectorAll("[data-setup-touched]").forEach(input => delete input.dataset.setupTouched);
-  $("#space-form").querySelectorAll('[id$="-setup-error"]').forEach(note => { note.hidden = true; note.textContent = ""; });
+  $("#space-form").querySelectorAll('[id$="-setup-error"]').forEach(note => { note.hidden = false; note.textContent = ""; });
   SP.dialog().classList.toggle("storage-drawers-config", kind === "storage_drawers" && !update);
   const typeLabel = SP_KINDS[kind]?.label || kind;
   const title = document.getElementById("space-form-title");
   if (title) {
     title.textContent = "Configure " + typeLabel;
   }
+  $("#space-form").querySelectorAll("#space-name, #drawer-x, #drawer-y, #drawer-z, #surface-x, #surface-y, #surface-trim, #portable-x, #portable-y, #portable-z, #pegboard-x, #pegboard-y, #pegboard-holes-x, #pegboard-holes-y").forEach(input => {
+    SP.setupFieldNote(`#${input.id}`, "", "hint");
+    SP.setupFieldNote(`#${input.id}`, "", "error");
+  });
+  $("#space-form").querySelectorAll(".derived-readout").forEach(readout => {
+    if (!readout.parentElement.classList.contains("setup-readout-slot")) {
+      const slot = document.createElement("div");
+      slot.className = "setup-readout-slot";
+      readout.before(slot);
+      slot.append(readout);
+    }
+  });
   SP.populateSurfaceTrim();
   SP.populatePegboardStandards();
   document.querySelectorAll(".space-type-fields").forEach(el => el.hidden = true);
@@ -144,6 +156,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   else SP.destroyStorageDrawersForm();
   const spaceNameField = document.getElementById("space-name");
   spaceNameField.value = prefillSpace?.name || "";
+  spaceNameField.placeholder = kind === "surface" ? "e.g. Kitchen worktop, Desk top" : "e.g. Tool chest, drawer 2";
   // Fix 1137: the Space name is tied to the folder name (see the folder help
   // copy: "Wavefinity will save this Space under Documents\Wavefinity using
   // the Space name"), so it is set at creation and never editable afterwards.
@@ -350,12 +363,12 @@ SP.setupFieldNote = (selector, text, slot = "hint") => {
     input.setAttribute("aria-describedby", [input.getAttribute("aria-describedby"), id].filter(Boolean).join(" "));
   }
   note.textContent = text;
-  note.hidden = !text;
+  note.hidden = false;
 };
 
 SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
   const form = $("#space-form");
-  form.querySelectorAll('[id$="-setup-error"]').forEach(note => { note.hidden = true; note.textContent = ""; });
+  form.querySelectorAll('[id$="-setup-error"]').forEach(note => { note.hidden = false; note.textContent = ""; });
   form.querySelectorAll('[aria-invalid]').forEach(input => input.removeAttribute("aria-invalid"));
   $("#space-error").hidden = true;
   let firstInvalid = null;

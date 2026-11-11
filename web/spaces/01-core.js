@@ -85,6 +85,9 @@ SP.run = async task => {
 };
 
 SP.sizeText = size => Array.isArray(size) ? `${size.map(fmt).join(" × ")} mm` : "";
+SP.spaceListSize = one => one?.kind === "surface" && one.max_x_mm != null && one.max_y_mm != null
+  ? `${fmt(one.max_x_mm)} × ${fmt(one.max_y_mm)} outside`
+  : one?.summary_text || SP.sizeText(one?.size);
 SP.snap = mm => {
   const unit = state.catalog?.base_unit || 7;
   // Container fields use the grid, never a single bin's resource ceiling.
