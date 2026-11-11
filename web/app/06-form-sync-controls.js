@@ -410,7 +410,7 @@ function formatDimField(axis) {
   if (!valid) notes.push("Enter a size in mm greater than zero.");
   if (axis !== "z" && requested > max) notes.push(`A bin can be at most ${fmt(max)} mm on this side.`);
   if (valid && Math.abs(requested - used) > 1e-6) {
-    notes.push(`Uses ${fmt(used)} mm${axis === "z" ? "" : ` (${fmt(used / unit)} units)`}.`);
+    notes.push(`Uses ${fmt(used)} mm.`);
   }
   let note = document.getElementById(`${input.id}-size-note`);
   if (!note) {

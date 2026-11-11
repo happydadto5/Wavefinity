@@ -804,8 +804,8 @@ def catalog_payload() -> dict[str, Any]:
             "removable_base_plate_mm": BASE_PLATE,
         },
         "modes": [
-            {"value": "fused", "label": "Fused into box"},
-            {"value": "separate", "label": "Removable insert"},
+            {"value": "fused", "label": "Printed into the bin"},
+            {"value": "separate", "label": "Separate insert (lifts out)"},
         ],
         "parts": parts,
         "wall_rules": {
@@ -863,7 +863,7 @@ def catalog_payload() -> dict[str, Any]:
             "alignments": [
                 {"value": name, "mm": LID_ALIGNMENT_MM[name],
                  "label": (LID_ALIGNMENT_NAMES[name] if name == "off"
-                           else f"{LID_ALIGNMENT_NAMES[name]} {LID_ALIGNMENT_MM[name]:g} mm")}
+                           else f"{LID_ALIGNMENT_NAMES[name]} — {LID_ALIGNMENT_MM[name]:.1f} mm")}
                 for name in LID_ALIGNMENTS
             ],
             "default_alignment": "off",

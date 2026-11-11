@@ -163,16 +163,16 @@ function renderDraftFields() {
       // is one persistent mode per relationship (never a one-shot button); the
       // X / Y counts are always explicit.
       const xySelect = wallsOnly
-        ? modeSelect("Set bin width / length", "xy_size_mode", xyMode, [
-          ["manual", "Manually"], ["bin_to_bore", "Auto size bin to bore"]])
-        : modeSelect("Set base width / length", "xy_size_mode", xyMode, [
-          ["manual", "Manually"], ["bore_to_bin", "Auto size bore to bin"],
-          ["bin_to_bore", "Auto size bin to bore"]]);
+        ? modeSelect("Bin width and length", "xy_size_mode", xyMode, [
+          ["manual", "Manually"], ["bin_to_bore", "Size the bin to fit the walls"]])
+        : modeSelect("Base width and length", "xy_size_mode", xyMode, [
+          ["manual", "Manually"], ["bore_to_bin", "Fit the base to the bin"],
+          ["bin_to_bore", "Size the bin to fit the base"]]);
       const showXy = !wallsOnly && xyMode === "manual";
       const showHeight = heightMode !== "bore_to_bin";
       // Fix 081 C/D: Bore now names itself above its settings (like every
       // other option), so the old standalone "Type" card is gone - Style
-      // instead sits on the left of the same row as Set base width / length.
+      // instead sits on the left of the same row as Base width and length.
       html += `<div class="bore-group wide bore-group-nolabel">
         <div class="bore-group-fields">
           <div class="bore-auto-row">
@@ -187,12 +187,12 @@ function renderDraftFields() {
             : ""}
           <div class="bore-auto-row">
             ${modeSelect("Set height", "height_size_mode", heightMode, [
-              ["manual", "Manually"], ["bore_to_bin", "Auto size bore to bin"],
-              ["bin_to_bore", "Auto size bin to bore"]])}
+              ["manual", "Manually"], ["bore_to_bin", "Fit the height to the bore"],
+              ["bin_to_bore", "Size the bin to fit the bore"]])}
             ${showHeight ? optionField("height", "Height", { unit: "mm", step: "0.5", min: "0.1" }) : ""}
           </div>
           <div class="bore-auto-row">
-            ${gridField("columns", "X count")}${gridField("rows", "Y count")}
+            ${gridField("columns", "Holes across")}${gridField("rows", "Holes front to back")}
           </div>
         </div>
       </div>`;
@@ -220,8 +220,8 @@ function renderDraftFields() {
         const shown = 90 - number(stored, 0);
         const nearest = boreAngleSteps.reduce((best, value) =>
           Math.abs(value - shown) < Math.abs(best - shown) ? value : best, boreAngleSteps[0]);
-        return `<label><span class="field-label">Bore angle<span class="unit">°</span></span>
-          <select data-draft="option:angle" title="90° is upright. Smaller angles lean the Bore toward the selected direction.">
+        return `<label><span class="field-label">Hole tilt<span class="unit">°</span></span>
+          <select data-draft="option:angle" title="90° is upright. Smaller angles lean the holes toward the side chosen below.">
             ${boreAngleSteps.map(value => `<option value="${value}" ${value === nearest ? "selected" : ""}>${value}°</option>`).join("")}
           </select>
         </label>`;
@@ -235,7 +235,7 @@ function renderDraftFields() {
             : optionField("depth", "Depth", { unit: "mm", step: "0.5", min: "0.1" })}
           ${wallsOnly ? dividerThicknessField(boreWallShown, "option:wall") : ""}
           ${hexBit || boreStyle !== "base_straight" ? "" : boreAngleField()}
-          ${hexBit || boreStyle !== "base_straight" || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Angle towards</span><select data-draft="option:angle_towards">
+          ${hexBit || boreStyle !== "base_straight" || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Tilts toward</span><select data-draft="option:angle_towards">
             ${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]].map(([value, label]) => `<option value="${value}" ${(one.options?.angle_towards || (one.along === "y" ? "front" : "left")) === value ? "selected" : ""}>${label}</option>`).join("")}
           </select></label>`}
         </div>
@@ -323,8 +323,8 @@ function renderDraftFields() {
       const shownHeightPercent = state.draftResolvedOptions?.height_percent ?? opt.height_percent ?? 90;
       const wallStyle = opt.wall_style ?? state.draftResolvedOptions?.wall_style ?? "straight";
       html += `<div class="editor-group divider-layout"><div class="pair divider-xy-pair">
-        ${field("X count", "option:count_x", shownGx, { min: "0", max: "200", step: "1", tip: "Walls dividing the bin left to right. 0 for none. At most 200." })}
-        ${field("Y count", "option:count_y", shownGy, { min: "0", max: "200", step: "1", tip: "Walls dividing the bin front to back. 0 for none. At most 200." })}
+        ${field("Walls across", "option:count_x", shownGx, { min: "0", max: "200", step: "1", tip: "Walls dividing the bin left to right. 0 for none. At most 200." })}
+        ${field("Walls front to back", "option:count_y", shownGy, { min: "0", max: "200", step: "1", tip: "Walls dividing the bin front to back. 0 for none. At most 200." })}
       </div><div class="pair triple">
         ${dividerThicknessField(shownThickness)}
         ${dividerHeightField(shownHeightPercent)}
@@ -368,8 +368,8 @@ function renderDraftFields() {
       const runsAlongApplies = info.flags.along && !["divider", "bore"].includes(info.kind) && !qtyZero;
       const runsAlong = runsAlongApplies && !manualXY
         ? `<fieldset><legend>${directionLabel}</legend><div class="segmented two">
-          <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
-          <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
+          <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>Left to right</span></label>
+          <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Front to back</span></label>
         </div></fieldset>`
         : runsAlongApplies && manualXY
         ? `<span class="muted">Direction follows your X/Y quantities.</span>`
@@ -426,7 +426,7 @@ function renderDraftFields() {
           if (info.kind === "post") {
             // Manual X/Y quantities - no Auto button, no "(Auto)" suffix, no help text.
             // (postQx/postQy are resolved in the quantity block above.)
-            html += `<div class="pair">${field("X quantity", "option:count_x", postQx, { min: "0", max: "200", step: "1", tip: "Posts across the bin left to right. 0 for none. X × Y total must be at most 10,000 per part, and at most 10,000 across all Post parts." })}${field("Y quantity", "option:count_y", postQy, { min: "0", max: "200", step: "1", tip: "Posts across the bin front to back. 0 for none. X × Y total must be at most 10,000 per part, and at most 10,000 across all Post parts." })}${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
+            html += `<div class="pair">${field("Posts across", "option:count_x", postQx, { min: "0", max: "200", step: "1", tip: "Posts across the bin left to right. 0 for none. X × Y total must be at most 10,000 per part, and at most 10,000 across all Post parts." })}${field("Posts front to back", "option:count_y", postQy, { min: "0", max: "200", step: "1", tip: "Posts across the bin front to back. 0 for none. X × Y total must be at most 10,000 per part, and at most 10,000 across all Post parts." })}${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
           } else {
             const quantityLabel = info.kind === "steps" ? "Number of steps" : "Quantity";
             const autoState = info.kind !== "steps" && one.count == null;

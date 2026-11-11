@@ -361,7 +361,7 @@ function syncDraftEditorIdentity(kind, info) {
   // stand in for a name.
   // Fix 1135: the blue feature bar already identifies the Scoop, so the
   // "Curved Scoop" heading above its fields is redundant.
-  title.hidden = isNest || kind === "scoop";
+  title.hidden = true;
   // Fix 058 Correction 1, C1.4A: the palette keeps its short description for
   // discoverability, but the Edge Mount editor's own Label/Screw Mounting
   // hierarchy makes the redundant "Add a label and/or screw mounting..."
@@ -1082,10 +1082,10 @@ function updateDraftOverhangNote() {
 // auto_grid state. Mirrors normalize_bore_style() / normalize_bore_modes() in
 // organizer_inserts/_bore.py.
 const BORE_STYLES = [
-  ["base_straight", "Base - Straight Walls"],
-  ["base_wavy", "Base - Wavy Walls"],
-  ["walls_straight", "Straight Walls Only"],
-  ["walls_wavy", "Wavy Walls Only"],
+  ["base_straight", "Solid base — straight walls"],
+  ["base_wavy", "Solid base — wavy walls"],
+  ["walls_straight", "Walls only — straight"],
+  ["walls_wavy", "Walls only — wavy"],
 ];
 const BORE_LEGACY_STYLES = { full_base: "base_straight", wavy_base: "base_wavy" };
 const boreWallsOnly = style => style === "walls_straight" || style === "walls_wavy";

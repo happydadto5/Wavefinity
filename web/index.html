@@ -81,15 +81,15 @@
           </div>
           <div class="bin-name-mode-row">
             <label class="part-name-row"><span id="part-name-label">Bin Name</span><input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>
-            <label class="compact-select">Options print mode<select id="mode-select"></select></label>
+            <label class="compact-select">Parts print as<select id="mode-select"></select></label>
           </div>
           <div id="ordinary-size-row" class="field-grid bin-dimensions-row">
             <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
             <label><span id="y-size-label">Depth</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
             <label><span id="z-size-label">Height</span> <span class="unit">mm</span><input id="z" type="text" inputmode="numeric"></label>
             <div class="thickness-pair">
-  <label id="base-thickness-setting" class="compact-select">Base thickness<select id="base-thickness"><option value="standard">Standard</option></select></label>
-  <label id="wall-thickness-setting" class="compact-select">Wall thickness<select id="wall-thickness"><option value="standard">0.8 mm ? Default</option></select></label>
+  <label id="base-thickness-setting" class="compact-select">Base thickness<select id="base-thickness"><option value="standard">0.8 mm — Default</option></select></label>
+  <label id="wall-thickness-setting" class="compact-select">Wall thickness<select id="wall-thickness"><option value="standard">0.8 mm — Default</option></select></label>
             </div>
           </div>
           <p id="bin-printer-warning" class="field-error" role="status" hidden></p>
@@ -112,8 +112,8 @@
               <div id="lid-option-panel" hidden>
                 <label class="compact-select">Lid thickness<select id="lid-thickness"><option value="0.8">0.8 mm</option><option value="1.0">1.0 mm</option><option value="1.2" selected>1.2 mm — Default</option><option value="1.4">1.4 mm</option><option value="1.6">1.6 mm</option></select></label>
                 <label id="lid-fit-row" class="compact-select">Lid fit<select id="lid-fit"><option value="standard">Standard</option></select></label>
-                <label id="lid-alignment-row" class="compact-select" hidden>Alignment<select id="lid-alignment"><option value="off">Off</option><option value="thin">Thin 1 mm</option><option value="standard">Standard 2 mm</option><option value="thick">Thick 3 mm</option></select></label>
-                <label id="lid-handle-type-row" class="compact-select">Lid with handle<select id="lid-handle-type"><option value="none">None</option><option value="knob">Knob</option></select></label>
+                <label id="lid-alignment-row" class="compact-select" hidden>Alignment lip<select id="lid-alignment"><option value="off">Off</option><option value="thin">Thin — 1.0 mm</option><option value="standard">Standard — 2.0 mm</option><option value="thick">Thick — 3.0 mm</option></select></label>
+                <label id="lid-handle-type-row" class="compact-select">Lid handle<select id="lid-handle-type"><option value="none">None</option><option value="knob">Knob</option></select></label>
                 <label id="lid-handle-size-row" class="compact-select">Handle size<select id="lid-handle-size"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label>
                 <label id="lid-handle-position-row" class="compact-select">Handle position<select id="lid-handle-position"><option value="left">Left</option><option value="right">Right</option><option value="front">Front</option><option value="back">Back</option><option value="middle">Middle</option></select></label>
                 <label id="lid-label-text-row">Label text<input id="lid-label-text" type="text" maxlength="80" placeholder="e.g. SCREWS"></label>
@@ -127,7 +127,7 @@
                   </div>
                 </div>
                 <p id="lid-flip-note" class="inline-help" hidden>Hinged on the back edge, inside the bin. Thread a strand of 1.75 mm filament through the hinge as its pin.</p>
-                <p id="lid-alignment-note" class="inline-help" hidden>Alignment tabs hang below the lid at the two front corners, so a hinged lid with Alignment on needs support when printed. That is expected and fine.</p>
+                <p id="lid-alignment-note" class="inline-help" hidden>The alignment lip is a thin tab under the two front corners of the lid that drops into the bin so the lid sits straight. A hinged lid with the lip on needs support when printed — that is expected and fine.</p>
               </div>
             </div>
             <div id="surface-bin-controls" class="surface-bin-controls" hidden>
@@ -384,7 +384,7 @@
           <span>Connectors</span>
           <span id="connector-height-wrap">
             <label class="heading-select" for="connector-height-mode">
-              <span>Bin heights</span>
+              <span>Heights of the two bins</span>
               <select id="connector-height-mode">
                 <option value="same">Same height</option>
                 <option value="different">Different heights</option>
@@ -703,7 +703,7 @@
     <p class="ai-help-guide">
       <span>Describe object</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
       <span>Generate Prompt</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
-      <span>Give prompt to AI</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
+      <span>Give the prompt to your AI</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
       <span>Copy response</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
       <span>Paste answer</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
       <span>Generate Bin</span>
@@ -721,15 +721,15 @@
       <button id="ai-help-generate" type="button" class="button primary" disabled>2. Generate Prompt</button>
     </div>
     <div id="ai-help-prompt-block" class="ai-help-field" hidden>
-      <label class="ai-help-field">3. Give this prompt to your AI
+      <label class="ai-help-field">3. Give this prompt to your AI — for example ChatGPT, Claude or Gemini — then copy its reply
         <textarea id="ai-help-prompt" rows="4" readonly></textarea>
       </label>
       <div class="button-row ai-help-row">
         <button id="ai-help-copy" type="button" class="button secondary">Copy Prompt</button>
       </div>
     </div>
-    <label class="ai-help-field">5. Paste the AI's answer (4. copy it from your AI first)
-      <textarea id="ai-help-response" rows="5" placeholder="Paste the JSON answer here"></textarea>
+    <label class="ai-help-field">5. Paste the AI's reply here (step 4 is copying it from your AI)
+      <textarea id="ai-help-response" rows="5" placeholder="Paste the AI's reply here"></textarea>
     </label>
     <p id="ai-help-status" class="ai-help-status" role="status" hidden></p>
     <div id="ai-help-failure-actions" class="button-row ai-help-row" hidden>

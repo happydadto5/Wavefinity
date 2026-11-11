@@ -76,11 +76,11 @@ DEFAULT_BASE_THICKNESS = 0.8
 # that need more than the maximum preset here (stacking, B4B) add their own
 # required value dynamically rather than widening this list.
 BASE_PRESETS = (
-    (0.4, "Very thin"),
-    (0.6, "Good"),
+    (0.4, "Extremely thin (experimental)"),
+    (0.6, "Very thin"),
     (0.8, "Default"),
-    (1.0, "Extra Heavy"),
-    (1.2, "Maximum"),
+    (1.0, "Sturdy"),
+    (1.2, "Strong"),
 )
 DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner

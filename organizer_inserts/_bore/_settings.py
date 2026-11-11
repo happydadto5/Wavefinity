@@ -224,7 +224,8 @@ def _wall_only_grid(
     if height <= 0.0 or wall <= 0.0:
         raise ValueError(f"{item.name}: bore height and wall must be positive")
     if not math.isfinite(angle) or abs(angle) > 1e-9:
-        label = "Walls Only" if is_walls_only(style) else "Base - Wavy Walls"
+        label = ("Walls only — straight" if style == "walls_straight" else
+                 "Walls only — wavy" if style == "walls_wavy" else "Solid base — wavy walls")
         raise ValueError(f"a {label} bore stands upright; its angle must be 0")
     wall_style = "wavy" if is_wavy_style(style) else "straight"
     env = wall_only_envelope(item.profile, held, wall, wall_style,

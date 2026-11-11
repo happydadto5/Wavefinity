@@ -633,8 +633,7 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .support-choice-desc {
   color: #465a60; font-size: 12px; font-weight: 450; line-height: 1.2;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
-  overflow: hidden; white-space: normal;
+  white-space: normal;
 }
 .support-choice-state { display: block; color: #1f6b45; font-size: 10px; font-weight: 800; line-height: 1.1; }
 .support-choice.has-state .support-choice-desc { display: none; }
@@ -738,6 +737,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .bore-group-fields.bore-hole-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .bore-group-fields > label { min-width: 0; }
 .bore-auto-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; align-items: end; grid-column: 1 / -1; }
+.bore-group-fields > .bore-auto-row:first-child { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .bore-auto-row > label { min-width: 0; }
 /* Fix 096 F3: Bore Width/Length share one deliberate two-column row - no dead third column. */
 .bore-auto-row.bore-auto-row-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }

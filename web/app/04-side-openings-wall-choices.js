@@ -284,7 +284,7 @@ function reconcileSideOpeningsAfterResize(design) {
       : "";
     const verb = result.removed.length === 1 ? "was" : "were";
     const wall = result.removed.length === 1 ? "that wall is" : "those walls are";
-    sideOpeningAdjustmentNote = `${removed} ${verb} turned off because ${wall} now shorter than 2 units (14 mm).${replacement}`;
+    sideOpeningAdjustmentNote = `${removed} ${verb} turned off because ${wall} now shorter than 14 mm.${replacement}`;
   }
 }
 
@@ -450,7 +450,7 @@ function syncSideOpeningControls() {
   if (note) {
     if (!anyEligible) {
       const rules = state.catalog?.side_openings || {};
-      note.textContent = `Side openings require at least one bin side to be 2 units (${fmt(number(rules.min_side_mm, 16))} mm) or longer.`;
+      note.textContent = `Side openings require at least one bin side to be ${fmt(number(rules.min_side_mm, 16))} mm or longer.`;
     } else if (sideOpeningAdjustmentNote) {
       note.textContent = sideOpeningAdjustmentNote;
     } else if (forced) {
@@ -575,11 +575,11 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
   const allChoices = Array.isArray(rules.choices) && rules.choices.length
     ? rules.choices
     : [
-        { value: 0.4, label: "Very thin" },
-        { value: 0.6, label: "Good" },
+        { value: 0.4, label: "Extremely thin (experimental)" },
+        { value: 0.6, label: "Very thin" },
         { value: 0.8, label: "Default" },
-        { value: 1.0, label: "Extra heavy" },
-        { value: 1.2, label: "Maximum" },
+        { value: 1.0, label: "Sturdy" },
+        { value: 1.2, label: "Strong" },
       ];
   // A mode floor above the highest preset (B4B's 2.8, ordinary direct's 3.8)
   // filters every ordinary preset out, which is the point: the control must
@@ -593,21 +593,17 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
   const verticalStack = (box?.stack?.mode || "none") === "direct";
   const standard = box?.standard_base !== false && !isB4B && !verticalStack;
   const ordinaryDefaultValue = fmt(ordinaryRules.default_mm ?? 0.8);
-  const numericChoices = isB4B
-    ? choices
-    : choices.filter(choice => fmt(choice.value) !== ordinaryDefaultValue);
+  const numericChoices = [...choices].sort((a, b) => number(a.value) - number(b.value));
   const knownValues = numericChoices.map(choice => fmt(choice.value));
   if (needsRequiredOption) knownValues.push(fmt(modeMin));
-  const customValue = !standard && !knownValues.includes(value) ? value : "";
+  const customValue = !standard && (!knownValues.includes(value)
+    || (!isB4B && !verticalStack && value === ordinaryDefaultValue)) ? value : "";
   const signature = JSON.stringify({ numericChoices, needsRequiredOption, modeMin, customValue, standard });
   if (select.dataset.choices !== signature) {
     select.replaceChildren();
-    if (!isB4B && !verticalStack) {
-      select.add(new Option(`${number(ordinaryRules.default_mm ?? 0.8).toFixed(1)} mm — Default`, "standard"));
-    }
     select.append(...numericChoices.map(choice => new Option(
       `${number(choice.value).toFixed(1)} mm — ${choice.label}`,
-      fmt(choice.value),
+      !isB4B && !verticalStack && fmt(choice.value) === ordinaryDefaultValue ? "standard" : fmt(choice.value),
     )));
     if (needsRequiredOption) {
       select.add(new Option(`${fmt(modeMin)} mm — ${requiredLabel}`, fmt(modeMin)));
