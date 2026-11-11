@@ -1253,7 +1253,9 @@ DV.wire = () => {
     const drop = DV.drop;
     DV.drop = null;
     if (drop && !readOnly()) {
-      if (!drop.valid) toastAt(drop.reason || "It does not fit there.", event.clientX, event.clientY, true);
+      if (DL.isOrdinary(drop.bin) && DL.isPlaced(drop.bin.id)) {
+        DL.placeAt(drop.bin, {});
+      } else if (!drop.valid) toastAt(drop.reason || "It does not fit there.", event.clientX, event.clientY, true);
       else {
         const notice = DV.lidCoverageNotice(drop.target, drop.moving);
         dismissToast();
@@ -1400,6 +1402,7 @@ DV.buildOverlay = () => {
     <div id="sd-workspace-host" class="sd-workspace-host" hidden></div>
     <div id="dl-empty-hint" class="dl-empty-hint" hidden><strong>Drag bins to place</strong><span>Drag onto a bin to stack</span></div>
     <div class="layout-hint dl-hint">Drag bins to move · drop on a compatible bin to stack (smaller bins on a Lid for stacking must together cover the whole lid) · drag a bin onto the tree to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>
+    <div id="dl-layout-action-note" class="layout-hint" role="status" hidden></div>
     <div class="layout-hint dl-height-legend" id="dl-height-legend" hidden></div>`);
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
     if (button.dataset.dlView === "fit") DV.fit(); else DV.setView(DV.PRESETS[button.dataset.dlView]);

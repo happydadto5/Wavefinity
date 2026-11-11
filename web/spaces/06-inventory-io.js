@@ -513,7 +513,7 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   if (openPreferredView && info.folder_mode === "space") {
     if (!(await SP.openTypedSpacePreferredView())) return null;
   }
-  toast(info.folder_mode === "space"
+  WS.showTreeNote(info.folder_mode === "space"
     ? `Opened ${info.space.name || folder.name}.`
     : `Saving designs to ${folder.name}.`);
   return info;

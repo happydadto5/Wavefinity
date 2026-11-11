@@ -21,6 +21,7 @@ const WS = {
   busy: false,
   queuedDeleteId: null,
   message: "",
+  treeNote: "",
   placeSeen: "",
   signature: "",
   auxSignature: "",
@@ -32,6 +33,22 @@ const WS_TASKS = ["landing", "container", "bin", "peek", "settings", "newspace",
 WS.open = () => Boolean(typeof DL !== "undefined" && DL.active && DL.layout && state.folderMode === "space");
 
 const wsEsc = value => escapeHtml(String(value ?? ""));
+
+WS.showNote = (id, text) => {
+  const node = document.getElementById(id);
+  if (node) { node.textContent = text; node.hidden = !text; }
+};
+WS.showTreeNote = text => {
+  WS.treeNote = text;
+  WS.sync();
+};
+// Clear the previous action's notes before the next action can set new ones.
+for (const type of ["pointerdown", "keydown", "change"]) {
+  document.addEventListener(type, () => {
+    WS.treeNote = "";
+    for (const id of ["ws-action-note", "bin-action-note", "dl-sp-action-note", "dl-layout-action-note"]) WS.showNote(id, "");
+  }, true);
+}
 
 // ------------------------------------------------------------------ places
 
@@ -174,6 +191,7 @@ WS.renderSelector = () => {
   const actions = `${here ? "" : '<button type="button" class="button secondary dl-small" data-ws-act="new-space-choose">New Space</button>'}<button type="button" class="button primary dl-small" data-ws-act="new-bin"${locked ? " disabled" : ""}>New Bin</button>`;
   return `<div class="ws-sel">
     <div class="ws-sel-head"><h2>${wsEsc(here ? WS.placeName() : "My Bins")}</h2><span class="ws-sel-actions">${actions}</span></div>
+    <p id="ws-action-note" class="dl-note" role="status"${WS.treeNote ? "" : " hidden"}>${wsEsc(WS.treeNote)}</p>
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
     <ul class="ws-items" aria-label="${here ? `Contents of ${wsEsc(WS.placeName())}` : "Bins that are not in a Space"}">${rows || '<li class="ws-empty">Nothing here yet. Choose New Bin to add the first bin.</li>'}</ul>
   </div>`;

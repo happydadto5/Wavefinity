@@ -91,7 +91,7 @@ SP.afterPick = async (folder, leaveOptions) => {
   if (data.folder.folder_mode === "space") {
     if (!(await SP.openTypedSpacePreferredView())) return null;
   }
-  toast(data.folder.folder_mode === "space"
+  WS.showTreeNote(data.folder.folder_mode === "space"
     ? `Opened ${data.folder.space?.name || data.folder.folder_name}.`
     : `Saving designs to ${data.folder.folder_name}.`);
   return data.folder;

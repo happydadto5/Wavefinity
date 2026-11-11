@@ -44,7 +44,7 @@ async function designerNewBin(acceptTransition = null, { skipBank = false } = {}
     state.surfaceHeightPromptSkipped = false;
     if (!acceptTransition && typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
     await loadFreshOrdinaryDesignForCurrentFolder();
-    toast("Started a new bin.");
+    if (!skipBank) WS.showNote("bin-action-note", "Started a new bin.");
     return true;
   } finally {
     finishDesignMutation();

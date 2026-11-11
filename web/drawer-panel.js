@@ -192,6 +192,7 @@ DP.build = () => {
         </div>
         <p id="dl-sp-reason" class="dl-note" hidden></p>
         <p id="dl-sp-status" class="dl-note" hidden></p>
+        <p id="dl-sp-action-note" class="dl-note" role="status" style="white-space: pre-line" hidden></p>
       </div>
     </details>
 

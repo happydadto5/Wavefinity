@@ -1252,6 +1252,7 @@ DL.editBins = async (changes, {
   context = DL.spaceContext(),
 } = {}) => {
   if (!DL.spaceContextCurrent(context)) return false;
+  const deletedNames = (changes.delete_ids || []).map(id => DL.bin(id)).filter(Boolean).map(one => DL.label(one));
   const payload = {
     ...changes,
     layout: Object.hasOwn(changes, "layout") ? changes.layout : DL.layout,
@@ -1273,7 +1274,7 @@ DL.editBins = async (changes, {
     const removed = DL.prune();
     if (commitLayout) DL.selected = selected && DL.findPlacement(selected) ? selected : null;
     if (removed) {
-      toast(`${removed} placement${removed === 1 ? "" : "s"} removed from the saved layout.`);
+      WS.showTreeNote(deletedNames.length ? `${deletedNames.join(", ")} deleted - ${deletedNames.length === 1 ? "it is" : "they are"} no longer in the layout.` : "The deleted bins are no longer in the layout.");
       DL.afterChange();
     } else {
       DL.dirty = false;
@@ -1389,7 +1390,7 @@ DL.busyWith = async (what, work, outputRows = null) => {
 // its next copy number.
 DL.placeAt = (one, where) => {
   if (DL.isOrdinary(one) && DL.isPlaced(one.id)) {
-    toast(`${DL.label(one)} is already placed in a Space.`, true);
+    WS.showNote("dl-layout-action-note", `${DL.label(one)} is already placed in a Space.`);
     return false;
   }
   const copy = DL.isSpacer(one) ? DL.nextSpacerCopy(one) : 0;
@@ -1509,13 +1510,13 @@ DL.refreshSpacers = () => DL.busyWith("spacers", async context => {
   DL.requestReport();
   const made = result.generated?.length || 0;
   const removed = Number(result.removed || 0);
-  toast([
+  WS.showNote("dl-sp-action-note", [
     made
       ? `Refreshed ${made} spacer${made === 1 ? "" : "s"}.`
       : "No spacer gaps were found for the current wall settings.",
     ...(removed ? [`Replaced ${removed} old spacer${removed === 1 ? "" : "s"}.`] : []),
     ...(result.notes || []),
-  ].join("\n"), false, 9000);
+  ].join("\n"));
 });
 
 // Spacers are free, edge-facing placements (no gx) - DL.items()/DL.supportTree()
