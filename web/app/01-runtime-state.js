@@ -904,17 +904,13 @@ function applySpaceSizingDefaults(design, remembered = null, keepStarterXY = fal
 // clone-the-last-design workflow.
 function freshDesignForCurrentFolder() {
   const starter = clone(state.catalog.defaults.design);
-  const remembered = spaceBinPreferences();
-  if (!remembered) {
-    // Fix 1012/1015: a fresh ordinary New Bin starts at 49x49 mm
-    // (closest multiple of 7 to the old 48 default; 50 would snap to 49 on first edit — Andrew 2026-10-10).
-    // Spaces have no default size of their own; the bin default stands
-    // in Space mode too.
-    starter.box.x = 49;
-    starter.box.y = 49;
-    return applySpaceSizingDefaults(starter, null, true);
-  }
-  return applySpaceSizingDefaults(mergeDesignDefaults(starter, remembered), remembered);
+  // Fix 1012/1015: a fresh ordinary bin starts at the app's 49x49 mm
+  // starter size (50 would snap to 49 on first edit). Space bin preferences
+  // do not seed later bins; only the Space's physical fit rules shape them.
+  // Reusable part settings remain seeded independently when a part is added.
+  starter.box.x = 49;
+  starter.box.y = 49;
+  return applySpaceSizingDefaults(starter, null, true);
 }
 
 // The starting-size hint is only true for the fresh starter bin it was shown for.
