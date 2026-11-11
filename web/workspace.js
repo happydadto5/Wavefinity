@@ -830,6 +830,12 @@ WS.sync = () => {
   if (["landing", "container", "peek", "settings"].includes(WS.task) && !WS.open() && state.folderMode !== "space") {
     WS.task = "bin";
   }
+  // Keep the Inventory and placement selection aligned with the tree's current row.
+  if (WS.open() && DL.layout) {
+    const current = WS.current();
+    const rowId = current?.kind === "bin" && current.id ? current.id : null;
+    if (DL.selectedRow !== rowId) DL.selectRow(rowId);
+  }
   // Story 2704: on the open screen nothing is chosen yet - no preview, nothing current, and the
   // space-dependent actions stay off, though the restored session is kept for picking from the list.
   const open = WS.open() && !["picker", "none"].includes(WS.task);

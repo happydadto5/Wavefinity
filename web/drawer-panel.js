@@ -627,8 +627,7 @@ DP.openStructuralTarget = async () => {
 };
 
 // Duplicate a design-source row through the accepted atomic owner. The new
-// row is In Design and unplaced, so it appears in the staging rail; the user
-// stays in Space.
+// row is In Design and unplaced, so it appears in the staging rail.
 DP.duplicateRow = async one => {
   if (typeof flushSpaceDesignAutosave === "function" &&
       !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
@@ -636,11 +635,8 @@ DP.duplicateRow = async one => {
   try {
     const data = await DL.inventoryCall("/api/drawer/design-source/duplicate", { row_id: one.id }, { context });
     DL.adopt(data);
-    DL.selectedRow = data.row_id;
-    DL.selected = null;
-    DL.emit();
     DL.requestReport();
-    toast(`Duplicated as ${DL.label(DL.bin(data.row_id) || one)}. It's under Not placed.`);
+    await WS.go("bin", data.row_id);
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) toast(`Could not duplicate bin: ${friendlyError(error)}`, true, 6000);
   }
