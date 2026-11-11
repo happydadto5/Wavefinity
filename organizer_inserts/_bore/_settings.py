@@ -236,8 +236,10 @@ def _wall_only_grid(
     needed_y = env["zone_span_y"] + (rows - 1) * env["pitch_y"]
     if needed_x > zone.width + 1e-9 or needed_y > zone.depth + 1e-9:
         raise ValueError(
-            f"{columns} x {rows} bores need {needed_x:.1f} x {needed_y:.1f} mm "
-            f"but the zone gives {zone.width:.1f} x {zone.depth:.1f} mm"
+            f"This Bore needs {needed_x:.1f} × {needed_y:.1f} mm of inside space "
+            f"for {columns} × {rows} bores, but this bin gives "
+            f"{zone.width:.1f} × {zone.depth:.1f} mm — make the bin bigger, "
+            "or use fewer or smaller bores."
         )
     centre_x, centre_y = zone.centre
     return {

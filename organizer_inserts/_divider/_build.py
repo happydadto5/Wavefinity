@@ -327,8 +327,9 @@ def build_divider(
     needed_span = spacing * (count + 1)
     if needed_span > span + 1e-9:
         raise ValueError(
-            f"{count} dividers {spacing:.1f} mm apart need {needed_span:.1f} mm "
-            f"across but the zone gives {span:.1f} mm"
+            f"These Dividers, {count} of them {spacing:.1f} mm apart, need "
+            f"{needed_span:.1f} mm across, but this bin gives {span:.1f} mm inside "
+            "— make the bin bigger, or use fewer dividers or less spacing."
         )
     centres = _divider_cross_centres(zone, along, count, spacing)
     solids: list[trimesh.Trimesh] = []

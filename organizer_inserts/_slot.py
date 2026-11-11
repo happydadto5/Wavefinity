@@ -66,7 +66,9 @@ def build_slot(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         raise ValueError(f"no room for slot rack: {across:.1f} mm across needs at least {pitch + 2.0 * wall:.1f} mm")
     used_across = (count - 1) * pitch + (thickness / cos_a) + 2.0 * (wall + wave_margin)
     if used_across > across + 1e-9:
-        raise ValueError(f"{count} slots need {used_across:.1f} mm across but zone gives {across:.1f} mm")
+        raise ValueError((f"This Slot rack needs {used_across:.1f} mm across for {count} slots, "
+                         f"but this bin gives {across:.1f} mm inside — make the bin wider, "
+                         "or use fewer slots."))
     centre_x, centre_y = zone.centre
     block = trimesh.creation.box(extents=(zone.width, zone.depth, height))
     block.apply_translation((centre_x, centre_y, base_z + height / 2.0))

@@ -101,7 +101,11 @@ def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     rounding = max(0.0, options.get("rounding", 0.0))
     if (height <= 0.0 or wall <= 0.0 or depth <= 0.0 or depth >= height
             or 2 * reach >= zone.width or 2 * reach >= zone.depth):
-        raise ValueError("pocket wall and depth must leave a positive shell")
+        raise ValueError((
+            "This Pocket does not fit — its walls and depth would leave no solid "
+            "material around it. Make the bin bigger, or make the Pocket shallower "
+            "or its walls thinner."
+        ))
     centre_x, centre_y = zone.centre
     c = min(POCKET_CHAMFER, wall / 2.0, zone.width / 4.0, zone.depth / 4.0)
     w, d = zone.width, zone.depth

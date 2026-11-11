@@ -133,14 +133,15 @@ def _cradle_seat_plan(box: BoxSpec, spec_feature: Feature, base_z: float) -> dic
         count = _fit_count(across, pitch, body)
     if count < 1:
         raise ValueError(
-            f"no room for {item.name}: {across:.1f} mm across needs at least "
+            f"No room for this Cradle: {item.name}: {across:.1f} mm across needs at least "
             f"{body:.1f} mm"
         )
     used = (count - 1) * pitch + body
     if used > across + 1e-9:
         raise ValueError(
-            f"{count} x {item.name} needs {used:.1f} mm across but the zone "
-            f"gives {across:.1f} mm"
+            f"This Cradle needs {used:.1f} mm across for {count} × {item.name}, "
+            f"but this bin gives {across:.1f} mm inside — make the bin wider, "
+            "or choose a smaller item."
         )
 
     alternating = bool(spec_feature.alternate_ends) and count > 1
@@ -148,14 +149,17 @@ def _cradle_seat_plan(box: BoxSpec, spec_feature: Feature, base_z: float) -> dic
     minimum_alternate_run = length / (1.0 - 2.0 * end_margin)
     if alternating and run + 1e-9 < minimum_alternate_run:
         raise ValueError(
-            f"{item.name} is {length:g} mm long, alternating ends need room "
-            f"for {end_margin:.0%} end clearance, but its zone only runs "
-            f"{run:.1f} mm along {along}"
+            f"{item.name} in this Cradle is {length:g} mm long and, laid in "
+            f"alternating directions, needs {minimum_alternate_run:.1f} mm with the "
+            f"ends kept clear, but this bin gives {run:.1f} mm — make the bin "
+            "longer, or turn off alternating ends."
         )
     if not alternating and length > run + 1e-9:
+        side = "left to right" if along == "x" else "front to back"
         raise ValueError(
-            f"{item.name} is {length:g} mm long but its zone only runs "
-            f"{run:.1f} mm along {along}"
+            f"{item.name} in this Cradle is {length:g} mm long, but this bin gives "
+            f"only {run:.1f} mm inside {side} — make the bin longer {side}, "
+            "or choose a shorter item."
         )
 
     centre_along, centre_across = zone.centre

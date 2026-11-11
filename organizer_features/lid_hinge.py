@@ -127,7 +127,7 @@ def hinge_layout(
     reach = (axis_v + r * math.cos(a)
              + max(0.0, r + r * math.sin(a) - near_u) * math.tan(a))
     if top - reach - 1.0 <= floor_z or rim - (axis_v + swing - rise) <= floor_z + 1.0:
-        raise ValueError("this bin is too short for a flip lid - increase height or turn Flip lid off")
+        raise ValueError("This bin is too short for a Hinged lid — make it taller, or set Lid to No lid.")
 
     total = max_x - min_x
     # Anchored on five (bin at both ends and the middle, lid between); a
@@ -140,7 +140,7 @@ def hinge_layout(
         count -= 2
         length = (total - (count - 1) * HINGE_AXIAL_GAP) / count
     if length < HINGE_KNUCKLE_MIN:
-        raise ValueError("this bin is too narrow for a flip lid - widen it or turn Flip lid off")
+        raise ValueError("This bin is too narrow for a Hinged lid — make it wider, or set Lid to No lid.")
     knuckles = tuple((min_x + i * (length + HINGE_AXIAL_GAP),
                       min_x + i * (length + HINGE_AXIAL_GAP) + length)
                      for i in range(count))
@@ -156,7 +156,7 @@ def hinge_layout(
     if bore_x0 > first_end - 0.4:
         bore_x0 = first_end - 0.4      # stay inside the first bin knuckle
     if bore_x0 - face_x < HINGE_END_CAP_MIN:
-        raise ValueError("this bin is too narrow for a flip lid - widen it or turn Flip lid off")
+        raise ValueError("This bin is too narrow for a Hinged lid — make it wider, or set Lid to No lid.")
     return LidHinge(
         axis_y=axis_y, axis_z=axis_z, axis_depth=rim - axis_z, rim=rim, rise=rise,
         span_half=total / 2.0, back_y=back_y, top_z=top, half=r, axis_v=axis_v,

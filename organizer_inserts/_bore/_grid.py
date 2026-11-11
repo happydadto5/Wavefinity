@@ -115,8 +115,10 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
     needed_y = rows * pitch_y + (reach if lean_axis == "y" else 0.0)
     if needed_x > zone.width + 1e-9 or needed_y > zone.depth + 1e-9:
         raise ValueError(
-            f"{columns} x {rows} bores need {needed_x:.1f} x {needed_y:.1f} mm "
-            f"but the zone gives {zone.width:.1f} x {zone.depth:.1f} mm"
+            f"This Bore needs {needed_x:.1f} × {needed_y:.1f} mm of inside space "
+            f"for {columns} × {rows} bores, but this bin gives "
+            f"{zone.width:.1f} × {zone.depth:.1f} mm — make the bin bigger, "
+            "or use fewer or smaller bores."
         )
 
     # Keep holes on their minimum printable pitch. Extra Base material remains

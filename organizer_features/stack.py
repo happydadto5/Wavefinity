@@ -326,7 +326,7 @@ def _clip_back(polygon: Polygon, back_y: float) -> Polygon:
     if isinstance(kept, MultiPolygon):
         kept = max(kept.geoms, key=lambda one: one.area)
     if kept.is_empty or not isinstance(kept, Polygon):
-        raise ValueError("this bin is too shallow for a flip lid - turn Flip lid off")
+        raise ValueError("This bin is too shallow for a Hinged lid — make it deeper, or set Lid to No lid.")
     return kept
 
 

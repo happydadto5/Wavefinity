@@ -152,12 +152,12 @@ class Zone:
         whole = Zone.whole(spec)
         if along == "x":
             if span > whole.width:
-                raise ValueError(f"{span:g} mm does not fit along x")
+                raise ValueError(f"{span:g} mm does not fit across this bin — make the bin wider.")
             return (Zone(whole.x0, whole.y0, whole.x0 + span, whole.y1)
                     if at == "low" else
                     Zone(whole.x1 - span, whole.y0, whole.x1, whole.y1))
         if span > whole.depth:
-            raise ValueError(f"{span:g} mm does not fit along y")
+            raise ValueError(f"{span:g} mm does not fit front to back in this bin — make the bin deeper.")
         return (Zone(whole.x0, whole.y0, whole.x1, whole.y0 + span)
                 if at == "low" else
                 Zone(whole.x0, whole.y1 - span, whole.x1, whole.y1))

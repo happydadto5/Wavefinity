@@ -195,8 +195,10 @@ def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     used_y = count_y * diameter + (count_y - 1) * spacing
     if used_x > zone.width + 1e-9 or used_y > zone.depth + 1e-9:
         raise ValueError(
-            f"{count_x}x{count_y} posts need {used_x:.1f} x {used_y:.1f} mm but the zone "
-            f"gives {zone.width:.1f} x {zone.depth:.1f} mm"
+            f"These Posts need {used_x:.1f} × {used_y:.1f} mm of inside space for "
+            f"{count_x} × {count_y} posts, but this bin gives "
+            f"{zone.width:.1f} × {zone.depth:.1f} mm — make the bin bigger, "
+            "or use fewer or thinner posts."
         )
 
     centre_x, centre_y = zone.centre
