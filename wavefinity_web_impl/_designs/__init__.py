@@ -124,4 +124,6 @@ from ._layout import (
     pegboard_layouts_payload,
     create_space_text_payload,
     configure_space_text_payload,
+    copy_space_text_payload,
+    copy_space_name_payload,
 )

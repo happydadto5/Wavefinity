@@ -361,10 +361,12 @@ def _reconcile_surface_bases(bins: list[dict[str, Any]], layout: dict[str, Any],
         metadata = source.get("layout")
         if not isinstance(metadata, dict) or metadata.get("surface_base_mode") != "edge":
             continue
+        box = source.get("box")
+        if isinstance(box, dict) and math.isclose(float(box["base_thickness"]), edge, abs_tol=1e-9):
+            continue  # Renaming or resizing X/Y never changes Inventory rows.
         if int(row.get("qty") or 0) > 0:
             metadata["surface_base_mode"] = "custom"
             continue
-        box = source.get("box")
         if not isinstance(box, dict):
             continue
         old_base, old_z = float(box["base_thickness"]), float(box["z"])
@@ -403,10 +405,10 @@ def _configured_space_definition(
 def _refuse_stranding_surface_change(
     bins: list[dict[str, Any]], layout: dict[str, Any], space_def: dict[str, Any], mode: str,
 ) -> None:
-    """Fix 095: validate a Surface edit against the *proposed* Surface before any
+    """Validate a Space edit against the proposed layout before any
     write. The single local/hosted rule; a refusal changes nothing and never
     unplaces, moves or clamps a bin."""
-    if mode != "update" or space_def.get("kind") != "surface" or not isinstance(layout.get("drawers"), list):
+    if mode != "update" or not isinstance(layout.get("drawers"), list):
         return
     if not any(isinstance(one, dict) and one.get("placements") for one in layout["drawers"]):
         return
@@ -415,7 +417,8 @@ def _refuse_stranding_surface_change(
     proposed = copy.deepcopy(layout)
     proposed_bins = copy.deepcopy(bins)
     _setup_space_layout(proposed, space_def)
-    _reconcile_surface_bases(proposed_bins, proposed, space_def["z"])
+    if space_def["kind"] == "surface":
+        _reconcile_surface_bases(proposed_bins, proposed, space_def["z"])
     problem = surface_reconfigure_problem(bins, layout, proposed_bins, proposed)
     if problem:
         raise ValueError(problem)

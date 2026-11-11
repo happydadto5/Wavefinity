@@ -36,7 +36,7 @@ body.ws-on.ws-open:not(.ws-task-settings) #drawer-canvas { cursor: pointer; }
 body.ws-on.ws-task-picker .workspace { visibility: hidden; }
 /* Layout and nothing-selected show the existing print list beneath the one bin tree. */
 body.ws-on.ws-task-none .controls > :not(#ws-stage):not(#drawer-panel),
-body.ws-on.ws-task-settings .controls > :not(#ws-stage):not(#drawer-panel),
+body.ws-on.ws-task-settings .controls > :not(#ws-stage):not(#drawer-panel):not(#space-head),
 body.ws-on.ws-task-none #ws-aux,
 body.ws-on.ws-task-settings #ws-aux,
 body.ws-on.ws-task-none #drawer-panel > :not([aria-label="Inventory"]) { display: none !important; }
@@ -118,15 +118,14 @@ body.ws-task-picker .controls > :not(#ws-stage):not(#ws-aux) { display: none !im
 body.ws-task-bin #space-head,
 body.ws-task-container #space-head .space-head-title,
 body.ws-task-container #space-actions > .button-row { display: none; }
-body.ws-task-settings #space-actions,
 body.ws-task-settings #space-head .space-head-title { display: none; }
-/* Story 2841: the Inventory list (select, Print Selected, Export Space) stays on the space details screen, and so
-   do the Name + Size summary of a Storage Box / Storage Drawers space (the setup form for an existing space).
-   Full size and construction editing still lives only in the container editor. */
+/* Space details reuse the setup form for name and usable size for every kind.
+   Container construction settings remain in the container editor. */
 
 /* Story 2743 / 2841: no empty bordered card above the details; the head shows only while it holds something
    visible (the kind's field group, an error or folder help). */
 body.ws-task-settings #space-head:not(:has(
+  #space-head-edit-host:not([hidden]), #space-actions,
   .space-type-fields:not([hidden]),
   #space-error:not([hidden]), #space-folder-help:not([hidden]))) { display: none; }
 
@@ -136,9 +135,7 @@ body.ws-task-container #space-head:not(:has(
   #space-structural:not([hidden]), #space-head-edit-host:not([hidden]),
   #space-error:not([hidden]), #space-folder-help:not([hidden]))) { display: none; }
 
-/* The Space name is shown in the heading; the layout view has no (falsely editable) Name section. */
-/* Story 2841: except for a Storage Box, whose Name + Size summary is its details (a cabinet hides the row itself). */
-body.ws-task-settings:not(:has(#space-fields-portable:not([hidden]))) #space-name-row,
+/* Edit has no onboarding note. */
 body.ws-task-settings #space-note { display: none !important; }
 
 /* Big message in the middle section while switching views. */

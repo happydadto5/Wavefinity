@@ -49,6 +49,8 @@
             <div class="button-row">
               <button id="space-head-open" class="button secondary dl-small major-action" type="button">Open Space…</button>
               <button id="space-head-edit" class="button secondary dl-small major-action" type="button">Edit Space</button>
+              <button id="space-head-copy" class="button secondary dl-small" type="button">Copy Space</button>
+              <button id="space-head-delete" class="button secondary dl-small" type="button">Delete Space</button>
               <button id="space-head-show" class="button secondary dl-small" type="button">Show Folder</button>
               <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
               <button id="space-pegboard-hooks" class="button secondary dl-small" type="button" title="Save a plate of printable hooks that fit this Pegboard." hidden>Export Pegboard Hooks</button>
@@ -62,6 +64,14 @@
               </div>
               <p id="space-structural-print-reason" class="dl-note" hidden></p>
             </div>
+          </div>
+        </div>
+        <p id="space-action-status" class="dl-note" role="status" hidden></p>
+        <div id="space-delete-confirm" hidden>
+          <p id="space-delete-message"></p>
+          <div class="button-row">
+            <button id="space-delete-yes" class="button secondary" type="button">Delete</button>
+            <button id="space-delete-cancel" class="button secondary" type="button">Cancel</button>
           </div>
         </div>
         <div id="space-head-edit-host" class="space-head-edit-host" hidden></div>

@@ -51,6 +51,7 @@ from datetime import datetime, timezone
 import json
 import math
 import os
+import shutil
 from pathlib import Path
 import threading
 import tempfile
@@ -1120,6 +1121,79 @@ def space_routes(
         mutate_preferences(apply)
         return reply(None)
 
+    def action_space(payload):
+        selected = Path(str(payload.get("output") or default_output)).expanduser().absolute()
+        if selected.is_symlink() or getattr(selected, "is_junction", lambda: False)():
+            raise ValueError("Open the original Space folder before copying or deleting it.")
+        target = selected.resolve()
+        prefs = load_preferences()
+        info = describe(target, prefs)
+        expected = _space_id(payload.get("space_id"))
+        if (info.get("folder_mode") != "space" or not expected
+                or info.get("space_id") != expected
+                or _space_id(prefs.get("active_space_id")) != expected):
+            raise ValueError("This is no longer the open Space. Nothing was changed.")
+        root = current_space_root(prefs).resolve()
+        if target.parent != root:
+            raise ValueError("Open this Space inside your Wavefinity folder before copying or deleting it.")
+        return target, info, prefs
+
+    def copy_space(payload):
+        from organizer_inventory._rows import _duplicate_name
+        from organizer_inventory import parse_inventory, render_inventory
+        with _SPACE_CREATE_LOCK, INVENTORY_LOCK:
+            target, info, prefs = action_space(payload)
+            spaces = [*other_spaces(prefs), *recent(prefs), {"name": info["space"]["name"]}]
+            name = _duplicate_name(spaces, info["space"]["name"])
+            destination = target.parent / _space_folder_name(name)
+            while destination.exists():
+                spaces.append({"name": name})
+                name = _duplicate_name(spaces, info["space"]["name"])
+                destination = target.parent / _space_folder_name(name)
+            # No links may lead the copy outside the source folder.
+            if any(path.is_symlink() or getattr(path, "is_junction", lambda: False)() for path in target.rglob("*")):
+                raise ValueError("This Space contains linked files or folders; remove the links before copying it.")
+            destination = _new_space_target(target.parent, name)
+            try:
+                def omit_identity(directory, _names):
+                    return {METADATA_FILE} if Path(directory) == target else set()
+                shutil.copytree(target, destination, dirs_exist_ok=True, ignore=omit_identity)
+                space = {**info["space"], "name": name}
+                metadata = _json_file(target / METADATA_FILE, strict=True)
+                metadata["space_id"] = _new_space_id()
+                (destination / METADATA_FILE).write_text(json.dumps(metadata), encoding="utf-8")
+                _write_metadata(destination, "space", space)
+                inventory = resolve_inventory_path(destination, migrate=True)
+                if inventory.is_file():
+                    parsed = parse_inventory(inventory.read_text(encoding="utf-8"))
+                    parsed["layout"]["space"] = space
+                    inventory.write_text(render_inventory(name, parsed["bins"], parsed["layout"]), encoding="utf-8")
+                copied = describe(destination, prefs)
+                def register(current):
+                    registry = _space_registry(current)
+                    registry[copied["space_id"]] = _registered_space_entry(copied, _utc_now())
+                    current["space_registry"] = registry
+                mutate_preferences(register)
+            except Exception:
+                if destination.is_dir():
+                    shutil.rmtree(destination)
+                raise
+            return {"name": name, "recent": recent(load_preferences()),
+                    "other_spaces": other_spaces(load_preferences())}
+
+    def delete_space(payload):
+        with _SPACE_CREATE_LOCK, INVENTORY_LOCK:
+            target, info, _prefs = action_space(payload)
+            # Resolve and check the absolute sibling path above before recursion.
+            # Failure leaves the registry intact, so the Space remains recoverable.
+            shutil.rmtree(target)
+            result = forget({"output": str(target), "space_id": info["space_id"]})
+            def clear_output(prefs):
+                if _same(prefs.get("output") or "", target):
+                    prefs["output"] = ""
+            mutate_preferences(clear_output)
+            return result
+
     def set_storage_parent(payload):
         # Fix 058 K: saves only the selected *parent* directory - never
         # creates its Wavefinity child, and never overwrites an existing
@@ -1364,6 +1438,8 @@ def space_routes(
         "/api/space/create": configure,
         "/api/space/configure": configure_migrate,
         "/api/space/update": update,
+        "/api/space/copy": copy_space,
+        "/api/space/delete": delete_space,
         "/api/folder/inventory": set_inventory,
         "/api/space/defaults": set_bin_defaults,
         "/api/space/resume": resume,

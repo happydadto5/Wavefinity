@@ -26,6 +26,12 @@ SP.renderSpaceInfo = () => {
 
 SP.renderSpaceInfoBody = () => {
     const isSpace = state.folderMode === "space" && state.activeSpace;
+    if (SP.actionSpaceSeen !== state.activeSpaceId) {
+        SP.actionSpaceSeen = state.activeSpaceId;
+        SP.deleteSpaceId = null;
+        document.getElementById("space-delete-confirm").hidden = true;
+        SP.spaceActionNote("");
+    }
     // Story 2519: the Storage Box action presence follows the contents on every render.
     SP.syncStorageBoxBinActions();
     const saveEl = document.getElementById("save-location-row");
@@ -42,7 +48,7 @@ SP.renderSpaceInfoBody = () => {
     }
     head.hidden = false;
     const viewing = document.getElementById("space-head-view");
-    if (viewing) viewing.hidden = SP.editing;
+    if (viewing) viewing.hidden = SP.editing && !(typeof WS !== "undefined" && WS.task === "settings");
     document.getElementById("space-head-name").textContent = state.activeSpace.name;
 
     const kind = state.activeSpace.kind;
@@ -86,8 +92,140 @@ SP.showFolder = async () => {
 };
 
 SP.editSpace = () => {
-    if (!state.activeSpace) return;
+    if (!state.activeSpace || SP.editing || SP.spaceActionBusy) return;
     SP.showSetup(state.activeSpace.kind === "box" ? "portable" : state.activeSpace.kind, state.activeSpace, { update: true });
+};
+
+SP.spaceActionNote = message => {
+    const note = document.getElementById("space-action-status");
+    note.textContent = message;
+    note.hidden = !message;
+};
+
+SP.copySpaceName = async names => (await api("/api/space/copy-name", {
+    name: state.activeSpace.name, names,
+})).name;
+
+SP.hostedActionParent = async folder => {
+    let parent = (SP.hostedHome || await WFFileSystem.load("home"))?.handle;
+    let path = parent ? await parent.resolve(folder.handle) : null;
+    if (!path || path.length !== 1) {
+      SP.spaceActionNote("Choose the folder containing this Space to continue.");
+      const picked = await WFFileSystem.pickDirectory();
+      if (picked.status === "cancelled") return null;
+      if (picked.status !== "ok") throw new Error("Folder access was not granted.");
+      parent = picked.handle;
+      path = await parent.resolve(folder.handle);
+    }
+    if (!path || path.length !== 1) throw new Error("Choose the folder directly containing this Space. Nothing was changed.");
+    return { parent, entry: path[0] };
+};
+
+SP.runSpaceAction = async action => {
+    if (!state.activeSpace || SP.spaceActionBusy || (typeof WS !== "undefined" && WS.busy)) return;
+    SP.spaceActionBusy = true;
+    const context = DL.spaceContext();
+    const spaceId = state.activeSpaceId;
+    if (typeof WS !== "undefined") WS.busy = true;
+    const buttons = [...document.querySelectorAll("#space-actions button, #space-delete-confirm button")];
+    const disabled = buttons.map(button => button.disabled);
+    buttons.forEach(button => { button.disabled = true; });
+    const form = document.getElementById("space-form");
+    form.inert = true;
+    try {
+      if (!(await SP.flushSetupAutosave()) || !(await SP.leaveSpaceSafely())) return;
+      DL.requireSpaceContext(context);
+      await SP.flushOutgoingResumeCheckpoint();
+      let copiedName;
+      if (state.runtime.hosted) {
+        const folder = state.browserFolder;
+        const location = await SP.hostedActionParent(folder);
+        if (!location) { SP.spaceActionNote(""); return; }
+        const { parent, entry } = location;
+        DL.requireSpaceContext(context);
+        const source = await SP.inspectHosted(folder);
+        if (source.space_id !== spaceId) throw new Error("This is no longer the open Space. Nothing was changed.");
+        const perform = async () => {
+          if (action === "copy") {
+            const names = [state.activeSpace.name, ...(SP.otherSpaces || []).map(one => one.name), ...(SP.recent || []).map(one => one.name)];
+            const entries = new Set();
+            for await (const [name, handle] of parent.entries()) {
+              entries.add(name.toLowerCase());
+              if (handle.kind === "directory") {
+                const raw = await WFFileSystem.readText(handle, FOLDER_METADATA);
+                if (raw) { try { names.push(JSON.parse(raw).space?.name || name); } catch (_) { names.push(name); } }
+              }
+            }
+            copiedName = await SP.copySpaceName(names);
+            while (entries.has(copiedName.toLowerCase())) {
+              names.push(copiedName); copiedName = await SP.copySpaceName(names);
+            }
+            if (copiedName.length > 80 || /[<>:"/\\|?*\x00-\x1f]/.test(copiedName) || /[. ]$/.test(copiedName))
+              throw new Error("The copied name cannot be used as a folder name. Shorten or rename this Space first.");
+            const handle = await parent.getDirectoryHandle(copiedName, { create: true });
+            try {
+              await WFFileSystem.copyDirectory(folder.handle, handle, [FOLDER_METADATA]);
+              const { current } = await SP.readMetadata(folder.handle);
+              await WFFileSystem.writeText(handle, FOLDER_METADATA, JSON.stringify({
+                ...current.data, space_id: crypto.randomUUID(),
+              }));
+              const space = { ...clone(state.activeSpace), name: copiedName };
+              const metadata = await SP.writeMetadata(handle, "space", space, true, {}, { freshIdentity: true });
+              // Change only the copied inventory's Space name, through the same server parser.
+              const copyFolder = { handle, name: copiedName };
+              const inventory = await SP.readInventoryFor(copyFolder, { migrate: true });
+              const updated = await api("/api/space/copy-text", { inventory_text: inventory, name: copiedName });
+              await WFFileSystem.writeText(handle, SP.inventoryFilenameFor(copyFolder), updated.inventory_text);
+              await SP.rememberHostedRecent(copyFolder, { folder_mode: "space", space, space_id: metadata.space_id });
+            } catch (error) {
+              await WFFileSystem.removeDirectory(parent, copiedName);
+              throw error;
+            }
+          } else {
+            await WFFileSystem.removeDirectory(parent, entry);
+            SP.recent = (await SP.loadHostedRecent()).filter(one => one.space_id !== spaceId);
+            await SP.saveHostedRecent(SP.recent);
+            await WFFileSystem.save("active", null);
+          }
+        };
+        const pending = SP._inventoryWriteChain.then(perform, perform);
+        SP._inventoryWriteChain = pending.catch(() => {});
+        await pending;
+      } else {
+        const result = await api(`/api/space/${action}`, { output: state.output, space_id: spaceId });
+        SP.recent = result.recent || [];
+        if (result.other_spaces) SP.otherSpaces = result.other_spaces;
+        copiedName = result.name;
+      }
+      DL.requireSpaceContext(context);
+      if (action === "copy") {
+        SP.otherSpacesFresh = false;
+        SP.spaceActionNote(`Copied as ${copiedName}.`);
+      } else {
+        document.getElementById("space-delete-confirm").hidden = true;
+        SP.deleteSpaceId = null;
+        SP.cancelInlineEdit();
+        await SP.resetDrawer({ skipSafeLeave: true });
+        SP.resetDesignSession();
+        state.output = ""; state.browserFolder = null; state.activeSpaceId = null;
+        state.folderSelected = false;
+        setFolderState("design", null, false, false, null, {});
+        SP.otherSpaces = (SP.otherSpaces || []).filter(one => one.space_id !== spaceId);
+        SP.otherSpacesFresh = false;
+        SP.spaceActionNote("");
+        SP.renderSpaceInfo();
+        if (typeof WS !== "undefined") {
+          WS.task = "picker"; WS.prior = null; WS.message = "";
+        } else SP.showHome();
+      }
+    } catch (error) {
+      SP.spaceActionNote(friendlyError(error));
+    } finally {
+      SP.spaceActionBusy = false;
+      form.inert = false;
+      buttons.forEach((button, i) => { button.disabled = disabled[i]; });
+      if (typeof WS !== "undefined") { WS.busy = false; WS.sync(); }
+    }
 };
 
 SP.newSpace = async () => {
@@ -148,6 +286,23 @@ const wireInfoButtons = (prefix = "space-head") => {
     if (btnOpen) btnOpen.addEventListener("click", SP.openLaunchSelection);
     const btnEdit = document.getElementById(prefix + "-edit");
     if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
+    if (prefix === "space-head") {
+      document.getElementById("space-head-copy")?.addEventListener("click", () => SP.runSpaceAction("copy"));
+      document.getElementById("space-head-delete")?.addEventListener("click", () => {
+        if (!state.activeSpace || SP.spaceActionBusy) return;
+        SP.deleteSpaceId = state.activeSpaceId;
+        document.getElementById("space-delete-message").textContent =
+          `Delete “${state.activeSpace.name}”? The Space and all its bins will be deleted. There is no undo.`;
+        document.getElementById("space-delete-confirm").hidden = false;
+      });
+      document.getElementById("space-delete-cancel")?.addEventListener("click", () => {
+        document.getElementById("space-delete-confirm").hidden = true;
+        SP.deleteSpaceId = null;
+      });
+      document.getElementById("space-delete-yes")?.addEventListener("click", () => {
+        if (SP.deleteSpaceId === state.activeSpaceId) SP.runSpaceAction("delete");
+      });
+    }
     const btnPrinterSettings = document.getElementById(prefix + "-printer-settings");
     if (btnPrinterSettings) btnPrinterSettings.addEventListener("click", SP.openPrinterSettings);
     const btnShow = document.getElementById(prefix + "-show");
@@ -247,7 +402,12 @@ SP.flushSetupAutosave = () => {
           if (revision === SP.setupAutosaveRevision) SP.setupFormSnapshot = SP.captureOrdinarySetupSnapshot();
           SP.renderSpaceInfo();
         } catch (error) {
-          SP.fail(friendlyError(error));
+          if (revision !== SP.setupAutosaveRevision) continue;
+          const message = friendlyError(error);
+          if (SP.setupChangedField && !message.includes("no longer fit at this size")) {
+            SP.setupFieldNote(SP.setupChangedField, message, "error");
+            $(SP.setupChangedField)?.setAttribute("aria-invalid", "true");
+          } else SP.fail(message);
           return false;
         }
       }
@@ -273,7 +433,7 @@ SP.commitSpaceUpdate = async (values, { structural = false } = {}) => {
         if (!(await SP.confirmPrintedAutoBases(trimSize))) return false;
         requireCurrent();
     }
-    if ((kind === "surface" || kind === "portable") && typeof DL !== "undefined" && DL.loaded && !(await DL.save())) {
+    if (typeof DL !== "undefined" && DL.loaded && !(await DL.save())) {
         throw new Error("Save the current Space layout before changing its size or case settings.");
     }
     requireCurrent();
@@ -319,6 +479,7 @@ SP.commitSpaceUpdate = async (values, { structural = false } = {}) => {
         requireCurrent();
         state.activeSpace = space;
         state.activeSpaceId = metadata.space_id || null;
+        await SP.rememberHostedRecent(folder, { folder_mode: "space", space, space_id: metadata.space_id });
         };
         const hostedUpdatePending = SP._inventoryWriteChain.then(hostedUpdateRun, hostedUpdateRun);
         SP._inventoryWriteChain = hostedUpdatePending.catch(() => {});
@@ -330,6 +491,7 @@ SP.commitSpaceUpdate = async (values, { structural = false } = {}) => {
         });
         requireCurrent();
         state.activeSpace = data.folder.space;
+        SP.recent = data.recent || SP.recent;
     }
     SP.setupFormSnapshot = null;
     if (!structural) {
@@ -357,8 +519,9 @@ SP.commitSpaceUpdate = async (values, { structural = false } = {}) => {
         }
         if (!structural && typeof refreshPreview === "function") await refreshPreview();
     }
-    if ((kind === "drawer" || kind === "pegboard") && typeof DL !== "undefined" && DL.active) {
-        DL.syncSingleDrawerFromSpace(state.activeSpace);
+    if ((kind === "drawer" || kind === "pegboard") && typeof DL !== "undefined" && DL.loaded) {
+        await DL.load();
+        requireCurrent();
     }
 };
 

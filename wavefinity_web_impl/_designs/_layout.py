@@ -23,7 +23,7 @@ from organizer_inserts import (
     snapped_zone,
 )
 from organizer_drawer import stack_part_height
-from organizer_inventory import configure_space_text
+from organizer_inventory import configure_space_text, parse_inventory, render_inventory
 from organizer_app import (
     base_height,
     design_from_dict,
@@ -382,6 +382,28 @@ def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
         title=str(payload.get("inventory_title") or payload.get("name") or "Wavefinity"),
         raw_def=raw_def, mode="create",
     )
+
+
+def copy_space_name_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    from organizer_inventory._rows import _duplicate_name
+    names = payload.get("names") or []
+    if not isinstance(names, list):
+        raise ValueError("Space names must be a list.")
+    source = str(payload.get("name") or "").strip()
+    return {"name": _duplicate_name([{"name": name} for name in [*names, source]], source)}
+
+
+def copy_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Rename the copied Space without reconfiguring its bins or cabinet."""
+    current = parse_inventory(str(payload.get("inventory_text") or ""))
+    layout = current.get("layout")
+    if not isinstance(layout, dict) or not isinstance(layout.get("space"), dict):
+        raise ValueError("The copied Space has no saved layout.")
+    name = str(payload.get("name") or "").strip()
+    if not name or len(name) > 80:
+        raise ValueError("Give the copied Space a name of at most 80 characters.")
+    layout["space"] = {**layout["space"], "name": name}
+    return {"inventory_text": render_inventory(name, current["bins"], layout)}
 
 
 def configure_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:

@@ -177,10 +177,11 @@ filed but not built yet.
 - **One Manage screen.** The Layout line (its click and its one **Manage**
   button go to the same place) is where you lay out *and* print: the layout on
   the right, the print list on the left. The Space's name and size are shown
-  there read-only; a Space with a container is edited by selecting the
-  container row (the second row). A Drawer or Pegboard Space, which has no
-  container row, keeps its size fields on the Manage screen *(planned, Story
-  2858)*.
+  there with editable name and usable size for every Space type. Copy Space
+  makes a separate Space and leaves the original open. Delete Space asks in
+  place before removing the Space and all its bins; there is no undo. A size
+  change that strands a placed bin is refused and names the bins in the way.
+  Container construction settings stay on the container row (Story 2933).
 - **Peek without leaving the layout.** Clicking a bin in the layout opens its
   details on the left while the layout stays on the right; change its height
   or stacking and the layout updates in place. Click empty floor or press Esc

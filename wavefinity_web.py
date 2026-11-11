@@ -424,6 +424,8 @@ from wavefinity_web_impl._designs import (
     pegboard_layouts_payload,
     create_space_text_payload,
     configure_space_text_payload,
+    copy_space_text_payload,
+    copy_space_name_payload,
 )
 from wavefinity_web_impl._ai import (
     AI_DESIGN_SCHEMA,
@@ -3217,6 +3219,8 @@ POST_ROUTES = {
     "/api/show-log": show_log_payload,
     "/api/space/create-text": create_space_text_payload,
     "/api/space/configure-text": configure_space_text_payload,
+    "/api/space/copy-text": copy_space_text_payload,
+    "/api/space/copy-name": copy_space_name_payload,
 }
 POST_ROUTES.update({
     **drawer_routes(

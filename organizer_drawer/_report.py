@@ -598,26 +598,28 @@ def surface_reconfigure_problem(
     current_bins: list[dict[str, Any]], current_layout: dict[str, Any] | None,
     proposed_bins: list[dict[str, Any]], proposed_layout: dict[str, Any],
 ) -> str | None:
-    """Why a proposed Surface would strand a placed bin, or None if it fits.
+    """Why a proposed Space would strand a placed bin, or None if it fits.
 
-    Pure and shared by the local and hosted Surface edit: it runs the ordinary
-    report over the *proposed* Surface with the current placements untouched.
+    Pure and shared by local and hosted edits: it runs the ordinary
+    report over the proposed Space with the current placements untouched.
     Geometry problems (outside / overlap, which include the accepted projecting
     label envelope) always refuse. Stack or floating problems refuse only when
     the edit introduces them, so an old unrelated problem never traps an edit.
     """
     baseline: set[tuple[str, tuple[str, ...]]] = set()
-    if is_surface_layout(current_layout):
+    if current_layout:
         baseline = {
-            _problem_signature(one) for one in drawer_report(
-                find_drawer(current_layout), current_bins, layout=current_layout)["problems"]
+            _problem_signature(one)
+            for drawer in current_layout.get("drawers", [])
+            for one in drawer_report(drawer, current_bins, layout=current_layout)["problems"]
         }
-    report = drawer_report(find_drawer(proposed_layout), proposed_bins, layout=proposed_layout)
+    problems = [one for drawer in proposed_layout.get("drawers", [])
+                for one in drawer_report(drawer, proposed_bins, layout=proposed_layout)["problems"]]
     by_id = {one["id"]: one for one in proposed_bins}
     stranded: list[str] = []
-    for problem in report["problems"]:
+    for problem in problems:
         kind = problem["type"]
-        if kind in ("outside", "overlap") or (
+        if kind in ("outside", "overlap", "too_tall", "mount", "mount_overlap") or (
                 kind in ("stack", "floating") and _problem_signature(problem) not in baseline):
             for name in _bin_names(problem.get("keys") or (), by_id):
                 if name not in stranded:
@@ -626,6 +628,5 @@ def surface_reconfigure_problem(
         return None
     shown = ", ".join(stranded[:5]) + (f" and {len(stranded) - 5} more" if len(stranded) > 5 else "")
     return (
-        f"This Surface change would leave placed bins outside or overlapping: {shown}. "
-        "Nothing was changed. Move those bins first, or choose a larger maximum size."
+        f"{shown} no longer fit at this size — move or remove them, or keep the Space bigger."
     )

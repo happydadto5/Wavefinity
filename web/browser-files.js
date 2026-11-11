@@ -180,6 +180,24 @@ window.WFFileSystem = (() => {
     await handle.removeEntry(filename);
   };
 
+  const copyDirectory = async (source, destination, skipFiles = []) => {
+    await requireWritableFolder(source);
+    await requireWritableFolder(destination);
+    for await (const [name, entry] of source.entries()) {
+      if (skipFiles.includes(name)) continue;
+      if (entry.kind === "directory") {
+        await copyDirectory(entry, await destination.getDirectoryHandle(name, { create: true }));
+      } else {
+        await writeBlob(destination, name, await readBlob(source, name));
+      }
+    }
+  };
+
+  const removeDirectory = async (parent, name) => {
+    await requireWritableFolder(parent);
+    await parent.removeEntry(name, { recursive: true });
+  };
+
   // Structural-output ownership (Fix 084B): read a file back as a Blob (null if
   // absent) and fingerprint it, so Wavefinity only ever replaces bytes it wrote.
   const readBlob = async (handle, filename) => {
@@ -207,6 +225,7 @@ window.WFFileSystem = (() => {
     queryReadWritePermission, requestReadWritePermission,
     writeBlob, writeText, readText, fileExists, listFilenames, removeFile,
     readBlob, sha256, sha256Blob,
+    copyDirectory, removeDirectory,
     save, load,
   };
 })();

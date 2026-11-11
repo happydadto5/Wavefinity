@@ -405,15 +405,10 @@ def plan_reconfigure(space: dict, layout: dict, proposed_space: dict, bins: list
     if old_ids != new_ids:
         raise ValueError("Use Add Drawer or Delete Drawer to change drawer identities")
     updated = reconcile_storage_drawers_layout(current, proposed)
-    from organizer_drawer import drawer_report, problem_blocks_print
-    for i, drawer in enumerate(updated["drawers"], 1):
-        if drawer["placements"]:
-            problems = drawer_report(drawer, bins, layout=updated).get("problems", [])
-            blocking = [problem for problem in problems if problem_blocks_print(problem)]
-            if blocking:
-                raise ValueError(
-                    f"Drawer {i}: {blocking[0].get('message', 'placements no longer fit')}"
-                )
+    from organizer_drawer import surface_reconfigure_problem
+    problem = surface_reconfigure_problem(bins, current, bins, updated)
+    if problem:
+        raise ValueError(problem)
     return proposed, updated
 
 

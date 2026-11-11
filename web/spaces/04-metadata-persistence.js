@@ -290,7 +290,7 @@ SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, chan
         else structuralOutputs[key] = value;
       }
     }
-    metadata.space_id = spaceId || crypto.randomUUID();
+    metadata.space_id = options.freshIdentity ? crypto.randomUUID() : (spaceId || crypto.randomUUID());
     metadata.inventory = true;
     metadata.space = resolvedSpace;
     metadata.keep_bin_defaults = keep;

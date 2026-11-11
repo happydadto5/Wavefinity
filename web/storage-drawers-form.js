@@ -93,18 +93,12 @@
       }, { capture: true, signal: events.signal });
     }
     const name = input(space.name); name.maxLength = 80; name.required = true;
-    // Fix 1137: like the drawer count below, the Space name is tied to the
-    // folder name, so it is set at creation and never editable afterwards.
-    name.disabled = mode === "edit";
+    // Renaming changes the display name while keeping folder and drawer IDs.
+    name.disabled = false;
     name.id = `sd-name-${epoch}`;
     name.dataset.heightNeutral = "1";
     const sizeGroup = group(form); sizeGroup.classList.add("sd-basics-group");
-    // Story 2755: an existing Space's name is shown as plain text, like the
-    // Storage Box; the disabled input stays hidden so draft() still reads it.
-    if (mode === "edit") {
-      name.hidden = true;
-      sizeGroup.append(el("strong", "sd-space-name", space.name || ""), name);
-    } else sizeGroup.append(labeled("Space name", name));
+    sizeGroup.append(labeled("Space name", name));
     const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
     const x = input(space.x), y = input(space.y);
     x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
@@ -671,7 +665,7 @@
       setDisabled(value) {
         disabled = !!value;
         for (const control of form.querySelectorAll("input, select")) control.disabled = disabled;
-        if (!disabled) { count.disabled = mode === "edit"; name.disabled = mode === "edit"; }
+        if (!disabled) { count.disabled = mode === "edit"; }
         renderRows();
         syncHeightField();
       },

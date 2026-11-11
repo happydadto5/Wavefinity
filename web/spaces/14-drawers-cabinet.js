@@ -214,6 +214,7 @@ SP.cabinetMutate = async (operation, { drawer_id = null, space = null } = {}) =>
     await WFFileSystem.writeText(folder.handle, filename, inventoryText);
     throw error;
   }
+  await SP.rememberHostedRecent(folder, { folder_mode: "space", space: result.space, space_id: spaceId });
   return result;
 };
 

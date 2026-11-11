@@ -116,6 +116,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   // Fix 004 Correction 6.F.
   SP.isUpdate = update;
   SP.setupKind = kind;
+  SP.setupChangedField = null;
   SP.setupValidationStarted = false;
   $("#space-form").querySelectorAll("[data-setup-touched]").forEach(input => delete input.dataset.setupTouched);
   $("#space-form").querySelectorAll('[id$="-setup-error"]').forEach(note => { note.hidden = false; note.textContent = ""; });
@@ -157,10 +158,8 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   const spaceNameField = document.getElementById("space-name");
   spaceNameField.value = prefillSpace?.name || "";
   spaceNameField.placeholder = kind === "surface" ? "e.g. Kitchen worktop, Desk top" : "e.g. Tool chest, drawer 2";
-  // Fix 1137: the Space name is tied to the folder name (see the folder help
-  // copy: "Wavefinity will save this Space under Documents\Wavefinity using
-  // the Space name"), so it is set at creation and never editable afterwards.
-  spaceNameField.disabled = update;
+  // The display name can change without moving the Space's folder or identity.
+  spaceNameField.disabled = false;
   document.getElementById("space-error").hidden = true;
   // Story 2755: no "can't be changed" notice; the name just shows plainly.
   document.getElementById("space-note").textContent = "";
@@ -400,6 +399,9 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
       const used = kind === "portable" && axis !== "z" ? SP.snap(raw) : raw;
       dimensions[axis] = used;
       const notes = ["At most 2000 mm."];
+      if (kind === "drawer") notes.push(axis === "z"
+        ? `Usable drawer height must be at least ${fmt(ordinaryBinMinimumHeight())} mm.`
+        : "Must fit at least one Wavefinity unit after wall clearance.");
       if (Number.isFinite(raw) && raw > 0 && Math.abs(raw - used) > 1e-6) {
         notes.push(`Uses ${fmt(used)} mm (${fmt(used / unit)} units).`);
       }
@@ -470,7 +472,10 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
 };
 
 SP.refreshSetupError = event => {
-  if (event?.target?.matches?.("input, select, textarea")) event.target.dataset.setupTouched = "1";
+  if (event?.target?.matches?.("input, select, textarea")) {
+    event.target.dataset.setupTouched = "1";
+    SP.setupChangedField = event.target.id ? `#${event.target.id}` : null;
+  }
   if (SP.setupKind === "storage_drawers") {
     $("#space-error").hidden = true;
     $("#space-form").querySelectorAll('[id$="-setup-error"]').forEach(note => {
