@@ -570,15 +570,8 @@ def stack_body_adders(eff: BoxSpec) -> list[trimesh.Trimesh]:
     """What the body gains: a flip lid's knuckles."""
     hinge = _lid_hinge(eff)
     if hinge is not None:
-        rail = union(body_hinge_parts(hinge, wavy_cavity_polygon(eff),
-                                      wavy_outer_polygon(eff), eff.base_thickness))
-        # A hinged lid never receives a stack, so the rail has no seat to
-        # clear. Carry the roots into the wall, then restore the pin bore.
-        # Exact contact with the cut wall can disconnect a ledge.
-        root = rail.copy()
-        root.apply_translation((0.0, 0.0, -0.05))
-        rail = difference([union([rail, root]), body_hinge_cutters(hinge)[-1]])
-        return [rail]
+        return body_hinge_parts(hinge, wavy_cavity_polygon(eff),
+                                wavy_outer_polygon(eff), eff.base_thickness)
     return []
 
 

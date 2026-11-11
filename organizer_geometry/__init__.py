@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import trimesh
+import manifold3d
+from trimesh.iteration import reduce_cascade
 from shapely.geometry import Polygon
 
 from ._stages import BuildAbandoned, build_scope, checkpoint, in_preview_build, stage, staged
@@ -29,22 +31,50 @@ def _cleaned(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     return cleaned
 
 
+def _boolean(meshes: list[trimesh.Trimesh], operation: str) -> trimesh.Trimesh:
+    """Keep construction coordinates in double precision across booleans.
+
+    Trimesh's Manifold adapter rounds both inputs and results to float32.
+    Repeated cuts of the hinge rail, fused divider contacts and insert trim
+    then acquire almost coincident edges that collapse when written to 3MF.
+    Mesh64 retains the engine's precision without repairing the output mesh.
+    """
+    if not all(mesh.is_volume for mesh in meshes):
+        raise ValueError("Not all meshes are volumes!")
+    solids = [manifold3d.Manifold(manifold3d.Mesh64(
+        vert_properties=np.array(mesh.vertices, dtype=np.float64, order="C"),
+        tri_verts=np.array(mesh.faces, dtype=np.uint64, order="C"),
+    )) for mesh in meshes]
+    if operation == "difference":
+        if len(solids) < 2:
+            raise ValueError("Difference only defined over two meshes.")
+        result = solids[0] - reduce_cascade(lambda a, b: a + b, solids[1:])
+    elif operation == "union":
+        result = reduce_cascade(lambda a, b: a + b, solids)
+    else:
+        result = reduce_cascade(lambda a, b: a ^ b, solids)
+    mesh = result.to_mesh64()
+    return _cleaned(trimesh.Trimesh(
+        vertices=mesh.vert_properties[:, :3], faces=mesh.tri_verts, process=False,
+    ))
+
+
 def union(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
     checkpoint()
     with stage("booleans"):
-        return _cleaned(trimesh.boolean.union(meshes, engine="manifold"))
+        return _boolean(meshes, "union")
 
 
 def difference(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
     checkpoint()
     with stage("booleans"):
-        return _cleaned(trimesh.boolean.difference(meshes, engine="manifold"))
+        return _boolean(meshes, "difference")
 
 
 def intersection(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
     checkpoint()
     with stage("booleans"):
-        return _cleaned(trimesh.boolean.intersection(meshes, engine="manifold"))
+        return _boolean(meshes, "intersection")
 
 
 def _extrude_polygon(polygon: Polygon, height: float) -> trimesh.Trimesh:

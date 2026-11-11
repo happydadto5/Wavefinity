@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import trimesh
-from shapely.affinity import rotate
+from shapely.affinity import rotate, translate
 from shapely.geometry import LineString, Point, Polygon, box
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
@@ -377,15 +377,16 @@ def _relief_prisms(hinge: LidHinge) -> list[trimesh.Trimesh]:
 def body_hinge_parts(
     hinge: LidHinge, cavity: Polygon, outer: Polygon, floor_z: float,
 ) -> list[trimesh.Trimesh]:
-    """Bin knuckles and the stop ledges under the lid knuckles."""
+    """Uncut bin knuckles and stops, to join before the body hinge cuts."""
     section = _bin_knuckle_section(hinge)
+    # Draw the wall-root overlap before extrusion instead of unioning a
+    # translated copy of an already clipped, relieved and bored rail.
+    section = section.union(translate(section, yoff=-0.05))
     solids = [_x_prism(section, x0, x1) for x0, x1 in _bins(hinge)]
     stop = _stop_section(hinge)
     if not stop.is_empty:
+        stop = stop.union(translate(stop, yoff=-0.05))
         solids += [_x_prism(stop, x0, x1) for x0, x1 in _lids(hinge)]
     parts = intersection([union(solids), _keeper(hinge, outer)])
-    # The knuckles' own back fill must not stand in the lid plate's sweep either.
-    relief = _relief_prisms(hinge)
-    if relief:
-        parts = difference([parts, union(relief)])
-    return [difference([parts, _bore(hinge)])]
+    # The caller cuts the swing relief and blind bore once in the joined bin.
+    return [parts]

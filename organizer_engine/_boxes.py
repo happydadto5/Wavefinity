@@ -30,6 +30,7 @@ from ._specs import (
     LOCK_RUN,
     LOCK_NOTCH_CLEARANCE,
     lid_enabled,
+    lid_has_flip,
     vertical_stack_enabled,
     BoxSpec,
     ConnectorSpec,
@@ -112,13 +113,28 @@ def make_box(spec: BoxSpec) -> trimesh.Trimesh:
         # round, so importing it at module scope would close a cycle.
         from organizer_features.stack import stack_body_adders, stack_body_cutters
 
+        adders = stack_body_adders(spec)
+        if lid_has_flip(spec) and adders:
+            # Cut hinge swing room and the bore in the joined body. Cutting
+            # the wall first leaves coincident relief faces on two separate
+            # solids when the rail is added, creating zero-thickness scraps.
+            result = union([result, *adders])
+            adders = []
         cutters = stack_body_cutters(spec)
         # Manifold handles the tapered, segmented cuts more reliably one at a
         # time.  A cutter that tapers to the exterior can leave zero-volume
         # triangulation scraps; the printable body is the sole volume.
         for cutter in cutters:
             result = difference([result, cutter])
-        if cutters:
+        if cutters and lid_has_flip(spec):
+            # Keep the generated hinge solid intact: no fragment filtering or
+            # split/reassembly repair may hide a bad hinge boolean.
+            components = trimesh.graph.connected_components(
+                result.face_adjacency, nodes=np.arange(len(result.faces)), min_len=1,
+            )
+            if len(components) != 1 or not result.is_volume:
+                raise RuntimeError("hinge cuts did not leave one printable solid")
+        elif cutters:
             solids = [
                 one for one in result.split(only_watertight=False)
                 if len(one.faces) > 12
@@ -126,7 +142,6 @@ def make_box(spec: BoxSpec) -> trimesh.Trimesh:
             if len(solids) != 1:
                 raise RuntimeError("stack body cuts did not leave one printable solid")
             result = solids[0]
-        adders = stack_body_adders(spec)
         if adders:
             result = union([result, *adders])
             solids = [
