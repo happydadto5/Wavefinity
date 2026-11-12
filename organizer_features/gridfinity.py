@@ -21,7 +21,7 @@ import trimesh
 from shapely.geometry import Polygon
 
 from organizer_engine import BoxSpec, MIN_HEIGHT_ABOVE_BASE
-from organizer_engine._specs import GRID_PITCHES, vertical_stack_enabled
+from organizer_engine._specs import GRID_PITCHES, lid_enabled, vertical_stack_enabled
 from organizer_geometry import (
     _extrude_polygon,
     _loft_cavity,
@@ -194,6 +194,11 @@ def assembled_stack_height(lower: BoxSpec, upper: BoxSpec, grid: str) -> float:
     return lower.z + upper.z - SEAT_DESCENT[grid]
 
 
+def assembled_lid_stack_height(lower: BoxSpec, upper: BoxSpec, grid: str) -> float:
+    """Closed lower bin plus upper bin, seated in the lid's standard socket."""
+    return assembled_stack_height(lower, upper, grid)
+
+
 def minimum_height_units(grid: str, stackable: bool, floor: float | None = None) -> int:
     """Fewest whole units a bin may be: 1 plain; stackable also fits floor + rim.
 
@@ -217,9 +222,15 @@ def normalize_gridfinity_settings(box: BoxSpec, grid: str) -> BoxSpec:
     stackable = vertical_stack_enabled(box)
     floor = effective_base(box, grid)
     needed = minimum_height_units(grid, stackable, floor)
+    if lid_enabled(box):
+        from organizer_features.stack import validate_grid_lid
+        validate_grid_lid(box, grid)
+        needed = max(2, needed)
 
     def too_short() -> ValueError:
         why = (
+            "Gridfinity lid minimum: a lidded bin needs at least 2 height units"
+            if lid_enabled(box) else
             f"a Stackable bin needs its {floor:g} mm floor plus the "
             f"{rim_depth(grid):g} mm stacking rim" if stackable
             else "a bin is at least one height unit"
@@ -390,13 +401,37 @@ def rim_cutter(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
             f"a Stackable {grid} bin needs Z of at least {floor + depth:g} mm "
             f"({floor:g} mm floor plus the {depth:g} mm stacking rim)"
         )
+    return rim_socket_cutter(spec, grid, spec.z)
+
+
+def rim_mouth_polygon(spec: BoxSpec, grid: str) -> Polygon:
+    """Whole-footprint outline inside the rim's narrowest receiving band."""
+    profile = _profile(grid)
+    nx, ny = cell_counts(spec, grid)
+    radius = _rim_bands(grid)[0][1] / 2.0 - profile["foot_half"]
+    return Polygon(_ring(
+        (0.0, 0.0),
+        profile["foot_half"] + (nx - 1) * profile["pitch"] / 2.0,
+        profile["foot_half"] + (ny - 1) * profile["pitch"] / 2.0,
+        radius,
+    ))
+
+
+def rim_socket_cutter(spec: BoxSpec, grid: str, opening_z: float) -> trimesh.Trimesh:
+    """Identical rim-profile void, opening at a body's rim or a lid ridge top.
+
+    The lowest band is exactly ``rim_depth(grid)`` below the opening. A lid
+    ridge that tall therefore keeps the cutter entirely above its plate.
+    """
+    profile = _profile(grid)
+    bands = _rim_bands(grid)
     half = profile["foot_half"]
     widest = profile["pitch"] - 0.5 - 2.0 * RIM_MIN_WALL
     sections = [
-        (spec.z - band_depth, min(width, widest) / 2.0 - half)
+        (opening_z - band_depth, min(width, widest) / 2.0 - half)
         for band_depth, width, _radius in reversed(bands)
     ]
-    sections.append((spec.z + RIM_OVERSHOOT, sections[-1][1]))
+    sections.append((opening_z + RIM_OVERSHOOT, sections[-1][1]))
     cells = [_lofted_cell(centre, half, sections) for centre in _cell_centres(spec, grid)]
     return cells[0] if len(cells) == 1 else union(cells)
 

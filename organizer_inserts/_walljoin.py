@@ -8,6 +8,7 @@ wall material, and never comes within ``JOIN_SKIN`` of the exterior.
 from __future__ import annotations
 
 import contextvars
+from contextlib import contextmanager
 import math
 
 import numpy as np
@@ -40,6 +41,16 @@ from ._bore._consts import (
 # Gridfinity grids have a flat outer wall, so wall-join tabs must be limited to
 # that flat outline; the wavy envelope reaches outside it.
 BUILD_GRID = contextvars.ContextVar("wall_join_build_grid", default="wavefinity")
+
+
+@contextmanager
+def build_grid(grid: str):
+    """Keep one design grid through body, interior and separate-lid builds."""
+    token = BUILD_GRID.set(grid)
+    try:
+        yield
+    finally:
+        BUILD_GRID.reset(token)
 
 
 def _join_limit(box: BoxSpec):

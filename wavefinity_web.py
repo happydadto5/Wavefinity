@@ -1498,6 +1498,15 @@ def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
         if isinstance(b4b_raw, dict) and b4b_raw.get("enabled"):
             return _b4b_preview_payload(payload, token)
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    from organizer_inserts._walljoin import build_grid
+    with build_grid(layout.design_grid):
+        return _preview_bin_payload(
+            payload, token, box, layout, label, part_name, label_location, scoop,
+        )
+
+
+def _preview_bin_payload(payload, token, box, layout, label, part_name, label_location, scoop):
+    """Preview body, inserts and lid under the existing design-grid context."""
     draft_raw = payload.get("draft")
     draft = _feature_from_json(draft_raw, layout.mode) if draft_raw else None
     if draft is not None:

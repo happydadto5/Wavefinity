@@ -122,6 +122,24 @@ def stack_enabled(box: BoxSpec) -> bool:
     return vertical_stack_enabled(box)
 
 
+def _grid() -> str:
+    # Share the design context used by wall joins; no second grid channel.
+    from organizer_inserts._walljoin import BUILD_GRID
+    return BUILD_GRID.get()
+
+
+def validate_grid_lid(box: BoxSpec, grid: str) -> None:
+    """Stage 1 offers only a loose plate lid, optionally receiving a stack."""
+    if grid == "wavefinity" or not lid_enabled(box):
+        return
+    spec = lid_spec(box)
+    if spec.flip_enabled or spec.handle_enabled or spec.label_enabled:
+        raise ValueError(
+            "Gridfinity Stage 1 lids support a plain plate or stacking socket only; "
+            "hinged, handle and label lids are Wavefinity options"
+        )
+
+
 def stack_lid_rise(box: BoxSpec) -> float:
     """How far the lid rises above the body rim.
 
@@ -133,6 +151,9 @@ def stack_lid_rise(box: BoxSpec) -> float:
     if not lid_enabled(box):
         return 0.0
     plate = float(lid_spec(box).thickness)
+    if _grid() != "wavefinity":
+        from organizer_features.gridfinity import rim_depth
+        return plate + (rim_depth(_grid()) if lid_receives_stack(box) else 0.0)
     # A rimmed resting lid is its plate (the chosen thickness) plus the rim
     # standing on it. The rim's height is counted here, once, and every stack
     # height and fit check is built from this rise.
@@ -145,6 +166,9 @@ def stack_step_depth(box: BoxSpec) -> float:
     It is the skirt, which drops into the mouth of the bin below or into the
     stack seat of that bin's lid (the seat is cut as deep as the skirt).
     """
+    if _grid() != "wavefinity":
+        from organizer_features.gridfinity import SEAT_DESCENT
+        return SEAT_DESCENT[_grid()]
     return STACK_SKIRT_DEPTH if direct_stack_enabled(box) else 0.0
 
 
@@ -185,6 +209,10 @@ def normalize_stack_settings(box: BoxSpec) -> BoxSpec:
     """
     if not vertical_stack_enabled(box) and not lid_enabled(box):
         return box
+    if _grid() != "wavefinity":
+        from organizer_features.gridfinity import effective_base
+        validate_grid_lid(box, _grid())
+        return replace(box, base_thickness=effective_base(box, _grid()), standard_base=False)
     changes: dict = {}
     if vertical_stack_enabled(box):
         changes.update(
@@ -654,6 +682,8 @@ def lid_label_backing(box: BoxSpec) -> float:
     A label on a lid that does not receive a stack sits on the lid top; on a
     rimmed lid it sits on the plate inside the rim.
     """
+    if _grid() != "wavefinity":
+        return float(lid_spec(box).thickness)
     return stack_lid_rise(box) - (STACK_SEAT_DEPTH if lid_receives_stack(box) else 0.0)
 
 
@@ -714,6 +744,40 @@ def _lid_stack_rim(eff: BoxSpec) -> trimesh.Trimesh:
     return rim
 
 
+def _make_grid_lid(eff: BoxSpec, grid: str) -> trimesh.Trimesh:
+    """Flush plate, mouth-clearing skirt and optional perimeter socket ridge."""
+    from organizer_features.gridfinity import (
+        _single_volume, flat_cavity_polygon, flat_outer_polygon,
+        rim_depth, rim_mouth_polygon, rim_socket_cutter,
+    )
+
+    outer = flat_outer_polygon(eff, grid)
+    mouth = rim_mouth_polygon(eff, grid)
+    # Clear both a plain wall and the narrowest band of an optional open rim.
+    # Stack fit is fixed for this interface, independent of Wavefinity lid fit.
+    locating = mouth.intersection(flat_cavity_polygon(eff, grid)).buffer(-STACK_FIT)
+    if locating.is_empty or not isinstance(locating, Polygon):
+        raise ValueError("this Gridfinity bin is too small for its lid skirt")
+    inner = locating.buffer(-STACK_LID_SKIRT_WIDTH)
+    band = locating if inner.is_empty else locating.difference(inner)
+    skirt = _extrude_polygon(band, STACK_SKIRT_DEPTH + 0.1)
+    skirt.apply_translation((0.0, 0.0, eff.z - STACK_SKIRT_DEPTH))
+    plate = _extrude_polygon(outer, float(lid_spec(eff).thickness))
+    plate.apply_translation((0.0, 0.0, eff.z))
+    lid = union([plate, skirt])
+    if lid_receives_stack(eff):
+        top = eff.z + stack_lid_rise(eff)
+        # A perimeter ridge, with no crossbars between cells. Its socket cut
+        # stops on the plate top; the overlap below fuses it into the plate.
+        ridge = _extrude_polygon(outer.difference(mouth), rim_depth(grid) + 0.1)
+        ridge.apply_translation((0.0, 0.0, top - rim_depth(grid) - 0.1))
+        ridge = difference([ridge, rim_socket_cutter(eff, grid, top)])
+        lid = union([lid, ridge])
+    _single_volume(lid, "the Gridfinity lid")
+    lid.remove_unreferenced_vertices()
+    return lid
+
+
 def make_lid_parts(
     box: BoxSpec,
     label_regions: list[tuple[str, tuple[float, float, float, float]]] | None = None,
@@ -722,6 +786,9 @@ def make_lid_parts(
     eff = stack_effective_box(box)
     if not lid_enabled(eff):
         raise ValueError("this bin has no lid")
+    if _grid() != "wavefinity":
+        validate_grid_lid(box, _grid())
+        return _make_grid_lid(eff, _grid()), []
 
     rim = eff.z
     rise = stack_lid_rise(eff)
@@ -885,6 +952,18 @@ def validate_stack_design(box: BoxSpec) -> None:
             "a Storage Box already stacks on its own - turn Storage Box stacking on "
             "instead"
         )
+    if _grid() != "wavefinity":
+        from organizer_features.gridfinity import normalize_gridfinity_settings
+        normalized = normalize_gridfinity_settings(box, _grid())
+        if lid_enabled(normalized):
+            minimum = (normalized.base_thickness + MIN_HEIGHT_ABOVE_BASE
+                       + stack_lid_rise(normalized))
+            if normalized.z < minimum - _EPS:
+                raise ValueError(
+                    f"Gridfinity lid body clearance rule: total Z needs at least "
+                    f"{minimum:g} mm for the floor, body and lid"
+                )
+        return
     # Checked against the request, before the effective box is built: below
     # this the shortened body fails BoxSpec's own lock-bump minimum, and the
     # user would get told about lock bumps on a bin they never made short.

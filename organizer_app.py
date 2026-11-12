@@ -479,6 +479,28 @@ def generate_organizer_files(
     pegboard_thickness_mm: float = 3.2,
     serial: str = "",
 ) -> dict[str, object]:
+    """Generate every part with the same design grid used by wall joins."""
+    from organizer_inserts._walljoin import build_grid
+    with build_grid(layout.design_grid):
+        return _generate_organizer_files(
+            box, layout, output_dir, label, part_name, label_location, scoop,
+            auto_timestamp, keep_log, pegboard_thickness_mm, serial,
+        )
+
+
+def _generate_organizer_files(
+    box: BoxSpec,
+    layout: Layout,
+    output_dir: Path,
+    label: str = "",
+    part_name: str = "",
+    label_location: str = "bottom",
+    scoop: bool = False,
+    auto_timestamp: bool = False,
+    keep_log: bool = False,
+    pegboard_thickness_mm: float = 3.2,
+    serial: str = "",
+) -> dict[str, object]:
     """Export an editor design as fused, fitted-removable, or cartridge parts.
 
     ``label`` is the rim-ledge label only. Floor lettering rides in ``layout``

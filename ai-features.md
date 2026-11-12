@@ -65,8 +65,14 @@ This file is supplemental explanation. Do not substitute values from this file f
 Design data carries `grid`: `wavefinity` (7 mm), `gridfinity_half` (21 mm), or
 `gridfinity` (42 mm). Keep it equal to the supplied Space/editor context. A
 missing AI candidate grid inherits that context; an explicit conflict is refused.
-This stage stores and enforces grid identity only; it adds no Gridfinity geometry
-or size rules. A Space's grid is fixed when created. Bins cannot enter a Space
+Gridfinity Stage 1 supports a loose plain plate lid or a plate lid with a stacking
+socket on both pitches. Closed Z stays nominal in whole 7 mm units; the body and
+interior shorten by the lid rise. A grid lid needs at least two height units and
+enough body clearance for its floor and lid. Use the same footprint and pitch
+when stacking on a grid lid; lid-on-lid uses the standard rim seat descent.
+Hinged, label and handle lids are Wavefinity options, unavailable on grid bodies.
+Physical grid-lid fit is not yet printed (S1-13 gate).
+A Space's grid is fixed when created. Bins cannot enter a Space
 with a different grid. An external older design without a grid means Wavefinity;
 a saved bin inside a Space inherits that verified source Space's grid.
 

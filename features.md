@@ -35,8 +35,16 @@ Production creation/export and AI Design options are unchanged.
 Space and design records preserve their grid identity: Wavefinity (7 mm),
 Gridfinity half (21 mm), or Gridfinity (42 mm). A Space keeps the grid chosen at
 creation; bin entry across different grids is refused without changing either
-record. Older external designs use Wavefinity. This is data support for Stage 1;
-new geometry and grid controls are not enabled yet.
+record. Older external designs use Wavefinity. Stage 1's Gridfinity body paths
+also support a loose plate lid, optionally with a receiving socket on a perimeter
+ridge, for both 42 mm and 21 mm pitches. The closed bin keeps its nominal height
+in whole 7 mm units; its body and interior shorten to make room for the lid.
+The same skirt clears a plain or rimmed body. Stacking uses the same footprint
+and grid pitch and the standard rim seat descent, including lid-on-lid stacks.
+Grid lids require at least two height units and enough remaining body clearance
+for the floor and lid. Hinged, label and handle lids remain Wavefinity options.
+Grid controls are not enabled yet. Physical grid-lid fit is **not yet printed**;
+the S1-13 print gate remains outstanding.
 
 - **Current** — accepted on `main`.
 - **In review** — implemented on a fix branch but not yet accepted into `main`.

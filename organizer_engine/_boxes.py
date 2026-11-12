@@ -90,12 +90,13 @@ def make_box(spec: BoxSpec, grid: str = "wavefinity") -> trimesh.Trimesh:
             _single_volume, gridfinity_body, rim_cutter,
         )
 
-        # Flat walls on Gridfinity feet. The wave-mating lock bumps and the
-        # stack / lid hardware are wavy-body parts with no flat-wall meaning.
+        # Callers supply stack_effective_box(): a lid's rise is already taken
+        # out of this body's height. Lids remain separate make_lid_parts parts.
+        # Wave-mating lock bumps and stepped feet do not belong to this shell.
         body = gridfinity_body(spec, grid)
         grabbers = make_lift_grabbers(spec)
         result = union([body, *grabbers]) if grabbers else body
-        if vertical_stack_enabled(spec):
+        if vertical_stack_enabled(spec) and not lid_enabled(spec):
             # Stackable: the standard receiving rim. Not Stackable keeps the plain top.
             result = difference([result, rim_cutter(spec, grid)])
             _single_volume(result, "the Gridfinity body with its stacking rim")

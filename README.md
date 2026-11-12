@@ -2402,6 +2402,20 @@ The baseline, measurements, dependency evidence, limitations and proposed next
 Story are in [browser-tests/README.md](browser-tests/README.md). No production
 design option or AI Design contract changes.
 
+### Gridfinity plate lids (Story 2971)
+
+The Gridfinity 42 mm and independent 21 mm paths build a separate loose lid:
+a flush plate and shallow locating skirt, optionally carrying the pitch's
+receiving socket in a perimeter ridge. The body shortens by the plate plus
+ridge rise, so the closed bin retains its nominal whole-7-mm height. Interior
+parts retain the regular lid's skirt clearance and 0.5 mm margin. A lid and an
+open stacking rim are alternatives on one bin. Only the same footprint and
+pitch stack on a lid; lid-on-lid uses the standard rim seat descent. Hinged,
+label and handle variants remain Wavefinity-only. The two-unit lid minimum
+does not replace the existing body clearance check: the remaining body must
+still clear its effective floor by 5 mm. Physical compatibility remains
+**not yet printed**, pending S1-13.
+
 ## Local temp space
 
 This project keeps a folder named `local-temp/` at the repository root. It is local temp space: files that belong with this project on this machine but are never backed up to the cloud repo - captures, trial output, scratch files. The project's .gitignore ignores `local-temp/`, so nothing in it is ever committed. Its contents are disposable: never keep the only copy of anything that matters in it. The convention is defined once for every project in Help-Code (REVIEWER-CHAT.md, 'Local temp space').
