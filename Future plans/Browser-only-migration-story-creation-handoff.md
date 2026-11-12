@@ -58,7 +58,7 @@ Current-source reconciliation is necessary because Gridfinity work was underway 
 
 **Porkbun lock:** `wavefinity.org` STAYS registered and paid at Porkbun, and Porkbun remains authoritative DNS/nameservers. No nameserver migration, domain transfer, Cloudflare Pages apex hosting, new domain purchase or new registration payment. Static hosting can be changed by modifying authorized DNS **records within Porkbun** and attaching the domains to the new Render service. Existing exact DNS values belong in private Help-Code, NOT public Bxx Stories. Do not perform these actions now. The future hosting Story MUST include a step **tell Andrew exactly what action/account configuration is needed and obtain his explicit authorization** before creating a paid resource, detaching domains, changing any DNS records, or retiring the existing service. Do not invent a future Render hostname; use the actual dashboard value at cutover.
 
-**User-tested rule — ABSOLUTE:** No coder may write, update, repair or run automated tests, run existing suites, build test fixtures/harnesses, manually operate the app for testing, perform browser/slicer QA, or write manual test plans/checklists/instructions for Andrew. Coders **must inspect and reason through their logic, callers, constraints, data contracts, imports, error handling and final diff**. Keep legitimate *runtime* validation (input, geometry, file integrity, security); it is application code, not a test. Do not reintroduce the nine removed web tests. A reviewer must not expand a Story into a testing assignment.
+**User-tested rule — ABSOLUTE:** No coder may write, update, repair or run automated tests, run existing suites, build test fixtures/harnesses, manually operate the app for testing, perform browser/slicer QA, or write manual test plans/checklists/instructions for Andrew. **B16 must REMOVE all inherited test code and infrastructure rather than merely disable it**, while keeping historical evidence in prose. Coders **must inspect and reason through their logic, callers, constraints, data contracts, imports, error handling and final diff**. Keep legitimate *runtime* validation (input, geometry, file integrity, security); it is application code, not a test. Do not reintroduce the nine removed web tests. A reviewer must not expand a Story into a testing assignment.
 
 ## Story creation procedure
 
@@ -110,7 +110,7 @@ Use the actual B00–B16 dependencies in the detailed contracts, reconciled with
 - B13 decided BYOK AI Help (with manual fallback) and browser capability/recovery notices
 - B14 static build **and explicit Andrew hosting approval handoff**
 - B15 retire Python HTTP execution while preserving historical rollback
-- B16 remove prototype/test-only scaffolding, not the production Manifold64 engine
+- B16 **remove ALL testing infrastructure** including `tests/`, `browser-tests/`, `run_tests.py`, any other test-only harness/CI commands and the prototype, but retain production MeshGL64 and historic prose
 
 Follow the ONE definitive dependency table in detailed contracts; **B09 needs B04, B11 needs B08+B10, B13 needs B08+B09+B12**. B10 requires B06+B09+B08. B13 cannot run before B08 or B12 because of shared JS files. B14 is solely responsible for final Python `route-dispatch.py` integration AND wiring browser JavaScript route maps into `local-api.js`. Every route has ONE owner. No test Story and no test-related scope. The full application may remain nonfunctional until all code is implemented.
 
