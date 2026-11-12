@@ -68,6 +68,8 @@ def b4b_screw_note_lines(box: BoxSpec) -> list[str]:
             current = candidate
     if current:
         lines.append(current)
+    if lines:
+        lines.append("CHECK SCREWS REGULARLY")
     return lines
 
 

@@ -402,10 +402,11 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
         fam = handle.profile if what == "handle pivot" else profile
         beyond = screw - span
         engage = min(beyond, lug)
-        if engage < fam.engage_min - _EPS:
+        minimum = fam.engage_min if what == "handle pivot" else fam.fitting_engage_min
+        if engage < minimum - _EPS:
             raise ValueError(
                 f"the {what} screw threads only {engage:.2f} mm into its "
-                f"{lug:.2f} mm lug (need {fam.engage_min:.1f} mm)"
+                f"{lug:.2f} mm lug (need {minimum:.1f} mm)"
             )
         tail = beyond - lug
         if tail > B4B_SCREW_MAX_TAIL + _EPS:

@@ -161,7 +161,8 @@ class B4BHardwarePlan:
 
 
 def _screw_for_stack(
-    profile: HardwareProfile, clear_span_mm: float, lug_thickness_mm: float, what: str
+    profile: HardwareProfile, clear_span_mm: float, lug_thickness_mm: float, what: str,
+    *, min_engagement: float | None = None,
 ) -> int:
     """Authoritative kit-screw choice for one pivot.
 
@@ -172,7 +173,7 @@ def _screw_for_stack(
     more than ``B4B_SCREW_MAX_TAIL`` past the far face.
 
     The exact stacks in the profiles are designed so the answer is a zero-tail
-    screw - M2x8, M3x10, M3x12 for the handle.  This still *derives* that
+    screw - M2x10, M3x12 for fittings, with separate handle dimensions.  This still *derives* that
     rather than hard-coding it, so a later change to an ear thickness cannot
     silently leave the BOM wrong.
 
@@ -180,15 +181,16 @@ def _screw_for_stack(
     family minimum is a geometry bug and is rejected here rather than papered
     over with a longer screw.
     """
-    if lug_thickness_mm + _EPS < profile.engage_min:
+    minimum = profile.engage_min if min_engagement is None else min_engagement
+    if lug_thickness_mm + _EPS < minimum:
         raise ValueError(
             f"the {what} terminal lug is only {lug_thickness_mm:.2f} mm thick - "
-            f"less than the {profile.engage_min:.1f} mm minimum {profile.name} "
+            f"less than the {minimum:.1f} mm minimum {profile.name} "
             f"thread engagement; widen the hardware"
         )
     for length in profile.lengths:
         beyond = length - clear_span_mm
-        if beyond + _EPS < profile.engage_min:
+        if beyond + _EPS < minimum:
             continue
         if beyond - lug_thickness_mm <= B4B_SCREW_MAX_TAIL + _EPS:
             return length
@@ -197,7 +199,7 @@ def _screw_for_stack(
     raise ValueError(
         f"no kit screw ({allowed}) fits the {what} pivot: a "
         f"{clear_span_mm:.2f} mm clearance stack into a {lug_thickness_mm:.2f} mm "
-        f"lug needs at least {profile.engage_min:.1f} mm of thread with no more "
+        f"lug needs at least {minimum:.1f} mm of thread with no more "
         f"than {B4B_SCREW_MAX_TAIL:.1f} mm of tail"
     )
 
@@ -535,7 +537,8 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
             root_bottom_z=hinge_root_bottom_z,
         )
         hinge_screw = _screw_for_stack(
-            profile, profile.clear_span, profile.far_lug, "hinge"
+            profile, profile.clear_span, profile.far_lug, "hinge",
+            min_engagement=profile.fitting_engage_min
         )
 
     # ---- front latches: use the explicit, validated count ------------------ #
@@ -591,10 +594,12 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
                 f"{B4B_LATCHED_MIN_HEIGHT:g} mm of bin height"
             )
         latch_screw = _screw_for_stack(
-            profile, profile.clear_span, profile.far_lug, "latch pivot"
+            profile, profile.clear_span, profile.far_lug, "latch pivot",
+            min_engagement=profile.fitting_engage_min
         )
         catch_screw = _screw_for_stack(
-            profile, profile.clear_span, profile.far_lug, "catch"
+            profile, profile.clear_span, profile.far_lug, "catch",
+            min_engagement=profile.fitting_engage_min
         )
 
     return B4BHardwarePlan(

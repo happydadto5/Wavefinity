@@ -108,7 +108,8 @@ class HardwareProfile:
     nominal: float
     clear_bore: float          # rotating / through member
     pilot: float               # printed thread-forming terminal lug
-    engage_min: float          # minimum real thread bite
+    engage_min: float          # minimum real thread bite for handle pivots
+    fitting_engage_min: float  # deeper bite for hinge and latch screws
     head_diameter: float       # maximum physical socket-head outside diameter
     head_bearing_min: float    # minimum solid material around that head
     lengths: tuple[int, ...]   # permitted standard kit lengths, mm
@@ -190,6 +191,7 @@ B4B_HW_M2 = HardwareProfile(
     clear_bore=2.3,
     pilot=1.7,
     engage_min=2.4,
+    fitting_engage_min=4.6,
     head_diameter=4.0,
     head_bearing_min=0.2,
     lengths=(6, 8, 10, 12, 16),
@@ -198,7 +200,7 @@ B4B_HW_M2 = HardwareProfile(
     bore_shell=1.2,
     near_ear=2.2,
     mid_member=2.6,
-    far_lug=2.6,
+    far_lug=4.6,
     latch_draw=9.0,
     pivot_standoff=2.85,
     catch_standoff=2.6,
@@ -223,6 +225,7 @@ B4B_HW_M3 = HardwareProfile(
     clear_bore=3.4,
     pilot=2.6,
     engage_min=3.0,
+    fitting_engage_min=5.4,
     head_diameter=5.7,
     head_bearing_min=0.2,
     lengths=(6, 8, 10, 12, 16, 20),
@@ -231,7 +234,7 @@ B4B_HW_M3 = HardwareProfile(
     bore_shell=1.3,
     near_ear=2.8,
     mid_member=3.2,
-    far_lug=3.4,
+    far_lug=5.4,
     latch_draw=10.5,
     pivot_standoff=3.45,
     catch_standoff=3.1,
