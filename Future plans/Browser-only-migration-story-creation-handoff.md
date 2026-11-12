@@ -112,7 +112,7 @@ Use the actual B00–B16 dependencies in the detailed contracts, reconciled with
 - B15 retire Python HTTP execution while preserving historical rollback
 - B16 **remove ALL testing infrastructure** including `tests/`, `browser-tests/`, `run_tests.py`, any other test-only harness/CI commands and the prototype, but retain production MeshGL64 and historic prose
 
-Follow the ONE definitive dependency table in detailed contracts; **B09 needs B04, B11 needs B08+B10, B13 needs B08+B09+B12**. B10 requires B06+B09+B08. B13 cannot run before B08 or B12 because of shared JS files. B14 is solely responsible for final Python `route-dispatch.py` integration AND wiring browser JavaScript route maps into `local-api.js`. Every route has ONE owner. No test Story and no test-related scope. The full application may remain nonfunctional until all code is implemented.
+Follow the ONE minimal direct dependency table in detailed contracts: B09 after B04 (parallel to B05–B08); B10 after B08+B09; B11 after B10; B12 after B11; B13 after B12 (and therefore after both B08/B09, preventing shared-file collisions); B14 after B13, transitively after all earlier work. B14 alone integrates Python and JavaScript registries. Do NOT add redundant transitive `start_after` edges. Every route has ONE owner. No test Story and no test-related scope. The full application may remain nonfunctional until all code is implemented.
 
 ## What to tell Andrew after submission
 
