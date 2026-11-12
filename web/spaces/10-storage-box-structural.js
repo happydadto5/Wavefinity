@@ -253,6 +253,9 @@ SP.saveStructural = () => {
   if (SP.structuralKind() === "base_trim") return SP.saveBaseTrim();
   if (SP.structuralKind() === "storage_box") return SP.printStorageBox("export");
 };
+SP.storageBoxMaterialNote = space => space?.storage_box?.secure_lid === false
+  ? ""
+  : " The latch holds by spring; ordinary PLA softens in heat at about 55–60 °C, such as in a closed car or a bag in the sun, and can lose that spring first. For a box that will be carried or left in heat, a heat-tolerant material is safer."
 SP.printStorageBox = async (mode = "print") => {
   if (SP.structuralBusy || SP.structuralKind() !== "storage_box") return;
   const report = SP.beginStructuralReport(mode === "print" ? "Printing…" : "Exporting…");
@@ -282,7 +285,7 @@ SP.printStorageBox = async (mode = "print") => {
           await WFFileSystem.writeBlob(null, file.name, await response.blob());
         }
       }
-      report(`Saved Storage Box files to ${state.runtime.hosted ? "your browser’s download folder" : result.output || state.output}: ${outputFileNames(result.files)}`);
+      report(`Saved Storage Box files to ${state.runtime.hosted ? "your browser’s download folder" : result.output || state.output}: ${outputFileNames(result.files)}${SP.storageBoxMaterialNote(state.activeSpace)}`);
       return;
     }
     if (!state.slicer?.available) {
@@ -307,7 +310,7 @@ SP.printStorageBox = async (mode = "print") => {
     DL.requestReport();
     if (result.partial) report(result.error || "Storage Box print stopped before Bambu Studio opened.", true);
     else {
-      report(`Sent ${outputFileNames(result.files)} to ${state.slicer?.name || "the slicer"}`);
+      report(`Sent ${outputFileNames(result.files)} to ${state.slicer?.name || "the slicer"}${SP.storageBoxMaterialNote(state.activeSpace)}`);
       if (typeof WS !== "undefined") WS.markContainerPrinted();
     }
   } catch (error) {
