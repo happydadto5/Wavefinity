@@ -1,6 +1,8 @@
 # Gridfinity — future plan
 
-**Status: plan only. No stories are filed from this document.**
+> **Historical rulings (2026-11-04), retained for reference.** The agreed 2026-11-12 implementation plan, submitted Stage 1 Poller stories **2967–2978**, and the Stage 2 proposal/questions for Velexa now live in **[Gridfinity implementation master plan](Gridfinity-implementation-master-plan.md)**. Newer Andrew decisions in that master plan supersede conflicting items below (including 21 mm support, unit entry, floor sizing, and magnets/screws sequencing). Stage 2 is **not submitted**.
+
+**Status: historical planning record; do not use this document to submit new stories.**
 Debate 2544 assessed adding Gridfinity to Wavefinity and concluded on 2026-11-04.
 Andrew gave his rulings the same day, then ordered the debate cancelled and the
 plan parked here. When this work resumes, stories are designed from this document.
