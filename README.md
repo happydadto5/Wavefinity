@@ -2376,16 +2376,19 @@ unchanged. Leaving a bin whose preview is still building for the same
 geometry waits for that build instead of starting it again. Opening a Space
 asks `/api/space/warm` (the server skips anything already warm).
 
-**Division labels that cannot fit (2026-11-12).** A grid division label wider
-than its compartment at the smallest legible size (cap 2.5 mm) used to be cut
-into the bin wall, leaving a sealed hole and a bin that failed the one-solid
-check with "A part of the bin could not be made". It is now refused in plain
-words ("The division label \"X\" is too long for its compartment. Shorten it to
-about N characters, or make the compartment wider."), as a feature error in the
-preview and as the Export error. Labels that only crowd the margin but stay
-inside the compartment are unchanged. Separately, `make_fused_box` drops
-zero-volume boolean slivers (under 2 mm) that a divider/wavy-wall join could
-leave as extra "pieces".
+**Division labels that cannot fit (2026-11-12).** Lettering never goes below
+2.5 mm, so a division label wider than its compartment used to be cut into the
+bin wall, leaving a sealed hole and a bin that failed the one-solid check ("A
+part of the bin could not be made"). It is now cut short instead
+(`_fit_label_text` in `organizer_inserts/_divider/_shelf.py`): the longest start
+of the text that sits inside the compartment's margins is built, and the bin
+exports. A label that fits the compartment, even crowding the margin, is left
+whole. The editor shows a red "Text doesn't fit" over each cut label (its tooltip
+says what will be made); it steps aside while the field has focus. The server
+measures this through `POST /api/design/division-label-fit` (read-only: the
+divider's feature in, `labels: [{index, kept}]` out). Lid division labels are
+not covered. Separately, `make_fused_box` drops zero-volume boolean slivers
+(under 2 mm) that a divider/wavy-wall join could leave as extra "pieces".
 
 ## Local temp space
 

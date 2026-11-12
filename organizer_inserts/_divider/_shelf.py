@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
+
 import math
 
 import trimesh
@@ -49,22 +52,58 @@ from ._consts import (
 from ._bottoms import _bottom_slot_bounds
 
 
-def _refuse_label_wider_than_compartment(
-    text: str, probe_width: float, cap: float, compartment_mm: float,
-) -> None:
-    """A division label that cannot fit its compartment even at the smallest
-    legible size (cap 2.5 mm) would be cut into the bin wall, leaving a sealed
-    hole in the floor and a bin that fails the one-solid check. Say so in
-    plain words instead. A label that only crowds the margin, but still sits
-    inside the compartment, is left as it always was."""
-    width = probe_width / 10.0 * cap
-    if width <= compartment_mm:
-        return
-    fits = max(1, int(len(text) * compartment_mm / width))
-    raise ValueError(
-        f'The division label "{text}" is too long for its compartment. '
-        f"Shorten it to about {fits} characters, or make the compartment wider."
-    )
+_MIN_LABEL_CAP_MM = 2.5   # smallest legible lettering (the cap floor used below)
+_FIT_SINK = threading.local()
+
+
+@contextmanager
+def label_fit_report():
+    """Collect which division labels had to be cut to fit, as
+    ``(divider, label_index, kept_text)``, while the block runs. Used by the
+    editor's "Text doesn't fit" check; build paths never need it."""
+    found: list[tuple[Feature, int, str]] = []
+    previous = getattr(_FIT_SINK, "found", None)
+    _FIT_SINK.found = found
+    try:
+        yield found
+    finally:
+        _FIT_SINK.found = previous
+
+
+def _fit_label_text(
+    text: str, full_mm: float, avail_mm: float,
+) -> tuple[str, bool]:
+    """``(text_to_build, was_cut)`` for a division label whose lettering runs
+    ``full_mm`` of room (the whole compartment) with ``avail_mm`` once margins
+    are taken off.
+
+    Lettering never goes below the smallest legible size, so a label wider
+    than its compartment at that size used to be cut into the bin wall, leaving
+    a sealed hole and a bin that failed the one-solid check. It is cut short
+    instead: the longest start of the text that sits inside the margins. A label
+    that fits the compartment (even if it crowds the margin) is left whole,
+    exactly as before. Empty text back means not even one letter fits."""
+    def width(value: str) -> float:
+        outline = text_outline(value, _MIN_LABEL_CAP_MM)
+        bx0, _by0, bx1, _by1 = outline.bounds
+        return bx1 - bx0
+
+    try:
+        if width(text) <= full_mm:
+            return text, False
+        for end in range(len(text) - 1, 0, -1):
+            kept = text[:end].rstrip()
+            if kept and width(kept) <= avail_mm:
+                return kept, True
+    except Exception:
+        return text, False
+    return "", True
+
+
+def _note_label_cut(spec_feature: Feature, index: int, kept: str) -> None:
+    found = getattr(_FIT_SINK, "found", None)
+    if found is not None:
+        found.append((spec_feature, index, kept))
 
 
 def _divider_grid_texts(
@@ -122,11 +161,22 @@ def _divider_grid_texts(
         cap = max(2.5, min(avail_d, avail_w / (pw / 10.0)))
         if front_to_back:
             cap = max(2.5, min(avail_w, avail_d / (pw / 10.0)))
-        _refuse_label_wider_than_compartment(
-            text, pw, cap, cell.zone.y1 - cell.zone.y0 if front_to_back
-            else cell.zone.x1 - cell.zone.x0)
+        full_room = (cell.zone.y1 - cell.zone.y0) if front_to_back else (cell.zone.x1 - cell.zone.x0)
+        room = avail_d if front_to_back else avail_w
+        shown, was_cut = _fit_label_text(text, full_room, room)
+        if was_cut:
+            _note_label_cut(spec_feature, idx, shown)
+            if not shown:
+                continue
+            probe = text_outline(shown, 10.0)
+            bx0, by0, bx1, by1 = probe.bounds
+            pw, ph = bx1 - bx0, by1 - by0
+            cap = max(2.5, min(avail_d, avail_w / (pw / 10.0)))
+            if front_to_back:
+                cap = max(2.5, min(avail_w, avail_d / (pw / 10.0)))
+        text_to_build = shown
         try:
-            outline = text_outline(text, cap)
+            outline = text_outline(text_to_build, cap)
         except Exception:
             continue
         if front_to_back:
@@ -611,9 +661,26 @@ def divider_division_texts(
             cap_by_across = avail_run
             cap_by_run = avail_across / (pw / 10.0)
         cap = max(2.5, min(cap_by_across, cap_by_run))
+        along_run = rotate_label == (along == "y")
+        shown, was_cut = _fit_label_text(
+            text, slot_run if along_run else slot_across,
+            avail_run if along_run else avail_across)
+        if was_cut:
+            _note_label_cut(spec_feature, idx, shown)
+            if not shown:
+                continue
+            probe = text_outline(shown, 10.0)
+            bx0, by0, bx1, by1 = probe.bounds
+            pw = bx1 - bx0
+            cap_by_across = avail_across
+            cap_by_run = avail_run / (pw / 10.0)
+            if rotate_label != (along == "y"):
+                cap_by_across = avail_run
+                cap_by_run = avail_across / (pw / 10.0)
+            cap = max(2.5, min(cap_by_across, cap_by_run))
 
         try:
-            outline = text_outline(text, cap)
+            outline = text_outline(shown, cap)
         except Exception:
             continue
 

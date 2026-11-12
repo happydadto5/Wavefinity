@@ -726,6 +726,7 @@ function renderDraftFields() {
   const activeDraft = document.activeElement?.dataset?.draft;
   $("#draft-fields").innerHTML = html;
   applyDivisionGridLayout($("#draft-fields"));
+  refreshDivisionLabelFit();
   if (one.kind === "divider" && dividerLockedByLidLabels()) {
     $$('input, select, button', $("#draft-fields")).forEach(control => { control.disabled = true; });
     $("#draft-status").textContent = dividerLockMessage();
@@ -757,6 +758,7 @@ function renderDraftFields() {
     seedPartNameFromLabel(input.value);
     renderLayout2D();
     refreshDraftSoon();
+    refreshDivisionLabelFit();
   }));
   const scoopDepth = $('[data-divider-scoop-depth]', $("#draft-fields"));
   if (scoopDepth) scoopDepth.addEventListener("change", () => {
@@ -965,4 +967,57 @@ function syncDraftFieldProblems() {
     input?.toggleAttribute("aria-invalid", false);
   }
   return problems;
+}
+
+// A division label wider than its compartment is built cut short (so the bin
+// still exports). The label field says so in red, laid over the text. The
+// server measures the lettering; this asks it a moment after typing stops.
+let divisionLabelFitTimer = null;
+let divisionLabelFitSeq = 0;
+const DIVISION_LABEL_NO_FIT = "Text doesn't fit";
+
+function markDivisionLabelFit(labels) {
+  const host = $("#draft-fields");
+  if (!host) return;
+  $$(".division-fit-warning", host).forEach(node => node.replaceWith());
+  $$("input[data-division-index].text-no-fit", host).forEach(input => {
+    input.classList.toggle("text-no-fit", false);
+    input.removeAttribute("aria-invalid");
+    input.removeAttribute("title");
+  });
+  for (const { index, kept } of labels || []) {
+    const input = $(`input[data-division-index="${index}"]`, host);
+    if (!input) continue;
+    const note = document.createElement("span");
+    note.className = "division-fit-warning";
+    note.setAttribute("role", "alert");
+    note.textContent = DIVISION_LABEL_NO_FIT;
+    note.style.gridColumn = input.style.gridColumn;
+    note.style.gridRow = input.style.gridRow;
+    input.classList.add("text-no-fit");
+    input.setAttribute("aria-invalid", "true");
+    input.title = kept
+      ? `Text doesn't fit. Only "${kept}" will be made.`
+      : "Text doesn't fit. Nothing will be made for this label.";
+    input.after(note);
+  }
+}
+
+function refreshDivisionLabelFit() {
+  clearTimeout(divisionLabelFitTimer);
+  const draft = state.draft;
+  if (!draft || draft.kind !== "divider" || !draft.options?.label_divisions) {
+    divisionLabelFitSeq += 1;
+    markDivisionLabelFit([]);
+    return;
+  }
+  divisionLabelFitTimer = setTimeout(async () => {
+    const seq = ++divisionLabelFitSeq;
+    try {
+      const result = await api("/api/design/division-label-fit", { design: state.design, feature: draft });
+      if (seq === divisionLabelFitSeq && state.draft === draft) markDivisionLabelFit(result.labels);
+    } catch (_error) {
+      /* the preview reports a divider that cannot build */
+    }
+  }, 250);
 }

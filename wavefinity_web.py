@@ -76,6 +76,7 @@ from organizer_engine import (
     wavy_cavity_polygon,
 )
 from organizer_inserts import (
+    divider_division_texts,
     BASE_PLATE,
     CARTRIDGE_PITCH,
     EDITOR_SNAP,
@@ -1909,6 +1910,27 @@ def _generate_payload(
     return reply
 
 
+def division_label_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Which of one divider's labels are too long for their compartment.
+
+    Read-only and light (no geometry is built beyond the lettering outlines).
+    The editor shows "Text doesn't fit" over each listed label; the file still
+    builds, with that label cut short to what fits (``kept`` is what is built).
+    """
+    box, layout, *_ = design_from_dict(payload["design"], validate_layout=False)
+    raw = payload.get("feature")
+    if not isinstance(raw, dict) or raw.get("kind") != "divider":
+        return {"labels": []}
+    from organizer_inserts._divider._shelf import label_fit_report
+    feature = _feature_from_json(raw, layout.mode)
+    with label_fit_report() as found:
+        try:
+            divider_division_texts(_interior_work_box(box), feature, box.base_thickness)
+        except Exception:
+            pass   # a divider that cannot build says so through the preview
+    return {"labels": [{"index": index, "kept": kept} for _one, index, kept in found]}
+
+
 def base_trim_joint_test_payload(payload: dict[str, Any]) -> dict[str, Any]:
     raw_design = payload["design"]
     if not _is_base_trim_design(raw_design):
@@ -3318,6 +3340,7 @@ POST_ROUTES = {
     "/api/ai/candidate": ai_candidate_payload,
     "/api/ai/repair-prompt": ai_repair_prompt_payload,
     "/api/design/inventory-preview": inventory_preview_payload,
+    "/api/design/division-label-fit": division_label_fit_payload,
     "/api/pegboard/layouts": pegboard_layouts_payload,
     "/api/pegboard/hooks": pegboard_hooks_payload,
     "/api/feature/default": default_feature_payload,
