@@ -129,6 +129,49 @@ Do NOT copy `tests/`, `browser-tests/`, `Future plans/`, `README.md`, `run_tests
 
 The build script may compile/copy production assets but must not create/run test programs, browser sessions or manual QA scripts. Manage versioned asset paths and cache headers coherently so new JS and WASM don't mix. Include declared WASM MIME and security headers in static host config.
 
+## Pinned bridge, production build and unresolved limits
+
+**Proven scope, not a completeness claim:** The Windows Chrome/Edge confirmation covers the ordinary 42 × 42 × 28 mm bin. The 84 × 42 × 28 mm ordinary bin was checked in Linux Chromium. The bridge has NOT been demonstrated on large Storage Drawers/Storage Boxes, Gridfinity feet, grid lids, magnets, Photo Nest or multipart 3MF. Porting these remains the main risk.
+
+**Pinned foundation copied from actual source:** Pyodide 0.28.3; Pyodide NumPy 2.2.5, Shapely 2.0.7 (GEOS 3.12.1), networkx 3.4.2; pure Trimesh 5.0.0 wheel SHA256 51ec67d7f9f74b918f2a695da5fd511b9c084e96307648ae83f45b58f13f8009; JS Earcut 3.0.2; Manifold C++ 3.5.0 upstream commit 541c33bd2ab9b1a72816bdecff90566c0a3ee56c; custom MeshGL64 bridge; Emscripten 4.0.10. Existing native requirements.txt pins are NOT the same as browser-package versions. Additional packages come from current Python import graph, not speculative downloads.
+
+**Build chain locked:** Production scripts/build-browser-core.py rebuilds canonical.zip from checked-out current source whenever scripts/build-static-site.py prepares the shipping bundle; records its SHA256 and hashes every locally vendored asset in the production manifest. Precompiled bridge64.mjs and bridge64.wasm are COMMITTED production files copied at Render static deployment; the historical Emscripten build.sh is for a separate maintainer rebuild, never invoked on Render. Bundle Pyodide and Python wheels locally. Never call browser-tests/prepare-local-poc.py and never copy historical test resources into dist.
+
+**Numeric capacity assumptions, not measurements:** target <=64 MiB first-load compressed assets and <=1536 MiB combined allocated Pyodide + Manifold WASM linear memory. WASM32's theoretical per-memory address limit is 4 GiB; usable browser limits may be lower. The old negative prototype measured 22,335,798 cold bytes and ~90.4 MB Python heap; neither number represents the complete final app. The largest current job peak is unknown. B02 assesses actual production artifact file sizes as part of the normal asset build (not a test) and reasons about worst-case memory growth from code; if target limits would compromise supported geometry, report a precise blocker rather than weaken the product. Check Render free-tier per-asset/traffic limits here, not after coding at B14.
+
+**Single-thread assumption and CORS:** bridge64/build.sh sets MANIFOLD_PAR=OFF, does not compile with -pthread, and the current default Pyodide worker path does not require SharedArrayBuffer. COOP/COEP cross-origin isolation is NOT required for this frozen implementation. If a later revision adds pthreads/SAB, that separate decision requires COOP same-origin, COEP require-corp, and audit of CORS/CORP for every pinned asset.
+
+**3MF native-library truth:** organizer_engine/_export.py imports native lib3mf at module top; its visible Python calls include Wrapper/CreateModel, QueryReader/ReadFromBuffer, GetMeshObjects, GetBuildItems/RemoveBuildItem, AddComponentsObject/AddComponent/AddBuildItem, SetName, GetMetaDataGroup/AddMetaData, AddAttachment/ReadFromBuffer, strict QueryWriter/WriteToFile and strict re-read. The native library's internal XML serialization/ordering is NOT visible in Python. B07 isolates that import from Pyodide, implements 3MF OPC content types, 3D model resource mesh, object/component ID and transforms, build items, identity Application/Title metadata, Bambu attachment relationship http://schemas.bambulab.com/package/2021 and Metadata/model_settings.config with part names and filament slots. Preserve real product format-validity checks. Do NOT claim byte-level or empirical Bambu parity was established through source review; owner naturally uses Print after implementation. No coder tests.
+
+**Photo Nest native-library truth:** wavefinity_web_impl/_nest.py imports photo_nest.py; the latter imports cv2, NumPy, Shapely and PIL.Image (for decoding/size guarding). Pyodide 0.28.3 has opencv-python 4.11.0.86 and Pillow 11.3.0, which are NOT the native opencv-python-headless 5.0.0.93 / Pillow 13 pins. B12 preserves the actual perspective, contour and warp algorithms and makes import/API adapters only where source analysis requires. No claim of unverified ABI equivalence.
+
+## Render Static Site headers: concrete B14 settings
+
+Use the NEW Render Static Site Dashboard > Settings > Headers with path patterns, not Cloudflare Pages _headers, and do not edit the legacy render.yaml early. See https://render.com/docs/static-site-headers.
+
+- Path /*: X-Content-Type-Options = nosniff; Referrer-Policy = no-referrer; X-Frame-Options = DENY. Content-Security-Policy baseline: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'. Add only an explicitly owner-approved AI provider origin. If Pyodide needs unsafe-eval, document the minimum exception; do not silently relax all sources. Preserve microphone availability for existing AI dictation if supported.
+- Paths /**/*.wasm and /*.wasm: Content-Type = application/wasm. Paths /**/*.mjs and /*.mjs: Content-Type = text/javascript; charset=utf-8. Streaming WebAssembly loads rely on correct MIME.
+- Path / and /index.html, /Brochure.md and /brochure.md, unversioned /app/* and /spaces/*, and /browser-core/engine/canonical.zip: Cache-Control = no-cache. Every unversioned runtime entrypoint must revalidate.
+- Path /browser-core/vendor/<content-hash>/* ONLY if truly content-hash-versioned: Cache-Control = public, max-age=31536000, immutable. Never cache a stable filename immutably; avoid mixed main JS and WASM versions.
+
+## Gridfinity implementation invariants for every Bxx Story
+
+Read gridfinity-stage1-spec.md and Future plans/Gridfinity-implementation-master-plan.md as the geometry/data model references, then check current main at the post-Gridfinity GO. Proposed Stage 2 features MUST NOT be described as shipped until merged. Existing Stage 1 prose containing old test instructions does NOT override README's no-coder-testing rule.
+
+| Bxx | Exact Gridfinity preservation scope |
+|---|---|
+| B01, B02 | Record final Gridfinity fields/routes and package the canonical grid, foot, socket, lid and container-floor modules actually present; do not create generic substitute 21/42 geometry. |
+| B04 | Persist design grid; Space grid chosen at creation and immutable thereafter. No-Space design has its own explicit grid. Width/depth bare numbers below pitch map to grid units, heights on BOTH Gridfinity pitches use 7 mm units. Every entry path validates cross-grid mismatch with both grid names. |
+| B05 | Show correct nominal grid dimensions, actual physical cavity and effective height as distinct readouts; don't call unknown seated lift zero. |
+| B06 | Independent 42 and 21 mm flat-sided Gridfinity profiles, foot/socket/rim per pitch, 0.5 mm total nominal XY relief where specified; parts and filenames include grid/pitch and nominal-unit segments, never replace Wavefinity's 7 mm wavy geometry. |
+| B07, B08 | 3MF naming/assemblies include correct feet, grid lid/open rim, printed profile and multi-filament parts. Print uses printer limits and correct Space grid. |
+| B09 | Preserve Space grid immutability, built_in_grid Floor versus None, floor_grid=null on None, nominal_grid_mm versus physical_cavity_mm, seated_lift_mm measured/unknown distinction and current metadata versions across save/restore. |
+| B10 | Layout snap/fit uses the Space grid accessor, cross-grid refusal identifies both grids on every insert/duplicate/import/restore path; one seated-lift accessor supplies fit and unmeasured remains unverified. |
+| B11 | Storage Box/Drawers printed Floor pockets are pitch-specific; None accepts external baseplate with provisional EXTERNAL_PLATE_CLEARANCE_PER_SIDE_MM=0.35 per side. Nominal stays exact, physical cavity grows; min base 5.8 mm (or 8.3 mm above Storage Box underside recess), do not silently grant unverified physical fit. |
+| B12, B13 | Advanced features and AI prompts must honor final Gridfinity eligibility, lid/stacking conditions, 7 mm vertical units, nominal-versus-physical dimensions, current Stage 2 magnets/lids/side openings only if merged. |
+
+**The route-dispatch.py shared file is created by B04; B14 alone merges exported route maps from other Bxx modules. All drawer routes belong to B10 (including Print); shared B08 helper use is not dual route ownership.**
+
 ## B14: hosting selection and exact owner handoff
 
 **Preferred target — Render Static Site.** Current documentation (November 2026) describes free static sites, CDN, custom domains and managed HTTPS with no free *web-service* idle spin-down. Static sites consume monthly included bandwidth/build minutes; do not claim unlimited free traffic. Check the deployed artifact's per-file size, total bandwidth expectations and Render account limits using vendor docs before proposing any paid service.
