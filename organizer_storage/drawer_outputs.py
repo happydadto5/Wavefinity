@@ -68,6 +68,12 @@ def effective_structural_state(space: dict) -> dict:
         "drawer_pitches_mm": list(plan.drawer_pitches_mm),
         "cabinet_height_mm": plan.outside_xyz[2],
     }
+    if canonical["grid"] != "wavefinity":
+        # Keep the legacy Wavefinity signature unchanged. Gridfinity geometry
+        # depends on pitch, floor composition and the clearanced cavity.
+        state.update(grid=canonical["grid"], built_in_grid=canonical["built_in_grid"],
+                     nominal_grid_mm=canonical["nominal_grid_mm"],
+                     physical_cavity_mm=canonical["physical_cavity_mm"])
     # Only Open geometry depends on the frame width. Full stays independent of a
     # hidden Open selection, in geometry and in this freshness signature.
     if block["cabinet_style"] == "open":

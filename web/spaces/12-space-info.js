@@ -390,7 +390,7 @@ SP.flushSetupAutosave = () => {
           const { kind, name, x, y, z, extra = {} } = values;
           if (kind === "storage_drawers") {
             const updated = await SP.mutateCabinet("reconfigure", {
-              space: { kind, name, x, y, z, storage_drawers: extra.storage_drawers },
+              space: { kind, name, x, y, z, ...extra },
             });
             if (!updated) return false;
             if (revision === SP.setupAutosaveRevision) SP.storageDrawersForm?.markPristine?.();

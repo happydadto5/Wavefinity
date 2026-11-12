@@ -35,6 +35,7 @@ from organizer_storage.drawers import (
     plan_add_drawer,
     plan_delete_drawer,
     plan_reconfigure,
+    retain_storage_drawers_fields,
     prepare_new_storage_drawers_definition,
     reconcile_storage_drawers_layout,
     reset_storage_drawers_definition,
@@ -564,9 +565,9 @@ def _plan_cabinet_mutation(
         raise ValueError("This folder does not hold a Storage Drawers Space.")
     persisted = layout.get("space")
     if isinstance(persisted, dict):
-        base = retain_space_grid(base, persisted)
+        base = retain_storage_drawers_fields(base, persisted)
     if isinstance(proposed, dict):
-        proposed = retain_space_grid(proposed, base)
+        proposed = retain_storage_drawers_fields(proposed, base)
     if operation == "reset":
         # Damaged cabinet settings: rebuild only the cabinet definition, then
         # reconcile the layout by stable drawer ID. A repaired-away drawer that

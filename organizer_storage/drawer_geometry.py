@@ -1082,7 +1082,7 @@ def storage_drawers_summary(space: dict, printer_profile: dict | None = None) ->
     first_bad = next((one for one in fits if not one["fits"]), None)
     from organizer_features.gridfinity import container_floor_record
     record = container_floor_record(plan.space["grid"], plan.space["built_in_grid"], plan.space["x"], plan.space["y"], block["seated_lift_mm"])
-    return {**record, "outside_xyz": list(plan.outside_xyz), "field_units": [ux, uy],
+    return {"grid": plan.space["grid"], "built_in_grid": plan.space["built_in_grid"], **record, "outside_xyz": list(plan.outside_xyz), "field_units": [ux, uy],
             "field_mm": [plan.space["x"], plan.space["y"]],
             "drawer_count": len(plan.drawer_pitches_mm),
             "cabinet_style": block["cabinet_style"],

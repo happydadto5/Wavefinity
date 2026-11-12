@@ -584,7 +584,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     height_fit = None
     if space_grid_name and built_in_floor:
         height_fit = {"verified": False, "seated_lift_mm": None,
-                      "note": "Bins seat in this box's own socket grid; its fit is not print-verified."}
+                      "note": "Bins seat in this container's own socket grid; its fit is not print-verified."}
     elif space_grid_name:
         # Never state a verified fit that was not measured: the seated lift of
         # the Space's baseplate (Story 2974) is either recorded or unverified.

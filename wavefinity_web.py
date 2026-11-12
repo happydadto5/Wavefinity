@@ -161,6 +161,7 @@ from organizer_storage.drawers import (
     STORAGE_DRAWERS_MAX_UNITS,
     STORAGE_DRAWERS_MIN_DRAWERS,
     STORAGE_DRAWERS_MIN_UNITS,
+    STORAGE_DRAWERS_DEFAULT_FIELD_MM,
     normalise_storage_drawers_definition,
     reset_storage_drawers_definition,
     storage_drawers_definition_problem,
@@ -886,6 +887,7 @@ def catalog_payload() -> dict[str, Any]:
         },
         "storage_drawers_rules": {
             "default_usable_height_mm": STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM,
+            "default_field_mm": list(STORAGE_DRAWERS_DEFAULT_FIELD_MM),
             "min_units": STORAGE_DRAWERS_MIN_UNITS,
             "max_units": STORAGE_DRAWERS_MAX_UNITS,
             "min_drawers": STORAGE_DRAWERS_MIN_DRAWERS,

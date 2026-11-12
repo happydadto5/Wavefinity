@@ -245,9 +245,9 @@ def _per_unit(drawer: dict[str, Any]) -> int:
 
 
 def space_drawer_grid(layout: dict[str, Any] | None) -> str | None:
-    """The recorded grid of a Plain Drawer or Storage Box Space, else None (every other kind)."""
+    """The recorded grid of a drawer or container Space, else None."""
     space = layout.get("space") if isinstance(layout, dict) else None
-    if isinstance(space, dict) and space.get("kind") in ("drawer", "portable", "box"):
+    if isinstance(space, dict) and space.get("kind") in ("drawer", "portable", "box", "storage_drawers"):
         return validate_grid(space.get("grid", "wavefinity"))
     return None
 
@@ -274,6 +274,8 @@ def space_seated_lift(layout: dict[str, Any] | None) -> float | None:
     value = space.get("seated_lift_mm")
     if value is None and isinstance(space.get("storage_box"), dict):
         value = space["storage_box"].get("seated_lift_mm")
+    if value is None and isinstance(space.get("storage_drawers"), dict):
+        value = space["storage_drawers"].get("seated_lift_mm")
     try:
         return measured_seated_lift(value)
     except ValueError:
@@ -361,10 +363,10 @@ def storage_box_height_cap(layout: dict[str, Any]) -> float:
 
 
 def space_floor_is_built_in(layout: dict[str, Any] | None) -> bool:
-    """True for a Gridfinity Storage Box whose box prints the socket grid
+    """True for a Gridfinity container whose floor prints the socket grid
     itself: no external plate, so no plate lift exists to measure."""
     space = layout.get("space") if isinstance(layout, dict) else None
-    if not (isinstance(space, dict) and space.get("kind") in ("portable", "box")):
+    if not (isinstance(space, dict) and space.get("kind") in ("portable", "box", "storage_drawers")):
         return False
     if validate_grid(space.get("grid", "wavefinity")) == "wavefinity":
         return False

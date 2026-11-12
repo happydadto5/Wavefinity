@@ -123,7 +123,12 @@ Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling:
 - Returned bins must fit inside that one drawer.
 - The AI result is still an ordinary bin. It must not invent or return cabinet structure (drawer count, frame, rails or cabinet settings).
 - Hard object-height cap: the selected drawer's usable height.
-- The Space owns the cabinet: grid-aware width/depth, drawer count and usable heights, drawer fit (Tight, Standard, Loose), cabinet and drawer material, handles, labels and stacking. Changing drawer fit affects the entire cabinet.
+- The Space owns the cabinet: width/depth, drawer count and usable heights, drawer fit (Tight, Standard, Loose), cabinet and drawer material, handles, labels and stacking. Changing drawer fit affects the entire cabinet.
+- Creation offers one grid for the whole cabinet: Wavefinity 7 mm (default), Gridfinity half 21 mm, or Gridfinity 42 mm. Gridfinity offers Floor (built-in raised pocket grid) or None (flat floor, cavity clearanced for an owner-supplied baseplate). Grid and Floor are immutable after creation.
+- Wavefinity starts at 210 × 119 mm with three drawers at 40 mm usable height. Both Gridfinity pitches derive a 210 × 126 mm field and 42 mm usable height (six 7 mm height units); stored heights remain net of Drawer fit.
+- Gridfinity placement uses pitch cells, including 1×1 and 2×3 bins. Bins of another grid are refused naming both grids. No side connectors or bin spacers are available in Gridfinity drawers.
+- Nominal grid area and printed cavity are separate readouts. None uses the shared provisional per-side baseplate clearance. Optional measured seated lift means height added by the seated baseplate, not its total thickness; a recorded zero is measured. Stacks include that lift and are refused when overheight. Missing lift reads unverified, never a verified fit.
+- Save/reload and cabinet print/export retain the selected pitch and floor configuration. AI returns only an ordinary bin; it must preserve the context grid and fit the selected drawer including any measured seated lift.
 
 ## Pegboard
 

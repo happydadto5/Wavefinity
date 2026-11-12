@@ -10,6 +10,34 @@
   };
   const clone = value => structuredClone(value);
   const isSpace = space => space?.kind === KIND;
+  const gridOf = space => space?.grid || space?.storage_drawers?.grid || "wavefinity";
+  const gridProfile = space => {
+    const profile = requireRules().grids.find(row => row.value === gridOf(space));
+    if (!profile) throw new Error("Choose a valid cabinet grid");
+    return profile;
+  };
+  const recordKeys = ["built_in_grid", "floor_grid", "floor_mode", "nominal_grid_mm", "physical_cavity_mm",
+    "external_plate_clearance_per_side_mm", "external_plate_clearance_status", "seated_lift_mm",
+    "seated_lift_status", "height_fit_verified"];
+  const gridFields = space => {
+    const fields = { grid: gridOf(space) };
+    for (const key of recordKeys) {
+      const value = space?.[key] !== undefined ? space[key] : space?.storage_drawers?.[key];
+      if (value !== undefined) fields[key] = clone(value);
+    }
+    return fields;
+  };
+  const gridReadout = space => {
+    if (gridOf(space) === "wavefinity") return "";
+    const fields = gridFields(space), profile = gridProfile(space);
+    const nominal = fields.nominal_grid_mm || [space.x, space.y];
+    const cavity = fields.physical_cavity_mm;
+    const size = values => values.map(value => Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 })).join(" × ") + " mm";
+    const lift = fields.seated_lift_mm;
+    return `${profile.label} · Nominal grid ${size(nominal)} · Printed cavity ${cavity ? size(cavity) : "unverified"} · ` +
+      (fields.built_in_grid === "none" ? `None (owner-supplied baseplate, provisional cavity clearance) · Seated lift ${typeof lift === "number" && Number.isFinite(lift) && lift >= 0 ? `${lift} mm (measured)` : "unverified"}`
+        : "Floor (built-in raised pocket grid)");
+  };
   const descriptors = space => space?.storage_drawers?.drawers || [];
   const positive = value => typeof value === "number" && Number.isFinite(value) && value > 0;
   const whole = value => Number.isInteger(value) && value > 0;
@@ -21,7 +49,10 @@
     const baseUnit = catalog?.base_unit;
     const minDrawerHeight = catalog?.drawer_rules?.ordinary_bin_min_height_mm;
     const minUsableDrawerHeight = catalog?.drawer_rules?.min_usable_drawer_height_mm;
-    if (!published || !positive(baseUnit) || !positive(minDrawerHeight) || !positive(minUsableDrawerHeight) ||
+    if (!published || !Array.isArray(published.default_field_mm) || published.default_field_mm.length !== 2 ||
+        !published.default_field_mm.every(positive) || !Array.isArray(catalog.grids) ||
+        !["wavefinity", "gridfinity_half", "gridfinity"].every(grid => catalog.grids.some(row => row.value === grid && positive(row.pitch_mm) && (grid === "wavefinity" || (positive(row.height_unit_mm) && positive(row.container_floor_build_mm) && positive(row.container_floor_pocket_depth_mm))))) ||
+        !positive(baseUnit) || !positive(minDrawerHeight) || !positive(minUsableDrawerHeight) ||
         !whole(published.min_units) || !whole(published.max_units) || published.max_units < published.min_units ||
         !whole(published.min_drawers) || !whole(published.max_drawers) || published.max_drawers < published.min_drawers ||
         !choiceList(published.drawer_fit_choices_mm) || !published.drawer_fit_choices_mm.includes(published.default_drawer_fit_mm) ||
@@ -31,6 +62,8 @@
     }
     return Object.freeze({
       baseUnit, minDrawerHeight, minUsableDrawerHeight,
+      defaultField: Object.freeze([...published.default_field_mm]),
+      grids: Object.freeze(catalog.grids.map(row => Object.freeze({ ...row }))),
       minUnits: published.min_units, maxUnits: published.max_units,
       minDrawers: published.min_drawers, maxDrawers: published.max_drawers,
       fitChoices: Object.freeze([...published.drawer_fit_choices_mm]), defaultFit: published.default_drawer_fit_mm,
@@ -42,6 +75,10 @@
   const validate = space => {
     const { baseUnit, minDrawerHeight, minUsableDrawerHeight, maxUsableHeight, fitChoices, defaultFit, minUnits, maxUnits, minDrawers, maxDrawers } = requireRules();
     if (!isSpace(space)) throw new Error("Expected Storage Drawers Space");
+    const profile = gridProfile(space), pitch = profile.pitch_mm;
+    if (gridOf(space) !== "wavefinity" && !["floor", "none"].includes(space.built_in_grid ?? space.storage_drawers?.built_in_grid)) throw new Error("Choose Floor or None for a Gridfinity cabinet");
+    const lift = space.storage_drawers?.seated_lift_mm ?? space.seated_lift_mm;
+    if (gridOf(space) !== "wavefinity" && lift != null && (typeof lift !== "number" || !Number.isFinite(lift) || lift < 0)) throw new Error("Seated lift must be a measured non-negative height or unverified");
     const rows = descriptors(space);
     if (!Array.isArray(rows) || rows.length < minDrawers || rows.length > maxDrawers) throw new Error(`Number of drawers must be ${minDrawers}–${maxDrawers}`);
     const seen = new Set();
@@ -57,7 +94,8 @@
     }
     for (const axis of ["x", "y"]) {
       const units = space[axis] / baseUnit;
-      if (!Number.isInteger(units) || units < minUnits || units > maxUnits) throw new Error(`Space ${axis} must be ${minUnits}–${maxUnits} whole units`);
+      const minimum = gridOf(space) === "wavefinity" ? minUnits : pitch / baseUnit;
+      if (!Number.isInteger(units) || units < minimum || units > maxUnits || !Number.isInteger(space[axis] / pitch)) throw new Error(`Space ${axis} must use whole ${pitch} mm cells within the cabinet size range`);
     }
     return rows;
   };
@@ -80,23 +118,24 @@
         if (placed.bin) seenRows.add(placed.bin);
       }
       return { ...old, id: row.id, name: `Drawer ${index + 1}`, width: space.x, depth: space.y,
-        height: row.height_mm + space.storage_drawers.drawer_fit_mm, clearance: 0, boundary: "mating", placements };
+        height: row.height_mm + space.storage_drawers.drawer_fit_mm, clearance: 0, boundary: "mating", placements,
+        ...(gridOf(space) !== "wavefinity" ? gridFields(space) : {}) };
     });
     next.active = ids.has(next.active) ? next.active : rows[0].id;
     next.space = clone(space);
     return next;
   };
-  const key = (draft, printer) => JSON.stringify([draft?.name, draft?.x, draft?.y, draft?.storage_drawers, printer]);
+  const key = (draft, printer) => JSON.stringify([draft?.name, draft?.x, draft?.y, gridFields(draft), draft?.storage_drawers, printer]);
   const api = {
-    KIND, isSpace, catalogRules,
+    KIND, isSpace, catalogRules, gridOf, gridProfile, gridFields, gridReadout,
     configureRules(catalog) { rules = catalogRules(catalog); return rules; },
     rules() { return requireRules(); },
-    unitCounts(space) { validate(space); const { baseUnit } = requireRules(); return [space.x / baseUnit, space.y / baseUnit]; },
+    unitCounts(space) { validate(space); const pitch = gridProfile(space).pitch_mm; return [space.x / pitch, space.y / pitch]; },
     drawerDescriptors(space) { return clone(validate(space)); },
     drawerName(space, id) { const index = validate(space).findIndex(row => row.id === id); return index < 0 ? null : `Drawer ${index + 1}`; },
     activeDrawerLimits(space, layout) {
       const rows = validate(space); const row = rows.find(one => one.id === layout?.active) || rows[0];
-      return { x: space.x, y: space.y, z: row.height_mm + space.storage_drawers.drawer_fit_mm, drawer_id: row.id };
+      return { x: space.x, y: space.y, z: row.height_mm + space.storage_drawers.drawer_fit_mm, drawer_id: row.id, ...gridFields(space) };
     },
     drawerHoldingRow(layout, rowId) { return (layout?.drawers || []).find(drawer => drawer.placements?.some(p => p.bin === rowId))?.id || null; },
     rowLocationText(layout, rowId) {

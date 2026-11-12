@@ -531,8 +531,8 @@ SP.create = async () => {
   if (kind === "storage_drawers" && state.runtime.hosted) {
     // Hosted Create assigns the stable drawer IDs here, exactly once; the
     // server keeps them. Local Create lets Python assign them.
-    const prepared = StorageDrawers.prepareCreateDraft({ kind, name, x, y, z, storage_drawers: extra.storage_drawers });
-    extra = { storage_drawers: prepared.storage_drawers };
+    const prepared = StorageDrawers.prepareCreateDraft({ kind, name, x, y, z, ...extra });
+    extra = { ...StorageDrawers.gridFields(prepared), storage_drawers: prepared.storage_drawers };
     z = prepared.z;
   }
   const migrating = Boolean(SP.configureData);

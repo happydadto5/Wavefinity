@@ -77,6 +77,7 @@ SP.validSpace = raw => {
       StorageDrawers.drawerDescriptors(raw);
     } catch (_error) { return null; }
     space.storage_drawers = clone(raw.storage_drawers);
+    Object.assign(space, StorageDrawers.gridFields(raw));
   }
   if (space.kind === "pegboard") {
     const standard = SP.pegboardStandard(raw.pegboard_standard);

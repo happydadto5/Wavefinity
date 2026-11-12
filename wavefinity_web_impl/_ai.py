@@ -22,7 +22,7 @@ def grid_editor_catalog() -> list[dict[str, Any]]:
     from organizer_engine._specs import GRID_PITCHES
     from organizer_engine._specs import BoxSpec
     from organizer_features.gridfinity import (
-        HEIGHT_UNIT, MIN_GRID_BASE, assembled_lid_stack_height, assembled_stack_height, minimum_floor_build,
+        HEIGHT_UNIT, MIN_GRID_BASE, assembled_lid_stack_height, assembled_stack_height, minimum_floor_build, floor_pocket_depth,
         rim_depth,
     )
     from organizer_b4b._constants import B4B_STACK_RECESS_DEPTH
@@ -45,6 +45,7 @@ def grid_editor_catalog() -> list[dict[str, Any]]:
              # Story 2975: a Storage Box with a Floor (its own raised socket grid)
              # needs this much base; None (plain cavity) has no such minimum.
              "container_floor_build_mm": 0 if grid == "wavefinity" else minimum_floor_build(grid),
+             "container_floor_pocket_depth_mm": 0 if grid == "wavefinity" else floor_pocket_depth(grid),
              "container_floor_stacking_build_mm": (
                  0 if grid == "wavefinity" else minimum_floor_build(grid, B4B_STACK_RECESS_DEPTH)),
              "container_floor_choices": (
@@ -386,6 +387,14 @@ def _ai_space_context(raw: Any) -> dict[str, Any]:
         if space["floor"] == "external_plate" and isinstance(lift, (int, float)) \
                 and not isinstance(lift, bool) and math.isfinite(lift) and lift >= 0:
             space["seated_lift_mm"] = round(float(lift), 3)
+    if raw["kind"] == "storage_drawers" and space["grid"] != "wavefinity":
+        cabinet = raw.get("storage_drawers") if isinstance(raw.get("storage_drawers"), dict) else {}
+        chosen = raw.get("built_in_grid", cabinet.get("built_in_grid", "floor"))
+        space["floor"] = "external_plate" if chosen == "none" else "built_in"
+        from organizer_features.gridfinity import measured_seated_lift
+        lift = measured_seated_lift(cabinet.get("seated_lift_mm", raw.get("seated_lift_mm")))
+        if space["floor"] == "external_plate" and lift is not None:
+            space["seated_lift_mm"] = lift
     if raw["kind"] == "surface" and isinstance(raw.get("trim_size"), str):
         space["trim_size"] = raw["trim_size"][:24]
     if raw["kind"] == "pegboard" and isinstance(raw.get("pegboard_standard"), str):
@@ -441,18 +450,27 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         )
     else:
         cap_line = "- No active typed Space. No hard vertical cap."
+    container = "Storage Drawers cabinet" if context.get("kind") == "storage_drawers" else "Storage Box"
+    if context.get("kind") == "storage_drawers":
+        cap_line += (
+            "\n- A Storage Drawers cabinet offers Wavefinity 7 mm, Gridfinity half 21 mm or Gridfinity 42 mm, "
+            "one grid for every drawer. Gridfinity offers Floor (built-in raised pocket grid) or None "
+            "(flat floor, clearanced for an owner-supplied baseplate). Both choices are immutable. "
+            "Use pitch cells for bin width/depth and 7 mm height units for Gridfinity. The nominal grid "
+            "field is distinct from the printed cavity. Gridfinity drawers have no side connectors or bin spacers. "
+            "Return only an ordinary bin on the context grid; cabinet options are set in Wavefinity.")
     if context.get("floor") == "built_in":
         cap_line += (
-            f"\n- This Storage Box is a {context.get('grid')} box with a Floor: its own raised socket grid, so a bin seats "
-            "in the box itself. The box's Grid and Floor are fixed when the Space is created and are set in Wavefinity, "
+            f"\n- This {container} uses {context.get('grid')} with a Floor: its own raised socket grid, so a bin seats "
+            "in the container itself. Its Grid and Floor are fixed when the Space is created and are set in Wavefinity, "
             "not in the returned design; keep design.grid equal to the context grid.")
     elif context.get("floor") == "external_plate":
         lift = context.get("seated_lift_mm")
         cap_line += (
-            f"\n- This Storage Box is a {context.get('grid')} box with no floor: a plain cavity for a baseplate the person supplies. "
+            f"\n- This {container} uses {context.get('grid')} with None: a flat floor and cavity for a baseplate the person supplies. "
             + (f"The baseplate's measured seated lift is {lift:g} mm. " if lift is not None
                else "The baseplate's seated lift is not measured, so the height fit is unverified. ")
-            + "The box's Grid and Floor are fixed when the Space is created and are set in Wavefinity, "
+            + "Its Grid and Floor are fixed when the Space is created and are set in Wavefinity. The full seated stack, including measured lift, must fit the usable height; missing lift means unverified fit. These settings belong in Wavefinity, "
             "not in the returned design; keep design.grid equal to the context grid.")
     return "\n".join([
         "You are helping design ONE 3D-printable storage bin for the Wavefinity app.",

@@ -297,7 +297,7 @@ DL.GRID_LABELS = { wavefinity: "Wavefinity 7 mm", gridfinity_half: "Gridfinity h
 DL.gridLabel = grid => DL.GRID_LABELS[grid] || String(grid);
 DL.spaceGrid = () => {
   const space = DL.layout?.space;
-  return ["drawer", "portable", "box"].includes(space?.kind) && DL.GRID_PITCHES[space.grid] ? space.grid : "wavefinity";
+  return ["drawer", "portable", "box", "storage_drawers"].includes(space?.kind) && DL.GRID_PITCHES[space.grid] ? space.grid : "wavefinity";
 };
 // True when this drawer lays out on a Gridfinity pitch (a Plain Drawer or a Storage Box, Story 2975).
 DL.isGridfinity = (drawer = DL.drawer()) => !DL.isPegboard(drawer) && DL.spaceGrid() !== "wavefinity";
@@ -317,18 +317,18 @@ DL.gridRefusal = (bins, drawer = DL.drawer()) => {
 // none is recorded. Only a Gridfinity drawer carries a lift.
 DL.seatedLift = () => {
   const space = DL.layout?.space;
-  const value = space?.seated_lift_mm ?? space?.storage_box?.seated_lift_mm;
+  const value = space?.seated_lift_mm ?? space?.storage_box?.seated_lift_mm ?? space?.storage_drawers?.seated_lift_mm;
   return value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < 0 ? null : Number(value);
 };
 // A Gridfinity Storage Box that prints its own socket grid seats bins at its
 // floor: it has no external plate, so no plate lift.
-DL.floorBuiltIn = () => DL.isStorageBox() && DL.spaceGrid() !== "wavefinity" && (DL.layout?.space?.built_in_grid ?? "floor") === "floor";
+DL.floorBuiltIn = () => (DL.isStorageBox() || DL.isStorageDrawers()) && DL.spaceGrid() !== "wavefinity" && (DL.layout?.space?.built_in_grid ?? "floor") === "floor";
 DL.baseLift = (drawer = DL.drawer()) => DL.isGridfinity(drawer) && !DL.floorBuiltIn() ? (DL.seatedLift() ?? 0) : 0;
 // What the height state may claim. A Gridfinity fit is verified only when the
 // Space's seated lift is recorded; otherwise it is presented as unverified.
 DL.heightFit = (drawer = DL.drawer()) => {
   if (!DL.isGridfinity(drawer)) return null;
-  if (DL.floorBuiltIn()) return { verified: false, lift: null, note: "Bins seat in this box's own socket grid; its fit is not print-verified." };
+  if (DL.floorBuiltIn()) return { verified: false, lift: null, note: "Bins seat in this container's own socket grid; its fit is not print-verified." };
   const lift = DL.seatedLift();
   return lift === null
     ? { verified: false, lift: null, note: "Height fit is not verified: no seated lift is recorded for this Space's baseplate." }

@@ -61,6 +61,16 @@ async function designerNewBin(acceptTransition = null, { skipBank = false } = {}
 // throws, so the caller can show an actionable message and leave the
 // current design untouched.
 function insideBinFitForStorageBox(space, candidateDesign) {
+  if (state.activeSpace?.kind === "storage_drawers" && space.grid && space.grid !== "wavefinity") {
+    const grid = state.catalog.grids.find(row => row.value === space.grid), pitch = grid.pitch_mm;
+    const maximum = Math.floor(state.catalog.max_box_size / pitch);
+    const lift = space.built_in_grid === "none" ? (space.seated_lift_mm ?? 0) : 0;
+    const z = Math.floor((space.z - lift) / grid.height_unit_mm) * grid.height_unit_mm;
+    const fit = { x: Math.min(maximum, Math.floor(space.x / pitch)) * pitch,
+      y: Math.min(maximum, Math.floor(space.y / pitch)) * pitch, z };
+    const legal = binDimensionResult("z", `${z}mm`, candidateDesign);
+    return fit.x < pitch || fit.y < pitch || legal.reason ? { error: "This drawer is too small to fit a legal bin." } : fit;
+  }
   const unit = state.catalog.base_unit;
   const maxUnits = Math.floor((state.catalog.max_box_size || 350) / unit);
   const xUnits = Math.min(maxUnits, Math.floor(space.x / unit));

@@ -906,6 +906,20 @@ function applySpaceSizingDefaults(design, remembered = null, keepStarterXY = fal
       cleat_y: design.box.pegboard?.cleat_y || "auto",
     };
   }
+  if (kind === "storage_drawers" && space.grid && space.grid !== "wavefinity") {
+    design.grid = space.grid;
+    const grid = state.catalog.grids.find(row => row.value === space.grid);
+    const pitch = grid.pitch_mm;
+    for (const axis of ["x", "y"]) {
+      const cells = Math.min(Math.floor(space[axis] / pitch), Math.floor(state.catalog.max_box_size / pitch),
+        Math.max(1, Math.round(design.box[axis] / pitch)));
+      design.box[axis] = cells * pitch;
+    }
+    const lift = space.built_in_grid === "none" ? (space.seated_lift_mm ?? 0) : 0;
+    design.box.z = Math.max(grid.height_unit_mm, Math.floor((space.z - lift) / grid.height_unit_mm) * grid.height_unit_mm);
+    design.box.base_thickness = Math.max(design.box.base_thickness, grid.minimum_base_mm);
+    design.box.standard_base = false;
+  }
   if (kind !== "surface") {
     design.layout.surface_base_mode = "custom";
     design.layout.surface_lightweight_base = false;

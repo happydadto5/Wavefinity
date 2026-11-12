@@ -40,8 +40,9 @@
     [0.8, "Very thin"], [1.2, "Thin"], [1.6, "Default"],
     [2.0, "Strong"], [2.4, "Very strong"], [3.0, "Heavy duty"],
   ];
-  const materialChoices = (catalog, kind, current, minMm = 0) => {
-    const rows = DRAWER_MATERIAL_CHOICES.filter(row => {
+  const materialChoices = (catalog, kind, current, minMm = 0, pocketMm = 0) => {
+    const choices = DRAWER_MATERIAL_CHOICES.map(([mm, title]) => [Math.round((mm + pocketMm) * 1000) / 1000, title]);
+    const rows = choices.filter(row => {
       const raw = Array.isArray(row) ? row[0] : (row.value ?? row.mm);
       return Number(raw) >= minMm;
     });
@@ -82,9 +83,25 @@
     // A brand-new Space starts at the legal grid size nearest 210 × 120 mm; a
     // supplied prefill keeps its own dimensions exactly.
     const startMm = mm => baseUnit * Math.min(maxUnits, Math.max(minUnits, Math.round(mm / baseUnit)));
-    const space = copy(initialSpace || { kind: "storage_drawers", name: "", x: startMm(210), y: startMm(119) });
+    const space = copy(initialSpace || { kind: "storage_drawers", name: "", grid: "wavefinity",
+      x: startMm(rules.defaultField[0]), y: startMm(rules.defaultField[1]) });
     space.storage_drawers = { ...defaults(), ...copy(space.storage_drawers || {}) };
     const block = space.storage_drawers;
+    const initialGrid = space.grid || block.grid || "wavefinity";
+    space.grid = initialGrid;
+    const grid = select(initialGrid, rules.grids.map(row => [row.value, row.label]));
+    const floorMode = select(space.built_in_grid ?? block.built_in_grid ?? "floor", [
+      ["floor", "Floor (built-in raised pocket grid)"], ["none", "None (owner-supplied baseplate)"],
+    ]);
+    const profile = () => rules.grids.find(row => row.value === grid.value);
+    const gridfinity = () => grid.value !== "wavefinity";
+    const pitch = () => profile().pitch_mm;
+    const minimumMm = () => gridfinity() ? pitch() : minUnits * baseUnit;
+    const maximumMm = () => Math.floor(maxUnits * baseUnit / pitch()) * pitch();
+    const lift = input(block.seated_lift_mm ?? space.seated_lift_mm ?? "", "number");
+    lift.min = "0"; lift.step = "any"; lift.placeholder = "Unverified";
+    grid.id = `sd-grid-${epoch}`; floorMode.id = `sd-floor-${epoch}`; lift.id = `sd-lift-${epoch}`;
+    grid.disabled = floorMode.disabled = mode === "edit";
     const tail = [];
     host.replaceChildren();
     // Basic scope (New Space and header Edit) is the compact layout: Basics +
@@ -104,18 +121,24 @@
     name.dataset.heightNeutral = "1";
     const sizeGroup = group(form); sizeGroup.classList.add("sd-basics-group");
     sizeGroup.append(labeled("Space name", name));
+    const gridRow = el("div", "sd-size-grid");
+    const floorField = labeled("Floor", floorMode);
+    gridRow.append(labeled("Grid", grid), floorField); sizeGroup.append(gridRow);
+    if (mode === "edit") sizeGroup.append(help("Grid and Floor are immutable: fixed when the cabinet is created. Create a new Space to change them."));
+    const liftField = labeled("Baseplate seated lift", lift, "Measured height added by a seated baseplate, not its total thickness. Leave blank for unverified.", "mm");
+    sizeGroup.append(liftField);
     const sizeGrid = el("div", "sd-size-grid"); sizeGroup.append(sizeGrid);
     const x = input(space.x), y = input(space.y);
     x.id = `sd-x-${epoch}`; y.id = `sd-y-${epoch}`;
     const sizeNotes = new Map();
-    const rangeText = `From ${minUnits} to ${maxUnits} whole units of ${baseUnit} mm (${minUnits * baseUnit} to ${maxUnits * baseUnit} mm).`;
+    const rangeText = () => `From ${minimumMm()} to ${maximumMm()} mm in whole ${pitch()} mm ${gridfinity() ? "cells" : "units"}.`;
     const resolveMm = field => {
       const raw = field.value.trim();
       const requested = Number(raw);
-      if (!raw || !Number.isFinite(requested) || requested < minUnits * baseUnit || requested > maxUnits * baseUnit) return { ok: false };
-      const units = Math.round(requested / baseUnit);
-      if (units < minUnits || units > maxUnits) return { ok: false };
-      return { ok: true, units, mm: units * baseUnit };
+      if (!raw || !Number.isFinite(requested) || requested < minimumMm() || requested > maximumMm()) return { ok: false };
+      const units = Math.round(requested / pitch());
+      if (units * pitch() < minimumMm() || units * pitch() > maximumMm()) return { ok: false };
+      return { ok: true, units, mm: units * pitch() };
     };
     // Refresh the note, never the input. Preview, save, blur and stepping all
     // resolve the same untouched request through resolveMm().
@@ -125,8 +148,8 @@
       const notes = [];
       if (resolved.ok) {
         const outside = lastSummary && Number(lastSummary.outside_xyz?.[field === x ? 0 : 1]);
-        notes.push(`Uses ${fmt(resolved.mm)} mm (${resolved.units} units).` + (Number.isFinite(outside) ? ` Outside ${fmt(outside)} mm.` : ""));
-      } else notes.push(rangeText);
+        notes.push(`Uses ${fmt(resolved.mm)} mm (${resolved.units} ${gridfinity() ? "cells" : "units"}).` + (Number.isFinite(outside) ? ` Outside ${fmt(outside)} mm.` : ""));
+      } else notes.push(rangeText());
       const bad = !resolved.ok && (field.value.trim() !== "" || touchedFields.has(field));
       field.toggleAttribute("aria-invalid", bad);
       const note = sizeNotes.get(field);
@@ -139,7 +162,7 @@
     const zHelp = help("");
     for (const [field, title] of [[x, "Interior Width"], [y, "Interior Depth"]]) {
       const label = labeled(title, field); sizeGrid.append(label);
-      const note = help(rangeText); note.id = `${field.id}-note`; note.setAttribute("aria-live", "polite");
+      const note = help(rangeText()); note.id = `${field.id}-note`; note.setAttribute("aria-live", "polite");
       label.append(note); sizeNotes.set(field, note); field.setAttribute("aria-describedby", note.id);
       field.addEventListener("input", () => formatUnitsInline(field), { signal: events.signal });
       field.addEventListener("blur", () => formatUnitsInline(field), { signal: events.signal });
@@ -300,6 +323,8 @@
     const guideLink = el("a", "", "Assembly & print guide"); guideLink.href = GUIDE_URL; guideLink.target = "_blank"; guideLink.rel = "noopener";
     guide.append(guideLink); summaryGroup.append(guide);
     const syncVisibility = () => {
+      floorField.hidden = !gridfinity();
+      liftField.hidden = !gridfinity() || floorMode.value !== "none";
       frameField.hidden = style.value !== "open"; handleField.hidden = handles.value !== "true";
       keyholeCountField.hidden = wallMounting.value !== "keyholes";
       unitTextField.hidden = !unitEnabled.checked; styleField.hidden = !drawerEnabled.checked;
@@ -490,6 +515,9 @@
       const next = copy(space), b = next.storage_drawers;
       const resolvedX = resolveMm(x), resolvedY = resolveMm(y);
       next.name = name.value.trim(); next.x = resolvedX.mm; next.y = resolvedY.mm;
+      next.grid = b.grid = grid.value;
+      next.built_in_grid = b.built_in_grid = gridfinity() ? floorMode.value : "floor";
+      next.seated_lift_mm = b.seated_lift_mm = gridfinity() && floorMode.value === "none" && lift.value.trim() !== "" ? Number(lift.value) : null;
       b.drawers = copy(block.drawers); b.cabinet_style = style.value; b.rear_support = rear.value;
       b.wall_mounting = wallMounting.value;
       b.wall_mount_keyholes_per_drawer = Number(keyholeCount.value);
@@ -509,8 +537,9 @@
       const fail = (message, focusId) => ({ ok: false, message, focusId });
       if (!name.value.trim()) return fail("Enter a Space name", name.id);
       for (const [field, axis] of [[x, "Interior Width"], [y, "Interior Depth"]]) {
-        if (!resolveMm(field).ok) return fail(`${axis} must be ${minUnits * baseUnit}–${maxUnits * baseUnit} mm (${baseUnit} mm grid).`, field.id);
+        if (!resolveMm(field).ok) return fail(`${axis}: ${rangeText()}`, field.id);
       }
+      if (gridfinity() && floorMode.value === "none" && lift.value.trim() !== "" && (!Number.isFinite(Number(lift.value)) || Number(lift.value) < 0)) return fail("Seated lift must be a measured non-negative height or blank for unverified", lift.id);
       if (countProblem()) return fail(`Number of drawers: ${countProblem().toLowerCase()}`, count.id);
       for (let i = 0; i < block.drawers.length; i++) {
         const height = block.drawers[i].height_mm;
@@ -556,6 +585,8 @@
     const showSummary = response => {
       lastSummary = response;
       const lines = [];
+      const gridNote = window.StorageDrawers.gridReadout({ ...draft(), ...response });
+      if (gridNote) lines.push(el("p", "sd-help", gridNote));
       for (const warning of response.warnings || []) lines.push(el("p", "sd-summary-warning", `Note: ${warning}`));
       summary.replaceChildren(...lines);
       // The finished outside size shows in the notes below Width and Depth.
@@ -633,6 +664,34 @@
       renderRows(); schedule();
     };
     count.addEventListener("input", applyCount, { signal: events.signal });
+    let baseChoice = { grid: grid.value, mode: floorMode.value };
+    const updateFloorBase = (promote = true) => {
+      const control = materialFields.drawer_base_mm;
+      const oldProfile = rules.grids.find(row => row.value === baseChoice.grid);
+      const oldMinimum = baseChoice.grid !== "wavefinity" && baseChoice.mode === "floor" ? oldProfile.container_floor_build_mm : 0;
+      const minimum = gridfinity() && floorMode.value === "floor" ? profile().container_floor_build_mm : 0;
+      let value = Number(control.value);
+      if (minimum) {
+        if (promote) value = Math.max(value, minimum);
+      } else if (oldMinimum) value = defaults().drawer_base_mm;
+      const choices = materialChoices(catalog, "base_choices", value, minimum, minimum ? profile().container_floor_pocket_depth_mm : 0);
+      control.replaceChildren(...choices.map(([key, title]) => {
+        const option = document.createElement("option"); option.value = key; option.textContent = title; return option;
+      }));
+      control.value = String(value);
+      baseChoice = { grid: grid.value, mode: floorMode.value };
+    };
+    grid.addEventListener("change", () => {
+      if (mode === "edit") return;
+      // Offer defaults derived from the shipping field and usable height.
+      [x, y].forEach((field, index) => { field.value = String(Math.max(1, Math.round(rules.defaultField[index] / pitch())) * pitch()); });
+      const heightUnit = gridfinity() ? profile().height_unit_mm : null;
+      const usable = heightUnit ? Math.max(1, Math.round(rules.defaultHeight / heightUnit)) * heightUnit : rules.defaultHeight;
+      for (const row of [...block.drawers, ...tail]) { row.height_mm = roundMm(usable - getDrawerFitMm()); heightRequests.set(row, String(usable)); }
+      updateFloorBase(); syncVisibility(); renderRows(); schedule();
+    }, { signal: events.signal });
+    floorMode.addEventListener("change", () => { updateFloorBase(); syncVisibility(); schedule(); }, { signal: events.signal });
+    updateFloorBase(mode === "create" && initialSpace?.storage_drawers?.drawer_base_mm === undefined);
     fit.addEventListener("change", () => {
       const nextFit = Number(fit.value);
       for (const row of block.drawers) {
@@ -657,17 +716,16 @@
     if (structural) {
       zField.addEventListener("input", () => { setInterior("z", zField.value.trim() ? Number(zField.value) : NaN); }, { signal: events.signal });
       for (const [axis, field] of [["x", x], ["y", y], ["z", zField]]) {
-        const step = axis === "z" ? 1 : baseUnit;
         const current = () => (axis === "z" ? Number(zField.value) : Number(field.value));
         field.addEventListener("keydown", event => {
           if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
           event.preventDefault();
-          if (Number.isFinite(current())) setInterior(axis, current() + (event.key === "ArrowUp" ? step : -step));
+          if (Number.isFinite(current())) setInterior(axis, current() + (event.key === "ArrowUp" ? 1 : -1) * (axis === "z" ? 1 : pitch()));
         }, { signal: events.signal });
         field.addEventListener("wheel", event => {
           if (document.activeElement !== field) return;
           event.preventDefault();
-          if (Number.isFinite(current())) setInterior(axis, current() + (event.deltaY < 0 ? step : -step));
+          if (Number.isFinite(current())) setInterior(axis, current() + (event.deltaY < 0 ? 1 : -1) * (axis === "z" ? 1 : pitch()));
         }, { signal: events.signal, passive: false });
       }
     }
@@ -677,7 +735,7 @@
     };
     formatUnitsInline(x); formatUnitsInline(y);
     const snapshot = () => JSON.stringify([
-      name.value.trim(), snapshotValue(x), snapshotValue(y), count.value,
+      name.value.trim(), grid.value, floorMode.value, lift.value, snapshotValue(x), snapshotValue(y), count.value,
       block.drawers.map(row => [row.id || "", row.height_mm, row.label_text]),
       style.value, rear.value, wallMounting.value, keyholeCount.value,
       stack.value, frame.value, fit.value, handles.value, handleSize.value,
@@ -719,7 +777,7 @@
       setDisabled(value) {
         disabled = !!value;
         for (const control of form.querySelectorAll("input, select")) control.disabled = disabled;
-        if (!disabled) { count.disabled = mode === "edit"; }
+        if (!disabled) { count.disabled = grid.disabled = floorMode.disabled = mode === "edit"; }
         renderRows();
         syncHeightField();
       },

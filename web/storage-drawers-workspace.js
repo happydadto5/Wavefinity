@@ -10,6 +10,7 @@
     // Fix 096 F9: visible reason when drawer controls are disabled while editing.
     const editNote = el("small", "sd-help", ""); editNote.id = "sd-edit-note"; editNote.hidden = true;
     panel.append(editNote);
+    const gridNote = el("p", "sd-help", ""); panel.append(gridNote);
     // The floating cabinet card is gone (Story 2748): Save/Print/Printer/guide
     // live in the left controls. Only the placement-lock note stays, here.
     const busyNote = el("p", "sd-help", "");
@@ -27,7 +28,9 @@
     host.append(panel, recovery);
     const render = () => {
       const damaged = Boolean(current.recovery);
-      recovery.hidden = !damaged; panel.hidden = damaged || (!editing && !current.structuralBusy);
+      const gridText = damaged ? "" : window.StorageDrawers.gridReadout(current.space);
+      gridNote.textContent = gridText; gridNote.hidden = !gridText;
+      recovery.hidden = !damaged; panel.hidden = damaged || (!editing && !current.structuralBusy && !gridText);
       if (damaged) {
         recoveryMessage.textContent = current.recovery.message || "A cabinet setting is not valid.";
         return;

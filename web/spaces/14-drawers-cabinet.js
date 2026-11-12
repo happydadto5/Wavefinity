@@ -18,7 +18,8 @@ SP.storageDrawersSummaryText = space => {
     SP.ensureStorageDrawersRules();
     const [x, y] = StorageDrawers.unitCounts(space);
     const count = StorageDrawers.drawerDescriptors(space).length;
-    return `${count} ${count === 1 ? "drawer" : "drawers"} · ${fmt(x)} × ${fmt(y)} units each`;
+    const unit = StorageDrawers.gridOf(space) === "wavefinity" ? "units" : `${StorageDrawers.gridProfile(space).label} cells`;
+    return `${count} ${count === 1 ? "drawer" : "drawers"} · ${fmt(x)} × ${fmt(y)} ${unit} each`;
   } catch (_error) {
     return "";
   }
@@ -141,7 +142,7 @@ SP.readStorageDrawersSetup = async () => {
   const draft = result.spaceDraft;
   return {
     kind: "storage_drawers", name: draft.name, x: draft.x, y: draft.y, z: draft.z, trimSize: null,
-    extra: { storage_drawers: draft.storage_drawers },
+    extra: { ...StorageDrawers.gridFields(draft), storage_drawers: draft.storage_drawers },
   };
 };
 

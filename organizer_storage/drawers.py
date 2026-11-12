@@ -1,6 +1,6 @@
 """Storage Drawers schema and placement-preserving layout plans."""
 from __future__ import annotations
-from organizer_engine._specs import validate_grid, validate_built_in_grid, retain_space_grid
+from organizer_engine._specs import GRID_PITCHES, grid_label, validate_grid, validate_built_in_grid, retain_space_grid
 
 import copy
 import math
@@ -10,6 +10,7 @@ from organizer_engine import BASE_UNIT
 from organizer_engine.product_rules import DRAWER_LAYER_MAX_USABLE_HEIGHT_MM, ORDINARY_BIN_MIN_HEIGHT_MM, STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM, STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM
 
 STORAGE_DRAWERS_KIND = "storage_drawers"
+STORAGE_DRAWERS_DEFAULT_FIELD_MM = (210.0, 119.0)
 STORAGE_DRAWERS_MIN_UNITS = 6
 STORAGE_DRAWERS_MAX_UNITS = 250
 STORAGE_DRAWERS_MIN_DRAWERS = 1
@@ -102,13 +103,33 @@ def new_drawer_descriptor(height_mm: float | None = None, fit_mm: float | None =
     return {"id": str(uuid.uuid4()), "height_mm": height, "label_text": ""}
 
 
-def storage_drawers_defaults(drawer_count: int = 3) -> dict:
+def storage_drawers_field_defaults(grid: str = "wavefinity") -> tuple[float, float]:
+    pitch = GRID_PITCHES[validate_grid(grid)]
+    return tuple(max(1, math.floor(value / pitch + 0.5)) * pitch
+                 for value in STORAGE_DRAWERS_DEFAULT_FIELD_MM)
+
+
+def storage_drawers_default_usable_height(grid: str = "wavefinity") -> float:
+    if validate_grid(grid) == "wavefinity":
+        return STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM
+    from organizer_features.gridfinity import HEIGHT_UNIT
+    return max(1, math.floor(STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM / HEIGHT_UNIT + 0.5)) * HEIGHT_UNIT
+
+
+def storage_drawers_defaults(drawer_count: int = 3, grid: str = "wavefinity", built_in_grid: str = "floor") -> dict:
     if isinstance(drawer_count, bool) or not isinstance(drawer_count, int) or not 1 <= drawer_count <= STORAGE_DRAWERS_MAX_DRAWERS:
         raise ValueError(f"Number of drawers must be {STORAGE_DRAWERS_MIN_DRAWERS}–{STORAGE_DRAWERS_MAX_DRAWERS}")
+    grid = validate_grid(grid)
+    mode = validate_built_in_grid(built_in_grid) if grid != "wavefinity" else "floor"
+    base = STORAGE_DRAWER_MATERIAL_DEFAULT_MM
+    if grid != "wavefinity" and mode == "floor":
+        from organizer_features.gridfinity import minimum_floor_build
+        base = minimum_floor_build(grid)
+    height = storage_drawers_default_usable_height(grid) - STORAGE_DRAWER_FIT_DEFAULT
     return {
-        "grid": "wavefinity", "built_in_grid": "floor",
+        "grid": grid, "built_in_grid": mode,
         "seated_lift_mm": None,
-        "drawers": [new_drawer_descriptor() for _ in range(drawer_count)],
+        "drawers": [new_drawer_descriptor(height, STORAGE_DRAWER_FIT_DEFAULT) for _ in range(drawer_count)],
         "cabinet_style": "full", "rear_support": "cross", "open_frame_width_mm": 14.0,
         "wall_mounting": "off", "wall_mount_keyholes_per_drawer": 2,
         "drawer_fit_mm": 0.40, "drawer_handles": True, "drawer_handle_size": "auto",
@@ -116,14 +137,18 @@ def storage_drawers_defaults(drawer_count: int = 3) -> dict:
         "drawer_labels_enabled": False, "drawer_label_style": "inlaid",
         "cabinet_wall_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM, "cabinet_base_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM,
         "cabinet_top_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM,
-        "drawer_wall_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM, "drawer_base_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM,
+        "drawer_wall_mm": STORAGE_DRAWER_MATERIAL_DEFAULT_MM, "drawer_base_mm": base,
     }
 
 
 def normalise_storage_drawers_block(raw: object) -> dict:
     if not isinstance(raw, dict):
         raise ValueError("Storage Drawers settings must be an object")
-    defaults = storage_drawers_defaults(1)
+    grid = validate_grid(raw.get("grid", "wavefinity"))
+    if grid != "wavefinity" and "built_in_grid" not in raw:
+        raise ValueError("Choose Floor or None for a Gridfinity cabinet.")
+    mode = validate_built_in_grid(raw["built_in_grid"]) if grid != "wavefinity" else "floor"
+    defaults = storage_drawers_defaults(1, grid, mode)
     rows = raw.get("drawers")
     if not isinstance(rows, list) or not 1 <= len(rows) <= STORAGE_DRAWERS_MAX_DRAWERS:
         raise ValueError("Number of drawers must be 1–32")
@@ -142,9 +167,7 @@ def normalise_storage_drawers_block(raw: object) -> dict:
         if height + fit < STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM:
             raise ValueError(f"Drawer usable height must be at least {STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM:g} mm")
         drawers.append({"id": drawer_id, "height_mm": _usable_drawer_height(height, fit), "label_text": _label(row.get("label_text", ""), "Drawer label")})
-    result = {"drawers": drawers,
-              "grid": validate_grid(raw.get("grid", "wavefinity")),
-              "built_in_grid": validate_built_in_grid(raw.get("built_in_grid", "floor"))}
+    result = {"drawers": drawers, "grid": grid, "built_in_grid": mode}
     result["cabinet_style"] = _choice(raw.get("cabinet_style", defaults["cabinet_style"]), ("full", "open"), "cabinet style")
     result["rear_support"] = _choice(raw.get("rear_support", defaults["rear_support"]), ("cross", "solid"), "rear support")
     result["wall_mounting"] = _choice(raw.get("wall_mounting", defaults["wall_mounting"]), ("off", "keyholes"), "wall mounting")
@@ -171,20 +194,25 @@ def normalise_storage_drawers_block(raw: object) -> dict:
         result[key] = _number(raw.get(key, defaults[key]), _MATERIAL_TITLES[key], floor, maximum)
     if pocket_floor:
         validate_floor_build(result["grid"], result["drawer_base_mm"])
-    result["seated_lift_mm"] = measured_seated_lift(raw.get("seated_lift_mm"))
+    result["seated_lift_mm"] = measured_seated_lift(raw.get("seated_lift_mm")) if grid != "wavefinity" else None
     return result
 
 
 def prepare_new_storage_drawers_definition(raw: dict) -> dict:
     prepared = copy.deepcopy(raw)
+    grid = validate_grid(prepared.get("grid"))
+    for axis, value in zip(("x", "y"), storage_drawers_field_defaults(grid)):
+        prepared.setdefault(axis, value)
     block = prepared.get("storage_drawers")
     if not isinstance(block, dict) or not isinstance(block.get("drawers"), list):
         raise ValueError("Storage Drawers settings are missing")
+    fit = _choice(block.get("drawer_fit_mm", STORAGE_DRAWER_FIT_DEFAULT), STORAGE_DRAWER_FIT_CHOICES, "drawer fit")
     for row in block["drawers"]:
         if not isinstance(row, dict):
             raise ValueError("Drawer must be an object")
         if "id" not in row:
             row["id"] = str(uuid.uuid4())
+        row.setdefault("height_mm", storage_drawers_default_usable_height(grid) - fit)
     return normalise_storage_drawers_definition(prepared)
 
 
@@ -196,14 +224,25 @@ def normalise_storage_drawers_definition(raw: dict) -> dict:
     settings = dict(raw.get("storage_drawers") or {})
     if "grid" in settings and validate_grid(settings["grid"]) != result["grid"]:
         raise ValueError("Storage Drawers grid must match its Space grid.")
-    result["built_in_grid"] = validate_built_in_grid(raw.get("built_in_grid", settings.get("built_in_grid", "floor")))
+    if result["grid"] != "wavefinity":
+        if "built_in_grid" not in raw and "built_in_grid" not in settings:
+            raise ValueError("Choose Floor or None for a Gridfinity cabinet.")
+        result["built_in_grid"] = validate_built_in_grid(raw.get("built_in_grid", settings.get("built_in_grid")))
+        if "built_in_grid" in settings and validate_built_in_grid(settings["built_in_grid"]) != result["built_in_grid"]:
+            raise ValueError("Storage Drawers floor must match its Space floor.")
+    else:
+        result["built_in_grid"] = "floor"
+        # Discard Gridfinity-only derived fields when reading a legacy cabinet.
+        for key in ("floor_grid", "floor_mode", "nominal_grid_mm", "physical_cavity_mm",
+                    "external_plate_clearance_per_side_mm", "external_plate_clearance_status",
+                    "seated_lift_mm", "seated_lift_status", "height_fit_verified"):
+            result.pop(key, None)
     result["name"] = _label(raw.get("name", ""), "Space name")
     if not result["name"]:
         raise ValueError("Enter a Space name")
     for axis in ("x", "y"):
         mm = _number(raw.get(axis), f"Space {axis}")
         units = mm / BASE_UNIT
-        from organizer_engine._specs import GRID_PITCHES
         minimum_units = GRID_PITCHES[result["grid"]] / BASE_UNIT if result["grid"] != "wavefinity" else STORAGE_DRAWERS_MIN_UNITS
         if not math.isclose(units, round(units), abs_tol=1e-8) or not minimum_units <= round(units) <= STORAGE_DRAWERS_MAX_UNITS:
             if result["grid"] != "wavefinity":
@@ -211,6 +250,8 @@ def normalise_storage_drawers_definition(raw: dict) -> dict:
             raise ValueError(f"Space {axis} must be 6–250 whole units")
         result[axis] = round(units) * BASE_UNIT
     settings.update(grid=result["grid"], built_in_grid=result["built_in_grid"])
+    if "seated_lift_mm" not in settings and "seated_lift_mm" in raw:
+        settings["seated_lift_mm"] = raw["seated_lift_mm"]
     result["storage_drawers"] = normalise_storage_drawers_block(settings)
     from organizer_features.gridfinity import container_floor_record
     record = container_floor_record(result["grid"], result["built_in_grid"], result["x"], result["y"],
@@ -251,19 +292,24 @@ def reset_storage_drawers_definition(raw: object) -> dict:
     base["kind"] = STORAGE_DRAWERS_KIND
     name = _attempt(_label, source.get("name", ""), "Space name")
     base["name"] = name or "Storage Drawers"
+    grid = validate_grid(source.get("grid", "wavefinity"))
+    pitch = GRID_PITCHES[grid]
     for axis in ("x", "y"):
         mm = _attempt(_number, source.get(axis), f"Space {axis}")
         units = None if mm is None else mm / BASE_UNIT
-        valid = units is not None and math.isclose(units, round(units), abs_tol=1e-8)             and STORAGE_DRAWERS_MIN_UNITS <= round(units) <= STORAGE_DRAWERS_MAX_UNITS
+        minimum_units = STORAGE_DRAWERS_MIN_UNITS if grid == "wavefinity" else pitch / BASE_UNIT
+        valid = (units is not None and math.isclose(units, round(units), abs_tol=1e-8)
+                 and minimum_units <= round(units) <= STORAGE_DRAWERS_MAX_UNITS)
         base[axis] = (round(units) if valid else STORAGE_DRAWERS_MIN_UNITS) * BASE_UNIT
+        if grid != "wavefinity":
+            base[axis] = max(1, math.floor(base[axis] / pitch + 0.5)) * pitch
     block_in = source.get("storage_drawers")
     block_in = block_in if isinstance(block_in, dict) else {}
-    defaults = storage_drawers_defaults(1)
-    from organizer_features.gridfinity import PROFILES, floor_pocket_depth, measured_seated_lift
-    grid = validate_grid(source.get("grid", "wavefinity"))
-    mode = validate_built_in_grid(source.get("built_in_grid", block_in.get("built_in_grid", "floor")))
+    from organizer_features.gridfinity import PROFILES, floor_pocket_depth, measured_seated_lift, minimum_floor_build
+    mode = validate_built_in_grid(source.get("built_in_grid", block_in.get("built_in_grid", "floor"))) if grid != "wavefinity" else "floor"
+    defaults = storage_drawers_defaults(1, grid, mode)
     block = {"grid": grid, "built_in_grid": mode,
-             "seated_lift_mm": _attempt(measured_seated_lift, block_in.get("seated_lift_mm"))}
+             "seated_lift_mm": _attempt(measured_seated_lift, block_in.get("seated_lift_mm", base.get("seated_lift_mm")))}
     for key, choices in (("cabinet_style", ("full", "open")), ("rear_support", ("cross", "solid")),
                          ("wall_mounting", ("off", "keyholes")),
                          ("wall_mount_keyholes_per_drawer", (2, 4)),
@@ -288,6 +334,8 @@ def reset_storage_drawers_definition(raw: object) -> dict:
         value = _attempt(_number, block_in.get(key, defaults[key]), key,
                          floor, maximum)
         block[key] = defaults[key] if value is None else value
+        if grid in PROFILES and mode == "floor" and key == "drawer_base_mm":
+            block[key] = max(block[key], minimum_floor_build(grid))
     rows = block_in.get("drawers")
     kept, seen = [], set()
     for row in (rows if isinstance(rows, list) else [])[:STORAGE_DRAWERS_MAX_DRAWERS]:
@@ -302,7 +350,7 @@ def reset_storage_drawers_definition(raw: object) -> dict:
             ORDINARY_BIN_MIN_HEIGHT_MM,
         )
         if height is None or _attempt(_usable_drawer_height, height, block["drawer_fit_mm"]) is None:
-            height = STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - block["drawer_fit_mm"]
+            height = storage_drawers_default_usable_height(grid) - block["drawer_fit_mm"]
         elif height + block["drawer_fit_mm"] < STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM:
             height = STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM - block["drawer_fit_mm"]
 
@@ -316,7 +364,7 @@ def reset_storage_drawers_definition(raw: object) -> dict:
             "label_text": label,
         })
     if not kept:
-        kept = [new_drawer_descriptor(STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM - block["drawer_fit_mm"], block["drawer_fit_mm"]) for _ in range(3)]
+        kept = [new_drawer_descriptor(storage_drawers_default_usable_height(grid) - block["drawer_fit_mm"], block["drawer_fit_mm"]) for _ in range(3)]
     block["drawers"] = kept
     base["storage_drawers"] = block
     return normalise_storage_drawers_definition(base)
@@ -328,7 +376,8 @@ def storage_drawers_compatibility_z(block: dict) -> float:
 
 def storage_drawers_unit_counts(space: dict) -> tuple[int, int]:
     canonical = normalise_storage_drawers_definition(space)
-    return int(canonical["x"] / BASE_UNIT), int(canonical["y"] / BASE_UNIT)
+    pitch = GRID_PITCHES[canonical["grid"]]
+    return round(canonical["x"] / pitch), round(canonical["y"] / pitch)
 
 
 def storage_drawers_active_limits(space: dict, drawer_id: str | None) -> dict:
@@ -339,14 +388,15 @@ def storage_drawers_active_limits(space: dict, drawer_id: str | None) -> dict:
     from organizer_storage.drawer_geometry import storage_drawers_usable_heights
     usable = storage_drawers_usable_heights(canonical)
     row = rows[index]
-    return {"x": canonical["x"], "y": canonical["y"], "z": usable[index], "drawer_id": row["id"]}
+    return {"x": canonical["x"], "y": canonical["y"], "z": usable[index], "drawer_id": row["id"], "grid": canonical["grid"], "built_in_grid": canonical["built_in_grid"], "seated_lift_mm": canonical["storage_drawers"]["seated_lift_mm"]}
 
 
 def storage_drawers_recent_summary(space: dict) -> str:
     canonical = normalise_storage_drawers_definition(space)
     x, y = storage_drawers_unit_counts(canonical)
     drawer_total = len(canonical["storage_drawers"]["drawers"])
-    return f"{drawer_total} {'drawer' if drawer_total == 1 else 'drawers'} · {x} × {y} units"
+    unit = "units" if canonical["grid"] == "wavefinity" else f"{grid_label(canonical['grid'])} cells"
+    return f"{drawer_total} {'drawer' if drawer_total == 1 else 'drawers'} · {x} × {y} {unit}"
 
 
 def storage_drawers_projection(space: dict) -> list[dict]:
@@ -356,7 +406,7 @@ def storage_drawers_projection(space: dict) -> list[dict]:
     from organizer_features.gridfinity import container_floor_record
     record = container_floor_record(canonical["grid"], canonical["built_in_grid"], canonical["x"], canonical["y"],
                                     canonical["storage_drawers"]["seated_lift_mm"])
-    return [{"id": row["id"], "name": f"Drawer {i}", "width": canonical["x"], "depth": canonical["y"], "height": usable[i-1], "clearance": 0.0, "boundary": "mating", "placements": [], **record} for i, row in enumerate(canonical["storage_drawers"]["drawers"], 1)]
+    return [{"id": row["id"], "name": f"Drawer {i}", "width": canonical["x"], "depth": canonical["y"], "height": usable[i-1], "clearance": 0.0, "boundary": "mating", "placements": [], **({"grid": canonical["grid"]} if canonical["grid"] != "wavefinity" else {}), **record} for i, row in enumerate(canonical["storage_drawers"]["drawers"], 1)]
 
 
 def reconcile_storage_drawers_layout(layout: dict, space: dict) -> dict:
@@ -435,9 +485,29 @@ def plan_delete_drawer(space: dict, layout: dict, drawer_id: str) -> tuple[dict,
     return canonical, updated, updated["active"]
 
 
+def retain_storage_drawers_fields(proposed: dict, existing: dict) -> dict:
+    """Cabinet-only creation choices; all mutation paths use the persisted record."""
+    result = retain_space_grid(proposed, existing)
+    grid = result["grid"]
+    wanted_block = result.get("storage_drawers")
+    wanted_block = wanted_block if isinstance(wanted_block, dict) else {}
+    if "grid" in wanted_block:
+        retain_space_grid({"grid": wanted_block["grid"]}, existing)
+    block = existing.get("storage_drawers")
+    block = block if isinstance(block, dict) else {}
+    saved = existing.get("built_in_grid", block.get("built_in_grid", "floor"))
+    if grid != "wavefinity":
+        saved = validate_built_in_grid(saved)
+        for wanted in (result.get("built_in_grid"), wanted_block.get("built_in_grid")):
+            if wanted is not None and validate_built_in_grid(wanted) != saved:
+                raise ValueError(f"A Storage Drawers floor is immutable: {saved} cannot become {wanted}. Create a new Space for another floor.")
+        result["built_in_grid"] = saved
+    return result
+
+
 def plan_reconfigure(space: dict, layout: dict, proposed_space: dict, bins: list[dict]) -> tuple[dict, dict]:
     current = reconcile_storage_drawers_layout(layout, space)
-    proposed = normalise_storage_drawers_definition(retain_space_grid(proposed_space, current["space"]))
+    proposed = normalise_storage_drawers_definition(retain_storage_drawers_fields(proposed_space, current["space"]))
     old_ids = [row["id"] for row in current["space"]["storage_drawers"]["drawers"]]
     new_ids = [row["id"] for row in proposed["storage_drawers"]["drawers"]]
     if old_ids != new_ids:
