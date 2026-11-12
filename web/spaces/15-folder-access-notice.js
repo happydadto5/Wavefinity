@@ -29,7 +29,14 @@ SP.hideFolderAccessNotice = () => {
     SP.folderNoticeTimer = null;
   }
   const notice = document.getElementById("folder-access-notice");
-  if (notice) notice.hidden = true;
+  document.querySelectorAll("[data-folder-notice-inert]").forEach(el => {
+    el.inert = false;
+    el.removeAttribute("data-folder-notice-inert");
+  });
+  if (notice) {
+    if (notice.open) notice.close();
+    notice.hidden = true;
+  }
 };
 
 SP.wireFolderAccessNotice = () => {
@@ -40,9 +47,22 @@ SP.wireFolderAccessNotice = () => {
     if (SP.pendingReconnect) SP.reconnectSavedFolder();
     else SP.open();
   });
-  document.getElementById("folder-access-dismiss")?.addEventListener("click", SP.hideFolderAccessNotice);
-  document.getElementById("folder-access-suppress")?.addEventListener("change", event => {
-    SP.setFolderNoticeSuppressed(event.target.checked);
+  // "Design bins only": record the existing suppression key, then close.
+  document.getElementById("folder-access-dismiss")?.addEventListener("click", () => {
+    SP.setFolderNoticeSuppressed(true);
+    SP.hideFolderAccessNotice();
+  });
+  // Escape must not dismiss the modal.
+  notice.addEventListener("cancel", event => event.preventDefault());
+  // Trap Tab between the two buttons while open.
+  notice.addEventListener("keydown", event => {
+    if (event.key !== "Tab") return;
+    const first = document.getElementById("folder-access-choose");
+    const last = document.getElementById("folder-access-dismiss");
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    else if (document.activeElement !== first && document.activeElement !== last) { event.preventDefault(); first.focus(); }
   });
 };
 
@@ -53,14 +73,21 @@ SP.showFolderAccessNoticeIfNeeded = () => {
   if (!notice || !state.runtime?.hosted) return;
   if (SP.canPersistSpace() || SP.folderNoticeSuppressed()) return;
   SP.wireFolderAccessNotice();
-  const checkbox = document.getElementById("folder-access-suppress");
-  if (checkbox) checkbox.checked = false;
   const choose = document.getElementById("folder-access-choose");
   if (choose) choose.textContent = SP.pendingReconnect ? "Reconnect folder" : "Choose folder";
   const homeHelp = document.getElementById("folder-access-home-help");
   if (homeHelp) homeHelp.hidden = !SP.pendingReconnect?.homeReconnect;
   notice.hidden = false;
-  // Choosing a folder happens elsewhere (Welcome / Spaces); drop the banner as
+  // Make the dialog the only interactive surface: inert every other top-level
+  // element (app shell, welcome dialog, ...) and focus Choose folder.
+  Array.from(document.body.children).forEach(el => {
+    if (el === notice || el.tagName === "SCRIPT" || el.inert) return;
+    el.inert = true;
+    el.setAttribute("data-folder-notice-inert", "1");
+  });
+  if (!notice.open && typeof notice.showModal === "function") notice.showModal();
+  choose?.focus();
+  // Choosing a folder happens elsewhere (Welcome / Spaces); drop the dialog as
   // soon as access exists, without touching the suppression preference.
   if (!SP.folderNoticeTimer) {
     SP.folderNoticeTimer = setInterval(() => {

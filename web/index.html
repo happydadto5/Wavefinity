@@ -1125,19 +1125,20 @@
     </dialog>
 
 
-  <div id="folder-access-notice" class="folder-access-notice" role="status" hidden>
-    <div class="folder-access-copy">
-      <strong>Pick a folder to keep your designs in</strong>
-      <span>Choose a folder to enable Inventory and Spaces. You can still design and download parts without it.</span>
-      <span>Your browser will ask twice. Choose Allow both times.</span>
-      <span id="folder-access-home-help" hidden>Your browser may offer "Allow on every visit" — choose it so you are not asked again.</span>
+  <dialog id="folder-access-notice" class="folder-access-notice" role="dialog" aria-modal="true" aria-labelledby="folder-access-title" hidden>
+    <div class="folder-access-panel">
+      <div class="folder-access-copy">
+        <strong id="folder-access-title">Pick a folder to keep your designs in</strong>
+        <span>Wavefinity saves your Spaces and Inventory in a folder on this computer, so everything is here next time you visit. Your browser will ask twice - choose Allow both times.</span>
+        <span id="folder-access-home-help" hidden>Your browser may offer "Allow on every visit" — choose it so you are not asked again.</span>
+      </div>
+      <div class="folder-access-actions">
+        <button id="folder-access-choose" class="button primary" type="button">Choose folder</button>
+        <button id="folder-access-dismiss" class="button" type="button">Design bins only</button>
+        <p class="folder-access-bins-note">I don't want to use all the features of the app. I just want to create bins</p>
+      </div>
     </div>
-    <div class="folder-access-actions">
-      <button id="folder-access-choose" class="button primary" type="button">Choose folder</button>
-      <label class="folder-access-suppress"><input id="folder-access-suppress" type="checkbox"> Don't show me again</label>
-      <button id="folder-access-dismiss" class="button" type="button">Dismiss</button>
-    </div>
-  </div>
+  </dialog>
   <div id="update-banner" class="update-banner" role="status" hidden>
     <span>Wavefinity was updated. This update requires the page to reload before you continue.</span>
     <button id="update-banner-reload" class="button primary" type="button">Reload</button>
