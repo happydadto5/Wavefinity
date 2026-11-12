@@ -122,7 +122,7 @@ Deliverable: worker protocol and local dispatcher code for timeout, cancellation
 
 Requires: B03.
 Existing files: wavefinity_web.py (reference only), wavefinity_web_impl/_designs/*.py, web/app/02-lifecycle-ai-help.js, web/app/03-history-utils-catalog.js, web/app/10-draft-update-commit.js, web/app/11-parts-preview-requests.js.
-Create `web/browser-core/engine/route-dispatch.py` with a `register_routes(routes)` API and the initial B04 route map. **B04 owns this central file during its creation; B14 alone updates it at final assembly** to import/merge B05/06/08/09/10/11/12/13 route maps. Later packages export their own `ROUTES` and **do not edit central dispatcher**. Python-owned and JS-owned routes can each be registered by the B03 local API adapter; B14 wires their final combined path table. The B14 assembly is shared integration, not a second route owner.
+Create `web/browser-core/engine/route-dispatch.py` with a `register_routes(routes)` API and the initial B04 route map. **B04 owns this central file during its creation; B14 alone updates it at final assembly** to import/merge PYTHON route maps exported by B05, B06, B08, B10, B11, B12 and the Python AI portion of B13. **B09's Space/folder routes and B13's browser-only capability/provider routes are JavaScript and cannot be imported into Python**: B14 wires those separately into B03's `local-api.js` dispatch map. Later packages export `ROUTES` in their own Python/JS module and **do not edit central dispatcher**. Registration wiring is shared integration, not a second semantic owner. The B14 assembly is shared integration, not a second route owner.
 Patch:
 1. Own `/api/catalog`, `/api/design/validate`, `/api/design/inventory-preview`, `/api/design/division-label-fit`, `/api/feature/default/draft/fit/apply/duplicate/delete`, `/api/layout/mode/expand` and `/api/pegboard/layouts`. **Do not own** `/api/health` or operation status (B03), `/api/sampler` (B06), `/api/pegboard/hooks` (B11), or any Storage Drawers summary/validation (B11). Call existing canonical source, not duplicated formulas.
 2. Call original Python implementations with environment adapters rather than duplicated constants. Preserve 7 mm Wavefinity and 21/42 mm Gridfinity rules, Space fit, error shapes and feature order; include all imported source dependencies identified by reading the dispatch graph.
@@ -133,7 +133,7 @@ Deliverable: complete local equivalents for listed edit/validation operations, w
 
 Requires: B04.
 Existing files: web/app/11-parts-preview-requests.js (refreshPreview, adoptPreviewResult), web/app/12-3d-preview-render.js, web/preview3d-webgl.js, web/app/01-runtime-state.js, web/app/04-side-openings-wall-choices.js, web/app/13-layout-geometry.js.
-No testing files created.
+Create `web/browser-core/engine/preview-routes.py` exporting Python `ROUTES` for `/api/preview`. No testing files.
 Patch:
 1. Route /api/preview and any dependent nest/layout/feature previews to browser-core worker using the native canonical geometry; keep payload and returned preview_mesh/layout/status shapes compatible.
 2. Preserve mutation controls, stale preview epoch logic, last-valid preview, warning banners, fit/feature errors, and exact nested_clearance/seam rules. Progress events use current preview wait UI; do not block the main thread.
@@ -169,7 +169,7 @@ Deliverable: browser 3MF packager implementing the existing output metadata, obj
 
 Requires: B07.
 Existing files: web/app/15-generate-dialogs.js (printModelWithReport, saveGeneratedFiles, browseSlicer, watchServerVersion), web/printer-profile.js, web/spaces/13-printer-profiles.js, web/browser-files.js.
-No testing files created.
+Create `web/browser-core/engine/print-routes.py` exporting Python `ROUTES` for `/api/print`, delegating actual 3MF preparation to B07 and output builders from B06. No testing files.
 Patch:
 1. Route /api/print and reusable print operations through browser output builder. Preserve printer volume limits, part/plate packing, labels and status on inventory rows.
 2. KEEP the current Print buttons and part selection dialogs. Replace only the prohibited native executable auto-launch with the Print contract above: autosave, validation, generation/reuse, arranged 3MF, save/download, explicit slicer-opening handoff. Preserve a separate Export action. Do not report "Sent to slicer" without verified proof.
@@ -180,7 +180,7 @@ Deliverable: Print remains a real main-UI command with browser-side 3MF preparat
 
 Requires: B04 (B03 transitively). **B05 preview is not required for Space/persistence implementation.**
 Existing files: web/browser-files.js, web/spaces/01-core.js, web/spaces/03-safe-switching.js, web/spaces/04-metadata-persistence.js, web/spaces/05-space-memory.js, web/spaces/07-welcome-folders.js, web/spaces/08-space-setup.js, web/spaces/09-event-wiring.js, web/app/02-lifecycle-ai-help.js.
-Create web/browser-core/space-store.js, web/browser-core/preferences.js.
+Create `web/browser-core/space-store.js` and `web/browser-core/preferences.js`, exporting a **JavaScript** local `ROUTES` map for Space/folder/preferences and browser File System Access operations. Do not attempt to import JavaScript handlers into Python.
 Patch:
 1. Retain .wavefinity.json (current metadata version), Space ID, Wavefinity bins.md and existing File System Access/IndexedDB handle semantics as authority. No fake server paths or parallel invented database for the same Space. Use IndexedDB for preference/recovery only; persist printer and UI preferences by origin and preserve explicit export/import.
 2. B09 owns `/api/preferences`, `/api/folder/*`, `/api/browse-output-folder`, `/api/space/show-folder`, `/api/space/warm`, `/api/space/startup/inspect/other-spaces/storage-state/storage-plan/storage-change/use-untyped/create/configure/create-text/configure-text/copy-text/copy-name/copy/delete/open/no-inventory/update/forget/defaults/resume/printer-profile/storage-parent/browse-storage-parent`. Reuse `WFFileSystem` and current file handle APIs; replace the old show-folder command with an in-app reveal/current-folder display appropriate to a browser. **B13 must not implement this route**. B13 owns `/api/browse-slicer-path` and `/api/show-log`, not B09.
@@ -190,7 +190,7 @@ Deliverable: local Space and preference implementations preserve current metadat
 
 ### B10 — Inventory and drawer flow parity
 
-Requires: B06, B09.
+Requires: B06, B09 and B08 (shared browser Print engine required for B10-owned drawer print routes).
 Existing files: web/drawer-model.js, web/drawer-panel.js, web/drawer-view.js, web/spaces/06-inventory-io.js, organizer_drawer/{_core,_inventory,_report,_spacers}.py and organizer_inventory/*.py.
 Create web/browser-core/engine/drawer-routes.py.
 Patch:
@@ -233,7 +233,7 @@ Deliverable: advanced-feature routes use the local engine, with equivalent geome
 
 Requires: B08, B09 and B12. **B13 is serialized after B08 for `web/app/15-generate-dialogs.js`, and after B12 for `web/spaces/12-space-info.js`; this forbids concurrent same-file edits on main.**
 Existing files: web/app/02-lifecycle-ai-help.js, wavefinity_web.py (AI handlers), web/spaces/12-space-info.js, web/app/15-generate-dialogs.js, web/app/16-suggestions.js, web/index.html.
-Create web/browser-core/capabilities.js, docs/static-capability-differences.md.
+Create `web/browser-core/capabilities.js` (JavaScript `ROUTES` for AI provider connection, suggestions, slicer/log/capabilities), `web/browser-core/engine/ai-routes.py` (Python `ROUTES` for local AI prompt/candidate/repair logic from canonical functions), and `docs/static-capability-differences.md`. B14 integrates the JS and Python route maps at their respective dispatch layers; no Python import of `.js`.
 Patch:
 1. **Preserve AI Help, not silently disable it.** Keep existing prompt generation, candidate validation, copying/pasting provider responses, history where present, and user-facing AI Help UI. Direct AI-provider chat may call a third-party endpoint **only with a user-supplied credential, provider-supported browser CORS and explicit user action**; never expose Wavefinity-held secrets or quietly proxy through the retired Python service. **Blocking product decision before B13 Story submission:** if direct AI chat cannot be retained safely, present Andrew with the concrete limitation and choose between copy/paste-only mode or another owner-approved service design **before Stories are submitted**, not during B14. Do not let the coder decide this tradeoff. See the Velexa debate file.
 2. B13 exclusively owns `/api/suggestions`, `/api/browse-slicer-path`, `/api/show-log` and browser-only UI capability notices. **B09 owns `/api/space/show-folder`**. B08 already owns the Print flow, so B13 may change only browser-native capability/slicer UI there; it cannot delete Print or its route. Preserve truthful labels and external AI privacy.
@@ -252,7 +252,7 @@ Create: `scripts/build-static-site.py` (production asset copier/bundler only), `
 
 Patch (implementation, not testing):
 1. Ship `dist/index.html` from `web/index.html`, approved production `web/*` UI paths at dist root, repository-root `images/` at `dist/images/`, and `Brochure.md` at **BOTH** `dist/Brochure.md` and byte-identical `dist/brochure.md`. **EXCLUDE** `web/browser-local-poc.html`, `web/browser-local-poc.js`, `web/browser-local-poc-worker.js`, and **ALL** `web/browser-local-poc/**`, even though B16 deletes them only later. The bridge must ship from its B02 production vendor path. Do not ship non-production source, tests or secrets.
-2. Replace core HTTP with worker-local dispatch. **B14 alone finalizes `web/browser-core/engine/route-dispatch.py`**, importing each package's `ROUTES` map into B04's registry; that is shared wiring, not semantic ownership. Keep Print/Export separate, Bambu 3MF, Space state and preview. Source-review the final imports/asset paths logically, not by tests or browser automation. Specify MIME, CSP and Cache-Control in **new Render Static Site Dashboard → Settings → Headers**, using exact paths in the diff map; do not alter legacy `render.yaml`. Pinned bridge is single-threaded and does not require COOP/COEP.
+2. Replace core HTTP with worker-local dispatch. **B14 alone finalizes `web/browser-core/engine/route-dispatch.py`** by importing Python `ROUTES` from B04/B05/B06/B08/B10/B11/B12 and B13's Python AI module. **Separately**, B14 attaches B09's local filesystem/Space and B13's browser capability/provider JavaScript `ROUTES` to B03 `web/browser-core/local-api.js`. No Python-to-JS module imports. This is shared wiring, not duplicate route ownership. Keep Print/Export separate, Bambu 3MF, Space state and preview. Source-review the final imports/asset paths logically, not by tests or browser automation. Specify MIME, CSP and Cache-Control in **new Render Static Site Dashboard → Settings → Headers**, using exact paths in the diff map; do not alter legacy `render.yaml`. Pinned bridge is single-threaded and does not require COOP/COEP.
 3. **Choose Render Static Site** in the existing Render account, free within current bandwidth/build limits, HTTPS/custom domains, without sleeping Python process. The old Web Service cannot convert in place; prepare a NEW Static Site on `happydadto5/Wavefinity` `main`, publishing `dist` from the self-contained shipping build (provisionally `python3 scripts/build-static-site.py`). Auto-deploy OFF initially. Before a hosting change, use B02's shipping-bundle asset sizes and current Render limits; no hosting surprises deferred from B02. Do not provision or touch `render.yaml` early.
 4. Preserve Porkbun registration and authoritative nameservers, apex `wavefinity.org` and `www` redirect. Existing exact live DNS record values are in PRIVATE Help-Code, not in public plans; read them when Andrew approves. Attach the domain to the NEW actual Render Static Site hostname and edit only necessary records **within Porkbun**; detach old domain association only when needed and approved. **NEVER** silently detach domains, modify DNS, change plans, disable the old service or incur charges.
 5. **ASK/TELL ANDREW AT THE RIGHT TIME:** On completion, explain the final static edition no longer has Render's ~60-second sleeping Python Web Service; disclose remaining first-load browser Pyodide/WASM delay, applicable free limits and any cost; provide exact new Static Site creation settings, real new hostname, and pending Porkbun/Render domain steps. Request authorization to move the domains and retire the old service. This is an operational approval, **not a QA or user-testing checklist**.
@@ -313,7 +313,7 @@ This list is the **single authoritative dependency graph**. Bxx headers above mu
 | B15 | B14 and Andrew's explicit hosting approval | fill rollback record BEFORE old service retires |
 | B16 | B15 | delete obsolete PoC files; already excluded from published dist |
 
-Shared helper dependencies are not second API-route ownership. B10 consumes B08's Print engine but owns every drawer API handler. Each package exports `ROUTES` without editing B04's central dispatcher, which B14 assembles exactly once. Coders avoid overlapping same-file writes by following these edges; no branches/worktrees, no dual running.
+Shared helper dependencies are not second API-route ownership. B10 consumes B08's Print engine but owns every drawer API handler. Each package exports `ROUTES` in its own Python or JavaScript module without editing B04's central dispatcher; B14 assembles the Python module map and JS browser route map once in their matching runtimes. Coders avoid overlapping same-file writes by following these edges; no branches/worktrees, no dual running.
 
 Each coder assignment uses one Bxx package as its scope, reads this file and current main, implements specified files (no tests), and reports changes, limitations and commit SHA. Intermediate packages may leave the UI broken. There are NO coder tests, no test gates and no manual test plans for the user. The owner evaluates the integrated application after final delivery.
 
