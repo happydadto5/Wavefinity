@@ -2847,7 +2847,7 @@ def _combined_space_print(payload: dict[str, Any], cfg: dict[str, Any]) -> dict[
             one = by_id.get(row_id)
             if one is None:
                 continue  # report above names every missing placement
-            if one.get("kind") in ("spacer", "manual") or one.get("status") == "printed":
+            if one.get("kind") in ("spacer", "manual", "standin") or one.get("status") == "printed":
                 continue
             if one.get("kind") not in ("bin", "b4b"):
                 issues.append(f"{one.get('name') or row_id}: this row cannot be printed")
@@ -3434,6 +3434,12 @@ def _checked_entry_payload(payload: dict[str, Any]) -> dict[str, Any]:
     elif row_id:
         source = current
     if source is not None and row_id:
+        standin = next((one for one in source.get("bins", []) if one.get("id") == row_id and one.get("kind") == "standin"), None)
+        if standin is not None:
+            # A stand-in has no design: only its own pitch's grid is held to the
+            # destination Space, by the same authority as a real bin's design.
+            checked_design_entry({"grid": standin["grid"]}, destination)
+            return dict(payload)
         raw_source = design_specs(source.get("layout")).get(row_id)
         if not isinstance(raw_source, dict):
             raise ValueError("The saved source bin could not be verified.")

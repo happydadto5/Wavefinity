@@ -426,7 +426,51 @@ def _interior_components(items: list[dict[str, Any]], cols: int, rows: int) -> l
 def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach: str = "column",
                   layout: dict[str, Any] | None = None) -> dict[str, Any]:
     """Everything the Layout view says about one drawer: fill, what is left,
-    what is wrong, what is still to print, and the connectors it needs."""
+    what is wrong, what is still to print, and the connectors it needs.
+
+    Story 3010: a stand-in whose height is Not measured (None) has no height to
+    measure. Its footprint is placed and checked normally, but every vertical
+    verdict that involves it (too tall, behind-taller, anything stacked on it) is
+    withheld and replaced by an advisory "unverified" problem - never a pass.
+    """
+    unknown = {one["id"] for one in bins if one.get("kind") == "standin" and one.get("z") is None}
+    if not unknown:
+        return _measured_drawer_report(raw_drawer, bins, reach, layout)
+    # The placeholder height only lets the footprint math run; nothing it
+    # produces about height is reported.
+    stand_in = [{**one, "z": 1.0} if one["id"] in unknown else one for one in bins]
+    report = _measured_drawer_report(raw_drawer, stand_in, reach, layout)
+    drawer_placements = [p for p in (raw_drawer.get("placements") or []) if isinstance(p, dict)]
+    keys = {_key(p) for p in drawer_placements if p.get("bin") in unknown}
+    above: set[str] = set()
+    while True:  # everything stacked, at any depth, on an unmeasured stand-in
+        more = {_key(p) for p in drawer_placements if p.get("on") in (keys | above)} - above
+        if not more:
+            break
+        above |= more
+    touched = keys | above
+    report["problems"] = [
+        one for one in report.get("problems") or []
+        if not (one.get("type") in ("too_tall", "height", "stack", "clearance") and touched & set(one.get("keys") or ()))
+    ]
+    names = {one["id"]: str(one.get("name") or one["id"]) for one in bins}
+    for placement in drawer_placements:
+        key = _key(placement)
+        if key in keys:
+            report["problems"].append({
+                "type": "unverified", "severity": "advisory", "keys": [key],
+                "message": f"{names[placement['bin']]}: height Not measured - vertical fit is unverified",
+            })
+        elif key in above:
+            report["problems"].append({
+                "type": "unverified", "severity": "advisory", "keys": [key],
+                "message": f"{names.get(placement.get('bin'), placement.get('bin'))} is stacked above a stand-in with Not measured height - the stack is unverified",
+            })
+    return report
+
+
+def _measured_drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach: str = "column",
+                            layout: dict[str, Any] | None = None) -> dict[str, Any]:
     drawer = normalise_drawer(drawer_in_space(raw_drawer, layout))
     if drawer.get("boundary") == "pegboard":
         return _pegboard_report(drawer, bins)

@@ -229,7 +229,8 @@ DV.pegboardCamera = (width, height, drawer) => {
 // ------------------------------------------------------------------ colour
 
 DV.heightRange = () => {
-  const heights = DL.bins.filter(one => !DL.isSpacer(one)).map(one => DL.isSurface() ? DL.effectiveHeight(one) : Number(one.z));
+  // An unmeasured stand-in has no height to place on the scale.
+  const heights = DL.bins.filter(one => !DL.isSpacer(one) && DL.heightKnown(one)).map(one => DL.isSurface() ? DL.effectiveHeight(one) : Number(one.z));
   return heights.length ? [Math.min(...heights), Math.max(...heights)] : [0, 1];
 };
 
@@ -238,6 +239,8 @@ DV.heightRange = () => {
 DV.binColor = (one, range) => {
   let hue, sat, light;
   if (one.kind === "spacer") [hue, sat, light] = one.boundary === "edge" ? [42, 28, 72] : [43, 20, 82];
+  // A third-party stand-in is a fixed warm amber, apart from every height-graded bin.
+  else if (DL.isStandIn(one)) [hue, sat, light] = [30, 70, 66];
   else {
     const height = DL.isSurface() ? DL.effectiveHeight(one) : Number(one.z);
     const t = range[1] > range[0] ? (height - range[0]) / (range[1] - range[0]) : 0.5;
@@ -520,7 +523,7 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
       ctx.font = `700 ${fontSize}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
       ctx.fillText(DV.fitText(ctx, info.name, boxW - 8), cx, cy - lineGap);
       ctx.font = `500 ${subSize}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
-      const compactDetail = `${fmt(one.x)}×${fmt(one.y)} · ${fmt(one.z)} mm`;
+      const compactDetail = `${fmt(one.x)}×${fmt(one.y)} · ${DL.heightText(one)}`;
       ctx.fillText(DV.fitText(ctx, compactDetail, boxW - 8), cx, cy + lineGap);
     } else {
       ctx.font = '600 11px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
@@ -688,7 +691,7 @@ DV.paintScene = (ctx, drawer, cam) => {
       if (!isFlat) if (eye[0] < x0) faces.push(["left", [[x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]]]);
       if (!isFlat) if (eye[0] > x1) faces.push(["right", [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]]]);
       faces.push(["top", flat(x0, y0, x1, y1, z1)]);
-      const stroke = entry.mode === "invalid" || problem === "error" ? "#a8443d" : "rgba(23,37,45,.45)";
+      const stroke = entry.mode === "invalid" || problem === "error" ? "#a8443d" : DL.isStandIn(one) ? "#8a4b08" : "rgba(23,37,45,.45)";
       const screens = faces.map(([side, points]) => ({ side, screen: face(points, DV.tone(color, DV.FACE_TONE[side]), stroke) }));
       ctx.globalAlpha = 1;
       if (DL.isOrdinary(one)) {
@@ -868,9 +871,11 @@ DV.binLabelInfo = (one, stackCount = 1) => {
   const lMm = fmt(one.y);
   const wUnits = DL.mmToUnits ? DL.mmToUnits(one.x) : fmt(Number(one.x) / DL.UNIT);
   const lUnits = DL.mmToUnits ? DL.mmToUnits(one.y) : fmt(Number(one.y) / DL.UNIT);
-  const dimLine = `${wMm} × ${lMm} mm · ${wUnits} × ${lUnits} units`;
+  const dimLine = DL.isStandIn(one) ? `Stand-in · ${wMm} × ${lMm} mm · ${wUnits} × ${lUnits} cells`
+    : `${wMm} × ${lMm} mm · ${wUnits} × ${lUnits} units`;
   const plan = DL.isSurface() ? DL.rowPlanning(one) : null;
-  const heightLine = DL.isSurface()
+  const heightLine = DL.isStandIn(one) ? `${DL.heightText(one)}${DL.heightKnown(one) ? " high" : " · fit unverified"}`
+    : DL.isSurface()
     ? `${fmt(one.z)} mm print · ${plan?.estimated ? "~" : ""}${fmt(DL.effectiveHeight(one))} mm installed planning`
     : `${fmt(one.z)} mm high`;
   const stackNote = stackCount > 1 ? ` · ${stackCount}-high stack` : "";
@@ -889,7 +894,7 @@ DV.stackSummary = bins => {
   return {
     heading: "Stacked Bins",
     binLines: bins.map((one, at) =>
-      `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm (${at === 0 ? "Bottom" : at === last ? "Top" : "Middle"})`),
+      `${fmt(one.x)} × ${fmt(one.y)} × ${DL.heightText(one)} (${at === 0 ? "Bottom" : at === last ? "Top" : "Middle"})`),
   };
 };
 
@@ -1008,7 +1013,7 @@ DV.drawLabel = (ctx, entry, topFace, ink) => {
     ctx.font = `700 ${size}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
     ctx.fillText(DV.fitText(ctx, info.name, width - 6), cx, cy - lineGap);
     ctx.font = `500 ${subSize}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
-    const compactDetail = `${fmt(top.x)}×${fmt(top.y)} · ${fmt(top.z)} mm` + (stackCount > 1 ? ` (${stackCount}×)` : "");
+    const compactDetail = `${fmt(top.x)}×${fmt(top.y)} · ${DL.heightText(top)}` + (stackCount > 1 ? ` (${stackCount}×)` : "");
     ctx.fillText(DV.fitText(ctx, compactDetail, width - 6), cx, cy + lineGap);
   } else {
     ctx.font = `650 ${size}px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;

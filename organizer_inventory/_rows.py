@@ -24,6 +24,7 @@ COLUMNS = (
     ("boundary", "Boundary"), ("flexible", "Flexible"),
     ("pegboard_standard", "Pegboard"),
     ("cleat_x", "Cleat X"), ("cleat_y", "Cleat Y"),
+    ("standin_pitch", "Stand-in pitch (mm)"),
 )
 # bin: generated here.  b4b: a Bin for Bins case.  spacer: made by the Layout
 # view to take up the measured back/right gap left by the placed grid - a
@@ -31,7 +32,14 @@ COLUMNS = (
 # one, or a rigid spacer where the gap is too short to flex.  manual: typed in
 # for a bin printed elsewhere.  Older inventories used a separate "shim" kind
 # for what is now an edge-facing spacer; see the migration in ``_normalise``.
-KINDS = ("bin", "b4b", "spacer", "manual")
+KINDS = ("bin", "b4b", "spacer", "manual", "standin")
+# standin (Story 3010): an external, non-printable layout stand-in for a bin
+# bought or printed elsewhere.  X/Y are whole Gridfinity cells times the pitch
+# (21 or 42 mm); Z is the measured actual exterior height, and a blank Z is a
+# true unknown (None) - never zero and never a default.  It deliberately has no
+# design source, no files and no print status.
+STANDIN_KIND = "standin"
+STANDIN_PITCHES = {21: "gridfinity_half", 42: "gridfinity"}
 # How the bin was printed to stack: not at all, with a snap-on lid, or snapping
 # straight into the bin below. For stackable bins Z is the requested module
 # contribution; the drawer derives the detached envelope from the interface.
@@ -57,6 +65,7 @@ _HEADER_KEYS = {
     "file": "file", "label": "label", "interior part(s)": "interior",
     "interior": "interior", "boundary": "boundary",
     "pegboard": "pegboard_standard", "cleat x": "cleat_x", "cleat y": "cleat_y",
+    "stand-in pitch": "standin_pitch",
 }
 _KEEP = object()
 
@@ -181,7 +190,70 @@ def infer_name(file: str, label: str = "") -> str:
     return stem.strip()
 
 
+def standin_pitch(value: Any) -> int:
+    """The stand-in pitch in mm: only 21 (Gridfinity half) or 42 (Gridfinity)."""
+    number = _number(value, 0.0)
+    if number not in STANDIN_PITCHES:
+        raise ValueError("A stand-in's grid pitch must be 21 or 42 mm.")
+    return int(number)
+
+
+def standin_height(value: Any) -> float | None:
+    """A measured exterior height in mm, or None for Not measured.
+
+    Blank, ``-`` and null are the true unknown.  Zero, negative and non-finite
+    values are refused rather than stored: an unknown height is never zero.
+    """
+    if value is None or str(value).strip() in ("", "-"):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("A stand-in's height must be a positive number of mm, or left unmeasured.") from error
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError("A stand-in's height must be a positive number of mm, or left unmeasured.")
+    return number
+
+
+def standin_row(raw: dict[str, Any], *, pitch: Any = None) -> dict[str, Any]:
+    """The validated geometry of one stand-in: pitch, whole-cell size, optional height.
+
+    Size comes from ``x``/``y`` in mm, which must be whole multiples of the pitch.
+    Returns only those fields; the caller supplies id, date and name.
+    """
+    mm = standin_pitch(raw.get("standin_pitch") if pitch is None else pitch)
+    size = {}
+    for axis in ("x", "y"):
+        value = _number(raw.get(axis), 0.0)
+        cells = round(value / mm)
+        if cells < 1 or abs(value - cells * mm) > 0.05:
+            raise ValueError(f"A stand-in's {'width' if axis == 'x' else 'depth'} must be a whole number of {mm} mm cells.")
+        size[axis] = float(cells * mm)
+    return {"standin_pitch": mm, "grid": STANDIN_PITCHES[mm], **size, "z": standin_height(raw.get("z"))}
+
+
+def _normalise_standin(raw: dict[str, str]) -> dict[str, Any] | None:
+    try:
+        geometry = standin_row({**raw, "z": raw.get("z")})
+    except ValueError:
+        return None
+    return {
+        "id": _text(raw.get("id")),
+        "date": _text(raw.get("date")),
+        "kind": STANDIN_KIND,
+        "boundary": "",
+        "name": _text(raw.get("name")),
+        **geometry,
+        "stack": "none", "wall": None, "object_height_mm": None,
+        "qty": 0, "status": "in_design",
+        "file": "", "label": "", "interior": "", "flexible": None,
+        "pegboard_standard": "", "cleat_x": "auto", "cleat_y": "auto",
+    }
+
+
 def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
+    if _text(raw.get("kind")).lower() == STANDIN_KIND:
+        return _normalise_standin(raw)
     x, y, z = (_number(raw.get(axis)) for axis in ("x", "y", "z"))
     if min(x, y, z) <= 0:
         return None
@@ -370,6 +442,12 @@ def parse_inventory(text: str) -> dict[str, Any]:
         if isinstance(spec, dict) and "grid" in spec:
             validate_grid(spec["grid"])
     for row in bins:
+        if row["kind"] == STANDIN_KIND:
+            # A stand-in carries its own pitch, held to the Space's grid by the
+            # same authority as a real bin; it never has a design source.
+            row["grid"] = owned_design_grid({"grid": row["grid"]}, space)
+            design_specs(layout).pop(row["id"], None)
+            continue
         spec = design_specs(layout).get(row["id"])
         row["grid"] = owned_design_grid(spec if isinstance(spec, dict) else {}, space)
         if isinstance(spec, dict):
@@ -389,7 +467,10 @@ def _row(one: dict[str, Any]) -> str:
     wall = one.get("wall")
     values = {
         **one,
-        "x": f"{float(one['x']):g}", "y": f"{float(one['y']):g}", "z": f"{float(one['z']):g}",
+        "x": f"{float(one['x']):g}", "y": f"{float(one['y']):g}",
+        "z": f"{float(one['z']):g}" if one.get("z") is not None else "",
+        "standin_pitch": (f"{float(one['standin_pitch']):g}"
+                          if one.get("kind") == STANDIN_KIND and one.get("standin_pitch") else ""),
         "qty": str(int(one["qty"])),
         "status": one.get("status", "in_design"),
         "stack": "" if one.get("stack", "none") == "none" else one["stack"],
@@ -572,6 +653,10 @@ def verify_space_bins(current: dict, space: dict | None = None) -> dict:
     for spec in design_specs(current.get("layout")).values():
         if isinstance(spec, dict):
             owned_design_grid(spec, stored)
+    for row in current.get("bins") or ():
+        if row.get("kind") == STANDIN_KIND:
+            # A stand-in's own pitch is held to the Space's grid like a design's.
+            owned_design_grid({"grid": row["grid"]}, stored)
     return {**stored, "grid": owned_design_grid({}, stored)}
 
 
@@ -607,9 +692,27 @@ def _duplicate_name(bins: list[dict[str, Any]], source: str) -> str:
     return f"{root} ({number})"
 
 
+def duplicate_standin(current: dict[str, Any], row_id: str) -> tuple[list[dict[str, Any]], dict, str]:
+    """Copy a stand-in row: same kind, pitch, size and height; a new id and name."""
+    bins = current["bins"]
+    source = next((one for one in bins if one["id"] == row_id and one.get("kind") == STANDIN_KIND), None)
+    if source is None:
+        raise ValueError(f"no stand-in {row_id!r}")
+    layout = current["layout"] if isinstance(current["layout"], dict) else {}
+    owned_design_grid({"grid": source["grid"]}, layout.get("space"))
+    new_id = next_bin_id(bins)
+    bins.append({**copy.deepcopy(source), "id": new_id, "name": _duplicate_name(bins, source.get("name", "")),
+                 "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
+    return bins, layout, new_id
+
+
 def _duplicate_design_source(current: dict[str, Any], row_id: str) -> tuple[list[dict[str, Any]], dict, str, dict]:
     bins = current["bins"]
     source = next((one for one in bins if one["id"] == row_id), None)
+    if source is not None and source.get("kind") == STANDIN_KIND:
+        # Same endpoint, no design payload: the copy keeps kind, pitch, size and height.
+        bins, layout, new_id = duplicate_standin(current, row_id)
+        return bins, layout, new_id, None
     layout = current["layout"] if isinstance(current["layout"], dict) else {}
     spec = design_specs(layout).get(row_id)
     if source is None or not isinstance(spec, dict):

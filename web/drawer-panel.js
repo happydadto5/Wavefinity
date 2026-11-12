@@ -132,6 +132,18 @@ DP.build = () => {
             <option value="newest">Newest first</option>
           </select></label>
         </div>
+        <details id="dl-standin" class="dl-standin" hidden>
+          <summary>Add third-party stand-in</summary>
+          <p class="dl-note">A bin bought or printed elsewhere. It holds its place in the layout only: it is never printed, exported or opened in the editor.</p>
+          <div class="dl-batch-row">
+            <label>Name<input id="dl-standin-name" type="text" maxlength="80" aria-label="Stand-in name"></label>
+            <label>Grid pitch<select id="dl-standin-pitch" aria-label="Stand-in grid pitch"><option value="42">Gridfinity 42 mm</option><option value="21">Gridfinity half 21 mm</option></select></label>
+            <label>Width (cells)<input id="dl-standin-w" type="number" min="1" step="1" value="1" aria-label="Stand-in width in cells"></label>
+            <label>Depth (cells)<input id="dl-standin-d" type="number" min="1" step="1" value="1" aria-label="Stand-in depth in cells"></label>
+            <label>Actual height (mm)<input id="dl-standin-h" type="number" min="0" step="0.1" placeholder="Not measured" aria-label="Stand-in measured height in mm; leave empty if not measured"></label>
+            <button type="button" id="dl-standin-add" class="button secondary dl-small">Add stand-in</button>
+          </div>
+        </details>
         <div id="dl-batch-tools" class="dl-batch-tools">
           <div class="dl-batch-row">
             <button type="button" id="dl-batch-select-needed" class="button secondary dl-small">Select all not printed</button>
@@ -291,6 +303,7 @@ DP.wire = () => {
     if (id) DL.toggleFillCandidate(id);
   });
 
+  $("#dl-standin-add").addEventListener("click", () => DP.addStandIn());
   $("#dl-batch-select-needed").addEventListener("click", () => DP.selectAllNotPrinted());
   $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllPrintable());
   $("#dl-batch-clear").addEventListener("click", () => DP.clearPrintSelection());
@@ -451,6 +464,31 @@ DP.renderBatch = () => {
 // Inventory row activation: mouse click and keyboard (Enter/Space) share
 // this one path, so both jump to the drawer that physically holds the row
 // before selecting it.
+// Story 3010: add a third-party stand-in. A pitch that is not this Space's grid is
+// refused here before any call (the server refuses the same save).
+DP.addStandIn = async () => {
+  const name = $("#dl-standin-name").value.trim();
+  const pitch = Number($("#dl-standin-pitch").value);
+  const cellsX = Number($("#dl-standin-w").value), cellsY = Number($("#dl-standin-d").value);
+  const height = $("#dl-standin-h").value;
+  if (!name) { toast("Name the stand-in.", true); return; }
+  if (!Number.isInteger(cellsX) || !Number.isInteger(cellsY) || cellsX < 1 || cellsY < 1) {
+    toast("A stand-in is a whole number of cells wide and deep.", true); return;
+  }
+  const mismatch = DL.gridRefusal([{ kind: "standin", name, grid: pitch === 21 ? "gridfinity_half" : "gridfinity" }]);
+  if (mismatch) { toast(mismatch, true, 6000); return; }
+  if (height.trim() !== "" && !(Number(height) > 0)) { toast("Height must be a positive number of mm, or left empty for Not measured.", true); return; }
+  if (await DL.addStandIn({ name, pitch, cellsX, cellsY, height })) {
+    $("#dl-standin-name").value = "";
+    $("#dl-standin-h").value = "";
+  }
+};
+DP.setStandInHeight = async one => {
+  const answer = window.prompt(`Actual exterior height of ${DL.label(one)} in mm (leave empty for Not measured):`, DL.heightKnown(one) ? String(one.z) : "");
+  if (answer === null) return;
+  if (answer.trim() !== "" && !(Number(answer) > 0)) { toast("Height must be a positive number of mm, or left empty for Not measured.", true); return; }
+  await DL.updateStandIn(one, { z: answer.trim() === "" ? null : Number(answer) });
+};
 DP.activateInventoryRow = async one => {
   if (DL.isStorageDrawers()) await SP.cabinetJumpToRow(one.id);
   DL.selectRow(one.id);
@@ -461,7 +499,9 @@ DP.onInventoryClick = async event => {
   const one = row && DL.bin(row.dataset.bin);
   if (!one) return;
   const action = event.target.closest("[data-act]")?.dataset.act;
-  if (action === "duplicate") DP.duplicateRow(one);
+  if (action === "duplicate-standin") DL.duplicateStandIn(one);
+  else if (action === "standin-height") DP.setStandInHeight(one);
+  else if (action === "duplicate") DP.duplicateRow(one);
   else if (action === "save") DL.saveSelectedBins([one.id], false);
   else if (action === "print") {
     if (DL.isSpacer(one)) DL.printSelectedSpacers({ [one.id]: Math.max(1, DL.placedCount(one.id)) });
@@ -1146,7 +1186,7 @@ DP.filteredBins = () => {
     if (show === "unprinted" && one.status === "printed") return false;
     if (show === "stackable" && !DL.stackable(one)) return false;
     if (!text) return true;
-    return `${one.name} ${fmt(one.x)}x${fmt(one.y)}x${fmt(one.z)} ${fmt(one.x)} × ${fmt(one.y)} ${one.file} ${one.label} ${one.interior} ${one.kind} ${one.stack}`
+    return `${one.name} ${fmt(one.x)}x${fmt(one.y)}x${DL.heightKnown(one) ? fmt(one.z) : "not measured"} ${fmt(one.x)} × ${fmt(one.y)} ${one.file} ${one.label} ${one.interior} ${one.kind} ${one.stack}`
       .toLowerCase().includes(text);
   });
   const sorters = {
@@ -1185,6 +1225,12 @@ DP.renderInventory = (force = false) => {
     Boolean(state.runtime.hosted), Boolean(state.slicer?.available),
     DP.filter, selectedRow, deleteRowId, DP.designNavBlocked(), drawer.id, drawer.height, [...DP.printSelected], containerRow,
     DL.isStorageDrawers() ? DL.layout.drawers.map(one => [one.id, one.height, one.placements.map(p => p.bin)]) : null]);
+  // Stand-ins exist only in a Gridfinity Space; the form offers that Space's own pitch first.
+  const standInForm = $("#dl-standin");
+  if (standInForm) {
+    standInForm.hidden = !DL.isGridfinity(drawer);
+    if (!standInForm.hidden && !standInForm.open) $("#dl-standin-pitch").value = String(DL.GRID_PITCHES[DL.spaceGrid()]);
+  }
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
   const bins = DP.filteredBins();
@@ -1194,7 +1240,7 @@ DP.renderInventory = (force = false) => {
   }
   if (!bins.length) { list.innerHTML = containerRow + `<div class="dl-empty">No bins match.</div>`; return; }
   const range = DV.heightRange();
-  const kinds = { b4b: "Storage Box", manual: "Added by hand" };
+  const kinds = { b4b: "Storage Box", manual: "Added by hand", standin: "Third-party stand-in · not printable" };
   const kindLabel = one => kinds[one.kind];
   const cabinet = DL.isStorageDrawers();
   list.innerHTML = containerRow + bins.map(one => {
@@ -1205,7 +1251,8 @@ DP.renderInventory = (force = false) => {
     const home = (holdingId && DL.layout.drawers.find(one => one.id === holdingId)) || drawer;
     const [w, d] = DL.cells(one, home);
     const units = value => fmt(value * DL.grid(home).step / (DL.grid(home).unit ?? DL.UNIT));
-    const tooTall = !DL.isSurface() && one.z + DL.baseLift(home) > home.height + 1e-6;
+    const standIn = DL.isStandIn(one);
+    const tooTall = DL.heightKnown(one) && !DL.isSurface() && one.z + DL.baseLift(home) > home.height + 1e-6;
     const plan = DL.rowPlanning(one);
     const planningText = DL.isSurface()
       ? one.object_height_mm == null ? "Object height not set"
@@ -1216,9 +1263,10 @@ DP.renderInventory = (force = false) => {
     const flags = [
       DL.stackable(one) ? DL.stackName(one.stack) : "", kindLabel(one),
       tooTall ? `Taller than ${home.name}` : "",
+      DL.heightKnown(one) ? "" : "Height not measured - vertical fit unverified",
     ].filter(Boolean);
     const classes = [one.id === selectedRow ? "selected" : "", tooTall ? "too-tall" : "",
-      spacer ? "spacer-row" : "", one.status === "printed" ? "printed" : ""].filter(Boolean).join(" ");
+      spacer ? "spacer-row" : "", standIn ? "standin-row" : "", one.status === "printed" ? "printed" : ""].filter(Boolean).join(" ");
     const eligible = DL.printEligible(one) || (spacer && Boolean(one.file) && placed > 0);
     const designSource = ["bin", "b4b"].includes(one.kind) && Boolean(DL.layout?.design_specs?.[one.id]);
     // A Storage Box case saved by an older version is not a Designer object.
@@ -1234,15 +1282,19 @@ DP.renderInventory = (force = false) => {
     const statusTracked = spacer || ["bin", "b4b", "manual"].includes(one.kind);
     const printed = one.status === "printed";
     const picked = DP.printSelected.has(one.id);
-    const swatch = `<span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${fmt(one.z)} mm tall">${DL.swatchLabel(one)}</span>`;
+    const swatch = `<span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${DL.heightKnown(one) ? `${fmt(one.z)} mm tall` : "Height not measured"}">${DL.swatchLabel(one)}</span>`;
     const check = `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.binNumberLabel(one))} ${escapeHtml(DL.label(one))}"${picked ? " checked" : ""}>`;
-    const lifecycle = spacer
+    const lifecycle = standIn
+      ? `<small class="dl-status">${placed ? "Placed" : "Not placed"} · External stand-in</small>`
+      : spacer
       ? `<small>${one.status === "printed" ? "Printed" : "Not printed"}</small>`
       : `<small class="dl-status">${cabinet ? StorageDrawers.rowLocationText(DL.layout, one.id) : (placed ? "Placed" : "Not placed")} · ${DL.statusLabel(one)}</small>`;
     const actions = `<div class="dl-row-actions">
           ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>`
             : sourceMissing ? `<button type="button" class="button secondary dl-small" data-act="edit" disabled title="The original editable design for this row is unavailable, so it can't be edited.">Edit</button>` : ""}
-          ${one.id === deleteRowId ? `<button type="button" class="button danger dl-small" data-act="delete" ${DP.designNavBlocked() ? "disabled" : ""}>Delete</button>` : ""}
+          ${standIn ? `<button type="button" class="button secondary dl-small" data-act="standin-height">Height…</button>
+          <button type="button" class="button secondary dl-small" data-act="duplicate-standin">Duplicate</button>` : ""}
+          ${one.id === deleteRowId || standIn ? `<button type="button" class="button danger dl-small" data-act="delete" ${DP.designNavBlocked() ? "disabled" : ""}>Delete</button>` : ""}
           ${designSource && one.id === deleteRowId ? `<button type="button" class="button secondary dl-small" data-act="duplicate" ${DP.designNavBlocked() ? "disabled" : ""}>Duplicate</button>` : ""}
           ${eligible && !spacer ? `<button type="button" class="button secondary dl-small" data-act="save"${outputRunning ? " disabled" : ""}>${outputLabel("export")}</button>` : ""}
           ${printable ? `<button type="button" class="button secondary dl-small" data-act="print"${outputRunning ? " disabled" : ""}>${outputLabel("print")}</button>` : ""}
@@ -1256,7 +1308,8 @@ DP.renderInventory = (force = false) => {
         ${swatch}
         <span class="dl-bin-main">
           <strong>${escapeHtml(DL.label(one))}${DL.stackIconHtml(one)}</strong>
-          <small>${spacer ? `${Math.round(one.x)} × ${Math.round(one.y)} × ${Math.round(one.z)} mm` : `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units`}</small>
+          <small>${standIn ? `${fmt(one.x)} × ${fmt(one.y)} mm · ${units(w)}×${units(d)} cells · ${DL.heightText(one)}`
+            : spacer ? `${Math.round(one.x)} × ${Math.round(one.y)} × ${Math.round(one.z)} mm` : `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units`}</small>
           ${!spacer && planningText ? `<small>${escapeHtml(planningText)}</small>` : ""}
           ${lifecycle}
           ${flags.length ? `<small class="dl-flags">${escapeHtml(flags.join(" · "))}</small>` : ""}

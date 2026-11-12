@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 from typing import Any, Iterable
 from organizer_engine._specs import retain_space_grid, validate_grid
-from ._rows import checked_design_entry, owned_design_grid
+from ._rows import checked_design_entry, owned_design_grid, STANDIN_KIND, standin_row
 
 from ._rows import (
     INVENTORY_LOCK,
@@ -340,6 +340,8 @@ def _merge_design_source(
     folder: Path | None = None, available_filenames: Iterable[str] = (),
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str, bool]:
     current = copy.deepcopy(current)
+    if any(one["id"] == row_id and one.get("kind") == STANDIN_KIND for one in current["bins"]):
+        raise ValueError("A stand-in is an external bin with no design; it cannot be opened in the editor or converted into a design.")
     space = (current.get("layout") or {}).get("space")
     design = checked_design_entry(design, space, source=current, row_id=row_id)
     bins = current["bins"]
@@ -559,11 +561,25 @@ def _merge_inventory(
             bins, chosen = _change_design_status(
                 {"bins": bins, "layout": chosen}, target["id"], "saved",
                 update["file"], expected)
-        clean = _clean_bin(update, partial=True)
+        # A stand-in's height may be blank (Not measured), so it is validated by
+        # standin_row below, never by the positive-number rule for real bins.
+        clean = _clean_bin(
+            {key: value for key, value in update.items() if key != "z"}
+            if target.get("kind") == STANDIN_KIND else update, partial=True)
         if target["id"] in design_specs(chosen) and clean:
             raise ValueError("Edit this bin through its canonical Designer source")
         if "qty" in clean and target.get("kind") in ("bin", "b4b", "manual"):
             clean["qty"] = min(1, clean["qty"])
+        if target.get("kind") == STANDIN_KIND:
+            # Only name, whole-cell size and the measured height change; a blank
+            # height stays Not measured. Kind, pitch and grid never change here.
+            clean = {key: value for key, value in clean.items() if key in ("name", "x", "y")}
+            if update.get("kind", STANDIN_KIND) != STANDIN_KIND:
+                raise ValueError("A stand-in cannot be converted into another kind of bin.")
+            merged = {"x": target["x"], "y": target["y"], **clean,
+                      "z": update["z"] if "z" in update else target.get("z")}
+            checked = standin_row(merged, pitch=target["standin_pitch"])
+            clean.update({key: checked[key] for key in ("x", "y", "z")})
         target.update(clean)
         if "qty" in clean:
             target["status"] = "printed" if clean["qty"] > 0 else ("saved" if target.get("file") else "in_design")
@@ -571,6 +587,21 @@ def _merge_inventory(
     bins = [one for one in bins if one["id"] not in gone]
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     for raw in new_bins or ():
+        if str(raw.get("kind") or "") == STANDIN_KIND:
+            name = str(raw.get("name") or "").strip()[:80]
+            if not name:
+                raise ValueError("A stand-in needs a name.")
+            geometry = standin_row(raw)
+            wanted = str(raw.get("id") or "")
+            taken = {one["id"] for one in bins}
+            bins.append({
+                "id": wanted if re.fullmatch(r"B\d+", wanted) and wanted not in taken else next_bin_id(bins),
+                "date": now, "kind": STANDIN_KIND, "boundary": "", "name": name, **geometry,
+                "stack": "none", "wall": None, "object_height_mm": None, "qty": 0,
+                "status": "in_design", "file": "", "label": "", "interior": "", "flexible": None,
+                "pegboard_standard": "", "cleat_x": "auto", "cleat_y": "auto",
+            })
+            continue
         clean = _clean_bin(raw, partial=False)
         kind = str(raw.get("kind") or "manual")
         boundary = str(raw.get("boundary") or "")
@@ -615,6 +646,11 @@ def _merge_inventory(
     final_specs = design_specs(chosen) if isinstance(chosen, dict) else {}
     destination_space = chosen.get("space") if isinstance(chosen, dict) else existing_space
     for row in created:
+        if row.get("kind") == STANDIN_KIND:
+            # No design payload is ever attached; the grid check below applies its pitch.
+            final_specs.pop(row["id"], None)
+            checked_design_entry({"grid": row["grid"]}, destination_space)
+            continue
         if row.get("kind") in ("bin", "b4b") and not isinstance(final_specs.get(row["id"]), dict):
             raise ValueError(
                 f"new row {row['id']} needs its editable design source; nothing was recorded")

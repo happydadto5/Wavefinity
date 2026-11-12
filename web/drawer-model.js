@@ -273,6 +273,15 @@ DL.label = one => (DL.isSpacer(one) ? DL.legacySpacerName(one.name) : one.name) 
 // section of README.md. The one place this conversion belongs.
 DL.mmToUnits = mm => fmt(mm / (DL.layout ? DL.gridUnit() : 7));
 DL.isSpacer = one => one?.kind === "spacer";
+// Story 3010: a third-party stand-in - an external, non-printable bin that holds
+// its place in the layout. It has no design, files or print status. Its height is
+// the measured actual exterior height, or a true unknown (null): Not measured,
+// never zero and never a default.
+DL.isStandIn = one => one?.kind === "standin";
+DL.heightKnown = one => !DL.isStandIn(one) ||
+  (one.z !== null && one.z !== undefined && Number.isFinite(Number(one.z)) && Number(one.z) > 0);
+DL.heightText = one => DL.heightKnown(one) ? `${fmt(one.z)} mm` : "Not measured";
+DL.standInUnverified = one => `${DL.label(one)}: height Not measured - vertical fit is unverified.`;
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
 // Both displays use these roles and the same stacked-box glyph.
 DL.stackRoles = one => ({
@@ -462,10 +471,13 @@ DL.toUnits = (cell, drawer = DL.drawer()) => DL.isPegboard(drawer) ? cell : cell
 
 // Inventory Z is the seating-datum module height. The top interlock remains
 // exposed on the physical envelope of the first/detached part.
-DL.pitch = one => DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.id]?.pitch_mm)
+DL.pitch = one => !DL.heightKnown(one) ? 0 : DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.id]?.pitch_mm)
   ? DL.stackMetrics[one.id].pitch_mm
   : one.stack === "b4b" || one.stack === "direct" ? Number(one.z) - (DL.stackSteps[one.stack] ?? 0) : Number(one.z);
-DL.partHeight = one => DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.id]?.physical_mm)
+// An unmeasured stand-in contributes no height to the footprint math (0 here is
+// a placeholder, never its height): every vertical verdict checks heightKnown()
+// first and reports unverified instead of passing.
+DL.partHeight = one => !DL.heightKnown(one) ? 0 : DL.usesStackMetrics() && Number.isFinite(DL.stackMetrics[one.id]?.physical_mm)
   ? DL.stackMetrics[one.id].physical_mm
   : Number(one.z);   // the skirt and a closed stackable lid are inside the typed height
 DL.stackWall = one => {
@@ -699,7 +711,7 @@ DL.isPlaced = id => DL.placedCount(id) > 0;
 // Placed ordinary bin rows whose Object height is still unknown (Surface planning
 // guidance only; spacers, manual rows and unplaced rows never count).
 DL.missingObjectHeightCount = () => DL.bins.filter(one =>
-  DL.isOrdinary(one) && one.kind !== "manual" && DL.isPlaced(one.id) &&
+  DL.isOrdinary(one) && one.kind !== "manual" && !DL.isStandIn(one) && DL.isPlaced(one.id) &&
   (one.object_height_mm === null || one.object_height_mm === undefined)).length;
 
 // Ordinary rows are the placeable, stageable bins; spacers are filler parts
@@ -708,16 +720,17 @@ DL.isOrdinary = one => Boolean(one) && !DL.isSpacer(one);
 DL.binNumbers = () => new Map(DL.bins.filter(DL.isOrdinary).map((one, index) => [one.id, index + 1]));
 DL.binNumber = one => DL.binNumbers().get(one?.id);
 DL.binNumberLabel = one => {
+  if (DL.isStandIn(one)) return "Stand-in";
   const number = DL.isOrdinary(one) ? DL.binNumber(one) : null;
   return number ? `Bin ${number}` : "";
 };
 DL.badgeLabel = one => DL.isSpacer(one)
   ? `S${DL.bins.filter(DL.isSpacer).findIndex(item => item.id === one.id) + 1}`
-  : String(DL.binNumber(one) || "");
+  : DL.isStandIn(one) ? "SI" : String(DL.binNumber(one) || "");
 // A named ordinary bin shows its name alone, so its number swatch stays empty
 // (the colour still shows); an unnamed bin keeps its number as the identifier.
 DL.hasName = one => Boolean(String(one?.name || "").trim());
-DL.swatchLabel = one => DL.isOrdinary(one) && DL.hasName(one) ? "" : DL.badgeLabel(one);
+DL.swatchLabel = one => DL.isOrdinary(one) && DL.hasName(one) && !DL.isStandIn(one) ? "" : DL.badgeLabel(one);
 
 // The staging rail's membership, derived and never persisted: every ordinary
 // Inventory row with no placement, in Inventory order.
@@ -826,6 +839,10 @@ DL.fitsAt = (drawer, movingSet, gx, gy, ignore = new Set(), { skipHeight = false
   const rect = DL.nodesRect(moving.nodes.map(node => ({ bin: node.bin, gx: gx + node.dx, gy: gy + node.dy, w: node.w, d: node.d })), drawer);
   const height = moving.height + DL.baseLift(drawer);
   const cap = DL.heightCap(drawer);
+  // A stand-in with no measured height is placed by footprint only; its vertical
+  // fit is reported unverified, never as a pass.
+  const unmeasured = bins.find(one => !DL.heightKnown(one));
+  const unverified = unmeasured ? DL.standInUnverified(unmeasured) : "";
   if (!skipHeight && !DL.isPegboard(drawer) && !DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
   if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > grid.cols || rect.y1 > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the Pegboard." : DL.isGridfinity(drawer) ? "That would reach the unused strip at the far edge of the Space." : "That would stick out of the Space." };
   if (DL.isPegboard(drawer)) {
@@ -855,7 +872,7 @@ DL.fitsAt = (drawer, movingSet, gx, gy, ignore = new Set(), { skipHeight = false
     }
   }
   const conflict = DL.rectConflict(drawer, rect, ignore);
-  return conflict ? { ok: false, reason: conflict } : { ok: true, reason: "" };
+  return conflict ? { ok: false, reason: conflict } : { ok: true, reason: "", ...(unverified ? { unverified } : {}) };
 };
 
 // Can this subtree seat on `target.layer` (a layer of a DL.items() entry) with
@@ -873,6 +890,9 @@ DL.fitsOn = (drawer, movingSet, target, movingKeys = null) => {
   const { item, layer: support } = target;
   const lower = support.bin;
   const root = moving.nodes[0];
+  // A stack touching a stand-in with no measured height is never claimed valid.
+  const unmeasured = [root.bin, lower].find(one => !DL.heightKnown(one));
+  if (unmeasured) return { ok: false, reason: `A stack involving ${DL.label(unmeasured)} cannot be verified: its height is Not measured.`, unverified: DL.standInUnverified(unmeasured) };
   if (keys.has(support.key)) return { ok: false, reason: "A bin cannot stack on itself or on something stacked on it." };
   const seat = DL.seatAbove(support, root.bin);
   if (seat === null) return { ok: false, reason: "Gridfinity stack heights are still loading. Try the placement again." };
@@ -1367,6 +1387,33 @@ DL.editBins = async (changes, {
   return true;
 };
 
+// Story 3010: stand-in rows. The server validates pitch (21 or 42), whole-cell
+// size and the optional height; it attaches no design and refuses a Space of
+// another grid. `cellsX`/`cellsY` are whole cells; `height` blank = Not measured.
+DL.addStandIn = ({ name, pitch, cellsX, cellsY, height }) => {
+  const mm = Number(pitch);
+  const heightText = String(height ?? "").trim();
+  return DL.editBins({ new_bins: [{
+    kind: "standin", name, standin_pitch: mm,
+    x: Number(cellsX) * mm, y: Number(cellsY) * mm,
+    z: heightText === "" ? null : Number(heightText),
+  }] });
+};
+DL.updateStandIn = (one, fields) => DL.editBins({ bin_updates: [{ id: one.id, ...fields }] });
+DL.duplicateStandIn = async one => {
+  const context = DL.spaceContext();
+  try {
+    const data = await DL.inventoryCall("/api/drawer/design-source/duplicate", { row_id: one.id }, { context });
+    DL.adopt(data);
+    DL.requestReport();
+    DL.emit();
+    return true;
+  } catch (error) {
+    if (!DL.isStaleSpaceError(error)) toast(`Could not duplicate stand-in: ${friendlyError(error)}`, true, 6000);
+    return false;
+  }
+};
+
 DL.setBinPrinted = async (one, printed) => {
   if (DL.layout?.design_specs?.[one.id]) {
     const context = DL.spaceContext();
@@ -1469,6 +1516,7 @@ DL.placeAt = (one, where) => {
   const moving = DL.movingForBins([one], drawer);
   const fit = where.target ? DL.fitsOn(drawer, moving, where.target) : DL.fitsAt(drawer, moving, where.gx, where.gy);
   if (!fit.ok) { toast(fit.reason, true); return false; }
+  if (fit.unverified) toast(fit.unverified, false, 6000);
   const placement = where.target
     ? { bin: one.id, copy, on: where.target.layer.key,
       ox: DL.toUnits(where.target.cx, drawer), oy: DL.toUnits(where.target.cy, drawer) }
