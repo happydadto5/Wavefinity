@@ -2376,6 +2376,17 @@ unchanged. Leaving a bin whose preview is still building for the same
 geometry waits for that build instead of starting it again. Opening a Space
 asks `/api/space/warm` (the server skips anything already warm).
 
+**Division labels that cannot fit (2026-11-12).** A grid division label wider
+than its compartment at the smallest legible size (cap 2.5 mm) used to be cut
+into the bin wall, leaving a sealed hole and a bin that failed the one-solid
+check with "A part of the bin could not be made". It is now refused in plain
+words ("The division label \"X\" is too long for its compartment. Shorten it to
+about N characters, or make the compartment wider."), as a feature error in the
+preview and as the Export error. Labels that only crowd the margin but stay
+inside the compartment are unchanged. Separately, `make_fused_box` drops
+zero-volume boolean slivers (under 2 mm) that a divider/wavy-wall join could
+leave as extra "pieces".
+
 ## Local temp space
 
 This project keeps a folder named `local-temp/` at the repository root. It is local temp space: files that belong with this project on this machine but are never backed up to the cloud repo - captures, trial output, scratch files. The project's .gitignore ignores `local-temp/`, so nothing in it is ever committed. Its contents are disposable: never keep the only copy of anything that matters in it. The convention is defined once for every project in Help-Code (REVIEWER-CHAT.md, 'Local temp space').

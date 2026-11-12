@@ -49,6 +49,24 @@ from ._consts import (
 from ._bottoms import _bottom_slot_bounds
 
 
+def _refuse_label_wider_than_compartment(
+    text: str, probe_width: float, cap: float, compartment_mm: float,
+) -> None:
+    """A division label that cannot fit its compartment even at the smallest
+    legible size (cap 2.5 mm) would be cut into the bin wall, leaving a sealed
+    hole in the floor and a bin that fails the one-solid check. Say so in
+    plain words instead. A label that only crowds the margin, but still sits
+    inside the compartment, is left as it always was."""
+    width = probe_width / 10.0 * cap
+    if width <= compartment_mm:
+        return
+    fits = max(1, int(len(text) * compartment_mm / width))
+    raise ValueError(
+        f'The division label "{text}" is too long for its compartment. '
+        f"Shorten it to about {fits} characters, or make the compartment wider."
+    )
+
+
 def _divider_grid_texts(
     box: BoxSpec, spec_feature: Feature, base_z: float, labels: list,
     grid_x: int, grid_y: int,
@@ -104,6 +122,9 @@ def _divider_grid_texts(
         cap = max(2.5, min(avail_d, avail_w / (pw / 10.0)))
         if front_to_back:
             cap = max(2.5, min(avail_w, avail_d / (pw / 10.0)))
+        _refuse_label_wider_than_compartment(
+            text, pw, cap, cell.zone.y1 - cell.zone.y0 if front_to_back
+            else cell.zone.x1 - cell.zone.x0)
         try:
             outline = text_outline(text, cap)
         except Exception:
