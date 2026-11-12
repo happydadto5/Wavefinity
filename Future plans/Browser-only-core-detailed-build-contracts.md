@@ -122,7 +122,7 @@ Deliverable: worker protocol and local dispatcher code for timeout, cancellation
 
 Requires: B03.
 Existing files: wavefinity_web.py (reference only), wavefinity_web_impl/_designs/*.py, web/app/02-lifecycle-ai-help.js, web/app/03-history-utils-catalog.js, web/app/10-draft-update-commit.js, web/app/11-parts-preview-requests.js.
-Create `web/browser-core/engine/route-dispatch.py` with `register_routes(routes)` and initial B04 map. **Unknown/missing/retired routes fail closed** with B03's standard `{error:{kind:"UNSUPPORTED_LOCAL_OPERATION",message:"This feature is unavailable in the browser edition."}}` envelope; neither Python worker nor `WFLocalAPI` ever makes a network request when a `/api/*` key is missing. The canonical manifest includes both implemented routes and retired explicit replacements. **B04 owns this central file during its creation; B14 alone updates it at final assembly** to import/merge PYTHON route maps exported by B05, B06, B08, B10, B11, B12 and the Python AI portion of B13. **B09's Space/folder routes and B13's browser-only capability/provider routes are JavaScript and cannot be imported into Python**: B14 wires those separately into B03's `local-api.js` dispatch map. Later packages export `ROUTES` in their own Python/JS module and **do not edit central dispatcher**. Registration wiring is shared integration, not a second semantic owner. The B14 assembly is shared integration, not a second route owner.
+Create `web/browser-core/engine/route_dispatch.py` with `register_routes(routes)` and initial B04 map. **Unknown/missing/retired routes fail closed** with B03's standard `{error:{kind:"UNSUPPORTED_LOCAL_OPERATION",message:"This feature is unavailable in the browser edition."}}` envelope; neither Python worker nor `WFLocalAPI` ever makes a network request when a `/api/*` key is missing. The canonical manifest includes both implemented routes and retired explicit replacements. **B04 owns this central file during its creation; B14 alone updates it at final assembly** to import/merge PYTHON route maps exported by B05, B06, B08, B10, B11, B12 and the Python AI portion of B13. **B09's Space/folder routes and B13's browser-only capability/provider routes are JavaScript and cannot be imported into Python**: B14 wires those separately into B03's `local-api.js` dispatch map. Later packages export `ROUTES` in their own Python/JS module and **do not edit central dispatcher**. Registration wiring is shared integration, not a second semantic owner. The B14 assembly is shared integration, not a second route owner.
 Patch:
 1. Own `/api/catalog`, `/api/design/validate`, `/api/design/inventory-preview`, `/api/design/division-label-fit`, `/api/feature/default/draft/fit/apply/duplicate/delete`, `/api/layout/mode/expand` and `/api/pegboard/layouts`. **Do not own** `/api/health` or operation status (B03), `/api/sampler` (B06), `/api/pegboard/hooks` (B11), or any Storage Drawers summary/validation (B11). Call existing canonical source, not duplicated formulas.
 2. Call original Python implementations with environment adapters rather than duplicated constants. Preserve 7 mm Wavefinity and 21/42 mm Gridfinity rules, Space fit, error shapes and feature order; include all imported source dependencies identified by reading the dispatch graph.
@@ -133,7 +133,7 @@ Deliverable: complete local equivalents for listed edit/validation operations, w
 
 Requires: B04.
 Existing files: web/app/11-parts-preview-requests.js (refreshPreview, adoptPreviewResult), web/app/12-3d-preview-render.js, web/preview3d-webgl.js, web/app/01-runtime-state.js, web/app/04-side-openings-wall-choices.js, web/app/13-layout-geometry.js.
-Create `web/browser-core/engine/preview-routes.py` exporting Python `ROUTES` for `/api/preview`. No testing files.
+Create `web/browser-core/engine/preview_routes.py` exporting Python `ROUTES` for `/api/preview`. No testing files.
 Patch:
 1. Route /api/preview and any dependent nest/layout/feature previews to browser-core worker using the native canonical geometry; keep payload and returned preview_mesh/layout/status shapes compatible.
 2. Preserve mutation controls, stale preview epoch logic, last-valid preview, warning banners, fit/feature errors, and exact nested_clearance/seam rules. Progress events use current preview wait UI; do not block the main thread.
@@ -144,7 +144,7 @@ Deliverable: actual main UI preview uses browser geometry, preserves geometry sh
 
 Requires: B05.
 Existing files: web/app/15-generate-dialogs.js (generatePartsWithReport, saveGeneratedFiles), organizer_engine/_boxes.py, organizer_engine/_export.py, web/app/03-history-utils-catalog.js.
-Create web/browser-core/engine/build-outputs.py.
+Create web/browser-core/engine/build_outputs.py.
 Patch:
 1. Route /api/generate and /api/connector through canonical Python build functions, keeping outputs and the existing dialog progress/error semantics. Implement 42x42, 84x42, wavy 7 mm and Gridfinity 21/42 bins, actual wave locking connectors and installed feature cases.
 2. Return [{name,local_file_id}] file descriptors and buffer bytes, not hosted filesystem paths or ephemeral server tokens. Update saveGeneratedFiles() to save browser blobs to the already-selected writable handle or download if no folder exists; collision/overwrite prompts and all-or-nothing save logic remain.
@@ -175,7 +175,7 @@ Deliverable: production 3MF exporter **and complete plate-assembly implementatio
 
 Requires: B07.
 Existing files: web/app/15-generate-dialogs.js (printModelWithReport, saveGeneratedFiles, browseSlicer, watchServerVersion), web/printer-profile.js, web/spaces/13-printer-profiles.js, web/browser-files.js.
-Create `web/browser-core/engine/print-routes.py` exporting Python `ROUTES` for `/api/print`, delegating actual 3MF preparation to B07 and output builders from B06. No testing files.
+Create `web/browser-core/engine/print_routes.py` exporting Python `ROUTES` for `/api/print`, delegating actual 3MF preparation to B07 and output builders from B06. No testing files.
 Patch:
 1. Route /api/print and reusable print operations through browser output builder. Preserve printer volume limits, part/plate packing, labels and status on inventory rows.
 2. KEEP the current Print buttons and part selection dialogs. Replace only the prohibited native executable auto-launch with the Print contract above: autosave, validation, generation/reuse, arranged 3MF, save/download, explicit slicer-opening handoff. Preserve a separate Export action. Do not report "Sent to slicer" without verified proof.
@@ -198,7 +198,7 @@ Deliverable: local Space and preference implementations preserve current metadat
 
 Requires: B08 and B09 (B06 is transitive through B08).
 Existing files: web/drawer-model.js, web/drawer-panel.js, web/drawer-view.js, web/spaces/06-inventory-io.js, organizer_drawer/{_core,_inventory,_report,_spacers}.py and organizer_inventory/*.py.
-Create web/browser-core/engine/drawer-routes.py.
+Create web/browser-core/engine/drawer_routes.py.
 Patch:
 1. Implement full route family /api/drawer/load/save/report/design-source/save/duplicate/status/generate-bin/surface-fill/surface-fill/create/spacers/spacers/refresh/connectors/save-bins/print-bins/print-spacers/print-complete, preserving shapes, touched filenames, row idempotency and deletion behavior.
 2. Keep the browser folder as storage authority; do not reintroduce server-side inventory. Integrate SP.inventoryRequest's existing transactional write/rollback and bin generation stamp logic. Keep stale result guard when Space changes.
@@ -209,7 +209,7 @@ Deliverable: inventory and drawer UI requests route to the local engine and brow
 
 Requires: B10 (B08 and B07 are transitive through B10).
 Existing files: `web/structural-design.js`, `web/storage-box-form.js`, `web/storage-drawers-form.js`, `web/storage-drawers-workspace.js`, `web/spaces/10-storage-box-structural.js`, `web/spaces/11-base-trim.js`, `web/spaces/14-drawers-cabinet.js`, `organizer_outputs/space.py`, `organizer_spaces/__init__.py`, **real** `organizer_storage/{drawers.py,drawer_geometry.py,drawer_outputs.py}`, `organizer_features/gridfinity.py`, `organizer_b4b/` and relevant canonical modules (do not guess `organizer_storage/drawers/*.py`).
-Create web/browser-core/engine/structural-routes.py.
+Create web/browser-core/engine/structural_routes.py.
 Patch:
 1. B11 exclusively owns `/api/space/structural-design/generate/print/print-combined`, `/api/space/storage-box-print`, `/api/space/surface-print`, `/api/space/storage-drawers-summary/validate/reset/mutate/mutate-text`, and `/api/pegboard/hooks`. `/api/space/warm` is B09 (local worker startup/no-op as appropriate); B04 must not also implement Storage Drawers summary/validate. Retain exact current Space, printer, cabinet, floor-grid, names and metadata semantics.
 2. Implement Storage Box assembly/lid/hinge/latch, Drawer and Storage Drawers outputs, Surface/base trim, pegboard hooks, 7/21/42 compatibility, labels and stacking according to existing source; do not create a feature test matrix.
@@ -223,7 +223,7 @@ Deliverable: all structural Space and print/export routes translated to client-s
 
 Requires: B11 (B05 and B07 are transitive through B11).
 Existing files: wavefinity_web_impl/_nest.py, wavefinity_web_impl/_designs/*, organizer_inserts/_nest/*, organizer_inserts/_text.py, web/app/11-parts-preview-requests.js, web/app/04-side-openings-wall-choices.js, web/spaces/12-space-info.js.
-Create web/browser-core/engine/nest-routes.py.
+Create web/browser-core/engine/nest_routes.py.
 Patch:
 1. Implement /api/nest/trace/photo/retrace with browser File/Blob image input, browser decoder when helpful, and the authoritative image contour/shape behavior. Port only incompatible native image-processing dependencies without altering designed contour semantics.
 2. Implement bores, side openings, wall choices, dividers, cradles, labels/text, scoops, pockets, post/slots/steps, hinged/lid features, photo nest and pegboard hooks with the canonical engine and packaged font/assets. Do not build a fixture matrix.
@@ -236,7 +236,7 @@ Requires: B12 (B12 → B11 → B10 includes B08 and B09 transitively; B13 theref
 
 Existing: `web/app/02-lifecycle-ai-help.js:{aiConnectionRefresh,aiConnectionForm,aiConnectionAction,aiAsk,aiPasteManually,aiProcessResponse}`; `wavefinity_web.py:{ai_connection_payload,_ai_chat,ai_ask_payload,ai_prompt_payload,ai_candidate_payload,ai_repair_prompt_payload}`; `wavefinity_web_impl/_ai.py`; `web/app/15-generate-dialogs.js:{browseSlicer,showAboutDialog}`, `web/spaces/12-space-info.js`, `web/index.html`.
 
-Create `web/browser-core/capabilities.js` (JavaScript local `ROUTES` for provider connection, suggestions, slicer/log capabilities), `web/browser-core/ai-providers.js` (provider-specific direct-browser request adapters), `web/browser-core/engine/ai-routes.py` (Python `ROUTES` for canonical prompt/candidate/repair logic), and `docs/static-capability-differences.md`. B14 registers Python and JS routes **in their respective runtimes**.
+Create `web/browser-core/capabilities.js` (JavaScript local `ROUTES` for provider connection, suggestions, slicer/log capabilities), `web/browser-core/ai-providers.js` (provider-specific direct-browser request adapters), `web/browser-core/engine/ai_routes.py` (Python `ROUTES` for canonical prompt/candidate/repair logic), and `docs/static-capability-differences.md`. B14 registers Python and JS routes **in their respective runtimes**.
 
 **Product decision RESOLVED for implementation: Option A = BYOK direct chat + always-available copy/paste. No second owner vote or later B14 decision is required.** Preserve AI Help UI, prompt assembly, generated request IDs/fingerprints, candidate checking, repair/paste/modify/new-bin functions and existing connection fields. A configured user API provider supplies optional automatic replies, never the Wavefinity site.
 
@@ -260,7 +260,7 @@ Create: `scripts/build-static-site.py` (production asset copier/bundler only), `
 
 Patch (implementation, not testing):
 1. Ship `dist/index.html` from `web/index.html`, approved production `web/*` UI paths at dist root, repository-root `images/` at `dist/images/`, and `Brochure.md` at **BOTH** `dist/Brochure.md` and byte-identical `dist/brochure.md`. **EXCLUDE** `web/browser-local-poc.html`, `web/browser-local-poc.js`, `web/browser-local-poc-worker.js`, and **ALL** `web/browser-local-poc/**`, even though B16 deletes them only later. The bridge must ship from its B02 production vendor path. Do not ship non-production source, tests or secrets.
-2. Replace core HTTP with local dispatch. **B14 alone finalizes `web/browser-core/engine/route-dispatch.py`**, registering Python `ROUTES` for B04/B05/B06/B08/B10/B11/B12 and B13 AI; **separately** attach B09 and B13 JavaScript `ROUTES` in B03 `local-api.js` (never import JS into Python). **Production build completeness contract:** B14 creates a flat final route declaration used by the actual runtime and consumed by `scripts/build-static-site.py`; compare its route keys to B01's `route-manifest.json` AND the updated source-route index. Fail shipping build on missing/duplicate/extra/unclassified keys, unknown runtime/module or owner, including newly merged Gridfinity routes. **Match `local` routes exactly; `retired` routes are explicitly named with local replacement but MUST NOT be registered.** The historical 92 rows include retired export token route: do NOT demand exactly 92 callable handlers or freeze out newly merged routes. This is a normal shipping-build contract integrity check, not a separate scanner, automated test or empirical network guarantee. `WFLocalAPI`/worker MUST fail closed on unknown route (`UNSUPPORTED_LOCAL_OPERATION`), never attempt HTTP fallback. Keep Print/Export, 3MF/plate layout, local Spaces, previews. Review imports/assets by reading code. Set MIME/CSP/cache in NEW Render Static Site Dashboard as in diff-map, without editing legacy `render.yaml`; existing bridge needs no COOP/COEP.
+2. Replace core HTTP with local dispatch. **B14 alone finalizes `web/browser-core/engine/route_dispatch.py`**, registering Python `ROUTES` for B04/B05/B06/B08/B10/B11/B12 and B13 AI; **separately** attach B09 and B13 JavaScript `ROUTES` in B03 `local-api.js` (never import JS into Python). **Production build completeness contract:** B14 creates a flat final route declaration used by the actual runtime and consumed by `scripts/build-static-site.py`; compare its route keys to B01's `route-manifest.json` AND the updated source-route index. Fail shipping build on missing/duplicate/extra/unclassified keys, unknown runtime/module or owner, including newly merged Gridfinity routes. **Match `local` routes exactly; `retired` routes are explicitly named with local replacement but MUST NOT be registered.** The historical 92 rows include retired export token route: do NOT demand exactly 92 callable handlers or freeze out newly merged routes. This is a normal shipping-build contract integrity check, not a separate scanner, automated test or empirical network guarantee. `WFLocalAPI`/worker MUST fail closed on unknown route (`UNSUPPORTED_LOCAL_OPERATION`), never attempt HTTP fallback. Keep Print/Export, 3MF/plate layout, local Spaces, previews. Review imports/assets by reading code. Set MIME/CSP/cache in NEW Render Static Site Dashboard as in diff-map, without editing legacy `render.yaml`; existing bridge needs no COOP/COEP.
 3. **Choose Render Static Site** in the existing Render account, free within current bandwidth/build limits, HTTPS/custom domains, without sleeping Python process. The old Web Service cannot convert in place; prepare a NEW Static Site on `happydadto5/Wavefinity` `main`, publishing `dist` from the self-contained shipping build (provisionally `python3 scripts/build-static-site.py`). Auto-deploy OFF initially. Before a hosting change, use B02's shipping-bundle asset sizes and current Render limits; no hosting surprises deferred from B02. Do not provision or touch `render.yaml` early.
 4. Preserve Porkbun registration and authoritative nameservers, apex `wavefinity.org` and `www` redirect. Existing exact live DNS record values are in PRIVATE Help-Code, not in public plans; read them when Andrew approves. Attach the domain to the NEW actual Render Static Site hostname and edit only necessary records **within Porkbun**; detach old domain association only when needed and approved. **NEVER** silently detach domains, modify DNS, change plans, disable the old service or incur charges.
 5. **ASK/TELL ANDREW AT THE RIGHT TIME:** On completion, explain the final static edition no longer has Render's ~60-second sleeping Python Web Service; disclose remaining first-load browser Pyodide/WASM delay, applicable free limits and any cost; provide exact new Static Site creation settings, real new hostname, and pending Porkbun/Render domain steps. Request authorization to move the domains and retire the old service. This is an operational approval, **not a QA or user-testing checklist**.
@@ -310,7 +310,7 @@ This is the **minimal, transitively reduced, authoritative dependency graph**. B
 | B01 | B00 | route manifest documentation |
 | B02 | B01 | canonical bundle/bridge binary |
 | B03 | B02 | `app/03-history-utils-catalog.js` transport |
-| B04 | B03 | creates `engine/route-dispatch.py`; pure route map |
+| B04 | B03 | creates `engine/route_dispatch.py`; pure route map |
 | B05 | B04 | preview route module; no central dispatcher edit |
 | B06 | B05 | owns generation changes in `app/15-generate-dialogs.js` |
 | B07 | B06 | 3MF exporter only, no API route |
@@ -320,7 +320,7 @@ This is the **minimal, transitively reduced, authoritative dependency graph**. B
 | B11 | B10 | structural/Storage Drawers/pegboard hooks; no `/api/space/warm` |
 | B12 | B11 | photo/nest/feature integration; edits `spaces/12-space-info.js` before B13 |
 | B13 | B12 | edits `app/15-generate-dialogs.js` **after** B08 and `spaces/12-space-info.js` **after** B12 |
-| B14 | B13 (all prior B00–B12 transitively) | **sole final `route-dispatch.py` registry assembly owner**, static bundle excludes PoC |
+| B14 | B13 (all prior B00–B12 transitively) | **sole final `route_dispatch.py` registry assembly owner**, static bundle excludes PoC |
 | B15 | B14 and Andrew's explicit hosting approval | fill rollback record BEFORE old service retires |
 | B16 | B15 | delete obsolete PoC files; already excluded from published dist |
 
