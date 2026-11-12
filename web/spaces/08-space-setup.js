@@ -209,10 +209,26 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById("surface-x").value = maximum ? fmt(maximum.x) : "";
       document.getElementById("surface-y").value = maximum ? fmt(maximum.y) : "";
   } else if (kind === "portable") {
+      // Story 2975: Grid (Wavefinity preselected) and, for a Gridfinity pitch,
+      // Floor/None are chosen at creation and immutable once the Space exists
+      // (the Plain Drawer pattern above). Set before the size so the field is
+      // read at the right pitch.
+      const grid = Object.hasOwn(SP.STORAGE_BOX_PITCHES, prefillSpace?.grid) ? prefillSpace.grid : "wavefinity";
+      const gridSelect = document.getElementById("portable-grid");
+      const floorSelect = document.getElementById("portable-floor");
+      gridSelect.value = grid;
+      floorSelect.value = (prefillSpace?.built_in_grid ?? prefillSpace?.storage_box?.built_in_grid) === "none" ? "none" : "floor";
+      for (const select of [gridSelect, floorSelect]) {
+        select.disabled = update;
+        select.title = update ? "A Storage Box's grid and floor are set when it is created and cannot be changed." : "";
+      }
+      gridSelect.onchange = SP.onStorageBoxGridChosen;
+      floorSelect.onchange = () => { SP.syncStorageBoxGrid(); SP.updateReadouts(); };
       document.getElementById("portable-x").value = prefillSpace?.x || "";
       document.getElementById("portable-y").value = prefillSpace?.y || "";
       document.getElementById("portable-z").value = prefillSpace?.z || "";
       SP.fillStorageBoxForm(prefillSpace?.storage_box);
+      SP.syncStorageBoxGrid();
   } else if (kind === "pegboard") {
       document.getElementById("pegboard-standard").value = prefillSpace?.pegboard_standard || "standard";
       document.getElementById("pegboard-thickness").value = String(prefillSpace?.pegboard_thickness_mm ?? 3.2);
@@ -402,14 +418,15 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
     for (const axis of ["x", "y", "z"]) {
       const selector = `#${prefix}-${axis}`;
       const raw = readNumber(selector);
-      const used = kind === "portable" && axis !== "z" ? SP.snap(raw) : raw;
+      const used = kind === "portable" && axis !== "z" ? SP.storageBoxSnap(raw) : raw;
       dimensions[axis] = used;
       const notes = ["At most 2000 mm."];
       if (kind === "drawer") notes.push(axis === "z"
         ? `Usable drawer height must be at least ${fmt(ordinaryBinMinimumHeight())} mm.`
         : "Must fit at least one Wavefinity unit after wall clearance.");
       if (Number.isFinite(raw) && raw > 0 && Math.abs(raw - used) > 1e-6) {
-        notes.push(`Uses ${fmt(used)} mm (${fmt(used / unit)} units).`);
+        const cell = kind === "portable" ? SP.storageBoxPitch() : unit;
+        notes.push(`Uses ${fmt(used)} mm (${fmt(used / cell)} ${kind === "portable" && SP.storageBoxGrid() !== "wavefinity" ? "cells" : "units"}).`);
       }
       SP.setupFieldNote(selector, notes.join(" "));
       if (!Number.isFinite(raw) || raw <= 0) fail("Enter a dimension in mm greater than zero.", selector);
@@ -428,7 +445,7 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
       }
     }
     values = { kind, name, ...dimensions, trimSize: null,
-      ...(kind === "portable" ? { extra: { storage_box: SP.readStorageBoxForm() } } : {}),
+      ...(kind === "portable" ? { extra: { ...SP.storageBoxGridFields(), storage_box: SP.readStorageBoxForm() } } : {}),
       ...(kind === "drawer" ? { extra: { grid: $("#drawer-grid").value } } : {}) };
   } else if (kind === "surface") {
     const trimSize = $("#surface-trim").value;

@@ -154,7 +154,9 @@ def normalise_drawer(raw: dict[str, Any]) -> dict[str, Any]:
     # is the snap, its dimensions are the real ones (no wall allowance), and the
     # field starts at the front-left wall. A Wavefinity drawer carries no key.
     grid = validate_grid(drawer.pop("grid", "wavefinity"))
-    if grid != "wavefinity" and drawer["boundary"] == "wall":
+    # A Gridfinity Storage Box Space (mating boundary) reads its own pitch the
+    # same way (Story 2975); a Wavefinity box carries no key.
+    if grid != "wavefinity" and drawer["boundary"] in ("wall", "mating"):
         drawer.update(grid=grid, snap=GRID_PITCHES[grid], clearance=0.0,
                       anchor="front-left", bin_axis="x")
     drawer.pop("keepouts", None)  # the old Keep-out Zone feature is gone
@@ -243,9 +245,9 @@ def _per_unit(drawer: dict[str, Any]) -> int:
 
 
 def space_drawer_grid(layout: dict[str, Any] | None) -> str | None:
-    """The recorded grid of a Plain Drawer Space, else None (every other kind)."""
+    """The recorded grid of a Plain Drawer or Storage Box Space, else None (every other kind)."""
     space = layout.get("space") if isinstance(layout, dict) else None
-    if isinstance(space, dict) and space.get("kind") == "drawer":
+    if isinstance(space, dict) and space.get("kind") in ("drawer", "portable", "box"):
         return validate_grid(space.get("grid", "wavefinity"))
     return None
 
@@ -345,8 +347,59 @@ def is_storage_drawers_layout(layout: dict[str, Any] | None) -> bool:
 
 
 def storage_box_height_cap(layout: dict[str, Any]) -> float:
+    """The tallest a stack may stand, from the box floor's datum. A Wavefinity
+    box allows its interior height; a Gridfinity box allows its interior height
+    plus its lid headroom (Story 2975). The seated lift is already part of every
+    stack's height, so it is never subtracted again here."""
     space = layout["space"]
-    return float(space["z"])
+    cap = float(space["z"])
+    if validate_grid(space.get("grid", "wavefinity")) != "wavefinity":
+        box = space.get("storage_box")
+        headroom = box.get("lid_headroom_mm") if isinstance(box, dict) else None
+        cap += float(headroom) if isinstance(headroom, (int, float)) and not isinstance(headroom, bool) else 0.0
+    return cap
+
+
+def space_floor_is_built_in(layout: dict[str, Any] | None) -> bool:
+    """True for a Gridfinity Storage Box whose box prints the socket grid
+    itself: no external plate, so no plate lift exists to measure."""
+    space = layout.get("space") if isinstance(layout, dict) else None
+    if not (isinstance(space, dict) and space.get("kind") in ("portable", "box")):
+        return False
+    if validate_grid(space.get("grid", "wavefinity")) == "wavefinity":
+        return False
+    return space.get("built_in_grid", "floor") == "floor"
+
+
+def storage_box_headroom(layout: dict[str, Any] | None, tallest_mm: float | None) -> dict[str, Any] | None:
+    """The headroom readout of a Gridfinity Storage Box Space, else None.
+
+    ``tallest_mm`` is the tallest stack's top above the box floor datum (it
+    already includes any recorded seated lift). A plate lift that was never
+    measured is shown as unverified - the remaining headroom then assumes no
+    lift and is never presented as a verified fit.
+    """
+    if not is_storage_box_layout(layout):
+        return None
+    space = layout["space"]
+    if validate_grid(space.get("grid", "wavefinity")) == "wavefinity":
+        return None
+    built_in = space_floor_is_built_in(layout)
+    lift = None if built_in else space_seated_lift(layout)
+    cap = storage_box_height_cap(layout)
+    status = "not_applicable" if built_in else ("measured" if lift is not None else "unverified")
+    remaining = None if tallest_mm is None else round(cap - tallest_mm, 6)
+    return {
+        "interior_mm": float(space["z"]),
+        "lid_headroom_mm": round(cap - float(space["z"]), 6),
+        "cap_mm": cap,
+        "floor": "built_in" if built_in else "external_plate",
+        "seated_lift_mm": lift,
+        "seated_lift_status": status,
+        "tallest_mm": tallest_mm,
+        "remaining_mm": remaining,
+        "verified": status == "measured",
+    }
 
 
 def stack_wall(one: dict[str, Any], specs: dict[str, Any]) -> float | None:

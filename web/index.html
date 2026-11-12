@@ -1005,6 +1005,22 @@
             <label class="space-field"><span>Interior depth <span class="unit">mm</span></span><input id="portable-y" type="number" min="1" max="2000" step="any"></label>
             <label class="space-field"><span>Interior height <span class="unit">mm</span></span><input id="portable-z" type="number" min="1" max="2000" step="any"></label>
           </div>
+          <div class="space-dimension-row">
+            <label class="space-field"><span>Grid</span>
+              <select id="portable-grid">
+                <option value="wavefinity" selected>Wavefinity 7 mm</option>
+                <option value="gridfinity_half">Gridfinity half 21 mm</option>
+                <option value="gridfinity">Gridfinity 42 mm</option>
+              </select>
+            </label>
+            <label id="portable-floor-row" class="space-field" hidden><span>Floor</span>
+              <select id="portable-floor">
+                <option value="floor" selected>Floor (raised socket grid)</option>
+                <option value="none">None (plain cavity for your own baseplate)</option>
+              </select>
+            </label>
+          </div>
+          <p id="portable-grid-note" class="space-help" hidden></p>
           <p id="portable-printer-fit" class="portable-fit-warning" hidden></p>
           <div id="portable-readout" class="derived-readout" hidden>
              <dt id="portable-outside-label" hidden>Finished outside</dt><dd id="portable-outside-readout" hidden></dd>

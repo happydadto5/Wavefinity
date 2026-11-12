@@ -29,6 +29,8 @@ from ._core import (
     drawer_in_space,
     drawer_unit_mm,
     space_seated_lift,
+    space_floor_is_built_in,
+    storage_box_headroom,
     _per_unit,
     is_surface_layout,
     is_storage_box_layout,
@@ -429,9 +431,11 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     if drawer.get("boundary") == "pegboard":
         return _pegboard_report(drawer, bins)
     space_grid_name = drawer.get("grid")
-    lift = space_seated_lift(layout) if space_grid_name else None
+    built_in_floor = space_floor_is_built_in(layout)
+    # A box that prints its own socket grid seats bins at its floor: no plate lift.
+    lift = space_seated_lift(layout) if space_grid_name and not built_in_floor else None
     if space_grid_name:
-        drawer["seated_lift_mm"] = lift
+        drawer["seated_lift_mm"] = 0.0 if built_in_floor else lift
     grid = drawer_grid(drawer)
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
     by_id = {one["id"]: one for one in bins}
@@ -578,15 +582,20 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     for problem in problems:
         problem["severity"] = "advisory" if problem["type"] in ADVISORY_PROBLEM_TYPES else "hard"
     height_fit = None
-    if space_grid_name:
+    if space_grid_name and built_in_floor:
+        height_fit = {"verified": False, "seated_lift_mm": None,
+                      "note": "Bins seat in this box's own socket grid; its fit is not print-verified."}
+    elif space_grid_name:
         # Never state a verified fit that was not measured: the seated lift of
         # the Space's baseplate (Story 2974) is either recorded or unverified.
         height_fit = ({"verified": True, "seated_lift_mm": lift,
                        "note": f"Heights include the recorded {lift:g} mm seated lift."} if lift is not None
                       else {"verified": False, "seated_lift_mm": None,
                             "note": "Height fit is not verified: no seated lift is recorded for this Space's baseplate."})
+    headroom = storage_box_headroom(layout, max((item["h"] for item in items), default=None))
     return {
         **({"height_fit": height_fit} if height_fit else {}),
+        **({"headroom": headroom} if headroom else {}),
         "grid": grid,
         "physical_envelopes": physical_envelopes,
         "cells": {"total": usable, "used": used, "free": int(free.sum())},

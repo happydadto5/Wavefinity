@@ -74,7 +74,14 @@
   function mount({ host, initialSpace, callbacks = {} }) {
     const catalog = (typeof state !== "undefined" && state.catalog) || null;
     const rules = catalog?.b4b_rules || {};
-    const unit = Number(catalog?.base_unit || 7);
+    // Story 2975: a Gridfinity Storage Box Space sizes X/Y in whole cells of its
+    // own pitch (read-only here: the grid and floor are fixed at creation).
+    // A Wavefinity Space and every standalone design keep the 7 mm unit.
+    const gridKey = initialSpace?.grid && initialSpace.grid !== "wavefinity" ? initialSpace.grid : "wavefinity";
+    const baseUnit = Number(catalog?.base_unit || 7);
+    const gridRow = (catalog?.grids || []).find(row => row.value === gridKey);
+    const unit = gridKey === "wavefinity" ? baseUnit : (Number(gridRow?.pitch_mm) || ({ gridfinity_half: 21, gridfinity: 42 })[gridKey] || baseUnit);
+    const unitName = gridKey === "wavefinity" ? "units" : "cells";
     const maxMM = 2000; // Container authority; never the single-bin ceiling.
     const minField = Number(rules.min_field_mm) || unit;
     const minHeight = Number(rules.min_secure_height_mm) || 1;
@@ -103,6 +110,18 @@
     const zLabel = labeled("Interior Height (mm)", zInput);
     sizeRow.append(xLabel, yLabel, zLabel);
     sizeGroup.append(sizeRow);
+    if (gridKey !== "wavefinity") {
+      // Read-only: seeded from the Space record, fixed at creation. The nominal
+      // grid is what the layout promises; with no floor, the printed cavity is
+      // larger by the plate clearance, so the two are told apart.
+      const external = (initialSpace?.built_in_grid ?? initialSpace?.storage_box?.built_in_grid ?? "floor") === "none";
+      const physical = Array.isArray(initialSpace?.physical_cavity_mm) ? initialSpace.physical_cavity_mm : null;
+      const gridLine = el("p", "dl-note", `${gridRow?.label || gridKey} — ${external ? "no floor (plain cavity for your own baseplate)" : "floor with raised socket grid"}. `
+        + `Nominal grid ${initialSpace?.x ?? ""} × ${initialSpace?.y ?? ""} mm`
+        + (external && physical ? `; printed cavity ${physical.map(n => Number(n).toFixed(1).replace(/\.0$/, "")).join(" × ")} mm` : "")
+        + ". Grid and floor are set when the Space is created and cannot be changed.");
+      sizeGroup.append(gridLine);
+    }
     form.append(sizeGroup);
 
     // ---- Case Settings ----
@@ -231,6 +250,14 @@
     fillMaterial(wallSel, rules.wall_choices, box.wall_mm);
     fillMaterial(baseSel, rules.base_choices, box.base_mm);
 
+    // A Floor (raised socket grid) needs at least the catalog's floor build.
+    function floorBase(chosen, stackingOn) {
+      if (gridKey === "wavefinity") return chosen;
+      if ((initialSpace?.built_in_grid ?? initialSpace?.storage_box?.built_in_grid ?? "floor") !== "floor") return chosen;
+      const minimum = Number(stackingOn ? gridRow?.container_floor_stacking_build_mm : gridRow?.container_floor_build_mm);
+      return Number.isFinite(minimum) && minimum > chosen ? minimum : chosen;
+    }
+
     // ---- Interior sizing: the one normalization path ----
     function parseLeadingNumber(value) {
       const match = String(value ?? "").trim().match(/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/);
@@ -240,7 +267,11 @@
     function normalizeAxis(axis, requested) {
       const value = typeof requested === "number" ? requested : parseLeadingNumber(requested);
       if (!Number.isFinite(value)) return NaN;
-      return axis === "z" ? Math.round(value) : Math.round(value / unit) * unit;
+      if (axis === "z") return Math.round(value);
+      // Nearest whole cells at the pitch, never fewer than the minimum field needs.
+      return gridKey === "wavefinity"
+        ? Math.round(value / unit) * unit
+        : Math.max(Math.ceil(minField / unit - 1e-9), Math.floor(value / unit + 0.5), 1) * unit;
     }
     function displayAxis(axis, input) {
       const raw = input.value.trim() ? Number(input.value) : NaN;
@@ -248,7 +279,7 @@
       const minimum = axis === "z" ? minHeight : minField;
       const bad = !Number.isFinite(raw) || raw <= 0 || used < minimum || raw > maxMM || used > maxMM;
       const notes = [`At least ${minimum} mm and at most ${maxMM} mm.`];
-      if (Number.isFinite(used) && Math.abs(raw - used) > 1e-6) notes.push(`Uses ${used} mm${axis === "z" ? "" : ` (${used / unit} units)`}.`);
+      if (Number.isFinite(used) && Math.abs(raw - used) > 1e-6) notes.push(`Uses ${used} mm${axis === "z" ? "" : ` (${used / unit} ${unitName})`}.`);
       let note = sizeNotes.get(axis);
       if (!note) {
         note = el("small", "field-help"); note.id = `${input.id}-note`; note.setAttribute("aria-live", "polite");
@@ -353,7 +384,7 @@
             stacking: stacking.value === "true",
             handle: latched && handle.value === "true",
             wall_mm: Number(wallSel.value),
-            base_mm: Number(baseSel.value),
+            base_mm: floorBase(Number(baseSel.value), stacking.value === "true"),
           },
         },
       };

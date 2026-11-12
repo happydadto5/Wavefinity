@@ -7,6 +7,7 @@
 // case settings on the Space setup/Edit form.
 
 SP.storageBoxDefaults = fieldWidth => ({
+  grid: "wavefinity", built_in_grid: "floor", seated_lift_mm: null,
   secure_lid: true, latch_count: fieldWidth > 96 ? "2" : "1", hinge_count: "2", lid_headroom_mm: 1, latch_tightness: "default",
   label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat", label_size: "default",
   stacking: false, handle: false,
@@ -33,9 +34,57 @@ SP.storageBoxHingeType = "screw";
 
 // portable-x is Interior width, not the finished outside case size.
 // Match the normalized child-bin field passed to the engine.
-SP.storageBoxSetupFieldWidth = () => {
-  const unit = Number(state.catalog?.base_unit || 7);
-  return Math.round(Number(document.getElementById("portable-x")?.value) / unit) * unit;
+SP.storageBoxSetupFieldWidth = () => SP.storageBoxSnap(Number(document.getElementById("portable-x")?.value));
+
+// Story 2975: the Grid and Floor choices of the Storage Box setup. The grid is
+// chosen at creation and immutable afterwards; Floor/None only exists for a
+// Gridfinity pitch. The nominal field is always whole cells at the pitch.
+SP.STORAGE_BOX_PITCHES = { wavefinity: 7, gridfinity_half: 21, gridfinity: 42 };
+SP.storageBoxGrid = () => {
+  const value = document.getElementById("portable-grid")?.value;
+  return Object.hasOwn(SP.STORAGE_BOX_PITCHES, value) ? value : "wavefinity";
+};
+SP.storageBoxPitch = (grid = SP.storageBoxGrid()) => {
+  const row = (state.catalog?.grids || []).find(one => one.value === grid);
+  return Number(row?.pitch_mm) || SP.STORAGE_BOX_PITCHES[grid] || Number(state.catalog?.base_unit || 7);
+};
+SP.storageBoxFloor = () => SP.storageBoxGrid() === "wavefinity" ? null
+  : (document.getElementById("portable-floor")?.value === "none" ? "none" : "floor");
+// The nearest legal whole-cell field at the chosen pitch (the spec's rounding
+// rule: nearest positive whole cells, never fewer than the box's minimum field).
+SP.storageBoxSnap = mm => {
+  const grid = SP.storageBoxGrid();
+  if (grid === "wavefinity") return SP.snap(mm);
+  const pitch = SP.storageBoxPitch(grid);
+  const minimum = Number(state.catalog?.b4b_rules?.min_field_mm) || 0;
+  return Math.max(1, Math.ceil(minimum / pitch - 1e-9), Math.floor(mm / pitch + 0.5)) * pitch;
+};
+SP.syncStorageBoxGrid = () => {
+  const gridfinity = SP.storageBoxGrid() !== "wavefinity";
+  const row = document.getElementById("portable-floor-row");
+  if (row) row.hidden = !gridfinity;
+  const note = document.getElementById("portable-grid-note");
+  if (note) {
+    const editing = Boolean(document.getElementById("portable-grid")?.disabled);
+    const parts = [];
+    if (gridfinity) parts.push(`Width and depth are whole ${fmt(SP.storageBoxPitch())} mm cells.`);
+    if (gridfinity && SP.storageBoxFloor() === "none") {
+      parts.push("With no floor the box prints a plain cavity, a little larger than the nominal grid, for a baseplate you supply.");
+    }
+    if (editing) parts.push("Grid and floor are set when the Space is created and cannot be changed.");
+    note.textContent = parts.join(" ");
+    note.hidden = !parts.length;
+  }
+};
+// Choosing a pitch re-derives the offered field from what was already entered.
+SP.onStorageBoxGridChosen = () => {
+  SP.syncStorageBoxGrid();
+  for (const id of ["portable-x", "portable-y"]) {
+    const input = document.getElementById(id);
+    const entered = input && input.value.trim() ? Number(input.value) : NaN;
+    if (Number.isFinite(entered) && entered > 0) input.value = String(SP.storageBoxSnap(entered));
+  }
+  SP.updateReadouts();
 };
 SP.syncNewStorageBoxLatchDefault = () => {
   if (!SP.newStorageBox) return;
@@ -45,6 +94,10 @@ SP.syncNewStorageBoxLatchDefault = () => {
 
 SP.fillStorageBoxForm = box => {
   SP.newStorageBox = !box;
+  // A measured seated lift is part of the record; the setup form carries it
+  // through an edit unchanged (it has no control for it).
+  SP.storageBoxSeatedLift = box && Number.isFinite(Number(box.seated_lift_mm)) && box.seated_lift_mm !== null
+    ? Number(box.seated_lift_mm) : null;
   const one = { ...SP.storageBoxDefaults(SP.storageBoxSetupFieldWidth()), ...(box || {}) };
   SP.storageBoxEdgeBevel = box ? (box.edge_bevel || "none") : "default";
   SP.storageBoxHingeType = box && box.hinge_type === "piano" ? "piano" : "screw";
@@ -100,12 +153,12 @@ SP.refreshSetupOutside = () => {
   const token = ++SP.setupOutsideToken;
   clearTimeout(SP.setupOutsideTimer);
   const num = id => Number(document.getElementById(id)?.value);
-  const x = SP.snap(num("portable-x")), y = SP.snap(num("portable-y")), z = num("portable-z");
+  const x = SP.storageBoxSnap(num("portable-x")), y = SP.storageBoxSnap(num("portable-y")), z = num("portable-z");
   const minField = Number(state.catalog?.b4b_rules?.min_field_mm);
   const minHeight = Number(state.catalog?.b4b_rules?.min_secure_height_mm);
   const valid = [x, y, z].every(n => Number.isFinite(n) && n > 0) && x >= minField && y >= minField && z >= minHeight;
   if (!valid || SP.setupKind !== "portable") { hideOutside(); hideFit(); return; }
-  const space = { kind: "portable", name: "Storage Box", x, y, z, storage_box: SP.readStorageBoxForm() };
+  const space = { kind: "portable", name: "Storage Box", x, y, z, ...SP.storageBoxGridFields(), storage_box: SP.readStorageBoxForm() };
   SP.setupOutsideTimer = setTimeout(async () => {
     try {
       const result = await api("/api/space/structural-design", {
@@ -134,12 +187,22 @@ SP.refreshSetupOutside = () => {
   }, 250);
 };
 
+// The Space-level grid fields of the setup form: the grid always, the floor
+// only for a Gridfinity pitch (it has no meaning on the Wavefinity grid).
+SP.storageBoxGridFields = () => ({
+  grid: SP.storageBoxGrid(),
+  ...(SP.storageBoxFloor() ? { built_in_grid: SP.storageBoxFloor() } : {}),
+});
+
 SP.readStorageBoxForm = () => {
   const value = id => document.getElementById(id)?.value;
   const latched = value("portable-lid-type") !== "lid_only";
   const location = value("portable-label-location") || "none";
   const labelled = location !== "none";
   return {
+    ...SP.storageBoxGridFields(),
+    ...(SP.storageBoxGrid() !== "wavefinity" && SP.storageBoxSeatedLift !== null && SP.storageBoxSeatedLift !== undefined
+      ? { seated_lift_mm: SP.storageBoxSeatedLift } : {}),
     secure_lid: latched,
     latch_count: value("portable-latch-count") || "1",
     hinge_count: latched ? (value("portable-hinge-count") === "1" ? "1" : "2") : "2",
@@ -155,8 +218,17 @@ SP.readStorageBoxForm = () => {
     stacking: value("portable-stacking") === "true",
     handle: latched && value("portable-handle") === "true",
     wall_mm: Number(value("portable-wall")),
-    base_mm: Number(value("portable-base")),
+    base_mm: SP.storageBoxFloorBase(Number(value("portable-base")), value("portable-stacking") === "true"),
   };
+};
+
+// A Floor (the box's own raised socket grid) needs at least the catalog's floor
+// build; a Wavefinity box and a Gridfinity box with no floor keep the chosen base.
+SP.storageBoxFloorBase = (chosen, stacking) => {
+  if (SP.storageBoxFloor() !== "floor") return chosen;
+  const row = (state.catalog?.grids || []).find(one => one.value === SP.storageBoxGrid());
+  const minimum = Number(stacking ? row?.container_floor_stacking_build_mm : row?.container_floor_build_mm);
+  return Number.isFinite(minimum) && minimum > chosen ? minimum : chosen;
 };
 
 // ------------------------------------------------------------ structural outputs

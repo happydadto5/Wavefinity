@@ -297,9 +297,9 @@ DL.GRID_LABELS = { wavefinity: "Wavefinity 7 mm", gridfinity_half: "Gridfinity h
 DL.gridLabel = grid => DL.GRID_LABELS[grid] || String(grid);
 DL.spaceGrid = () => {
   const space = DL.layout?.space;
-  return space?.kind === "drawer" && DL.GRID_PITCHES[space.grid] ? space.grid : "wavefinity";
+  return ["drawer", "portable", "box"].includes(space?.kind) && DL.GRID_PITCHES[space.grid] ? space.grid : "wavefinity";
 };
-// True when this drawer lays out on a Gridfinity pitch (a Plain Drawer only).
+// True when this drawer lays out on a Gridfinity pitch (a Plain Drawer or a Storage Box, Story 2975).
 DL.isGridfinity = (drawer = DL.drawer()) => !DL.isPegboard(drawer) && DL.spaceGrid() !== "wavefinity";
 // One layout unit in mm: the Space's pitch on a Gridfinity drawer, 7 mm otherwise.
 DL.gridUnit = (drawer = DL.drawer()) => DL.isGridfinity(drawer) ? DL.GRID_PITCHES[DL.spaceGrid()] : DL.UNIT;
@@ -320,11 +320,15 @@ DL.seatedLift = () => {
   const value = space?.seated_lift_mm ?? space?.storage_box?.seated_lift_mm;
   return value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < 0 ? null : Number(value);
 };
-DL.baseLift = (drawer = DL.drawer()) => DL.isGridfinity(drawer) ? (DL.seatedLift() ?? 0) : 0;
+// A Gridfinity Storage Box that prints its own socket grid seats bins at its
+// floor: it has no external plate, so no plate lift.
+DL.floorBuiltIn = () => DL.isStorageBox() && DL.spaceGrid() !== "wavefinity" && (DL.layout?.space?.built_in_grid ?? "floor") === "floor";
+DL.baseLift = (drawer = DL.drawer()) => DL.isGridfinity(drawer) && !DL.floorBuiltIn() ? (DL.seatedLift() ?? 0) : 0;
 // What the height state may claim. A Gridfinity fit is verified only when the
 // Space's seated lift is recorded; otherwise it is presented as unverified.
 DL.heightFit = (drawer = DL.drawer()) => {
   if (!DL.isGridfinity(drawer)) return null;
+  if (DL.floorBuiltIn()) return { verified: false, lift: null, note: "Bins seat in this box's own socket grid; its fit is not print-verified." };
   const lift = DL.seatedLift();
   return lift === null
     ? { verified: false, lift: null, note: "Height fit is not verified: no seated lift is recorded for this Space's baseplate." }
@@ -345,8 +349,10 @@ DL.seatAbove = (parent, one) => {
 };
 DL.isSurface = () => DL.layout?.space?.kind === "surface";
 DL.isStorageBox = () => ["portable", "box"].includes(DL.layout?.space?.kind);
+// A Gridfinity Storage Box takes its interior height plus its lid headroom (the
+// seated lift is already part of every stack's height); a Wavefinity box, its interior.
 DL.heightCap = drawer => DL.isStorageBox()
-  ? Number(DL.layout.space.z)
+  ? Number(DL.layout.space.z) + (DL.spaceGrid() === "wavefinity" ? 0 : Number(DL.layout.space.storage_box?.lid_headroom_mm) || 0)
   : Number(drawer.height);
 DL.isStorageDrawers = () => state.activeSpace?.kind === "storage_drawers";
 // Storage Box and Surface share the server's canonical stack metrics.

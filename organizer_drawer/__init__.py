@@ -141,6 +141,8 @@ from ._core import (
     drawer_in_space,
     drawer_unit_mm,
     space_seated_lift,
+    space_floor_is_built_in,
+    storage_box_headroom,
     gridfinity_seat_offset,
     _per_unit,
     _cell,

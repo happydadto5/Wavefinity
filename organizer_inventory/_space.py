@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import copy
 import math
-from organizer_engine._specs import validate_grid, validate_built_in_grid, retain_space_grid, cross_grid_message
+from organizer_engine._specs import (
+    GRID_PITCHES, cross_grid_message, grid_label, retain_space_grid, validate_built_in_grid, validate_grid,
+)
 from typing import Any
 from organizer_engine import (
     B4B_DEFAULT_BASE,
@@ -84,6 +86,20 @@ def legacy_layout_space(layout: dict[str, Any] | None) -> dict[str, Any] | None:
 STORAGE_BOX_LABEL_LIMIT = 80
 STORAGE_BOX_MIN_MATERIAL_MM = 0.4
 STORAGE_BOX_MAX_MATERIAL_MM = 4.0
+FLOOR_CHOICE_NAMES = {"floor": "Floor", "none": "None"}
+
+
+def nearest_whole_cell_field(grid: str, x: Any, y: Any, minimum_mm: float = 0.0) -> tuple[float, float]:
+    """The nearest legal whole-cell field at a pitch for the dimensions entered.
+
+    Nearest positive whole cells per axis (halves round up), never fewer cells
+    than the box's minimum field needs. No dimension is invented: the result is
+    only ever the entered size moved to the nearest legal cell count.
+    """
+    pitch = GRID_PITCHES[validate_grid(grid)]
+    floor_cells = max(1, math.ceil(float(minimum_mm) / pitch - 1e-9))
+    return tuple(  # type: ignore[return-value]
+        max(floor_cells, math.floor(float(value) / pitch + 0.5)) * pitch for value in (x, y))
 
 
 def storage_box_defaults() -> dict[str, Any]:
@@ -185,12 +201,17 @@ def normalise_storage_box(raw: Any, width_mm: Any = None, depth_mm: Any = None) 
         raise ValueError(f"storage box label text is at most {STORAGE_BOX_LABEL_LIMIT} characters")
     from organizer_features.gridfinity import (
         PROFILES, container_floor_record, floor_pocket_depth, measured_seated_lift,
-        validate_floor_build,
+        minimum_floor_build, validate_floor_build,
     )
     from organizer_b4b._constants import B4B_STACK_RECESS_DEPTH
     grid = validate_grid(merged["grid"])
     mode = validate_built_in_grid(merged["built_in_grid"])
     underside = B4B_STACK_RECESS_DEPTH if merged["stacking"] else 0.0
+    if grid in PROFILES and mode == "floor" and "base_mm" not in raw:
+        # A Floor box that was not given a base starts from the thinnest base
+        # that can hold its raised socket grid (derived, never guessed). An
+        # explicit base below it is still refused by validate_floor_build.
+        merged["base_mm"] = minimum_floor_build(grid, underside)
     maximum = STORAGE_BOX_MAX_MATERIAL_MM
     if grid in PROFILES and mode == "floor":
         maximum += floor_pocket_depth(grid) + underside
@@ -257,7 +278,6 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
         if grid != "wavefinity":
             # A Gridfinity drawer keeps its real size and no wall allowance:
             # it needs room for one whole cell at its pitch.
-            from organizer_engine._specs import GRID_PITCHES
             minimum_xy = GRID_PITCHES[grid]
         if x + 1e-9 < minimum_xy or y + 1e-9 < minimum_xy:
             raise ValueError(
@@ -271,8 +291,19 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
     elif kind == "portable":
         minimum_xy = B4B_MIN_FIELD_XY
         if grid != "wavefinity" and (raw.get("storage_box") or {}).get("secure_lid") is False:
-            from organizer_engine._specs import GRID_PITCHES
             minimum_xy = GRID_PITCHES[grid]
+        if grid != "wavefinity":
+            # Gridfinity field: whole cells at the pitch, never fewer than the
+            # minimum field. The nearest legal field is named so the entry can
+            # be corrected, never guessed.
+            pitch = GRID_PITCHES[grid]
+            nearest = nearest_whole_cell_field(grid, x, y, minimum_xy)
+            if not all(math.isclose(value, wanted, abs_tol=1e-6)
+                       for value, wanted in zip((x, y), nearest)):
+                raise ValueError(
+                    f"a {grid_label(grid)} Storage Box field is whole {pitch:g} mm cells; "
+                    f"the nearest legal field is {nearest[0]:g} x {nearest[1]:g} mm"
+                )
         if x + 1e-9 < minimum_xy or y + 1e-9 < minimum_xy:
             raise ValueError(
                 f"a storage box needs at least {minimum_xy:g} mm in X and Y"
@@ -281,12 +312,13 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
             raise ValueError(
                 f"a storage box needs at least {B4B_LATCHED_MIN_HEIGHT:g} mm usable height"
             )
-        for axis_name, value in (("X", x), ("Y", y)):
-            units = value / BASE_UNIT
-            if not math.isclose(units, round(units), abs_tol=1e-6):
-                raise ValueError(
-                    f"storage box {axis_name} must be a whole Wavefinity unit"
-                )
+        if grid == "wavefinity":
+            for axis_name, value in (("X", x), ("Y", y)):
+                units = value / BASE_UNIT
+                if not math.isclose(units, round(units), abs_tol=1e-6):
+                    raise ValueError(
+                        f"storage box {axis_name} must be a whole Wavefinity unit"
+                    )
 
     elif kind == "surface":
         for axis_name, value in (("X", x), ("Y", y)):
@@ -320,11 +352,17 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
         settings["grid"] = grid
         if "built_in_grid" in raw:
             settings["built_in_grid"] = raw["built_in_grid"]
+        if grid == "wavefinity":
+            # A floor choice is meaningless on the Wavefinity grid: cleared to
+            # the neutral default, never recorded on the Space.
+            settings["built_in_grid"] = "floor"
+            settings["seated_lift_mm"] = None
         result["storage_box"] = normalise_storage_box(settings, x, y)
-        result["built_in_grid"] = result["storage_box"]["built_in_grid"]
-        from organizer_features.gridfinity import container_floor_record
-        result.update(container_floor_record(grid, result["built_in_grid"], x, y,
-                                            result["storage_box"]["seated_lift_mm"]))
+        if grid != "wavefinity":
+            result["built_in_grid"] = result["storage_box"]["built_in_grid"]
+            from organizer_features.gridfinity import container_floor_record
+            result.update(container_floor_record(grid, result["built_in_grid"], x, y,
+                                                result["storage_box"]["seated_lift_mm"]))
     return result
 
 def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> None:
@@ -398,8 +436,11 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
         primary["grid"] = space_def["grid"]
     else:
         primary.pop("grid", None)
-    if kind == "portable":
+    if kind == "portable" and space_def["grid"] != "wavefinity":
+        # The box's own pitch is the layout's cell: Gridfinity placement snaps
+        # to its cells, read through the same drawer fields a Plain Drawer uses.
         from organizer_features.gridfinity import container_floor_record
+        primary["grid"] = space_def["grid"]
         primary.update(container_floor_record(space_def["grid"], space_def["built_in_grid"], x, y,
                                                space_def["storage_box"]["seated_lift_mm"]))
     if kind == "pegboard":
@@ -449,12 +490,38 @@ def _carry_storage_box(raw_def: dict[str, Any], layout: dict[str, Any], mode: st
     return raw_def
 
 
+def _refuse_floor_change(proposed: dict[str, Any], existing: dict[str, Any]) -> None:
+    """A Storage Box's floor (Floor / None) is fixed at creation, like its grid.
+
+    Only the portable (Storage Box) kind is judged here; the Storage Drawers
+    path owns its own floor rules. A Wavefinity box has no floor choice.
+    """
+    if existing.get("kind") not in ("portable", "box") or proposed.get("kind") not in ("portable", "box"):
+        return
+    grid = validate_grid(existing.get("grid", "wavefinity"))
+    if grid == "wavefinity":
+        return
+    saved = existing.get("built_in_grid")
+    if saved is None and isinstance(existing.get("storage_box"), dict):
+        saved = existing["storage_box"].get("built_in_grid")
+    saved = validate_built_in_grid(saved if saved is not None else "floor")
+    box = proposed.get("storage_box")
+    for wanted in (proposed.get("built_in_grid"), box.get("built_in_grid") if isinstance(box, dict) else None):
+        if wanted is not None and validate_built_in_grid(wanted) != saved:
+            raise ValueError(
+                f"A Storage Box's floor is immutable: this Space was created with the "
+                f"{FLOOR_CHOICE_NAMES[saved]} floor and cannot become {FLOOR_CHOICE_NAMES[wanted]}. "
+                "Create a new Space for another floor. Nothing was changed.")
+
+
 def _configured_space_definition(
     raw_def: dict[str, Any], layout: dict[str, Any], mode: str, allow_legacy: bool,
 ) -> dict[str, Any]:
     existing = layout.get("space")
     if isinstance(existing, dict):
         raw_def = retain_space_grid(raw_def, existing)
+        if mode == "update":
+            _refuse_floor_change(raw_def, existing)
     if raw_def.get("kind") == "storage_drawers":
         if mode == "update":
             raise ValueError("Edit a Storage Drawers Space from its cabinet editor.")

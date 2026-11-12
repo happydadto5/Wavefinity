@@ -101,10 +101,13 @@ class GridModelTests(unittest.TestCase):
         for grid in ("gridfinity_half", "gridfinity"):
             created = configure_space_text("", title="Tools", raw_def=space(grid, "portable"))
             text = created["inventory_text"]
-            edited = space(kind="portable") | {"name": "Renamed", "x": 217, "built_in_grid": "none"}
+            edited = space(kind="portable") | {"name": "Renamed", "x": 252}
             result = configure_space_text(text, title="Tools", raw_def=edited, mode="update")
             saved = result["layout"]["space"]
-            self.assertEqual((saved["grid"], saved["x"], saved["built_in_grid"]), (grid, 217, "none"))
+            self.assertEqual((saved["grid"], saved["x"], saved["built_in_grid"]), (grid, 252, "floor"))
+            # Story 2975: the floor is fixed at creation, like the grid.
+            with self.assertRaisesRegex(ValueError, "floor is immutable"):
+                configure_space_text(text, title="Tools", raw_def=edited | {"built_in_grid": "none"}, mode="update")
             for bad in ("wavefinity", "invalid"):
                 with self.assertRaises(ValueError):
                     configure_space_text(text, title="Tools", raw_def=edited | {"grid": bad}, mode="update")

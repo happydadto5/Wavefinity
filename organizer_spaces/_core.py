@@ -285,11 +285,16 @@ def _space(raw: Any) -> dict[str, Any] | None:
                 raise ValueError("Storage Box grid must match its Space grid.")
             settings["grid"] = grid
             settings["built_in_grid"] = validate_built_in_grid(raw.get("built_in_grid", settings.get("built_in_grid", "floor")))
+            if grid == "wavefinity":
+                # No floor choice exists on the Wavefinity grid (cleared, as normalised).
+                settings["built_in_grid"] = "floor"
+                settings["seated_lift_mm"] = None
             res["storage_box"] = normalise_storage_box(settings, size[0], size[1])
-            res["built_in_grid"] = settings["built_in_grid"]
-            from organizer_features.gridfinity import container_floor_record
-            res.update(container_floor_record(grid, settings["built_in_grid"], size[0], size[1],
-                                               res["storage_box"]["seated_lift_mm"]))
+            if grid != "wavefinity":
+                res["built_in_grid"] = settings["built_in_grid"]
+                from organizer_features.gridfinity import container_floor_record
+                res.update(container_floor_record(grid, settings["built_in_grid"], size[0], size[1],
+                                                   res["storage_box"]["seated_lift_mm"]))
         except ValueError:
             return None
     return res
