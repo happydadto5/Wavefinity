@@ -24,6 +24,7 @@ from organizer_engine.product_rules import B4B_LATCHED_MIN_HEIGHT, B4B_MIN_FIELD
 from ._constants import (
     B4B_CAVITY_CORNER_CLEARANCE,
     B4B_LID_SKIRT_LAP,
+    B4B_SECURE_LID_SKIN,
     B4B_WALL_CORNER_FILLET,
     B4B_STACK_MIN_BASE,
     _SUPPORT_FREE_INSCRIBED,
@@ -494,8 +495,8 @@ def b4b_handle_width_fit(box: BoxSpec) -> tuple[bool, float, float]:
 
 
 def b4b_lid_skin_from_eff(eff: BoxSpec) -> float:
-    """Storage Box lid top plate matches the effective Storage Box base."""
-    return eff.base_thickness
+    """Use the reinforced plate for secure lids and the base thickness otherwise."""
+    return B4B_SECURE_LID_SKIN if eff.b4b.secure_lid else eff.base_thickness
 
 
 def b4b_lid_skin(box: BoxSpec) -> float:
