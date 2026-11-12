@@ -31,6 +31,8 @@ from organizer_geometry import (
 )
 
 # --------------------------------------------------------------------------- #
+# Magnet pattern reference: Gridfinity Builder specification
+# https://gridfinity-docs.securedev.codes/reference/specification.html
 # profiles
 # --------------------------------------------------------------------------- #
 FOOT_HEIGHT = 4.75        # visible foot: z 0 to here, then the full-width shell
@@ -352,7 +354,21 @@ def foot_solid(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
         _lofted_cell(centre, profile["foot_half"], sections)
         for centre in _cell_centres(spec, grid)
     ]
-    return cells[0] if len(cells) == 1 else union(cells)
+    feet = cells[0] if len(cells) == 1 else union(cells)
+    if spec.magnet_holes == "6x2":
+        if grid != "gridfinity":
+            raise ValueError("Magnet holes require 42 mm Gridfinity")
+        # Unconfirmed starting dimensions; Andrew's recorded fit print is the
+        # only confirmation. Cap depth to preserve at least FLOOR_SKIN.
+        depth = min(2.4, FOOT_HEIGHT - FLOOR_SKIN)
+        cutters = []
+        for x, y in _cell_centres(spec, grid):
+            for dx in (-13.0, 13.0):
+                for dy in (-13.0, 13.0):
+                    cutter = trimesh.creation.cylinder(radius=3.25, height=depth + 0.1, sections=64)
+                    cutters.append(translated(cutter, (x + dx, y + dy, (depth - 0.1) / 2)))
+        feet = difference([feet, *cutters])
+    return feet
 
 
 def _single_volume(mesh: trimesh.Trimesh, what: str) -> None:

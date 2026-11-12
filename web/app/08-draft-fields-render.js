@@ -5,6 +5,8 @@ function syncBinGridControl() {
   row.hidden = !standaloneBinUnits();
   select.replaceChildren(...state.catalog.grids.map(choice => new Option(choice.label, choice.value)));
   select.value = state.design.grid || "wavefinity";
+  $("#bin-magnets-row").hidden = state.design.grid !== "gridfinity" || !!state.design.box.b4b?.enabled;
+  $("#bin-magnets").value = state.design.box.magnet_holes || "none";
 }
 
 function renderDraftFields() {

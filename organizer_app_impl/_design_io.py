@@ -617,7 +617,10 @@ def design_to_dict(
             raise ValueError("Pegboard mounting is available only for ordinary bins")
         receiver_layout(box)  # validates Auto/manual counts and minimum height
     b4b = box.b4b.normalised()
+    from organizer_engine._specs import validate_bin_magnets
+    validate_bin_magnets(box, layout.design_grid)
     box_block = {
+        "magnet_holes": box.magnet_holes,
         "x": box.x,
         "y": box.y,
         "z": box.z,
@@ -1018,7 +1021,10 @@ def design_from_dict(
         edge_mount=edge_mount,
         side_openings=side_openings,
         pegboard=pegboard,
+        magnet_holes=raw.get("magnet_holes", "none"),
     )
+    from organizer_engine._specs import validate_bin_magnets
+    validate_bin_magnets(box, grid)
     if grid != "wavefinity" and box.side_openings.enabled:
         raise ValueError("Side openings are unavailable for Gridfinity Stage 1.")
     box = normalize_stack_settings(box)

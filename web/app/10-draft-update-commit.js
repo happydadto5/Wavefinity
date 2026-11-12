@@ -43,12 +43,25 @@ function commitBinGrid(event) {
       : "Remove the hinged, handle or label lid before switching grid.", true);
     refused = true;
   }
+  if (candidate.grid !== "gridfinity" && candidate.box.magnet_holes === "6x2") {
+    toast("Remove magnet holes before switching grid.", true);
+    refused = true;
+  }
   if (refused) { event.target.value = previous.grid || "wavefinity"; return; }
   state.design.grid = candidate.grid;
+  syncBinGridControl();
   state.canGenerate = false;
   updateGenerateAvailability();
   bindBinSizeFields();
   syncLidForm();
+  changedDesign(previous);
+}
+
+function commitBinMagnets(event) {
+  const previous = clone(state.design);
+  state.design.box.magnet_holes = event.target.value;
+  state.canGenerate = false;
+  updateGenerateAvailability();
   changedDesign(previous);
 }
 

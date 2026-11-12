@@ -1460,3 +1460,5 @@ Authoritative implementation details live in the owning code, including areas su
 
 When this file disagrees with the current accepted code, fix the document.
 
+
+Gridfinity 42 mm ordinary bins optionally offer 6x2 mm magnet holes (default None): four blind pockets per foot on a 26 mm square pattern, following the [Gridfinity Builder specification](https://gridfinity-docs.securedev.codes/reference/specification.html). The 6.5 mm diameter and 2.4 mm depth are unconfirmed starting values. Retention is press-fit, with adhesive optional. Only Andrew can confirm fit by recording his own print using his printer, material and slicer. No holes are offered in 21 mm feet or container floors.

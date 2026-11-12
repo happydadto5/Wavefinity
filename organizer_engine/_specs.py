@@ -878,6 +878,11 @@ class SideOpeningSpec:
         return SIDE_OPENING_WIDTHS[self.size]
 
 
+def validate_bin_magnets(box: "BoxSpec", grid: str) -> None:
+    if box.magnet_holes != "none" and (grid != "gridfinity" or box.b4b.enabled):
+        raise ValueError("Magnet holes are only available on ordinary 42 mm Gridfinity bins")
+
+
 @dataclass(frozen=True)
 class BoxSpec:
     x: float = 3.0 * GRID_PITCH
@@ -910,8 +915,13 @@ class BoxSpec:
     side_openings: SideOpeningSpec = field(default_factory=SideOpeningSpec)
     # Pegboard Space mounting. Inert for every ordinary/legacy design.
     pegboard: PegboardMountSpec = field(default_factory=PegboardMountSpec)
+    magnet_holes: str = "none"
 
     def __post_init__(self) -> None:
+        if self.magnet_holes not in ("none", "6x2"):
+            raise ValueError("Magnet holes must be none or 6x2")
+        if self.b4b.enabled and self.magnet_holes != "none":
+            raise ValueError("Magnet holes are only available on ordinary 42 mm Gridfinity bins")
         values = {
             "X": self.x, "Y": self.y, "Z": self.z,
             "wall": self.wall, "corner fillet": self.corner_fillet,

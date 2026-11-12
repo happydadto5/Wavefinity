@@ -33,6 +33,7 @@ from ._specs import (
     lid_has_flip,
     vertical_stack_enabled,
     BoxSpec,
+    validate_bin_magnets,
     ConnectorSpec,
 )
 from ._wave import (
@@ -84,6 +85,7 @@ def make_box(spec: BoxSpec, grid: str = "wavefinity") -> trimesh.Trimesh:
         raise ValueError(
             "Storage Box BoxSpec must use the dedicated Storage Box builder, not make_box()"
         )
+    validate_bin_magnets(spec, grid)
     if grid != "wavefinity":
         # Imported here for the same reason as the stack import below.
         from organizer_features.gridfinity import (

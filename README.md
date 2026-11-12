@@ -2332,3 +2332,7 @@ This project keeps a folder named `local-temp/` at the repository root. It is lo
 # Reference appendix
 
 Material kept for occasional use. It is not part of the everyday read above; follow a pointer from the main text when a task needs it.
+
+### Gridfinity magnet holes (Story 3007)
+
+Ordinary 42 mm Gridfinity bins can optionally have four blind 6x2 mm magnet pockets per foot; None is the default. The 6.5 mm diameter and 2.4 mm depth are unconfirmed starting values, intended for press-fit with adhesive optional. Only Andrew’s recorded fit print on his printer, material and slicer can confirm fit. The 21 mm feet and container floors have no magnet holes.
