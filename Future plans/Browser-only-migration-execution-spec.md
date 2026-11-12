@@ -37,7 +37,7 @@ B01 creates canonical machine-readable web/browser-core/contracts/route-manifest
   "owner": "B05",
   "disposition": "local",
   "runtime": "python",
-  "module": "preview_routes",
+  "module": "wf_browser_core.preview_routes",
   "handler": "preview_payload",
   "input_fields": ["design"],
   "output_fields": ["preview_meshes"],
@@ -56,6 +56,33 @@ B04 creates web/browser-core/engine/route_dispatch.py with register_routes(ROUTE
 - Worker and WFLocalAPI MUST NEVER network-fallback for an unregistered/retired /api path. Return regular local error kind UNSUPPORTED_LOCAL_OPERATION and a clear unavailable-feature message. This guard is actual production error handling.
 
 One semantic owner per path: B03 health/job status; B04 catalog/editor/feature/layout/pegboard layouts; B05 preview; B06 generate/connector/sampler plus retired token replacement; B08 /api/print; B09 folders/Space/preferences/show-folder/browse-output-folder/warm; B10 ALL drawer paths including drawer print; B11 structural, Storage Drawers and pegboard hooks; B12 Photo Nest; B13 AI/provider, suggestions/slicer browse/show-log. B08 shared Print helpers are NOT a second B10 route owner.
+
+### Python packaging and dispatcher wiring — fixed import contract
+
+The STATIC URL directory `web/browser-core/` may contain hyphens because it is a JavaScript asset path. **Python importable adapter module names MUST be snake_case**, not hyphenated scripts. Production sources live in `web/browser-core/engine/*.py`, and B02's `scripts/build-browser-core.py` packs them into `canonical.zip` under Python package `wf_browser_core/` with an `__init__.py`. Canonical geometry package roots (`organizer_engine/`, `organizer_geometry/`, `organizer_inserts/`, `organizer_b4b/`, `organizer_storage/`, etc.) keep their existing native importable names. Thus B14's worker after reading the self-hosted archive uses the existing PoC `py.unpackArchive(archive, 'zip', {extractDir:'/wavefinity'})`, adds `/wavefinity` to Python `sys.path`, then `import wf_browser_core.route_dispatch`; do not attempt `import browser-core` or `import route-dispatch`.
+
+Expected Python source filenames: `route_dispatch.py`, `preview_routes.py`, `build_outputs.py`, `three_mf.py`, `plate_layout.py`, `print_routes.py`, `drawer_routes.py`, `structural_routes.py`, `nest_routes.py`, `ai_routes.py`. JavaScript filenames (e.g. `local-api.js`, `space-store.js`, `ai-providers.js`) retain their existing URL-style hyphens.
+
+B04 `wf_browser_core.route_dispatch.register_routes` registers each Python module's `ROUTES` once, detects duplicate paths and raises a typed error for absent paths. B03 `WFLocalAPI` routes browser-only operations to B09/B13 JavaScript `ROUTES` and worker operations to the Python registry. **No module that requires native `lib3mf`/OpenCV not provided in Pyodide may be eagerly imported** before B07/B12 adapters are in place; intermediate broken operation is acceptable but the complete bundle must have importable modules.
+
+**B14 build-time route declaration, exact algorithm (not an application test):**
+~~~text
+manifest = read_json("web/browser-core/contracts/route-manifest.json")
+index_paths = parse_api_table_rows("Future plans/Browser-only-core-source-route-index.md")
+assert unique(manifest.paths) and set(manifest.paths) == set(index_paths)
+for each manifest row:
+    assert row.owner and row.method and row.disposition in {"local","retired"}
+    if row.disposition == "retired":
+        assert row.replacement and not registered_as_callable(row.path)
+    else:
+        assert row.runtime in {"python","javascript"}
+        assert file_exists(row.module_source_path)
+        assert final_route_declarations.count(row.path) == 1
+        assert declaration_owner_runtime_module_match(row)
+assert no extra registrations outside manifest local rows
+emit flat route registry used by worker/JS dispatch
+~~~
+Use explicit per-package route declarations/manifest metadata as shipping inputs; do NOT import the native-dependent geometry engine on Render just to enumerate keys. The compiler checks route binding completeness and known file paths, **not geometry execution**. Runtime's real `ROUTES` registration verifies export names and fails closed locally if missing. No test runner/scanner/fixtures.
 
 ## 4. Locked implementation order and exact package boundaries
 
