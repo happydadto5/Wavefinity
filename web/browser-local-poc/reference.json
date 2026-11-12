@@ -1,17 +1,17 @@
 {
-  "baseline_commit": "d60d78ee5bdbd38dff62e21c6b0f962856f2816b",
+  "baseline_commit": "554d98639bec7097ac3d747ae8203b39d5f67a6f",
   "source_sha256": {
-    "organizer_engine/_specs.py": "5d3bdea00841ba5c699390acec60bcc650f9c871a2c94b009a5e45e07bf327ae",
-    "organizer_engine/_wave.py": "db5c4a450f97fcd5a5136e8e4f89389a1ac9fdad35f090137f5ef8e25ebca338",
-    "organizer_engine/_boxes.py": "c697b2783262225e49f22b0360c1c5d981eca3ac3cd6e4e409c4209d747642bb",
-    "organizer_engine/_lift_grabbers.py": "4ff7dc6a9b7c6294320a28ffb040b4920ae43955c5db22787561c01131a94810",
-    "organizer_engine/_fit.py": "69fb1ea2ad14e12f05b0ef5142cdf37b682aa01579a2b2cb2d7a3332a0074785",
-    "organizer_features/pegboard.py": "8bb0d29bf3e5580024878d6c021b7c6b2eb83caa8d25a5c19ab343b55b9d1122",
-    "organizer_geometry/__init__.py": "c4e65ed267de707ef6c29148c170cbd5986ddfa60ef614fa992adb1d093c59af",
-    "organizer_geometry/_nearest.py": "421e2ff058e247721a7b8f6e46798545d52d2a54de2495a19c7954eacfc6151c",
-    "organizer_geometry/_stages.py": "2f046300e3b72531bc08a7bc21a2dec74757fd7df2e21b5f5f97bfef7d9c1b4f"
+    "organizer_engine/_specs.py": "0f2bab08fba14ffbb1d9acd45cf45a9f0d38124872a2475f8e089dd840da074c",
+    "organizer_engine/_wave.py": "5931d6060aeafe05bcab55a36c4c4f58629320007526228dc49c2d1d78f440e8",
+    "organizer_engine/_boxes.py": "3a90c178f9122e55fbce4b99be3dca5504404ccdb1b2f65df2ad6f915badc55b",
+    "organizer_engine/_lift_grabbers.py": "74470c90cf8336aa77d2bfe75cdcec0a5cd09f7fba06f58f90e19ed082eb5900",
+    "organizer_engine/_fit.py": "246a0d99af2e79f9727a4120607b5ca35ad8b7c7dba3eaf24d6485b7f7851d56",
+    "organizer_features/pegboard.py": "a6efd8730eabbd34b67b1967b13c474e8e6dc4bef0d2015d9bd92f13b4e9271d",
+    "organizer_geometry/__init__.py": "7095578d36fc8887629a13e12b1180824b1620c5d5a8d116ea9bc0429b34a30f",
+    "organizer_geometry/_nearest.py": "c5bd4b50ee8153333d1b2f3ab85764ad20b34eb8a9c6f57febb4684809f9f082",
+    "organizer_geometry/_stages.py": "ac2d212e4004ef4a560ca72c698d77b41ba89da9557ce46307a9120b25493201"
   },
-  "archive_sha256": "7e15c050c75b36b76c4c0f9c4adadf8d96b6f8e9e8e2cb270cd92f05e17494ea",
+  "archive_sha256": "908ec668d5c457e7a179786454abaf75e5f98ede70dc8c8f44fee61fe042215f",
   "spec": {
     "x": 42,
     "y": 42,
@@ -25,7 +25,7 @@
     "geos": "3.13.1",
     "trimesh": "5.0.0"
   },
-  "build_ms": 766.690699965693,
+  "build_ms": 1705.521009999984,
   "mesh_report": {
     "name": "42x42x28 ordinary Wavefinity bin",
     "watertight": true,
@@ -20509,11 +20509,11 @@
     ],
     [
       20.063723671949326,
-      0.2955759966392824
+      0.29557599663928236
     ],
     [
       20.053049081222348,
-      0.28115178490683057
+      0.2811517849068307
     ],
     [
       20.04270069944214,

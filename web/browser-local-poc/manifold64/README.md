@@ -29,3 +29,9 @@ were below 0.00000030 mm. This comparison includes cavity and lock geometry;
 no separate physical fit or printed part was tested. PyMeshFix independently
 reported zero boundary edges and zero intersecting triangles for both STLs.
 These measurements do not replace a Windows Chrome/Edge acceptance run.
+
+After rebasing onto main `554d986`, the canonical bundle and 42 mm native
+reference were regenerated and both sizes were retested in Linux Chromium.
+The maximum STL vertex differences remained 0.00000129 mm and 0.00000213 mm;
+PyMeshFix again found no boundaries or intersecting triangles. Windows
+Chrome/Edge acceptance remains outstanding.
