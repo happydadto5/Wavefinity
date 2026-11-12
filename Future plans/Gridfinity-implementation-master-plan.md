@@ -134,7 +134,7 @@ Stories are filed through Poller with unique `submission_id` values, `applicatio
 | 2 | S2-01 | Optional standard magnet holes in 42 mm bin feet | standard · medium · medium | `[2978]` | — | NOT FILED |
 | 3 | S2-03a | Plain lids for 21/42 mm Gridfinity bins | standard · high · medium | `[2978]` | — | NOT FILED |
 | 4 | S2-03b | Hinged lids within Gridfinity bin envelope | standard · high · medium | `[2978]` (add S2-03a ID only if live file conflicts require serialization) | — | NOT FILED |
-| 5 | S2-05 | Measured edge-shim retention for loose drawer baseplates | standard · medium · medium | `[2978]` | — | NOT FILED |
+| — | S2-05 | Measured edge shims — declined by Andrew 2026-11-12: no shims anywhere; spacers are the only gap fill, including for a loose baseplate | OUT OF SCOPE | **do not file** | — | DECLINED |
 | 6 | S2-06 | Third-party bin placeholders, inventory/layout only | comprehensive · high · medium | `[2978]` | — | NOT FILED |
 | 7* | S2-02 | Storage Box-on-Box stacking, both pitches, preservation of closures | comprehensive · high · high | `[2978, actual S2-00 ID]` | — | NOT FILED |
 | 8 | S2-04 | Side Openings that preserve foot/rim and cell envelope | standard · high · medium | `[2978, actual S2-01 ID]` | — | NOT FILED |
@@ -217,6 +217,8 @@ The exact `submission_id` values proposed for idempotent filing are `gridfinity-
 **Filing fields:** `type=feature`; `review_depth=standard`; `tier=high`; `thinking=medium`; `tier_reason="Openings must validate multiple structural no-cut zones in shared bin geometry while preserving third-party mating and stack behavior."`
 
 ### S2-05 — Measured edge-shim retention for a loose Plain Drawer baseplate
+
+**DECLINED by Andrew, 2026-11-12 — do not file.** No shims: spacers fill gaps, including holding a loose baseplate. The text below is kept as history only.
 
 **Problem:** In an ordinary real drawer, an externally supplied baseplate can slide because its actual footprint is smaller than the drawer cavity.
 
@@ -317,7 +319,7 @@ Identify **only** remaining decisions that genuinely require Andrew (rather than
 ### Review summary (Velexa fills)
 
 - **Review date / commit:** 2026-11-12, Velexa, responding to the plan as committed in 07a44a31 and ebdc76b8.
-- **Accepted Stage 2 story set:** S2-01 (magnet pockets, with the Q1 reference-and-confirm edit), S2-02 (Storage Box stacking, filed only after a new contract-only prerequisite spec — see Q2), S2-03 split into S2-03a plain lids and S2-03b hinged lid (Q3), S2-04 (Side Openings, with the Q4 constraint list and gated behind S2-01 — Q7), S2-05 (baseplate retention by measured edge shims, Q5), S2-06 (third-party placeholders, comprehensive, Q6). S2-07 screw holes: declined by Andrew on 2026-11-12 — will not be filed.
+- **Accepted Stage 2 story set:** S2-01 (magnet pockets, with the Q1 reference-and-confirm edit), S2-02 (Storage Box stacking, filed only after a new contract-only prerequisite spec — see Q2), S2-03 split into S2-03a plain lids and S2-03b hinged lid (Q3), S2-04 (Side Openings, with the Q4 constraint list and gated behind S2-01 — Q7), S2-06 (third-party placeholders, comprehensive, Q6). S2-07 screw holes: declined by Andrew on 2026-11-12 — will not be filed. S2-05 edge shims: also declined by Andrew on 2026-11-12 — no shims; spacers are the only gap fill, including for a loose baseplate — will not be filed.
 - **Recommended changes:** Q1 — magnet cavity figures are test-confirmed starting values from a named reference, not settled fact. Q2 — add a slim prerequisite spec story for Storage Box stacking (lid eligibility, label rule, latch/feet clearances, assembled-height model) before the comprehensive build. Q3 — split plain and hinged lids. Q4 — write the refusal constraints (foot zone, rim zone, corners, wall minimum) into S2-04. Q7 — S2-04 starts after S2-01 (shared foot/wall geometry files).
 - **Explicit Andrew questions:** Both answered by Andrew on 2026-11-12: (1) screw holes in 42 mm bin feet — declined, S2-07 will not be filed; (2) weight — never discussed: no capacity claimed, tested, or documented. Recorded in Q8.
 - **Can another LLM file the approved stories without guessing?** YES for S2-01, S2-03a, S2-03b, S2-04, S2-05 and S2-06, once Stage 1 physical sign-off is recorded in Story 2978's acceptance record; S2-02 after its prerequisite spec story is agreed; S2-07 NO — declined by Andrew; it will not be filed.
