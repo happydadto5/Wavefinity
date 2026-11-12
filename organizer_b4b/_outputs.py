@@ -455,6 +455,10 @@ def b4b_build_print_objects(
         (object_name, [(part, _print_pose(mesh, kind)) for part, mesh in make()])
         for object_name, kind, make in _print_object_plan(box, features)
     ]
+    if box.b4b.grid != "wavefinity":
+        from plate_layout import pack_mesh_objects
+        from organizer_outputs.printer_profile import current_export_profile
+        return pack_mesh_objects(objects, current_export_profile())
     return _pack_print_objects(objects)
 
 

@@ -351,6 +351,8 @@ def generate_b4b_files(
         "object_names": written,
         "hardware_bom": summary.get("hardware_bom", []),
     }
+    from organizer_outputs.slicer import require_export_fit
+    result["printer_fit"] = require_export_fit([target])
     if keep_log:
         envelope = summary["assembled_envelope_mm"]
         design_spec = design_to_dict(box, Layout(tuple(features), "fused", EDITOR_SNAP), "", part_name, "bottom", False)
@@ -387,7 +389,7 @@ def generate_organizer_files_transactional(
     exactly its prior files. Returns the same result shape as
     generate_organizer_files with every path rewritten to its final location.
 
-    B4B keeps its existing direct path (out of scope for M09). When keep_log
+    Storage Box files use the same staged fit check. When keep_log
     is true, the inventory row is recorded only AFTER the complete set
     promoted - a row is never recorded for a partial set.
 
@@ -396,14 +398,9 @@ def generate_organizer_files_transactional(
     timestamped copy). A bin that is about to be logged and has no serial yet
     reserves the id its new row will take.
     """
-    if box.b4b.enabled:
-        return generate_organizer_files(
-            box, layout, output_dir, label, part_name, label_location, scoop,
-            auto_timestamp=auto_timestamp, keep_log=keep_log,
-        )
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    if keep_log and not serial:
+    if keep_log and not serial and not box.b4b.enabled:
         serial = next_bin_serial(output_dir)
     if serial:
         auto_timestamp = False
@@ -425,6 +422,8 @@ def generate_organizer_files_transactional(
         )
         if not staged:
             raise RuntimeError("generating its files did not produce any")
+        from organizer_outputs.slicer import require_export_fit
+        result["printer_fit"] = require_export_fit(staged)
         _phase("promote")
         finals = _promote_staged_set(
             output_dir, staged, auto_timestamp=auto_timestamp, part_name=part_name)
@@ -589,7 +588,7 @@ def _generate_organizer_files(
                  for one, parts in zip(rim_features, rim_parts)]
 
     def _resolve_file(filename_fn, *args, **kwargs) -> Path:
-        base_name = filename_fn(*args, **kwargs)
+        base_name = filename_fn(*args, grid=layout.design_grid, **kwargs)
         target = output_dir / with_serial(base_name, serial)
         if auto_timestamp and not serial:
             has_name = bool(clean_label(part_name))

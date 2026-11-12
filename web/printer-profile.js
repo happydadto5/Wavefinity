@@ -28,7 +28,7 @@
   };
   const adopt = (raw, isExplicit) => {
     const next = normalise(raw);
-    const changed = Object.keys(next).some(key => next[key] !== profile[key]);
+    const changed = !!isExplicit !== explicit || Object.keys(next).some(key => next[key] !== profile[key]);
     profile = next;
     explicit = !!isExplicit;
     setMalformed("");
@@ -45,7 +45,7 @@
     } catch (_) { return null; }
   };
   const api = {
-    DEFAULT, normalise, current: () => ({ ...profile }),
+    DEFAULT, normalise, current: () => ({ ...profile }), configured: () => explicit,
     malformedMessage: () => malformed,
     set(raw) { return adopt(raw, true); },
     loadLocal({ profile: raw, explicit: setExplicit, malformed: bad }) {
@@ -87,7 +87,7 @@
     },
     readLegacyBaseTrimSeed,
     retireLegacyBaseTrim() { localStorage.removeItem(LEGACY); },
-    summaryText() { return `Printer build volume — ${fmt(profile.x_mm)} × ${fmt(profile.y_mm)} × ${fmt(profile.z_mm)} mm`; },
+    summaryText() { return `Printer build volume — ${fmt(profile.x_mm)} × ${fmt(profile.y_mm)} × ${fmt(profile.z_mm)} mm${explicit ? "" : " — fit unverified"}`; },
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     mount(host, callbacks = {}) {
       host.replaceChildren();

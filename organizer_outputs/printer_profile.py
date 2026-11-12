@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import numpy as np
 
@@ -9,6 +11,26 @@ DEFAULT_PRINTER_BUILD_MM = (256.0, 256.0, 256.0)
 _PREF_KEYS = ("printer_build_x_mm", "printer_build_y_mm", "printer_build_z_mm")
 PRINTER_PREF_KEYS = _PREF_KEYS
 _AXES = ("x_mm", "y_mm", "z_mm")
+
+
+_EXPORT_PROFILE = ContextVar("export_printer_profile", default=None)
+
+
+def current_export_profile() -> dict:
+    return _EXPORT_PROFILE.get() or {**dict(zip(_AXES, DEFAULT_PRINTER_BUILD_MM)), "configured": False}
+
+
+@contextmanager
+def export_printer_profile(profile: dict):
+    token = _EXPORT_PROFILE.set(normalise_printer_profile(profile))
+    try:
+        yield
+    finally:
+        _EXPORT_PROFILE.reset(token)
+
+
+def fit_status(profile: dict) -> str:
+    return "fit checked" if profile.get("configured", True) else "fit unverified"
 
 
 _AXIS_NAMES = {"x_mm": "width", "y_mm": "depth", "z_mm": "height"}
@@ -26,6 +48,8 @@ def normalise_printer_profile(raw: object) -> dict:
         if not math.isfinite(value) or value < 10 or value > 1000:
             raise ValueError(f"Printer {_AXIS_NAMES.get(axis, axis)} must be between 10 and 1000 mm.")
         result[axis] = value
+    if "configured" in raw:
+        result["configured"] = raw["configured"] is True
     return result
 
 
@@ -45,7 +69,8 @@ def default_printer_profile_state(malformed: str = "") -> dict:
 
 
 def printer_profile_from_preferences(prefs: dict) -> dict:
-    return printer_profile_state(prefs)["profile"]
+    state = printer_profile_state(prefs)
+    return {**state["profile"], "configured": state["explicit"]}
 
 
 def apply_printer_profile_to_preferences(prefs: dict, raw: object) -> dict:
@@ -117,12 +142,24 @@ def component_fit(bounds_xyz: tuple[float, float, float], allowed_orientations: 
     profile = normalise_printer_profile(profile)
     if len(bounds_xyz) != 3 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0 for v in bounds_xyz):
         raise ValueError("Component bounds must be three positive dimensions")
+    if not allowed_orientations:
+        raise ValueError("A component must have an allowed print orientation")
+    if not profile.get("configured", True):
+        return {"fits": None, "orientation": allowed_orientations[0], "reason": "fit unverified"}
     bed = (profile["x_mm"], profile["y_mm"], profile["z_mm"])
     for name in allowed_orientations:
         oriented = oriented_bounds(bounds_xyz, name)
         if all(size <= limit + 1e-6 for size, limit in zip(oriented, bed)):
             return {"fits": True, "orientation": name, "reason": ""}
-    return {"fits": False, "orientation": "", "reason": f"Component {tuple(round(v, 2) for v in bounds_xyz)} mm exceeds printer {bed} mm"}
+    failures = []
+    for name in allowed_orientations:
+        oriented = oriented_bounds(bounds_xyz, name)
+        axes = ", ".join(f"{axis} {size:.2f} > {limit:g} mm"
+                         for axis, size, limit in zip(("X (width)", "Y (depth)", "Z (height)"), oriented, bed)
+                         if size > limit + 1e-6)
+        failures.append(f"{name}: {axes}")
+    return {"fits": False, "orientation": "", "reason":
+            f"Exceeds configured printer ({bed[0]:g} x {bed[1]:g} x {bed[2]:g} mm); " + "; ".join(failures)}
 
 
 def print_file_fit_issues(path, profile: dict) -> list[str]:
@@ -130,17 +167,22 @@ def print_file_fit_issues(path, profile: dict) -> list[str]:
     from pathlib import Path
     import trimesh
 
+    if not profile.get("configured", True):
+        return []
     source = Path(path)
     if not source.is_file() or source.suffix.lower() != ".3mf":
         return [f"{source.name}: a current 3MF file is unavailable"]
     try:
         scene = trimesh.load(source, force="scene")
-        parts = scene.dump(concatenate=False)
-        if not parts:
+        nodes = list(scene.graph.nodes_geometry)
+        if not nodes:
             return [f"{source.name}: the 3MF has no printable component"]
-        candidates = [("complete file", scene.extents)] + [
-            (f"component {index + 1}", mesh.extents) for index, mesh in enumerate(parts)
-        ]
+        candidates = [("complete file", scene.extents)]
+        for node in nodes:
+            transform, geometry = scene.graph[node]
+            mesh = scene.geometry[geometry].copy()
+            mesh.apply_transform(transform)
+            candidates.append((str(node), mesh.extents))
         issues = []
         for label, extents in candidates:
             bounds = tuple(float(value) for value in extents)

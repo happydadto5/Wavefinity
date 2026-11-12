@@ -30,18 +30,21 @@ SP.initPrinterProfile = async () => {
     if (state.runtime.hosted) {
       const loaded = await PrinterProfile.loadHosted();
       if (!loaded.explicit && !loaded.malformed) {
-        PrinterProfile.persistHosted(PrinterProfile.readLegacyBaseTrimSeed() || PrinterProfile.DEFAULT);
+        const seed = PrinterProfile.readLegacyBaseTrimSeed();
+        if (seed) PrinterProfile.persistHosted(seed);
       }
       PrinterProfile.retireLegacyBaseTrim();
     } else {
       const local = await api("/api/space/printer-profile", {});
       PrinterProfile.loadLocal(local);
       if (!local.explicit && !local.malformed) {
-        const seed = PrinterProfile.readLegacyBaseTrimSeed() || PrinterProfile.DEFAULT;
+        const seed = PrinterProfile.readLegacyBaseTrimSeed();
         // The old Base Trim key is retired only after the new authority holds it.
-        const saved = await api("/api/space/printer-profile", { profile: { ...seed } });
-        PrinterProfile.loadLocal(saved);
-        PrinterProfile.retireLegacyBaseTrim();
+        if (seed) {
+          const saved = await api("/api/space/printer-profile", { profile: { ...seed } });
+          PrinterProfile.loadLocal(saved);
+          PrinterProfile.retireLegacyBaseTrim();
+        }
       }
     }
   } catch (error) {

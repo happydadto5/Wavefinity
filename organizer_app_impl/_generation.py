@@ -132,7 +132,8 @@ def b4b_filename(box: BoxSpec, part_name: str = "", suffix: str = ".3mf") -> str
     tidy = clean_label(part_name) or clean_label(box.b4b.label_text)
     if tidy:
         name += f" - {tidy}"
-    return name + suffix
+    from ._filenames import grid_filename_segment
+    return name + grid_filename_segment(box.b4b.grid, box.x, box.y) + suffix
 
 
 # The exact app-owned namespace for staged ordinary-bin output files and

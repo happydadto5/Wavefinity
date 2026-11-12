@@ -177,7 +177,10 @@
       const vol = `${fmt(printerProfile.x_mm)} × ${fmt(printerProfile.y_mm)} × ${fmt(printerProfile.z_mm)} mm`;
       printerRow.replaceChildren();
       printerRow.append(el("span", "sd-summary-label", "Printer"), " ", el("span", "sd-summary-value", vol));
-      if (lastSummary && !lastSummary.fits_printer) {
+      if (lastSummary?.fits_printer === null) {
+        printerRow.append(" — fit unverified");
+      }
+      if (lastSummary?.fits_printer === false) {
         printerRow.append(" ", el("span", "sd-fit-warning", ` — ${lastSummary.first_fit_error || "Does not fit your printer"}`));
       }
       if (callbacks.openPrinterSettings) {

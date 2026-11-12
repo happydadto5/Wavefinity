@@ -12,6 +12,7 @@ import numpy as np
 import trimesh
 
 from organizer_app import clean_label
+from organizer_app_impl._filenames import grid_filename_segment, check_filename_bytes
 from organizer_engine import export_mesh, export_text_body_3mf, validate_3mf
 from organizer_outputs.printer_profile import component_fit, normalise_printer_profile, orientation_transform
 from organizer_storage.drawers import normalise_storage_drawers_definition
@@ -93,11 +94,13 @@ def structural_signature(space: dict) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _filename(space_name: str, component_name: str) -> str:
+def _filename(space_name: str, component_name: str, *, grid=None, x=0, y=0) -> str:
     safe = clean_label(space_name)
     if not safe:
         raise ValueError("Space name does not make a valid filename")
-    return f"{safe} - {component_name}.3mf"
+    name = f"{safe} - {component_name}{grid_filename_segment(grid, x, y)}.3mf"
+    check_filename_bytes(name)
+    return name
 
 
 def _hash(path: Path) -> str:
@@ -120,15 +123,15 @@ def structural_manifest_plan(space: dict, output_dir: Path, printer_profile: dic
     components = []
     for component in plan.components:
         fit = component_fit(component.bounds_xyz, component.allowed_orientations, profile)
-        if not fit["fits"]:
+        if fit["fits"] is False:
             fit = {**fit, "reason": f"{component.display_name}: {fit['reason']}"}
-        filename = _filename(plan.space["name"], component.display_name)
+        filename = _filename(plan.space["name"], component.display_name, grid=plan.space["grid"], x=plan.space["x"], y=plan.space["y"])
         _safe_path(Path(output_dir), filename)
         components.append({"key": component.key, "filename": filename,
                            "bounds_xyz": list(component.bounds_xyz), **fit})
     return {"signature": structural_signature(plan.space), "generator_version": STRUCTURAL_GENERATOR_VERSION,
-            "components": components, "fits_printer": all(one["fits"] for one in components),
-            "first_fit_error": next((one["reason"] for one in components if not one["fits"]), None)}
+            "components": components, "fits_printer": all(one["fits"] for one in components) if profile.get("configured", True) else None,
+            "first_fit_error": next((one["reason"] for one in components if one["fits"] is False), None)}
 
 
 def _valid_manifest_components(manifest) -> list | None:
@@ -195,7 +198,7 @@ def structural_status(space: dict, stored_manifest: dict | None, output_dir: Pat
         wanted = {one["key"]: one for one in plan_components}
         for item in rows:
             now = wanted.get(item["key"])
-            if now is None or not now["fits"] or item.get("orientation") != now["orientation"]:
+            if now is None or now["fits"] is False or item.get("orientation") != now["orientation"]:
                 return {"status": "need_update"}
     return {"status": "saved"}
 
@@ -571,10 +574,11 @@ def _oriented_parts(component, orientation: str):
 
 def _check_exported_fit(path: Path, profile: dict, name: str) -> None:
     """The written file itself must fit the printer as exported."""
-    extents = trimesh.load(path, force="scene").extents
-    bed = (profile["x_mm"], profile["y_mm"], profile["z_mm"])
-    if any(float(size) > limit + 1e-6 for size, limit in zip(extents, bed)):
-        raise RuntimeError(f"{name}: the exported file does not fit the printer profile")
+    from organizer_outputs.slicer import require_export_fit
+    try:
+        require_export_fit([path], profile)
+    except ValueError as error:
+        raise ValueError(f"{name}: {error}") from error
 
 
 def materialize_storage_drawers(space: dict, output_dir: Path, printer_profile: dict,
@@ -621,7 +625,7 @@ def _materialize(space, folder, printer_profile, previous_manifest, commit) -> d
         if parts:
             recovery_warnings.append("Recovered an interrupted cabinet save (" + "; ".join(parts) + ").")
     dry = structural_manifest_plan(space, folder, printer_profile)
-    if not dry["fits_printer"]:
+    if dry["fits_printer"] is False:
         raise ValueError(dry["first_fit_error"] or "Cabinet does not fit printer")
     previous = _previous_owned(folder, previous_manifest)
     desired = [item["filename"] for item in dry["components"]]
@@ -638,13 +642,15 @@ def _materialize(space, folder, printer_profile, previous_manifest, commit) -> d
     fits = []
     for component in plan.components:
         fit = component_fit(component.bounds_xyz, component.allowed_orientations, profile)
-        if not fit["fits"]:
+        if fit["fits"] is False:
             raise ValueError(f"{component.display_name}: {fit['reason']}")
         fits.append(fit)
     temporary: dict[str, Path] = {}
     backups: dict[str, Path] = {}
     installed: list[str] = []
     warnings = recovery_warnings + list(plan.warnings)
+    if not profile.get("configured", True):
+        warnings.append("fit unverified")
     committed = False
     recovery_pending = False
     pending_install: list[str] = []

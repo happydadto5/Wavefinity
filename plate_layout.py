@@ -32,7 +32,8 @@ def _file_bounds(path: Path) -> np.ndarray:
 
 
 def plan_plate(sizes: list[tuple[float, float]], bed: tuple[float, float],
-               gap: float = PLATE_GAP_MM, edge: float = PLATE_EDGE_MM):
+               gap: float = PLATE_GAP_MM, edge: float = PLATE_EDGE_MM,
+               names: list[str] | None = None):
     """Shelf-pack footprints. Returns ([(x, y, rotated)], error or None).
 
     A footprint that only fits the bed turned a quarter is turned. ``x, y`` is
@@ -41,20 +42,62 @@ def plan_plate(sizes: list[tuple[float, float]], bed: tuple[float, float],
     usable_x, usable_y = bed[0] - 2 * edge, bed[1] - 2 * edge
     placed, cursor_x, cursor_y, row_depth = [], 0.0, 0.0, 0.0
     for index, (w, d) in enumerate(sizes):
+        label = names[index] if names else f"part {index + 1}"
         turned = (w > usable_x + 1e-6 or d > usable_y + 1e-6) and (
             d <= usable_x + 1e-6 and w <= usable_y + 1e-6)
         pw, pd = (d, w) if turned else (w, d)
         if pw > usable_x + 1e-6 or pd > usable_y + 1e-6:
-            return [], f"part {index + 1} ({w:.1f} x {d:.1f} mm) is larger than the printer bed"
+            return [], f"{label} ({w:.1f} x {d:.1f} mm) exceeds printer X/Y ({bed[0]:g} x {bed[1]:g} mm)"
         if cursor_x > 0 and cursor_x + pw > usable_x + 1e-6:
             cursor_x, cursor_y, row_depth = 0.0, cursor_y + row_depth + gap, 0.0
         if cursor_y + pd > usable_y + 1e-6:
-            return [], ("the parts cannot all sit side by side on the printer bed "
+            return [], (f"Cannot place {label} and the remaining parts {names[index + 1:] if names else len(sizes) - index - 1}: printer X/Y exhausted "
                         f"({bed[0]:.0f} x {bed[1]:.0f} mm) with a {gap:.0f} mm gap")
         placed.append((edge + cursor_x, edge + cursor_y, turned))
         cursor_x += pw + gap
         row_depth = max(row_depth, pd)
     return placed, None
+
+
+def _plan_bounds(bounds, names: list[str], profile: dict):
+    from organizer_outputs.printer_profile import component_fit
+    sizes = [(float(b[1][0] - b[0][0]), float(b[1][1] - b[0][1])) for b in bounds]
+    for name, b in zip(names, bounds):
+        fit = component_fit(tuple(float(v) for v in b[1] - b[0]), ("flat", "bed_90"), profile)
+        if fit["fits"] is False:
+            return [], f"{name}: {fit['reason']}"
+    if profile.get("configured", True):
+        bed = (float(profile["x_mm"]), float(profile["y_mm"]))
+    else:
+        # A layout canvas, not an invented printer-fit guarantee.
+        bed = (sum(w + PLATE_GAP_MM for w, _ in sizes) + 2 * PLATE_EDGE_MM,
+               max((d for _, d in sizes), default=0) + 2 * PLATE_EDGE_MM)
+    placed, error = plan_plate(sizes, bed, names=names)
+    if error:
+        return [], error
+    combined = (max(x + (d if turned else w) for (x, y, turned), (w, d) in zip(placed, sizes)),
+                max(y + (w if turned else d) for (x, y, turned), (w, d) in zip(placed, sizes)),
+                max(float(b[1][2] - b[0][2]) for b in bounds))
+    fit = component_fit(combined, ("flat",), profile)
+    return ([], f"Combined plate ({', '.join(names)}): {fit['reason']}") if fit["fits"] is False else (placed, None)
+
+
+def pack_mesh_objects(objects, profile: dict):
+    """Pack registered mesh groups by their generated bounds, keeping inlays together."""
+    bounds = [np.array([np.min([m.bounds[0] for _, m in parts], axis=0),
+                        np.max([m.bounds[1] for _, m in parts], axis=0)]) for _, parts in objects]
+    placed, error = _plan_bounds(bounds, [name for name, _ in objects], profile)
+    if error:
+        raise ValueError(error)
+    packed = []
+    for (name, parts), b, (x, y, turned) in zip(objects, bounds, placed):
+        moved = []
+        for part, mesh in parts:
+            mesh = mesh.copy()
+            mesh.apply_transform(_placement_move(b, x, y, turned).T)
+            moved.append((part, mesh))
+        packed.append((name, moved))
+    return packed
 
 
 def _row_matrix(values: list[float]) -> np.ndarray:
@@ -128,11 +171,13 @@ def space_out_for_plate(files: list[Path], profile: dict,
     caller reports it before launching the slicer.
     """
     files = [Path(f) for f in files]
-    if len(files) < 2:
+    if not files:
         return files, []
+    if len(files) == 1:
+        from organizer_outputs.printer_profile import print_file_fit_issues
+        return files, print_file_fit_issues(files[0], profile)
     bounds = [_file_bounds(f) for f in files]
-    sizes = [(float(b[1][0] - b[0][0]), float(b[1][1] - b[0][1])) for b in bounds]
-    placed, error = plan_plate(sizes, (float(profile["x_mm"]), float(profile["y_mm"])))
+    placed, error = _plan_bounds(bounds, [f.name for f in files], profile)
     if error:
         return files, [error]
     base = root or Path(tempfile.gettempdir()) / "Wavefinity" / "Plate Layouts"
@@ -164,8 +209,7 @@ def combine_for_plate(files: list[Path], profile: dict, dest: Path) -> tuple[Pat
     if not files:
         raise ValueError("No files to open in slicer")
     bounds = [_file_bounds(f) for f in files]
-    sizes = [(float(b[1][0] - b[0][0]), float(b[1][1] - b[0][1])) for b in bounds]
-    placed, error = plan_plate(sizes, (float(profile["x_mm"]), float(profile["y_mm"])))
+    placed, error = _plan_bounds(bounds, [f.name for f in files], profile)
     if error:
         return dest, [error]
 

@@ -186,7 +186,7 @@ def inventory_bin_record(
     if generated_files:
         file_names = ", ".join(dict.fromkeys(p.name for p in generated_files))
     else:
-        file_names = box_filename(box, part_name)
+        file_names = box_filename(box, part_name, grid=grid)
 
     tidy_label = clean_label(label)
     text_labels = [
@@ -1019,6 +1019,8 @@ def design_from_dict(
         side_openings=side_openings,
         pegboard=pegboard,
     )
+    if grid != "wavefinity" and box.side_openings.enabled:
+        raise ValueError("Side openings are unavailable for Gridfinity Stage 1.")
     box = normalize_stack_settings(box)
     if not box.b4b.enabled:
         box = normalize_gridfinity_settings(box, grid)

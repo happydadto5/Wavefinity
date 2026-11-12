@@ -75,8 +75,8 @@ are refused, never clamped. The settled field shows millimetres and unit count.
 Gridfinity height uses the same rules against 7 mm, with the model's floor,
 rim and lid minimums; Wavefinity height keeps plain millimetres. Space forms
 keep their existing millimetre entry.
-Gridfinity Stage 1 offers a Stackable rim, a loose Gridfinity Lid or a lid with a stacking
-socket on both pitches. Closed Z stays nominal in whole 7 mm units; the body and
+Gridfinity Stage 1 offers a Stackable rim (`box.stack.mode` direct; none is off), a loose Gridfinity Lid or a lid with a stacking
+socket (`box.lid.enabled`, `box.lid.stack_rim`) on both pitches. Closed Z stays nominal in whole 7 mm units; the body and
 interior shorten by the lid rise. A grid lid needs at least two height units and
 enough body clearance for its floor and lid. Use the same footprint and pitch
 when stacking on a grid lid; lid-on-lid uses the standard rim seat descent.
@@ -84,6 +84,7 @@ Hinged, label and handle lids and side connectors are Wavefinity options,
 hidden on grid bodies. The capability manifest filters lid choices by the
 selected grid, using the same catalog as the editor.
 Physical grid-lid fit is not yet printed (S1-13 gate).
+Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Gridfinity side openings are unavailable; the Wavefinity Side Openings modifier is omitted from the grid manifest and palette. No additional Gridfinity features are exposed.
 A Space's grid is fixed when created. Bins cannot enter a Space
 with a different grid. An external older design without a grid means Wavefinity;
 a saved bin inside a Space inherits that verified source Space's grid.
@@ -115,6 +116,7 @@ Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling:
 - The AI result is still an ordinary bin, not the Storage Box case itself.
 - Generating or printing a bin in a Storage Box Space requires the bin or closed design to fit the interior height, including its foot, handle and raised lettering. Unverifiable height blocks generation. Lid snugness does not add capacity; designs without a Space are unaffected.
 - Hard object-height cap: the Storage Box Space's own height.
+- Gridfinity Storage Box creation offers 21 or 42 mm pitch and immutable Floor or None. Floor builds the raised socket floor; None leaves a plain cavity for an owner-supplied baseplate. Nominal grid cells and printed cavity sizes are distinct. Optional measured seated lift is the height added by the seated baseplate, not total thickness; zero is measured, missing lift is unverified. The full seated stack includes measured lift and must fit the usable height. These settings stay in the Space; AI returns only an ordinary bin on its grid.
 - The case is configured in its Space: interior width and depth, usable inside height, Latched Lid or Lid Only and lid snugness, stacking on/off, carrying handle on/off, and no label or a front label in Flat or Wavy style. Number of latches offers None or 1 at every width, and 2 only above 96 mm of interior child-bin field width; new cases start with 2 above that width, otherwise 1. User selections and saved counts are kept. Latch tightness is Loose / Default / Tight (0.35 / 0.40 / 0.45 mm snap grip). Wall and Base/Lid thickness share these choices: 0.8 mm Very thin, 1.2 mm Thin, 1.6 mm Default, 2.0 mm Strong, 2.4 mm Very strong and 3.0 mm Heavy duty. New cases default to 1.6 mm for both. These are case settings, not bin fields.
 
 ## Storage Drawers

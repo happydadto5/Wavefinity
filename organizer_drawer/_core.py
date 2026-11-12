@@ -28,9 +28,9 @@ from organizer_outputs.printer_profile import (
 
 
 def _default_printer_profile() -> dict[str, float]:
-    return normalise_printer_profile(dict(zip(
+    return {**normalise_printer_profile(dict(zip(
         ("x_mm", "y_mm", "z_mm"), DEFAULT_PRINTER_BUILD_MM,
-    )))
+    ))), "configured": False}
 
 UNIT = BASE_UNIT
 SNAPS = (7.0, 3.5)

@@ -321,7 +321,7 @@ function beginOutputReport(working, owner = "bin", rowIds = [state.designInvento
     text: working, short: working, busy: true, error: false, lateAt: null, startedAt: Date.now(), joined: false };
   currentOutputReport = entry;
   const report = (message, error = false) => {
-    entry.text = friendlyError(message);
+    entry.text = friendlyError(message) + (entry.printerFit === "fit unverified" ? " · fit unverified" : "");
     entry.error = error;
     entry.busy = false;
     entry.lateAt = context && !DL.spaceContextCurrent(context) ? DL.spaceContext() : null;
@@ -377,6 +377,10 @@ function renderOutputReport() {
 }
 
 async function api(path, payload = null, { timeoutMs = 60000, onStillFinishing = null } = {}) {
+  if (payload !== null && state.runtime.hosted && typeof PrinterProfile !== "undefined") {
+    payload = { ...payload, printer_profile: PrinterProfile.current(),
+      printer_profile_configured: PrinterProfile.configured() };
+  }
   const label = outputLabel(path, payload);
   // Every backend call is bounded: a stalled request must surface as an
   // error, never wedge the UI forever (e.g. the drawers configure form's
@@ -622,6 +626,7 @@ async function apiSideEffect(path, payload, { timeoutMs = 60000, operationId = n
 }
 
 async function apiSideEffectRun(path, payload, id, label, forget, { timeoutMs, onStillFinishing }) {
+  const outputReport = currentOutputReport;
   let data;
   try {
     data = await api(path, { ...(payload || {}), operation_id: id }, { timeoutMs, onStillFinishing });
@@ -646,6 +651,9 @@ async function apiSideEffectRun(path, payload, id, label, forget, { timeoutMs, o
     }
   }
   forget();
+  if (isOutputRequest(path) && outputReport && data?.printer_fit) {
+    outputReport.printerFit = data.printer_fit;
+  }
   if (isOutputRequest(path) && data?.partial && data.error) {
     const detail = data.failed_row?.error || data.error;
     const plain = outputErrorText(detail, label);

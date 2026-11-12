@@ -322,7 +322,7 @@ def storage_drawers_reset_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _storage_box_printer_fit(summary: dict[str, Any], profile: dict[str, float]) -> tuple[bool, str | None]:
+def _storage_box_printer_fit(summary: dict[str, Any], profile: dict[str, float]) -> tuple[bool | None, str | None]:
     """Drawers-style printer verdict for a Storage Box case.
 
     Each separately printed object (body, lid) is checked on its own, flat and
@@ -331,9 +331,11 @@ def _storage_box_printer_fit(summary: dict[str, Any], profile: dict[str, float])
     because the closed case is taller or wider than the bed. Unreadable bounds
     mean "cannot check": no warning, and creation is never blocked.
     """
+    if not profile.get("configured", True):
+        return None, "fit unverified"
     objects = summary.get("print_objects_mm")
     if not isinstance(objects, list) or not objects:
-        return True, None
+        return None, "fit unverified"
     profile = normalise_printer_profile(profile)
     bed = f"{profile['x_mm']:g} × {profile['y_mm']:g} × {profile['z_mm']:g}"
     for one in objects:
@@ -341,9 +343,9 @@ def _storage_box_printer_fit(summary: dict[str, Any], profile: dict[str, float])
             bounds = tuple(float(value) for value in one["bounds_mm"])
             name = str(one["name"])
         except (KeyError, TypeError, ValueError):
-            return True, None
+            return None, "fit unverified"
         if len(bounds) != 3 or any(value <= 0 for value in bounds):
-            return True, None
+            return None, "fit unverified"
         if not component_fit(bounds, ("flat", "bed_90"), profile)["fits"]:
             size = " × ".join(f"{value:.1f}" for value in bounds)
             return False, f"{name} is {size} mm and does not fit the {bed} mm printer in any orientation."

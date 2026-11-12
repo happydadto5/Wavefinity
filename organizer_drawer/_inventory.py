@@ -274,6 +274,9 @@ def save_inventory_bins(
     if prepared["failed"]:
         return _batch_partial(prepared, "generate", _prepare_failure_text(prepared))
     inventory = prepared["inventory"]
+    from organizer_outputs.slicer import require_export_fit
+    # Reused files must satisfy today's printer too, even when no rebuild ran.
+    require_export_fit([path for files in prepared["files"].values() for path in files])
     connector_counts: dict[str, int] = {}
     notes: list[str] = []
     if include_connectors:

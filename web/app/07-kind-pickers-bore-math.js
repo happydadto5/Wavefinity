@@ -81,6 +81,7 @@ function clearDraftSelection(resetLocks = true) {
 }
 
 function pickKind(kind) {
+  if (kind === "side_openings" && (state.design?.grid || "wavefinity") !== "wavefinity") return;
   const info = partInfo(kind);
   const isModifier = info?.capabilities?.includes("box_modifier");
   if (!isModifier && state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour)) {

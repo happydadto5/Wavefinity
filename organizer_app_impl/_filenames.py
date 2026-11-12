@@ -68,7 +68,16 @@ def with_serial(filename: str, serial: str) -> str:
     return f"{path.stem} {serial}{path.suffix}"
 
 
-def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+def grid_filename_segment(grid: str | None, x: float, y: float) -> str:
+    """Nominal cells belong to the design, never inferred from mesh bounds."""
+    if grid is None or grid == "wavefinity":
+        return ""
+    from organizer_engine._specs import GRID_PITCHES, validate_grid
+    pitch = GRID_PITCHES[validate_grid(grid)]
+    return f" Gridfinity {pitch:g}mm {x / pitch:g}x{y / pitch:g}u"
+
+
+def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf", *, grid: str | None = None) -> str:
     """``Box 16 x 48 x 40 Driver Rack.3mf``.
 
     The part name is the only thing that names a file. Lettering on the part
@@ -83,22 +92,22 @@ def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
     tidy = clean_label(part)
     if tidy:
         name += f" {tidy}"
-    return name + suffix
+    return name + grid_filename_segment(grid, box.x, box.y) + suffix
 
 
-def edge_mount_label_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+def edge_mount_label_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf", *, grid: str | None = None) -> str:
     name = f"Edge Mount Label {box.x:g} x {box.y:g}"
     tidy = clean_label(part)
-    return (f"{name} {tidy}" if tidy else name) + suffix
+    return (f"{name} {tidy}" if tidy else name) + grid_filename_segment(grid, box.x, box.y) + suffix
 
 
-def pegboard_adapter_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+def pegboard_adapter_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf", *, grid: str | None = None) -> str:
     name = f"Pegboard Adapters {pegboard_standard(box.pegboard.standard).name} {box.x:g} x {box.z:g}"
     tidy = clean_label(part)
-    return (f"{name} {tidy}" if tidy else name) + suffix
+    return (f"{name} {tidy}" if tidy else name) + grid_filename_segment(grid, box.x, box.y) + suffix
 
 
-def lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+def lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf", *, grid: str | None = None) -> str:
     """The ordinary bin's matching removable lid."""
     effective = stack_effective_box(box)
     name = f"{'Stack Lid' if lid_receives_stack(box) else 'Handled Lid'} {box.x:g} x {box.y:g}"
@@ -107,12 +116,12 @@ def lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
     tidy = clean_label(part)
     if tidy:
         name += f" {tidy}"
-    return name + suffix
+    return name + grid_filename_segment(grid, box.x, box.y) + suffix
 
 
-def stack_lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+def stack_lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf", *, grid: str | None = None) -> str:
     """Compatibility name for callers of the former stack-only helper."""
-    return lid_filename(box, part, suffix)
+    return lid_filename(box, part, suffix, grid=grid)
 
 
 def lid_label_regions(
@@ -143,6 +152,7 @@ def insert_filename(
     part: str = "",
     cartridge: bool = False,
     suffix: str = ".3mf",
+    *, grid: str | None = None,
 ) -> str:
     prefix = "Cartridge" if cartridge else "Insert"
     name = f"{prefix} {box.x:g} x {box.y:g}"
@@ -151,7 +161,7 @@ def insert_filename(
     tidy = clean_label(part)
     if tidy:
         name += f" {tidy}"
-    return name + suffix
+    return name + grid_filename_segment(grid, box.x, box.y) + suffix
 
 
 def connector_filename(

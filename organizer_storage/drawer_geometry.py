@@ -1068,18 +1068,18 @@ def _fit_message(name: str, key: str, bounds, profile: dict) -> str:
 
 def storage_drawers_summary(space: dict, printer_profile: dict | None = None) -> dict:
     plan = resolve_storage_drawers_plan(space, build_meshes=False)
-    profile = normalise_printer_profile(printer_profile or {"x_mm":256.0,"y_mm":256.0,"z_mm":256.0})
+    profile = normalise_printer_profile(printer_profile or {"x_mm":256.0,"y_mm":256.0,"z_mm":256.0,"configured":False})
     fits = []
     for component in plan.components:
         fit = component_fit(component.bounds_xyz, component.allowed_orientations, profile)
-        if not fit["fits"]:
+        if fit["fits"] is False:
             fit = {**fit, "reason": _fit_message(component.display_name, component.key,
                                                  component.bounds_xyz, profile)}
         fits.append({"key": component.key, "name": component.display_name,
                      "bounds_xyz": list(component.bounds_xyz), **fit})
     ux, uy = storage_drawers_unit_counts(plan.space)
     block = plan.space["storage_drawers"]
-    first_bad = next((one for one in fits if not one["fits"]), None)
+    first_bad = next((one for one in fits if one["fits"] is False), None)
     from organizer_features.gridfinity import container_floor_record
     record = container_floor_record(plan.space["grid"], plan.space["built_in_grid"], plan.space["x"], plan.space["y"], block["seated_lift_mm"])
     return {"grid": plan.space["grid"], "built_in_grid": plan.space["built_in_grid"], **record, "outside_xyz": list(plan.outside_xyz), "field_units": [ux, uy],
@@ -1094,7 +1094,8 @@ def storage_drawers_summary(space: dict, printer_profile: dict | None = None) ->
                         for i, row in enumerate(block["drawers"], 1)],
             "effective_material": {"base_mm": plan.effective_base_mm, "top_mm": plan.effective_top_mm,
                                    "frame_width_mm": plan.resolved_frame_width_mm if block["cabinet_style"] == "open" else None},
-            "components": fits, "fits_printer": first_bad is None,
+            "components": fits, "fits_printer": (first_bad is None) if profile.get("configured", True) else None,
+            "printer_fit": "fit checked" if profile.get("configured", True) else "fit unverified",
             "first_fit_error": first_bad["reason"] if first_bad else None,
             "first_fit_part": first_bad["name"] if first_bad else None,
             "warnings": list(plan.warnings)}

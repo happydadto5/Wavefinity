@@ -149,6 +149,7 @@ from organizer_outputs.printer_profile import (
     normalise_printer_profile,
     print_file_fit_issues,
     printer_profile_from_preferences,
+    current_export_profile, export_printer_profile, fit_status,
 )
 from organizer_storage.drawers import (
     STORAGE_DRAWER_FIT_CHOICES,
@@ -1741,7 +1742,7 @@ def generate_payload(
     # exactly what they were. Each stage it enters is reported to the running
     # operation, with an honest estimate, for the Export status line.
     progress = _GenerateProgress(payload.get("design"))
-    with build_scope(preview=False, listener=progress.stage) as timings:
+    with export_printer_profile(_printer_profile_for(payload)), build_scope(preview=False, listener=progress.stage) as timings:
         reply = _generate_payload(payload, suppress_local_inventory=suppress_local_inventory,
                                   progress=progress)
     report = timings.report()
@@ -2190,7 +2191,9 @@ def _generate_bin_from_design_spec(
     box, layout, label, part_name, label_location, scoop = design_from_dict(design_spec)
     inventory_layout = load_inventory(output_dir).get("layout") or {}
     space = inventory_layout.get("space") or {}
-    with GEOMETRY_LOCK:
+    with GEOMETRY_LOCK, export_printer_profile(_printer_profile_for({})):
+        # Background builds also read the current saved printer, independently
+        # of the request thread. Hosted builds inherit their request's profile.
         # Fix 096 A1: on-demand batch generation installs as one unit too -
         # a row is recorded Saved only after its whole file set promoted.
         result = generate_organizer_files_transactional(
@@ -2395,7 +2398,11 @@ def _printer_profile_for(payload: dict[str, Any]) -> dict[str, float]:
     profile, so the browser supplies it; local reads the saved preferences."""
     if HOSTED:
         raw = payload.get("printer_profile")
-        return normalise_printer_profile(raw or dict(zip(("x_mm", "y_mm", "z_mm"), DEFAULT_PRINTER_BUILD_MM)))
+        if raw is None:
+            return current_export_profile()
+        profile = normalise_printer_profile(raw)
+        profile["configured"] = payload.get("printer_profile_configured") is True
+        return profile
     try:
         return printer_profile_from_preferences(load_preferences())
     except ValueError as error:
@@ -3078,6 +3085,7 @@ def ai_capability_manifest(grid: str = "wavefinity") -> dict[str, Any]:
         for kind, title, description, paths in AI_MODIFIER_BLOCKS
     ]
     if grid != "wavefinity":
+        modifiers = [row for row in modifiers if row["kind"] != "side_openings"]
         stacking = next(row for row in modifiers if row["kind"] == "lid_stacking")
         stacking.update(
             description="Stackable rim: box.stack.mode=direct without a lid; or Gridfinity Lid, optionally with stack_rim=true. No hinged, handle or label variants; no side connectors. All heights use whole 7 mm units.",
@@ -3455,6 +3463,17 @@ def _checked_entry_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return request
 
 
+def _printer_output_route(handler):
+    def guarded(payload):
+        profile = _printer_profile_for(payload)
+        with export_printer_profile(profile):
+            reply = handler(payload)
+        if isinstance(reply, dict):
+            reply["printer_fit"] = fit_status(profile)
+        return reply
+    return guarded
+
+
 def _grid_entry_route(handler):
     def guarded(payload):
         from organizer_inventory._rows import INVENTORY_LOCK
@@ -3541,6 +3560,7 @@ POST_ROUTES.update({
         printer_profile_for=_printer_profile_for,
     ),
 })
+POST_ROUTES["/api/drawer/generate-bin"] = _printer_output_route(POST_ROUTES["/api/drawer/generate-bin"])
 # Every editor/load/import/restore uses design/validate; row insertion and Save
 # also need the destination check before their handlers can write or build.
 for _grid_entry_path in (
@@ -3556,6 +3576,12 @@ for _grid_entry_path in (
 # is deliberately absent (its own docstring: "Read-only: never touches an
 # Inventory"), as is the 15-second drawer summary route.
 POST_ROUTES["/api/operation-status"] = operation_status_payload
+_OUTPUT_PATHS = {
+    "/api/generate", "/api/print", "/api/space/structural-generate",
+    "/api/space/structural-print", "/api/space/structural-print-combined",
+    "/api/space/storage-box-print", "/api/space/surface-print",
+    "/api/drawer/print-complete", "/api/drawer/print-bins", "/api/drawer/save-bins",
+}
 for _side_effect_path in (
     "/api/generate",
     "/api/connector",
@@ -3580,7 +3606,10 @@ for _side_effect_path in (
     "/api/drawer/print-bins",
     "/api/drawer/save-bins",
 ):
-    POST_ROUTES[_side_effect_path] = _idempotent_operation(POST_ROUTES[_side_effect_path])
+    _handler = POST_ROUTES[_side_effect_path]
+    if _side_effect_path in _OUTPUT_PATHS:
+        _handler = _printer_output_route(_handler)
+    POST_ROUTES[_side_effect_path] = _idempotent_operation(_handler)
 if not HOSTED:
     POST_ROUTES.update({
         # Local save-folder selection and optional Space setup.

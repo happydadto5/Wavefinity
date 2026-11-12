@@ -274,6 +274,10 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 
 ---
 
+Gridfinity print/export filenames include pitch and nominal X × Y cell counts, for example `Gridfinity 42mm 2x3u`. This includes matching lids and cabinet parts. The existing 255-byte UTF-8 limit refuses an overlong filename; names are never silently shortened. Wavefinity filenames keep their existing form.
+
+All four supported kinds (No-Space bins, Plain Drawers, Storage Box and Storage Drawers) use the same export fit rule. A configured printer checks each part in its allowed print orientations; an oversize part is refused with its name, overflowing axis and printer dimensions. Without a configured profile, export proceeds with **fit unverified**; built-in default dimensions are not a configured printer. Combined plates use real generated bounds, refuse and name parts that cannot be placed, and receive the same volume check. Parts are never automatically split.
+
 ## 2.3a Storage Drawers Space
 
 - Choose one Grid for the entire cabinet: Wavefinity 7 mm (default), Gridfinity half 21 mm, or Gridfinity 42 mm. For Gridfinity choose **Floor** (built-in raised pocket grid) or **None** (flat floor, clearanced for an owner-supplied baseplate). Grid and Floor are immutable after creation; editing shows the fixed choices and explains why.
