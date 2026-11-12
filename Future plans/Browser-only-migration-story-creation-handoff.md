@@ -6,6 +6,8 @@
 
 On receiving that explicit instruction, **create and submit the Stories in Poller in this session**. Do not merely outline them, do not send another plan for approval, and do not ask whether Andrew means to proceed. The invocation is the go-ahead for **Story creation only**, not code implementation or hosting/DNS changes.
 
+**The owner's one-line command authorizes Story submission only, not source implementation or domain changes.** `Browser-only-migration-execution-spec.md` supersedes prior unresolved question language. If source drift creates a genuine impossibility, file other Stories and report that narrowly rather than inventing a workaround or asking about already-settled architecture.
+
 ## Mission and boundaries
 
 - App/repo: **Wavefinity**, `happydadto5/Wavefinity`; use its latest GitHub `main`.
@@ -19,12 +21,13 @@ On receiving that explicit instruction, **create and submit the Stories in Polle
 
 Read files from the latest Wavefinity `main` (not old conversation summaries or cached checkouts):
 
-1. **`Future plans/Browser-only-core-detailed-build-contracts.md`** — complete B00–B16 work packages, invariants and dependency order.
-2. **`Future plans/Browser-only-core-diff-map.md`** — precise existing function anchors, pseudo-diffs, new module paths, static `dist/` layout and Render Static Site cutover.
-3. **`Future plans/Browser-only-core-source-route-index.md`** — **92-entry, single Bxx owner** route table, Python handlers, prominent UI callers; a frozen reference snapshot, not a claim of current runtime coverage.
-4. **`Future plans/Browser-only-core-integration-plan.md`** — short master architecture and scope.
-5. **`README.md`** — owner policy, live product behavior, geometry and workflow rules.
-6. **`docs/legacy-python-server-hosting.md`** — historical server architecture, recovery record and legacy Print behavior.
+1. **`Future plans/Browser-only-migration-execution-spec.md` — SINGLE FINAL AUTHORITY: decisions, B00–B16 work order, final route/AI/plate/hosting contract.**
+2. **`Future plans/Browser-only-core-detailed-build-contracts.md`** — exact B00–B16 package patches and definitive dependency table.
+3. **`Future plans/Browser-only-core-diff-map.md`** — source function anchors, pseudo-diffs, runtime versions and static build/host details.
+4. **`Future plans/Browser-only-core-source-route-index.md`** — frozen **92-route source map (91 local, 1 retired)**, single owner/disposition, handlers and prominent UI callers. Reconcile on current source, not a permanent route-count requirement.
+5. **`Future plans/Browser-only-core-integration-plan.md`** — historical short overview; defer to execution spec if unclear.
+6. **`README.md`** — owner-tested/no-coder-testing rules and canonical geometry behavior.
+7. **`docs/legacy-python-server-hosting.md`** — historical server architecture and hard pre-retirement recovery record.
 
 For private DNS details, read `happydadto5/Help-Code/docs/wavefinity-domain.md`. Do not copy private account/DNS details into public Stories beyond the minimal operational instructions needed for a domain handoff. Keep Porkbun as registrar and authoritative DNS.
 
@@ -51,7 +54,7 @@ Current-source reconciliation is necessary because Gridfinity work was underway 
 
 **Single cutover:** Andrew explicitly accepts that intermediate implementation stages may be nonfunctional. Do NOT add dual server/browser execution, half-working releases, backend fallbacks or compatibility layers solely to keep each Story operational in isolation. All work converges on one complete static application.
 
-**Hosting:** Final target is a **new Render Static Site, using the free tier if within allowances**. It serves static HTML/JS/Pyodide/WASM/assets; no Python Web Service execution, idle sleep or ~60-second server cold start. Browser initialization may still take time. Copy `web/*` to `dist/` root, repository `images/*` to `dist/images/*`, and repo-root `Brochure.md` to `dist/Brochure.md`. Ship required pinned local runtime assets with proper MIME/cache paths. Keep historical Python/Render deployment documentation and recovery source.
+**Hosting:** Final target is NEW Render Static Site, free within allowances, not the sleeping Python Web Service. Build with production-only `web/*` to dist root, root `images/*` into `dist/images/*`, and BOTH `Brochure.md` and `brochure.md` aliases. Exclude PoC HTML/worker/`web/browser-local-poc/**` before B16 removal. Include pinned Pyodide/WASM with correct MIME/cache/CSP, full route declarations and the normal production build integrity check. Preserve legacy hosting record. Do not touch live DNS/Render domains now.
 
 **Porkbun lock:** `wavefinity.org` STAYS registered and paid at Porkbun, and Porkbun remains authoritative DNS/nameservers. No nameserver migration, domain transfer, Cloudflare Pages apex hosting, new domain purchase or new registration payment. Static hosting can be changed by modifying authorized DNS **records within Porkbun** and attaching the domains to the new Render service. Existing exact DNS values belong in private Help-Code, NOT public Bxx Stories. Do not perform these actions now. The future hosting Story MUST include a step **tell Andrew exactly what action/account configuration is needed and obtain his explicit authorization** before creating a paid resource, detaching domains, changing any DNS records, or retiring the existing service. Do not invent a future Render hostname; use the actual dashboard value at cutover.
 
@@ -61,8 +64,8 @@ Current-source reconciliation is necessary because Gridfinity work was underway 
 
 1. **Inventory existing Poller Wavefinity Stories** and current repository state. Match B00–B16 package scope and identify existing work. Record skipped/completed scope to prevent duplicates.
 2. **Resolve current source only where necessary**, starting from exact symbols in the diff map and 92-entry route index. Read `gridfinity-stage1-spec.md` and `Future plans/Gridfinity-implementation-master-plan.md` as source-invariant references, and check what Stage 2 code actually merged (magnet feet, lid variants, container stacking, side openings); do NOT assume merely planned features shipped. Include Space/grid immutability; nominal versus physical cavity; Floor/None and third-party baseplate relief; measured/unverified seated lift; 7-mm Z units; printed floor sockets; grid/lid stacking; cross-grid refusals and filename pitch/unit segments. No route scanner, tests or manual test plan.
-3. **Use B00–B16 as the default Story division** and the authoritative dependency table in the detailed contracts. Single OWNER per route from the 92-row index: B10 owns ALL `/api/drawer/*`, B11 owns ALL structural/Storage Drawers and pegboard hooks, B09 owns folder/Space paths including `/api/browse-output-folder`, `/api/space/show-folder` and `/api/space/warm`; B13 owns slicer browse/show-log/AI. B04 creates Python `route-dispatch.py`; B05/B06/B08/B10/B11/B12/B13 Python modules export Python `ROUTES`. B09 and B13's browser-only handlers export JavaScript `ROUTES`. **B14 wires Python maps into Python dispatcher and JavaScript maps into `local-api.js` separately**, never imports JS into Python. No competing writers or dual route owners. Split only for safe truly independent code ownership.
-4. **Resolve the ONLY known product-decision blocker BEFORE filing dependent Stories:** preserve AI Help UI, local prompt/candidate validation and copy/paste assistance. If current code/provider facts cannot safely preserve one-click direct AI chat under static hosting without server secrets or disallowed CORS, ask Andrew to choose a copy/paste-only mode or an explicitly permitted external AI service BEFORE filing B13 or B14. Do not silently disable chat or defer this decision until hosting cutover. Other Stories may still be submitted while a genuinely blocked B13 is pending; report that precisely.
+3. **Use B00–B16 as the default Story division** and the authoritative dependency table in the detailed contracts. The **normal shipping-build check** compares updated source-route index + B01 manifest with final flat Python/JS runtime registry, failing on missing/duplicate/unclassified routes; historical export-token path is `retired` and NOT a callable handler. Missing route fails closed with `UNSUPPORTED_LOCAL_OPERATION` and never calls a server. This is production compile integrity, NOT coder testing. Single OWNER per route from the 92-row historical index: B10 owns ALL `/api/drawer/*`, B11 owns ALL structural/Storage Drawers and pegboard hooks, B09 owns folder/Space paths including `/api/browse-output-folder`, `/api/space/show-folder` and `/api/space/warm`; B13 owns slicer browse/show-log/AI. B04 creates Python `route-dispatch.py`; B05/B06/B08/B10/B11/B12/B13 Python modules export Python `ROUTES`. B09 and B13's browser-only handlers export JavaScript `ROUTES`. **B14 wires Python maps into Python dispatcher and JavaScript maps into `local-api.js` separately**, never imports JS into Python. No competing writers or dual route owners. Split only for safe truly independent code ownership.
+4. **AI Help product choice is ALREADY RESOLVED in the execution spec:** BYOK browser-direct AI chat where user provider CORS allows, session-memory key only by default, ALWAYS retain manual copy/paste. No site key or new Wavefinity server. Never pause Story creation for a repeat A/B vote; if a particular provider blocks browser CORS, the app must report that and retain copy/paste. Preserve all local prompt/candidate/repair flows and disclose prompt/design context sent only after user asks. Include B07 `plate_layout.py` four-member merged 3MF path and B13 pre-Space unsupported-browser recovery in their Stories.
 5. **Create the Stories through Poller**, each self-contained and implementation-ready.
 6. **Register dependencies** using Poller's supported dependency/ordering mechanism. If Poller cannot represent a dependency, write the exact blocking Story IDs and required deliverables in the relevant Story's contract. Avoid cycles and same-file parallel ownership conflicts.
 7. **Align reviewer and coder instructions** with the owner-tested rule and single cutover. Reviewers validate contractual/code reasoning without adding tests or manual QA plans. Preserve direct-`main` no-force-push safety and latest-origin reconciliation.
@@ -98,13 +101,13 @@ Use the actual B00–B16 dependencies in the detailed contracts, reconciled with
 - B04 catalog/editor/rules
 - B05 previews
 - B06 standard bin/connectors/STL
-- B07 correct 3MF
+- B07 native 3MF **plus plate_layout.py exact transform/combined-plate four-file ZIP behavior**
 - B08 **Print** preparation/handoff
 - B09 local Space/preferences/files/autosave (after relevant base runtime)
 - B10 inventory/drawer save and print
 - B11 all structural Spaces and related exports
 - B12 advanced features, image nesting, text
-- B13 optional AI and browser-incompatible desktop actions
+- B13 decided BYOK AI Help (with manual fallback) and browser capability/recovery notices
 - B14 static build **and explicit Andrew hosting approval handoff**
 - B15 retire Python HTTP execution while preserving historical rollback
 - B16 remove prototype/test-only scaffolding, not the production Manifold64 engine
