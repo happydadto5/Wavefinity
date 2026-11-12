@@ -2,7 +2,7 @@
 
 Working rules for AI agents and coders working on Wavefinity. [README.md](README.md) is the product and architecture authority — what the project is, how it behaves, and how it is built and run. These rules govern how work is done; the product facts live in the README.
 
-> **OWNER POLICY (2026-11-12) — WAVEFINITY IS USER-TESTED.** Coders validate their logic by reading code, callers and diffs. Do **not** write, update, repair or run automated tests; do **not** manually test the application; do **not** create user testing instructions, QA checklists or manual test plans. Implement, inspect code, commit/push and hand off. Applies to Help-Code assignments as well as direct work; request correction of any conflicting assignment rather than running tests. See '3. Owner-mandated user-tested development policy — NO CODER TESTING' under Testing below.
+> **OWNER POLICY (2026-11-12, clarified) — TWO DISTINCT WORK MODES.** **Implementation/Story coders do not test:** no automated tests, manual app tests, test scripts or test plans; reason through code/diffs, implement, commit/push, and stop. **Only a separate, explicit owner-requested UI audit or bug-hunting assignment may operate the application**, using an isolated test environment and Playwright to inspect screens and capture evidence. Never infer audit permission from a coding Story, review or delivery. See Testing and Browser work below.
 
 ## Before changing code
 
@@ -33,7 +33,7 @@ AI Design uses [ai-features.md](ai-features.md) as its reference. Any change tha
 - **Communication:** Operate in "caveman mode". Keep messages simple, plain, and short. User is not a programmer — avoid code jargon. Give a general sense of progress by showing steps in layman's terms.
 - **Workflow:** For a Help Code Fix/correction, fetch the current coder protocol and assignment from `happydadto5/Help-Code`. For work explicitly not a Help Code task, follow the generic repository workflow below in this file.
 - **Authority:** Read [README.md](README.md) for product guidance. Current Help Code coder protocol and assignments live in the helper repository.
-- **Testing:** None by coders. No automated test execution or creation, manual application checks or user test plans. The owner handles actual application testing regardless of task size.
+- **Testing:** No testing as part of Story/implementation work. Separate, owner-requested UI audits and exploratory bug hunts are permitted under the isolated-audit rules below; they are not coder acceptance tests.
 - **Scope:** Implement the requested code change, reason carefully through affected logic, inspect callers and the changed diff, commit and push. Do not test or write a testing plan.
 - **Project notes:** Three coding tools (Claude, Codex/ChatGPT, Gemini) work this project. Keep project/task notes in [README.md](README.md) whenever possible so all three tools and the human see the same record. Put something in this file only if it is specific to this particular tool.
 
@@ -58,9 +58,9 @@ git push
 
 ### 3. Owner-mandated user-tested development policy — NO CODER TESTING
 
-**Authoritative product-wide instruction, November 12, 2026. Applies to ALL Wavefinity coders, agents, development Stories, direct work, reviews and migrations.** Older testing guidance in this README, archived discussions, developer prompts, repository tests and generic Help-Code instructions is superseded. If an incoming assignment contradicts this rule, flag the conflict and have the assignment corrected; do not silently perform tests.
+**Authoritative instruction for all Wavefinity implementation work, November 12, 2026.** Applies to Help-Code Stories, direct coding tasks, reviews and migrations. Older testing guidance in the README, developer prompts, repository tests and generic Help-Code instructions does not authorize coder testing. If an implementation assignment requires testing, request correction rather than silently running it. **The separate owner-directed UI-audit exception below does not change the implementation rule.**
 
-**Wavefinity is a user-tested application. The owner is the application tester, not the coding LLM.**
+**Wavefinity remains owner-tested for development acceptance.** The owner may independently delegate visual exploration and screenshot collection to an audit agent; this is not acceptance testing performed by the coder implementing a Story.
 
 - **Coders implement and validate their logic by reasoning and inspecting the source and diff.** Read relevant callers and data contracts; inspect types, control flow, preconditions, numerical formulas, error paths, async/state ownership, file operations, and affected call sites. Correct problems apparent from code analysis.
 - **Coders DO NOT WRITE, GENERATE, MODIFY, REPAIR, OR RUN AUTOMATED TESTS.** No Python unittest/pytest, JavaScript/Node test runners, Playwright, browser automation, geometry comparison harnesses, fixture snapshots, regression sweeps, CI test gates or test-only scripts. Do not run existing test suites just because the repository contains them. Do not treat a test result as a completion requirement.
@@ -76,11 +76,26 @@ git push
 
 **Conflict handling:** This explicit owner instruction governs Wavefinity product development even when a generic reviewer rubric or older Fix requests automated tests. Correct the assignment or escalate a genuinely mandatory conflict. Do not infer permission to add testing from the risk or size of the change.
 
-**No automated tests, no manual application tests and no user test plans, without exceptions based on change size.** Review code logic and changed diffs instead. The owner will use and evaluate the application.
+**No automated tests, manual application tests or user test plans during implementation, without exceptions based on change size.** Owner-requested independent UI audits are a separate task, never an automatic implementation phase.
 
-## Browser work
+## Browser work — owner-directed UI audits only
 
-There is no coder browser testing on this project: the owner policy under Testing forbids driving browsers, Playwright and manual UI walkthroughs, so there are no screenshots or test results to produce or verify. How the browser UI itself behaves is product documentation — see README.md, "Using the browser UI" and "The browser service".
+**Trigger:** The owner explicitly asks for screenshots, a visual audit, a specific UI exercise, or open-ended exploratory bug hunting. That authorization applies to the **separate audit assignment only**, not an implementation Story, a reviewer rubric, a delivery, or a coder's self-chosen verification. The owner may request an extended exploratory session without enumerating every click or screen. Ordinary coding tasks must still stop after code/diff review and handoff.
+
+**Independent audit-agent rules:**
+- Use Playwright's isolated Chromium browser, preferably headless. Do **not** use computer-use, desktop mouse/keyboard control, or the OpenCode embedded browser for automated screenshots.
+- Use a verified isolated Wavefinity test instance (planned `http://127.0.0.1:8766`) with separate preferences, Space folders and browser state for **all state-changing UI actions**. Confirm isolation before creating or editing test Spaces. If isolation is unavailable, **stop before writes**; never silently use the real `http://127.0.0.1:8765` instance. Read-only production screenshots require the owner's explicit request.
+- Create and manipulate **disposable test Spaces only**; never modify, move or delete the owner's saved Spaces. Never start a physical print job, launch a slicer for printing, or send output to an external service.
+- Default screenshot viewport: **1920 × 1080 CSS pixels**, device scale factor 1; use smaller desktop/mobile viewports only when the requested audit calls for responsive coverage. Save artifacts and optional reusable Playwright scripts **outside the product repository**, e.g. under `C:\AI\BrowserAudit\WavefinityTest`.
+- The audit agent may browse menus, create bins/Dividers/labels, exercise save/preview paths in the test instance, inspect rendered UI and screenshots, and collect console errors. Longer owner-requested bug hunts are permitted; checkpoint progress and record reproducible findings instead of looping indefinitely.
+- **No source-code fixes during an audit.** If the app throws an error or a feature fails, capture evidence, continue with other safe paths, and report the bug. Code repair is a distinct owner-requested Story/task.
+- Verify screenshot files exist and their dimensions match the requested viewport. Distinguish a value present in an input from lettering actually visible in the rendered preview; do not claim visual verification unless the screenshot or rendered result was inspected.
+- Report what screens/actions were attempted, what passed or failed, screenshot paths and dimensions, errors, reproduction steps, and remaining blockers. Do not invent successful actions, screenshots, or fixes.
+- Stop or ask for direction if a requested audit cannot be performed without accessing real data or exceeding the explicit permission granted.
+
+**Audit scripts are not product regression tests.** Small Playwright helpers made for an explicit independent audit may live in the separate test workspace, but must not be committed to `tests/`, `browser-tests/`, CI, or any other Wavefinity product test suite. The owner decides whether and how findings become implementation Stories.
+
+How the browser UI itself behaves is product documentation — see README.md, "Using the browser UI" and "The browser service".
 
 ## Implementation & reporting
 
