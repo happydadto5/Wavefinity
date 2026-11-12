@@ -11,6 +11,9 @@ license: mit
 
 # Wavefinity — wavy drawer organizer generator
 
+> **OWNER'S CODER POLICY — READ FIRST (2026-11-12): Wavefinity is USER-TESTED. Coders validate changes by reading and reasoning about code, not by executing tests. Do NOT write, update, repair or run automated tests. Do NOT manually test the application or prepare test plans/checklists for users. Implement, inspect your diff, commit/push safely, and report what changed. See [Owner-mandated user-tested development policy](#3-owner-mandated-user-tested-development-policy--no-coder-testing).**
+
+
 Parametric Python generator for a 3D-printable modular drawer organizer with
 **wavy walls that interlock** and configurable holders inside. The local browser
 UI, command-line interface, fit sampler and tests share the same Python box,
@@ -239,7 +242,7 @@ filed but not built yet.
   pre-spaced file, *Last Printed.3mf*, overwritten on every print, so parts
   never land on top of each other *(planned, Story 2856)*.
 
-**Screen captures for a UI review:** when a review needs pictures of the app as it stands, do not photograph the desktop by hand - capture the app's own pages with a scripted browser session against a fixed baseline, following the recipe in the Reference appendix at the end of this README ("Capturing the UI for a review"). It produces an indexed set of screens and states a reviewer can walk through.
+**UI reviews:** The owner tests and judges actual screens. Coders do not run scripted browser sessions, take automated test screenshots, or produce manual user-testing plans.
 
 ### The flow, start to print (every Space type)
 
@@ -323,7 +326,7 @@ Project-wide coding and architecture guidance is centralized here for all agents
 | Authority | Where it lives |
 | --- | --- |
 | Product behavior, architecture, code and project guidance | This Wavefinity repository and README |
-| Help Code workflow, role boundaries and testing limits | Helper `README.md`, `help-code-state.json` and its declared overrides |
+| Help Code workflow and role boundaries | Helper `README.md`, `help-code-state.json` and its declared overrides; Wavefinity's no-testing rule below governs product implementation |
 | Current coder assignment and startup rules | Helper `reviews/code-chat.md` and `CODER.md` |
 | Exact implementation behavior and evidence | Assigned active Fix or fixlet in helper `fixes/`; its master controls shared ordering/status |
 | Permanent lifecycle ledger | Helper `fixes/Fix Master.md`, maintained by reviewers; coders neither read nor edit it |
@@ -336,7 +339,7 @@ Use the helper's **current default branch**, freshly resolved through authentica
 - **`read fix 4`** means read helper `fixes/fix-004.md`; `Fix 35A` ordinarily uses `fixes/fix-035a.md`. For fixlet bundles, follow the current assignment/master's exact paths rather than inventing names. A read/review request does not itself start implementation.
 - An empty or unrelated cwd requires safe repository recovery, not a request for the PM to locate the code. If authoritative helper access actually fails, report **HELPER REPO ACCESS FAILED** with the concrete failure; never implement from a stale copy.
 
-The helper protocol governs Help Code orchestration; this README governs product facts and project constraints; the active contract governs the assigned change within those rules. Generic non-Help-Code guidance below cannot broaden a Help Code task or weaken its testing/acceptance gates. Report a real conflict to reviewers instead of guessing.
+The helper protocol governs Help Code orchestration; this README governs product facts and project constraints; the active contract governs the assigned change within those rules. Generic non-Help-Code guidance cannot broaden a Help Code task, but the owner's no-coder-testing rule below applies to Wavefinity work in either workflow. If the active assignment mandates testing, request correction rather than running it.
 
 ### 1. User communication preferences
 - **Operate in "caveman mode"**: keep messages simple, plain, and short.
@@ -347,128 +350,25 @@ The helper protocol governs Help Code orchestration; this README governs product
 
 The helper repository's fresh `CODER.md` and `reviews/code-chat.md` define the coder workflow and current assignment. This product README supplies product facts and generic project guidance; it does not select a Fix or define a parallel coder protocol. The coder resolves this repository from `help-code.config.json`, preserves unrelated local work, and follows the fresh helper protocol for preparing, editing, committing, pushing, outbriefing, and reporting. Reviewers perform acceptance and closure. A historical READY file or stale ledger label never selects the coder's next job.
 
-### 3. Fast vibe-coding & testing policy
+### 3. Owner-mandated user-tested development policy — NO CODER TESTING
 
-#### Purpose & Core Rule
+**Authoritative product-wide instruction, November 12, 2026. Applies to ALL Wavefinity coders, agents, development Stories, direct work, reviews and migrations.** Older testing guidance in this README, archived discussions, developer prompts, repository tests and generic Help-Code instructions is superseded. If an incoming assignment contradicts this rule, flag the conflict and have the assignment corrected; do not silently perform tests.
 
-> **Help Code override:** The generic testing guidance below is for work without an active Help Code implementation contract. For a Help Code Fix/correction, the active cloud fix selects task-specific verification within the helper protocol's standing limits, including its full-suite approval gate and retired-browser policy. If it says not to write, update, or run automated tests, do not do so regardless of the generic Class A/B/C guidance below.
+**Wavefinity is a user-tested application. The owner is the application tester, not the coding LLM.**
 
-> **MAXIMIZE CONFIDENCE PER TOKEN.**
-> Use cheap automated tests when they materially improve confidence.
-> Browser-driven tests are retired by user decision as of 2026-09-25. Do not add,
-> update, repair, run, or use them as completion evidence unless the user explicitly
-> reverses this policy. Keep non-browser tests for frontend/web logic active.
+- **Coders implement and validate their logic by reasoning and inspecting the source and diff.** Read relevant callers and data contracts; inspect types, control flow, preconditions, numerical formulas, error paths, async/state ownership, file operations, and affected call sites. Correct problems apparent from code analysis.
+- **Coders DO NOT WRITE, GENERATE, MODIFY, REPAIR, OR RUN AUTOMATED TESTS.** No Python unittest/pytest, JavaScript/Node test runners, Playwright, browser automation, geometry comparison harnesses, fixture snapshots, regression sweeps, CI test gates or test-only scripts. Do not run existing test suites just because the repository contains them. Do not treat a test result as a completion requirement.
+- **Coders DO NOT RUN MANUAL APPLICATION TESTS.** Do not drive browsers, simulate user interactions, click through UI flows, produce test prints, load slicers to experiment, or perform acceptance walkthroughs. The owner performs real-world application testing when and how they choose.
+- **Coders DO NOT WRITE MANUAL TEST PLANS, STEP-BY-STEP QA CHECKLISTS, OR TEST REQUESTS FOR THE OWNER.** Do not append a "How to test" section, list user click sequences or ask the owner to execute a scripted acceptance matrix. The handoff should say what changed and any known limitations; the owner will try the app naturally and report issues.
+- **Do not add testing scaffolding.** No new `tests/`, `browser-tests/`, `fixtures/`, `TESTING.md`, test-status logs, mock servers, throwaway harnesses or testing-only dependencies. Previously existing tests are historical artifacts, not instructions to run or expand them.
+- **Do not promise that changes are proven or fully tested.** A coder may state that the implementation is logically reviewed, built/committed/pushed, and describe known unverified limitations. If logic is ambiguous, reason through it from the existing code and product rules; surface only genuine blocked decisions.
+- **Code correctness still matters.** Keep runtime input validation, mesh validity checks used by the product, file-format constraints, safety boundaries, error reporting, integrity hashes, and production diagnostic output. These are application behaviors, not test suites. Avoid deleting legitimate runtime validation merely because it contains the word "validate."
+- **Build steps are permitted to produce shipping assets.** Compile WASM, bundle the static site, generate required manifests and run tools needed for actual implementation. Do not turn builds into test runs, test suites or scripted acceptance checks.
+- **No partial-app operability requirement during the browser-only migration.** Implement all assigned components directly and complete one final cutover. Do not add dual-mode compatibility code, interim tests or releases only to keep a partly migrated app working.
 
-Wavefinity should avoid both extremes: skipping useful automated verification and wasting time/tokens on ceremonial testing. The computer running a test does not meaningfully consume LLM tokens; token cost mostly comes from the agent reading output, diagnosing failures, or writing tests. Therefore prefer quiet, high-signal automated checks and concise output.
+**Default coder workflow:** Understand the request and existing implementation -> reason through the exact code changes and integration points -> implement -> review the changed source/diff logically -> commit and publish safely -> report changed behavior, affected files, commit and known limitations. **Stop.** Do not add a test phase. The owner reports application bugs after using the result.
 
-> **Implement carefully, inspect the diff, run the cheapest useful automated checks, and stop when the meaningful risks are covered.**
-
-Existing tests are a safety net. Reuse them freely when they fit. Do not build a large new testing program merely because a change exists.
-
-#### Test inventory and planning limit
-
-The active suite baseline is **500 tests**. Do not exceed **550 active test methods** without an explicit user decision; prefer replacing or consolidating an older test over permanent net growth. Do not create permanent active `test_fixNNN.py` suites. Temporary fix-specific tests may be used during development, but move durable cases into behavior-owned suites and remove the temporary file before acceptance. An obsolete test for behavior the product no longer promises may be deleted.
-
-A normal Fix names only the smallest useful verification set. Several requirements may share one test or code/static proof. Do not create a correction solely to add an assertion when review can directly prove the requirement. After a correction, rerun the failing/new check and directly affected owner tests, not the full suite by default. A green full suite alone does not prove completion. There is no coverage-percentage target.
-
-#### Change classification
-
-**Class A — Small/localized change: TESTING OPTIONAL**
-- *Examples:* wording, labels, tooltips, CSS/layout/spacing, moving or hiding one control, documentation, a clear one-line/local bug fix, a small local refactor, renaming, or a contained default/range change.
-- *Action:* implement and inspect the changed path/diff. Skip tests when they add no meaningful signal. If a relevant existing automated test is cheap to run, it is fine to run it.
-
-**Class B — Moderate/bounded change: AUTOMATED TESTING ENCOURAGED**
-- *Examples:* one feature plus paired UI/API wiring; contained serialization; several files in one coherent path; a new local interaction/state flow; a meaningful bug fix spanning multiple functions.
-- Prefer an existing targeted automated test or small related test group.
-- Use `python3 run_tests.py core` if targeted tests are insufficient; reserve the full suite for broad Class C work, release/audit milestones, or shared-owner breakage.
-- Do not write a new test unless it is likely to protect an important behavior at reasonable maintenance/token cost.
-
-**Class C — Major / Heavy-Lift / High-Blast-Radius change: AUTOMATED TESTING EXPECTED**
-Testing is expected when the change can realistically break significant portions of Wavefinity outside the immediate feature.
-- *Qualifying criteria:* shared box/wave/grid geometry; global mating/interlock rules; central data models; saved-design schema/versioning; broad save/load/generation paths; shared layout/assembly/registry infrastructure; major subsystem replacement; security/request boundaries; global browser state synchronization; common 3MF/export logic; versioned serialization.
-- Use relevant targeted tests and the core gate. Run the full suite when the changed shared contract genuinely needs it.
-- A large line count alone does not make work Class C; a tiny shared-contract edit can.
-
-#### Browser-test retirement
-
-Existing browser-driven tests and browser-only harness material are historical
-reference under `retired-tests/browser/`. They are not part of active testing:
-do not run, repair, modernize, or use them as completion evidence. Reactivation
-requires an explicit later user decision. This does not retire ordinary
-non-browser tests of frontend or web-service logic.
-
-#### Correction-escalation rule
-
-Repeated correction cycles are evidence that more real verification may be worthwhile.
-
-- After **2 correction passes** on the same fix, reconsider whether additional automated coverage would cheaply catch the remaining issue.
-- After **3 correction passes**, or after any runtime/integration failure escapes review, run relevant automated verification unless the environment truly cannot run it.
-- A fix spanning multiple subsystems, migration, frontend/backend state, or persistence should normally receive automated verification before repeated corrections accumulate.
-
-The Help Code fix file should state the testing approach for that fix, choosing from:
-- **No testing needed**
-- **Existing targeted automated tests**
-- **Existing broader/full automated suite**
-
-Name exact commands/checks when known, but do not turn the fix file into a testing plan.
-
-#### Testing rules
-
-- **Prefer existing tests.** Reuse them before writing new ones.
-- **Targeted first when obvious.** If one small test group directly covers the change, start there.
-- **Core first.** `python3 run_tests.py core` is the default broad gate. Reserve the full suite for broad Class C work, release/audit milestones, or shared-owner breakage.
-- **Use quiet/concise output.** Avoid verbose logs unless diagnosing a failure. Run the suite through
-  `python3 run_tests.py core` (74-test core), `python3 run_tests.py` (whole suite), or `python3 run_tests.py test_foo test_bar` (a subset) — it
-  prints one `PASS: N/N passed in Ys` line when everything passes, and only the failing test IDs plus
-  their tracebacks otherwise. A green run costs one line of output no matter how large the suite is;
-  `python -m unittest` directly is for when you need its own `-v`/`-k` flags while diagnosing a failure.
-- **New tests are exceptional.** Class A normally adds none. Class B uses existing targeted tests first; add one only for an important stable failure mode that static review cannot cheaply catch. Class C adds the smallest durable set for shared contracts. Exact UI copy, layout, and source structure normally use code review or manual verification.
-- **Syntax/import checks are cheap** and encouraged when relevant.
-- **Browser automation is retired.** Use static review and active non-browser checks.
-- **Rerun failures, not reassurance.** After fixing a failure, rerun the failed/relevant checks. Do not repeatedly rerun already-passing suites without a reason.
-- **No exhaustive matrices or random sweeps** unless the changed algorithm genuinely requires them.
-- **No screenshot QA** for routine styling; inspect visuals only when visual behavior is itself the risk.
-- If testing cannot run because the environment/tooling is unavailable, say so clearly and use the strongest available static review.
-
-#### What still should NOT happen
-
-Do not create testing bureaucracy:
-- no `TESTING.md`;
-- no per-session testing logs;
-- no giant acceptance matrices;
-- no dozens of near-duplicate cases;
-- no “one more verification” loops after the named risks are covered;
-- no retired browser-driven test;
-- no new test merely to increase confidence cosmetically.
-
-#### Fast implementation workflow
-
-1. Read the affected implementation and direct callers.
-2. Make the smallest correct change.
-3. Inspect the changed code and diff.
-4. Choose the cheapest high-signal verification appropriate to the blast radius.
-5. Run relevant existing automated tests when they materially improve confidence.
-6. Fix real failures and rerun only the affected checks.
-7. Commit/push the coherent completed work.
-8. Stop.
-
-#### Quick decision rule
-
-Before spending testing tokens, ask:
-
-> **Which check gives the most confidence for the least agent interaction/output?**
-
-- Tiny/local change with no meaningful runtime risk → testing may be skipped.
-- Relevant existing targeted test → usually run it.
-- Targeted tests insufficient → run the 74-test core gate; use the full suite only for genuinely broad risk or milestones.
-- Browser-specific behavior → use active non-browser checks and static review; browser automation is retired.
-- Repeated corrections or escaped runtime failures → increase automated verification.
-
-#### Definition of done
-
-- **Class A:** requested behavior implemented, code path reasoned through, diff verified; cheap relevant automated checks may be run but are not mandatory.
-- **Class B:** Class A plus useful existing automated verification when available; targeted tests are preferred, with core for broader confidence.
-- **Class C:** implementation plus relevant non-browser automated verification; use core first, with full suite for genuinely broad shared-contract risk.
+**Conflict handling:** This explicit owner instruction governs Wavefinity product development even when a generic reviewer rubric or older Fix requests automated tests. Correct the assignment or escalate a genuinely mandatory conflict. Do not infer permission to add testing from the risk or size of the change.
 
 ### Using the browser UI
 
@@ -1152,15 +1052,7 @@ frontend's *Keep inventory for this folder* checkbox). Legacy inventory,
 decide a folder's first `inventory` value, then superseded by the explicit
 field - and are not deleted.
 
-**Verification:** browser-driven tests are retired and are not part of the
-active verification contract. Python API contracts and JavaScript syntax are
-covered by `tests/test_wavefinity_web.py` and `node --check`. A very dense design (many
-cradle/bore parts at once) serializes a large triangle payload to
-the browser; camera motion stays client-side and fast regardless, but the
-initial load is heavier. **Save design** relies on the browser's own
-download prompt. Photo Nest's automatic finger-access search and its 2D access
-indicators are interactive UI behavior; their active automated checks remain
-non-browser tests.
+**Development policy:** Wavefinity is user-tested. Coders inspect their logic and code; they do not run or author automated tests, perform manual UI testing, or create manual test plans for users. A very dense design (many cradle/bore parts at once) serializes a large triangle payload to the browser, making initial load heavier. **Save design** uses the browser's download prompt. Photo Nest's automatic finger-access search and 2D indicators are application behaviors.
 
 ---
 
@@ -1853,21 +1745,13 @@ layered implementation:
 | `web/spaces.js` | Typed Space setup and opening, folder and Space activation, resume and startup handoff, and Space setup lifecycle. | No. |
 | `web/browser-files.js` | Hosted-browser writable-folder permission and handle persistence, plus browser-owned file operations; Python receives no fake client path. | No. |
 | `web/preview3d-webgl.js` | Shared depth-buffered WebGL renderer for solid 3D preview geometry; `app.js` owns 2D overlay annotations. | No. |
-| `tests/test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest tests.test_wavefinity_web`. |
-| `tests/test_drawer.py` | Inventory file, one-placement layout, report and spacer regressions. | Only via `python -m unittest tests.test_drawer`. |
-| `tests/test_pegboard.py` | Pegboard sizing, persistence, mount geometry and placement regressions. | Only via `python -m unittest tests.test_pegboard`. |
-| `tests/test_inventory_safety.py` | Inventory refresh, deletion, and Space isolation. | Via `run_tests.py`. |
-| `tests/test_ui_state_safety.py` | Preview selection and async UI state. | Via `run_tests.py`. |
-| `tests/test_text_geometry.py` | Text placement and geometry. | Via `run_tests.py`. |
-| `tests/test_lid_geometry.py` | Lid fit, labels, and export geometry. | Via `run_tests.py`. |
-| `run_tests.py` | Compact test runner: full, 74-test core, or selected modules. See [Testing rules](#testing-rules). | Yes — `python3 run_tests.py [core | module ...]`. |
+| Historical `tests/` and `run_tests.py` | Legacy automated test artifacts: coders must not run, modify, repair or expand them under the current owner policy. | Not part of coder workflow. |
 
 `web/index.html`, `web/styles.css`, `web/feature-icons.js` and `web/app.js` are
 plain dependency-free frontend files with no build step. Icon artwork lives in
 `feature-icons.js`; the feature registry supplies stable icon identifiers.
 `app.js` holds the stateful editor, preview coordination, and typed-Space
-ordinary-bin autosave and status handoffs. All printable geometry still comes
-from the Python service. Drawer layout mode lives in `web/drawer-model.js`
+ordinary-bin autosave and status handoffs. In the current legacy runtime printable geometry comes from the Python service; the planned browser-only migration retains canonical Python geometry through Pyodide/WASM and removes that server dependency. Drawer layout mode lives in `web/drawer-model.js`
 (data, saving), `web/drawer-view.js` (the canvas) and
 `web/drawer-panel.js` (its sidebar), styled by `web/drawer.css`. These files
 share helpers and Space identity with `app.js`. The page's content-security
@@ -2395,12 +2279,12 @@ not covered. Separately, `make_fused_box` drops zero-volume boolean slivers
 `/browser-local-poc.html` is an opt-in, isolated experiment on the existing
 host. It loads tools into browser memory without installation. Chrome and Edge
 reproduce the canonical wall/cavity profiles and 0.25 mm seam, including with
-network blocked after load. **The full-bin POC failed:** the pinned browser
-dependencies lack the engine's required float64 Mesh64 boolean interface.
-No finished bin or STL is claimed. Production geometry still uses Python.
-The baseline, measurements, dependency evidence, limitations and proposed next
-Story are in [browser-tests/README.md](browser-tests/README.md). No production
-design option or AI Design contract changes.
+network blocked after load. The original PoC lacked a float64 boolean interface, but the later custom
+MeshGL64 WebAssembly bridge generated valid downloadable bins with real
+Wavefinity geometry, and Windows Chrome/Edge were confirmed by the owner.
+The original feasibility history remains in [browser-tests/README.md](browser-tests/README.md)
+for reference, not as a development testing mandate. Production still uses the
+legacy Python server until the complete browser-only migration is delivered.
 
 ### Gridfinity container floors (Story 2974, model and geometry)
 
