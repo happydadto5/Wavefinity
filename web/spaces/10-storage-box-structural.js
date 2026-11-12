@@ -6,8 +6,8 @@
 // organizer_inventory.normalise_storage_box). These helpers fill and read the
 // case settings on the Space setup/Edit form.
 
-SP.storageBoxDefaults = () => ({
-  secure_lid: true, latch_count: "1", hinge_count: "2", lid_headroom_mm: 1, latch_tightness: "default",
+SP.storageBoxDefaults = fieldWidth => ({
+  secure_lid: true, latch_count: fieldWidth > 96 ? "2" : "1", hinge_count: "2", lid_headroom_mm: 1, latch_tightness: "default",
   label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat", label_size: "default",
   stacking: false, handle: false,
   wall_mm: Number(state.catalog?.b4b_rules?.default_wall_mm ?? 1.6),
@@ -31,9 +31,21 @@ SP.storageBoxEdgeBevel = "default";
 // Hinge type is chosen in the Design-panel form; the setup dialog keeps it.
 SP.storageBoxHingeType = "screw";
 
+// portable-x is Interior width, not the finished outside case size.
+// Match the normalized child-bin field passed to the engine.
+SP.storageBoxSetupFieldWidth = () => {
+  const unit = Number(state.catalog?.base_unit || 7);
+  return Math.round(Number(document.getElementById("portable-x")?.value) / unit) * unit;
+};
+SP.syncNewStorageBoxLatchDefault = () => {
+  if (!SP.newStorageBox) return;
+  const select = document.getElementById("portable-latch-count");
+  if (select) select.value = SP.storageBoxDefaults(SP.storageBoxSetupFieldWidth()).latch_count;
+};
+
 SP.fillStorageBoxForm = box => {
   SP.newStorageBox = !box;
-  const one = { ...SP.storageBoxDefaults(), ...(box || {}) };
+  const one = { ...SP.storageBoxDefaults(SP.storageBoxSetupFieldWidth()), ...(box || {}) };
   SP.storageBoxEdgeBevel = box ? (box.edge_bevel || "none") : "default";
   SP.storageBoxHingeType = box && box.hinge_type === "piano" ? "piano" : "screw";
   const set = (id, value) => { const node = document.getElementById(id); if (node) node.value = String(value); };
@@ -129,9 +141,7 @@ SP.readStorageBoxForm = () => {
   const labelled = location !== "none";
   return {
     secure_lid: latched,
-    latch_count: SP.newStorageBox
-      ? (SP.snap(Number(value("portable-x"))) > 96 ? "2" : "1")
-      : (value("portable-latch-count") || "1"),
+    latch_count: value("portable-latch-count") || "1",
     hinge_count: latched ? (value("portable-hinge-count") === "1" ? "1" : "2") : "2",
     hinge_type: latched ? SP.storageBoxHingeType : "screw",
     lid_headroom_mm: parseFloat(value("portable-lid-snugness")) || 1,

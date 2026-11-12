@@ -200,8 +200,8 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 - **Latched Lid**.
 - **Lid Only**.
 - Lid snugness / clearance choices.
-- Latch tightness (Loose / Default / Tight): one 0.05 mm step of catch engagement each way; Default is 0.05 mm tighter than the former latch and is what older designs read as.
-- **Number of latches**: None or 1 at every width; 2 only when the inside width is over 96 mm. New cases start with 1 latch. Older automatic counts are resolved from the case width when loaded.
+- Latch tightness (Loose / Default / Tight): 0.35 / 0.40 / 0.45 mm of snap grip against the catch screw. Saved tightness choices keep their setting and use this stronger grip.
+- **Number of latches**: None or 1 at every width; 2 only when the interior child-bin field width is over 96 mm. New cases start with 2 latches above that width, otherwise 1; the user's selection and saved counts are kept. Older automatic counts are resolved from the case width when loaded.
 - **Hinge type** (Latched Lid only): **Screw hinges** (the default; 1 or 2 screw-pivot hinges) or **Piano hinge (filament pin)**. The piano hinge runs the full back width, with case and lid knuckles taking turns on one strand of 1.75 mm filament pushed in through either open end. It never cuts into the inside: it stands about 5 mm out behind the back wall, its top flush with the lid top. The lid rests open at 110 degrees on a flat heel-and-ledge stop. Number of hinges is hidden for a piano hinge.
 
 ### Case options

@@ -50,10 +50,10 @@
 
   // Canonical defaults — MUST match SP.storageBoxDefaults() in spaces.js.
   // If that function changes, this must change identically.
-  function defaults(catalog) {
+  function defaults(catalog, fieldWidth) {
     const rules = catalog?.b4b_rules || {};
     return {
-      secure_lid: true, latch_count: "1", hinge_count: "2", hinge_type: "screw", lid_headroom_mm: 1, latch_tightness: "default",
+      secure_lid: true, latch_count: fieldWidth > 96 ? "2" : "1", hinge_count: "2", hinge_type: "screw", lid_headroom_mm: 1, latch_tightness: "default",
       edge_bevel: "default",
       label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat", label_size: "default",
       stacking: false, handle: false,
@@ -78,7 +78,7 @@
     const maxMM = 2000; // Container authority; never the single-bin ceiling.
     const minField = Number(rules.min_field_mm) || unit;
     const minHeight = Number(rules.min_secure_height_mm) || 1;
-    const box = { ...defaults(catalog), ...(initialSpace?.storage_box || {}), edge_bevel: bevelOf(initialSpace) };
+    const box = { ...defaults(catalog, normalizeAxis("x", initialSpace?.x)), ...(initialSpace?.storage_box || {}), edge_bevel: bevelOf(initialSpace) };
 
     const form = el("div", "storage-box-form");   // one column of areas: size, Lid, options, Label, Material, status
     const events = new AbortController();
@@ -120,7 +120,8 @@
     const latchCount = select([], "1");
     latchCount.id = id("latch-count");
     function syncLatchChoices(preferred = latchCount.value) {
-      const width = parseLeadingNumber(xInput.value);
+      // X is the interior child-bin field, normalized exactly as read().
+      const width = normalizeAxis("x", xInput.value);
       const canFitTwo = Number.isFinite(width) && width > 96;
       const legacyChoice = preferred === "auto"
         ? (canFitTwo ? "2" : "1")
@@ -133,7 +134,7 @@
         latchCount.append(option);
       }
       latchCount.value = legacyChoice === "2" && !canFitTwo ? "1" : legacyChoice;
-      if (!latchCount.value) latchCount.value = "1";
+      if (!latchCount.value) latchCount.value = canFitTwo ? "2" : "1";
     }
     syncLatchChoices(box.latch_count || "1");
     for (const eventName of ["input", "change"]) {
@@ -378,7 +379,7 @@
     }
 
     function fill(space) {
-      const b = { ...defaults(catalog), ...(space?.storage_box || {}) };
+      const b = { ...defaults(catalog, normalizeAxis("x", space?.x)), ...(space?.storage_box || {}) };
       xInput.value = String(space?.x || "");
       yInput.value = String(space?.y || "");
       zInput.value = String(space?.z || "");
