@@ -453,3 +453,109 @@ def socket_cutter(grid: str, nx: int, ny: int) -> trimesh.Trimesh:
         for i in range(nx) for j in range(ny)
     ]
     return cells[0] if len(cells) == 1 else union(cells)
+
+
+# Container floors (Story 2974). PROVISIONAL until Stage 1 fit prints settle it.
+EXTERNAL_PLATE_CLEARANCE_PER_SIDE_MM = 0.35
+CONTAINER_FLOOR_SKIN_MM = 0.8
+
+
+def socket_surface_z(grid: str) -> float:
+    """Standalone plate surface; the 42 mm cutter has 0.1 mm overshoot."""
+    return 5.0 if _profile(grid)["pitch"] == 42.0 else FOOT_HEIGHT
+
+
+def floor_pocket_depth(grid: str) -> float:
+    return socket_surface_z(grid) - _profile(grid)["socket"][0][0]
+
+
+def minimum_floor_build(grid: str, underside_depth: float = 0.0) -> float:
+    """Pocket depth plus printable skin above any underside construction."""
+    return floor_pocket_depth(grid) + CONTAINER_FLOOR_SKIN_MM + underside_depth
+
+
+def validate_floor_build(grid: str, thickness: float, underside_depth: float = 0.0) -> None:
+    minimum = minimum_floor_build(grid, underside_depth)
+    if not math.isfinite(thickness) or thickness + 1e-9 < minimum:
+        raise ValueError(
+            f"Gridfinity minimum floor build: {minimum:g} mm for {grid} "
+            f"({floor_pocket_depth(grid):g} mm pocket + "
+            f"{CONTAINER_FLOOR_SKIN_MM:g} mm floor skin + "
+            f"{underside_depth:g} mm underside recess); got {thickness:g} mm"
+        )
+
+
+def floor_cell_counts(grid: str, x: float, y: float) -> tuple[int, int]:
+    pitch = _profile(grid)["pitch"]
+    counts = tuple(round(value / pitch) for value in (x, y))
+    if any(count < 1 or not math.isclose(value, count * pitch, abs_tol=1e-8)
+           for value, count in zip((x, y), counts)):
+        raise ValueError(f"Gridfinity floor area must use whole {pitch:g} mm cells")
+    return counts
+
+
+def floor_pocket_cutter(grid: str, nx: int, ny: int, floor_z: float) -> trimesh.Trimesh:
+    """Shared socket field, with the plate's surface at the container floor.
+
+    Translation preserves every pitch's own seat and relief. The 21 mm mouth
+    ends at its surface, so extend only its last section above the cavity cut
+    to avoid a coplanar boolean seam; no receiving band is changed.
+    """
+    cutter = socket_cutter(grid, nx, ny)
+    if grid == "gridfinity_half":
+        profile = _profile(grid)
+        half, pitch = profile["foot_half"], profile["pitch"]
+        z, width = profile["socket"][-1]
+        caps = [_lofted_cell(
+            ((i - (nx - 1) / 2) * pitch, (j - (ny - 1) / 2) * pitch), half,
+            [(z - 0.001, width / 2 - half), (z + 0.1, width / 2 - half)],
+        ) for i in range(nx) for j in range(ny)]
+        cutter = union([cutter, *caps])
+    return translated(cutter, (0, 0, floor_z - socket_surface_z(grid)))
+
+
+def measured_seated_lift(value: object = None) -> float | None:
+    """Foot-bottom lift measured on the external plate, never plate thickness.
+
+    None means explicitly unverified. Zero is a valid recorded measurement.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("External plate seated lift must be a measured number in mm or unverified")
+    if not math.isfinite(value) or value < 0:
+        raise ValueError("External plate seated lift must be finite and non-negative")
+    return float(value)
+
+
+def container_floor_record(grid: str, built_in_grid: str, x: float, y: float,
+                           seated_lift_mm: object = None) -> dict:
+    """Nominal layout area and actual rectangular cavity are distinct datums.
+
+    Space grid remains the pitch identity. Existing schema spells no built-in
+    grid as built_in_grid='none'; floor_grid=None records that flat floor.
+    Height *fit* is left unverified for Story 2973 even when lift is measured.
+    """
+    if grid not in PROFILES:
+        return {}
+    floor_cell_counts(grid, x, y)
+    external = built_in_grid == "none"
+    lift = measured_seated_lift(seated_lift_mm)
+    clearance = EXTERNAL_PLATE_CLEARANCE_PER_SIDE_MM if external else 0.0
+    return {
+        "floor_grid": None if external else grid,
+        "floor_mode": "external_plate" if external else "built_in",
+        "nominal_grid_mm": [x, y],
+        "physical_cavity_mm": [x + 2 * clearance, y + 2 * clearance],
+        "external_plate_clearance_per_side_mm": clearance,
+        "external_plate_clearance_status": "provisional" if external else "not_applicable",
+        "seated_lift_mm": lift,
+        "seated_lift_status": ("measured" if lift is not None else "unverified") if external else "not_applicable",
+        "height_fit_verified": False,
+    }
+
+
+def container_cavity_polygon(grid: str, built_in_grid: str, x: float, y: float) -> Polygon:
+    from shapely.geometry import box
+    cx, cy = container_floor_record(grid, built_in_grid, x, y)["physical_cavity_mm"]
+    return box(-cx / 2, -cy / 2, cx / 2, cy / 2)

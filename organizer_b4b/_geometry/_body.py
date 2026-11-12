@@ -274,6 +274,11 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     cavity.apply_translation((0.0, 0.0, floor_z))
     body = difference([envelope, cavity])
 
+    if eff.b4b.grid != "wavefinity" and eff.b4b.built_in_grid == "floor":
+        from organizer_features.gridfinity import floor_cell_counts, floor_pocket_cutter
+        nx, ny = floor_cell_counts(eff.b4b.grid, eff.x, eff.y)
+        body = difference([body, floor_pocket_cutter(eff.b4b.grid, nx, ny, floor_z)])
+
     # One n-way union, not one call per fitting: each separate boolean would
     # re-walk the whole wavy case.
     hardware: list[trimesh.Trimesh] = []

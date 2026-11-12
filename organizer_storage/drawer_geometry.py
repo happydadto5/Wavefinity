@@ -386,6 +386,8 @@ def _make_datum(space):
     runner = SD_RAIL_LEDGE_MM + SD_RAIL_CAPTURE_MM
     x = space["x"]
     y = space["y"]
+    if space["grid"] != "wavefinity":
+        x, y = space["physical_cavity_mm"]
     # Global X includes local rail/joint lands; broad panels retain selected wall.
     track_reach = joint_land + 2 * 0.8
     outer_x = x + 2 * (drawer_wall + runner + fit + track_reach)
@@ -925,10 +927,19 @@ def _datum_components(space, datum):
             cavity = wavy_rect_cavity(datum.field_x/2 + WAVE_MATING_GAP/2,
                                       datum.field_y/2 + WAVE_MATING_GAP/2,
                                       0.0, wall=0.0)
+            if space["grid"] != "wavefinity":
+                from organizer_features.gridfinity import container_cavity_polygon
+                cavity = container_cavity_polygon(space["grid"], space["built_in_grid"], space["x"], space["y"])
             cut = _extrude_polygon(cavity, height+0.1)
             cut.apply_translation((x0+datum.field_x/2, datum.field_y/2, floor))
-            cosmetic = _cosmetic_side_shell(cavity, x0, datum, floor, height)
+            cosmetic = _cosmetic_side_shell(cavity, x0, datum, floor, height) if space["grid"] == "wavefinity" else None
             body = difference([union([outer, cosmetic]) if cosmetic is not None else outer, cut])
+            if space["grid"] != "wavefinity" and space["built_in_grid"] == "floor":
+                from organizer_features.gridfinity import floor_cell_counts, floor_pocket_cutter
+                nx, ny = floor_cell_counts(space["grid"], space["x"], space["y"])
+                pockets = floor_pocket_cutter(space["grid"], nx, ny, floor)
+                pockets.apply_translation((x0 + datum.field_x/2, datum.field_y/2, 0))
+                body = difference([body, pockets])
             fascia_width = datum.outer_x-2*datum.panel-2*SD_FRONT_REVEAL_MM
             # The visible bottom edge has the same 0.6 mm reveal as the other
             # edges. A 45-degree root behind it grows from the drawer bed.
@@ -1069,7 +1080,9 @@ def storage_drawers_summary(space: dict, printer_profile: dict | None = None) ->
     ux, uy = storage_drawers_unit_counts(plan.space)
     block = plan.space["storage_drawers"]
     first_bad = next((one for one in fits if not one["fits"]), None)
-    return {"outside_xyz": list(plan.outside_xyz), "field_units": [ux, uy],
+    from organizer_features.gridfinity import container_floor_record
+    record = container_floor_record(plan.space["grid"], plan.space["built_in_grid"], plan.space["x"], plan.space["y"], block["seated_lift_mm"])
+    return {**record, "outside_xyz": list(plan.outside_xyz), "field_units": [ux, uy],
             "field_mm": [plan.space["x"], plan.space["y"]],
             "drawer_count": len(plan.drawer_pitches_mm),
             "cabinet_style": block["cabinet_style"],

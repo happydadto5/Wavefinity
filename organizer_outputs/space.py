@@ -64,6 +64,9 @@ def storage_box_design(space: dict[str, Any]) -> dict[str, Any]:
     settings = definition["storage_box"]
     b4b = B4BSpec(
         enabled=True,
+        grid=settings["grid"],
+        built_in_grid=settings["built_in_grid"],
+        seated_lift_mm=settings["seated_lift_mm"],
         lid=True,
         secure_lid=settings["secure_lid"],
         latch_count=settings["latch_count"] if settings["secure_lid"] else ("2" if definition["x"] > B4B_LATCH_TWO_ABOVE_FIELD_X else "1"),

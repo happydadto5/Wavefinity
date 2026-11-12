@@ -2402,6 +2402,25 @@ The baseline, measurements, dependency evidence, limitations and proposed next
 Story are in [browser-tests/README.md](browser-tests/README.md). No production
 design option or AI Design contract changes.
 
+### Gridfinity container floors (Story 2974, model and geometry)
+
+Storage Boxes and Storage Drawers use the shared 42/21 mm socket field when
+their Gridfinity setting has a built-in floor. Each pitch keeps its own seat
+and relief. The minimum base build is 5.8 mm (5 mm pocket plus 0.8 mm skin),
+or 8.3 mm above Storage Box underside stacking recesses; insufficient bases
+are refused rather than silently changed. Small 1x1 Storage Boxes use Lid Only;
+secure-lid hardware retains its existing minimum field.
+
+With `built_in_grid="none"`, the floor is flat. The Space still records its
+pitch; `floor_grid=null` identifies the absence of a built-in floor. Nominal
+layout dimensions (`nominal_grid_mm`) stay exact-grid; the built cavity
+(`physical_cavity_mm`) adds **0.35 mm per side, PROVISIONAL until Stage 1 fit
+prints settle it**, from `EXTERNAL_PLATE_CLEARANCE_PER_SIDE_MM` alone.
+`seated_lift_mm` is an optional measured foot-bottom lift above the container
+floor, never the plate's thickness. Missing measurements are `unverified`;
+recorded zero is a measurement. Height fit remains unverified for the later
+layout checks (Story 2973). Container UI and exports are later work.
+
 ### Gridfinity plate lids (Story 2971)
 
 The Gridfinity 42 mm and independent 21 mm paths build a separate loose lid:

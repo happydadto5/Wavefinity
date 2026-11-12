@@ -212,6 +212,15 @@ def _cavity_with_bin_corners(
 def b4b_layout(box: BoxSpec) -> B4BLayout:
     """Resolve the exact child field and its outward-built case wall."""
     eff = b4b_effective_box(box)
+    if eff.b4b.grid != "wavefinity":
+        from organizer_features.gridfinity import container_cavity_polygon
+        inner = container_cavity_polygon(eff.b4b.grid, eff.b4b.built_in_grid, eff.x, eff.y)
+        inner_half_x, inner_half_y = inner.bounds[2:]
+        outer_half_x = inner_half_x + eff.wall_depth
+        outer_half_y = inner_half_y + eff.wall_depth
+        outer = _outer_rounded_outline(outer_half_x, outer_half_y, min(eff.wall, 3.5))
+        return B4BLayout(eff.x, eff.y, inner_half_x, inner_half_y,
+                         outer_half_x, outer_half_y, inner, outer, tuple(outer.bounds))
     inner_half_x = eff.x / 2.0 + WAVE_MATING_GAP / 2.0
     inner_half_y = eff.y / 2.0 + WAVE_MATING_GAP / 2.0
     inner_tx = inner_half_x - CORNER_INSET
@@ -266,6 +275,11 @@ def b4b_effective_base_thickness(box: BoxSpec) -> float:
     """
     b4b = box.b4b.normalised()
     requested = box.base_thickness
+    if b4b.grid != "wavefinity" and b4b.built_in_grid == "floor":
+        from organizer_features.gridfinity import validate_floor_build
+        from ._constants import B4B_STACK_RECESS_DEPTH
+        validate_floor_build(b4b.grid, requested, B4B_STACK_RECESS_DEPTH if b4b.stacking and b4b.lid else 0.0)
+        return requested
     if b4b.stacking and b4b.lid:
         return max(requested, B4B_STACK_MIN_BASE)
     return requested
@@ -311,6 +325,10 @@ def b4b_min_field(box: BoxSpec) -> tuple[float, float]:
     latches and handle would *be* the product.  B4B is refused rather than
     grown, so the entered field always survives into the geometry.
     """
+    if box.b4b.grid != "wavefinity" and not box.b4b.secure_lid:
+        from organizer_engine._specs import GRID_PITCHES
+        pitch = GRID_PITCHES[box.b4b.grid]
+        return pitch, pitch
     return B4B_MIN_FIELD_XY, B4B_MIN_FIELD_XY
 
 

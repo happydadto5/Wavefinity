@@ -133,6 +133,15 @@ def b4b_summary(box: BoxSpec) -> dict:
         ),
         "max_child_height_text": f"Maximum bin height: {b4b_max_child_height(box):g} mm",
     }
+    if b4b.grid != "wavefinity":
+        from organizer_features.gridfinity import container_floor_record
+        record = container_floor_record(b4b.grid, b4b.built_in_grid, eff.x, eff.y, b4b.seated_lift_mm)
+        summary.update(record)
+        px, py = record["physical_cavity_mm"]
+        summary["capacity_text"] = f"Nominal grid: {mx:g} x {my:g} mm; physical cavity: {px:g} x {py:g} mm"
+        if b4b.built_in_grid == "none":
+            summary["max_child_height_mm"] = None
+            summary["max_child_height_text"] = "Bin height fit unverified (external plate)"
     if b4b.secure_lid:
         fam = plan.profile.name
         summary["latch_count"] = plan.latch_count_resolved

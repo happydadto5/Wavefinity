@@ -608,7 +608,10 @@ def design_to_dict(
             box, layout.features, base_z=base_height(box, layout.mode), mode=layout.mode,
         ))
     box = normalize_stack_settings(box)
-    box = normalize_gridfinity_settings(box, validate_grid(layout.design_grid))
+    if box.b4b.enabled:
+        layout = replace(layout, design_grid=box.b4b.grid)
+    else:
+        box = normalize_gridfinity_settings(box, validate_grid(layout.design_grid))
     if box.pegboard.enabled:
         if box.b4b.enabled:
             raise ValueError("Pegboard mounting is available only for ordinary bins")
@@ -630,6 +633,9 @@ def design_to_dict(
     if b4b.enabled:
         box_block["b4b"] = {
             "enabled": True,
+            "grid": b4b.grid,
+            "built_in_grid": b4b.built_in_grid,
+            "seated_lift_mm": b4b.seated_lift_mm,
             "lid": b4b.lid,
             "secure_lid": b4b.secure_lid,
             "latch_count": b4b.latch_count,
@@ -647,6 +653,8 @@ def design_to_dict(
             "handle": b4b.handle,
             "version": b4b.version,
         }
+        from organizer_features.gridfinity import container_floor_record
+        box_block["b4b"].update(container_floor_record(b4b.grid, b4b.built_in_grid, box.x, box.y, b4b.seated_lift_mm))
     stack = getattr(box, "stack", None) or StackSpec()
     if stack.mode == "direct":
         box_block["stack"] = {"mode": stack.mode}
@@ -922,6 +930,9 @@ def design_from_dict(
         label_text = str(b4b_raw.get("label_text", ""))
         b4b = B4BSpec(
             enabled=True,
+            grid=b4b_raw.get("grid", grid),
+            built_in_grid=b4b_raw.get("built_in_grid", "floor"),
+            seated_lift_mm=b4b_raw.get("seated_lift_mm"),
             lid=bool(b4b_raw.get("lid", True)),
             secure_lid=bool(b4b_raw.get("secure_lid", True)),
             latch_count=str(b4b_raw.get("latch_count", "auto")),
@@ -1009,7 +1020,8 @@ def design_from_dict(
         pegboard=pegboard,
     )
     box = normalize_stack_settings(box)
-    box = normalize_gridfinity_settings(box, grid)
+    if not box.b4b.enabled:
+        box = normalize_gridfinity_settings(box, grid)
     if box.pegboard.enabled:
         if box.b4b.enabled:
             raise ValueError("Pegboard mounting is available only for ordinary bins")
@@ -1058,7 +1070,7 @@ def design_from_dict(
         from organizer_b4b import b4b_effective_box, normalize_b4b_divider
         box = b4b_effective_box(box)
         normalized = [normalize_b4b_divider(box, one) for one in layout.features]
-        layout = Layout(tuple(normalized), "fused", layout.snap)
+        layout = Layout(tuple(normalized), "fused", layout.snap, design_grid=box.b4b.grid)
         label = str(data.get("label", ""))
         location = label_position(data.get("label_position", "bottom"))
         return (box, layout, label, str(data.get("part_name", "")), location, False)

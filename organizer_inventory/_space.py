@@ -90,6 +90,7 @@ def storage_box_defaults() -> dict[str, Any]:
     """The established B4B/Storage Box settings a new or legacy Space starts from."""
     return {
         "grid": "wavefinity", "built_in_grid": "floor",
+        "seated_lift_mm": None,
         "secure_lid": True,
         "latch_count": "1",
         "hinge_count": "2",
@@ -123,7 +124,7 @@ def _storage_box_choice(raw: Any, choices: tuple[str, ...], name: str) -> str:
     return value
 
 
-def _storage_box_material(raw: Any, name: str) -> float:
+def _storage_box_material(raw: Any, name: str, maximum: float = STORAGE_BOX_MAX_MATERIAL_MM) -> float:
     if isinstance(raw, bool):
         raise ValueError(f"storage box {name} must be a number in mm")
     try:
@@ -131,16 +132,16 @@ def _storage_box_material(raw: Any, name: str) -> float:
     except (TypeError, ValueError) as error:
         raise ValueError(f"storage box {name} must be a number in mm") from error
     if not math.isfinite(value) or not (
-        STORAGE_BOX_MIN_MATERIAL_MM <= value <= STORAGE_BOX_MAX_MATERIAL_MM
+        STORAGE_BOX_MIN_MATERIAL_MM <= value <= maximum
     ):
         raise ValueError(
             f"storage box {name} must be between {STORAGE_BOX_MIN_MATERIAL_MM:g} "
-            f"and {STORAGE_BOX_MAX_MATERIAL_MM:g} mm"
+            f"and {maximum:g} mm"
         )
     return value
 
 
-def normalise_storage_box(raw: Any, width_mm: Any = None) -> dict[str, Any]:
+def normalise_storage_box(raw: Any, width_mm: Any = None, depth_mm: Any = None) -> dict[str, Any]:
     """A complete, validated ``space.storage_box`` block.
 
     Missing keys read the established defaults, so a legacy Storage Box Space
@@ -182,7 +183,21 @@ def normalise_storage_box(raw: Any, width_mm: Any = None) -> dict[str, Any]:
     label_text = str(merged["label_text"] or "").strip()
     if len(label_text) > STORAGE_BOX_LABEL_LIMIT:
         raise ValueError(f"storage box label text is at most {STORAGE_BOX_LABEL_LIMIT} characters")
-    return {
+    from organizer_features.gridfinity import (
+        PROFILES, container_floor_record, floor_pocket_depth, measured_seated_lift,
+        validate_floor_build,
+    )
+    from organizer_b4b._constants import B4B_STACK_RECESS_DEPTH
+    grid = validate_grid(merged["grid"])
+    mode = validate_built_in_grid(merged["built_in_grid"])
+    underside = B4B_STACK_RECESS_DEPTH if merged["stacking"] else 0.0
+    maximum = STORAGE_BOX_MAX_MATERIAL_MM
+    if grid in PROFILES and mode == "floor":
+        maximum += floor_pocket_depth(grid) + underside
+    base = _storage_box_material(merged["base_mm"], "base thickness", maximum)
+    if grid in PROFILES and mode == "floor":
+        validate_floor_build(grid, base, underside)
+    result = {
         "secure_lid": _storage_box_flag(merged["secure_lid"], "secure lid"),
         "grid": validate_grid(merged["grid"]),
         "built_in_grid": validate_built_in_grid(merged["built_in_grid"]),
@@ -201,8 +216,12 @@ def normalise_storage_box(raw: Any, width_mm: Any = None) -> dict[str, Any]:
         "stacking": _storage_box_flag(merged["stacking"], "stacking"),
         "handle": _storage_box_flag(merged["handle"], "handle"),
         "wall_mm": _storage_box_material(merged["wall_mm"], "wall thickness"),
-        "base_mm": _storage_box_material(merged["base_mm"], "base thickness"),
+        "base_mm": base,
+        "seated_lift_mm": measured_seated_lift(merged["seated_lift_mm"]),
     }
+    if width_mm is not None and depth_mm is not None:
+        result.update(container_floor_record(grid, mode, width_mm, depth_mm, result["seated_lift_mm"]))
+    return result
 
 
 def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = False) -> dict[str, Any]:
@@ -245,9 +264,13 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
             )
 
     elif kind == "portable":
-        if x + 1e-9 < B4B_MIN_FIELD_XY or y + 1e-9 < B4B_MIN_FIELD_XY:
+        minimum_xy = B4B_MIN_FIELD_XY
+        if grid != "wavefinity" and (raw.get("storage_box") or {}).get("secure_lid") is False:
+            from organizer_engine._specs import GRID_PITCHES
+            minimum_xy = GRID_PITCHES[grid]
+        if x + 1e-9 < minimum_xy or y + 1e-9 < minimum_xy:
             raise ValueError(
-                f"a storage box needs at least {B4B_MIN_FIELD_XY:g} mm in X and Y"
+                f"a storage box needs at least {minimum_xy:g} mm in X and Y"
             )
         if z + 1e-9 < B4B_LATCHED_MIN_HEIGHT:
             raise ValueError(
@@ -292,8 +315,11 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
         settings["grid"] = grid
         if "built_in_grid" in raw:
             settings["built_in_grid"] = raw["built_in_grid"]
-        result["storage_box"] = normalise_storage_box(settings, x)
+        result["storage_box"] = normalise_storage_box(settings, x, y)
         result["built_in_grid"] = result["storage_box"]["built_in_grid"]
+        from organizer_features.gridfinity import container_floor_record
+        result.update(container_floor_record(grid, result["built_in_grid"], x, y,
+                                            result["storage_box"]["seated_lift_mm"]))
     return result
 
 def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> None:
@@ -359,6 +385,10 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
     primary["height"] = z
     primary["clearance"] = clearance
     primary["boundary"] = boundary
+    if kind == "portable":
+        from organizer_features.gridfinity import container_floor_record
+        primary.update(container_floor_record(space_def["grid"], space_def["built_in_grid"], x, y,
+                                               space_def["storage_box"]["seated_lift_mm"]))
     if kind == "pegboard":
         primary["pegboard_standard"] = space_def["pegboard_standard"]
         primary["pegboard_holes_x"] = space_def["pegboard_holes_x"]

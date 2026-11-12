@@ -555,8 +555,19 @@ class B4BSpec:
     stacking: bool = False
     handle: bool = False               # folding U/bail on the body front wall
     version: int = B4B_SCHEMA_VERSION
+    grid: str = "wavefinity"
+    built_in_grid: str = "floor"
+    seated_lift_mm: float | None = None
 
     def __post_init__(self) -> None:
+        validate_grid(self.grid)
+        validate_built_in_grid(self.built_in_grid)
+        if self.seated_lift_mm is not None and (
+            isinstance(self.seated_lift_mm, bool)
+            or not isinstance(self.seated_lift_mm, (int, float))
+            or not math.isfinite(self.seated_lift_mm) or self.seated_lift_mm < 0
+        ):
+            raise ValueError("External plate seated lift must be a measured non-negative number or unverified")
         if self.latch_count not in B4B_LATCH_COUNTS and self.latch_count != "auto":
             raise ValueError(
                 f"latch count must be one of {', '.join(B4B_LATCH_COUNTS)}"
@@ -646,6 +657,9 @@ class B4BSpec:
             stacking=stacking,
             handle=handle,
             version=B4B_SCHEMA_VERSION,
+            grid=self.grid,
+            built_in_grid=self.built_in_grid,
+            seated_lift_mm=self.seated_lift_mm,
         )
 
 
