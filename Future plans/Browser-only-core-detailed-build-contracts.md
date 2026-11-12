@@ -196,7 +196,7 @@ Deliverable: local Space and preference implementations preserve current metadat
 
 ### B10 — Inventory and drawer flow parity
 
-Requires: B06, B09 and B08 (shared browser Print engine required for B10-owned drawer print routes).
+Requires: B08 and B09 (B06 is transitive through B08).
 Existing files: web/drawer-model.js, web/drawer-panel.js, web/drawer-view.js, web/spaces/06-inventory-io.js, organizer_drawer/{_core,_inventory,_report,_spacers}.py and organizer_inventory/*.py.
 Create web/browser-core/engine/drawer-routes.py.
 Patch:
@@ -207,7 +207,7 @@ Deliverable: inventory and drawer UI requests route to the local engine and brow
 
 ### B11 — All remaining structural Space geometry
 
-Requires: B08 and B10 (B07 transitively through B08).
+Requires: B10 (B08 and B07 are transitive through B10).
 Existing files: `web/structural-design.js`, `web/storage-box-form.js`, `web/storage-drawers-form.js`, `web/storage-drawers-workspace.js`, `web/spaces/10-storage-box-structural.js`, `web/spaces/11-base-trim.js`, `web/spaces/14-drawers-cabinet.js`, `organizer_outputs/space.py`, `organizer_spaces/__init__.py`, **real** `organizer_storage/{drawers.py,drawer_geometry.py,drawer_outputs.py}`, `organizer_features/gridfinity.py`, `organizer_b4b/` and relevant canonical modules (do not guess `organizer_storage/drawers/*.py`).
 Create web/browser-core/engine/structural-routes.py.
 Patch:
@@ -221,7 +221,7 @@ Deliverable: all structural Space and print/export routes translated to client-s
 **Photo Nest native-library boundary:** `wavefinity_web_impl/_nest.py` delegates to `photo_nest.py`, using `cv2`, NumPy, Shapely and Pillow `PIL.Image`. The native requirements use `opencv-python-headless 5.0.0.93`, Pillow 13; Pyodide 0.28.3 offers opencv-python 4.11.0.86 and Pillow 11.3.0. Adapt only incompatible APIs by reading the source; preserve all existing contour and perspective logic. This does not prove ABI equivalence. B12 finishes edits to `web/spaces/12-space-info.js` before B13 begins.
 
 
-Requires: B05 and B11 (B07 transitively).
+Requires: B11 (B05 and B07 are transitive through B11).
 Existing files: wavefinity_web_impl/_nest.py, wavefinity_web_impl/_designs/*, organizer_inserts/_nest/*, organizer_inserts/_text.py, web/app/11-parts-preview-requests.js, web/app/04-side-openings-wall-choices.js, web/spaces/12-space-info.js.
 Create web/browser-core/engine/nest-routes.py.
 Patch:
@@ -232,7 +232,7 @@ Deliverable: advanced-feature routes use the local engine, with equivalent geome
 
 ### B13 — AI Help BYOK direct chat and browser-only capabilities
 
-Requires: B08, B09 and B12. B13 follows B08 (`web/app/15-generate-dialogs.js`) and B12 (`web/spaces/12-space-info.js`) to avoid direct-main collisions.
+Requires: B12 (B12 → B11 → B10 includes B08 and B09 transitively; B13 therefore follows prior edits to both shared JS files).
 
 Existing: `web/app/02-lifecycle-ai-help.js:{aiConnectionRefresh,aiConnectionForm,aiConnectionAction,aiAsk,aiPasteManually,aiProcessResponse}`; `wavefinity_web.py:{ai_connection_payload,_ai_chat,ai_ask_payload,ai_prompt_payload,ai_candidate_payload,ai_repair_prompt_payload}`; `wavefinity_web_impl/_ai.py`; `web/app/15-generate-dialogs.js:{browseSlicer,showAboutDialog}`, `web/spaces/12-space-info.js`, `web/index.html`.
 
@@ -252,7 +252,7 @@ Deliverable: AI Help preserves direct chat **where user-authorized browser provi
 
 ### B14 — Build the complete static site; tell Andrew exactly how to cut over
 
-Requires: all B00–B13 code implemented. No coder testing.
+Requires: B13 complete (implies all B00–B12); no coder testing. B14 cannot begin until all implementation packages exist.
 
 Existing source: `web/index.html`, `web/app.js`, `web/browser-files.js`, `wavefinity_web.py:do_GET`, `render.yaml` (old Python service), `Dockerfile` (legacy Hugging Face), `README.md`, B02 browser runtime.
 
@@ -302,7 +302,7 @@ Deliverable: zero remaining automated test code/harnesses/fixtures and no protot
 
 ## Authoritative dependencies and same-file serialization
 
-This list is the **single authoritative dependency graph**. Bxx headers above must agree; Poller `start_after` uses ONLY these edges (do not create redundant transitive edges):
+This is the **minimal, transitively reduced, authoritative dependency graph**. Bxx headers above agree; Poller `start_after` records ONLY these direct edges (do not create redundant transitive edges). B09 can run after B04 in parallel with B05–B08; B10 reunites those tracks, and B11→B12→B13 serializes later shared-file changes:
 
 | Package | Direct prerequisites | Shared-file ownership / note |
 |---|---|---|
@@ -316,11 +316,11 @@ This list is the **single authoritative dependency graph**. Bxx headers above mu
 | B07 | B06 | 3MF exporter only, no API route |
 | B08 | B07 | owns Print changes in `app/15-generate-dialogs.js`; follows B06 |
 | B09 | B04 | folders/Space/preferences; B05 not needed |
-| B10 | B06, B09, B08 | owns entire drawer route group, including Print; uses shared B08 engine |
-| B11 | B08, B10 | structural/Storage Drawers/pegboard hooks; no `/api/space/warm` |
-| B12 | B05, B11 | photo/nest/feature integration; edits `spaces/12-space-info.js` before B13 |
-| B13 | B08, B09, B12 | edits `app/15-generate-dialogs.js` **after** B08 and `spaces/12-space-info.js` **after** B12 |
-| B14 | B00–B13 implemented | **sole final `route-dispatch.py` registry assembly owner**, static bundle excludes PoC |
+| B10 | B08, B09 | owns entire drawer route group, including Print; uses shared B08 engine |
+| B11 | B10 | structural/Storage Drawers/pegboard hooks; no `/api/space/warm` |
+| B12 | B11 | photo/nest/feature integration; edits `spaces/12-space-info.js` before B13 |
+| B13 | B12 | edits `app/15-generate-dialogs.js` **after** B08 and `spaces/12-space-info.js` **after** B12 |
+| B14 | B13 (all prior B00–B12 transitively) | **sole final `route-dispatch.py` registry assembly owner**, static bundle excludes PoC |
 | B15 | B14 and Andrew's explicit hosting approval | fill rollback record BEFORE old service retires |
 | B16 | B15 | delete obsolete PoC files; already excluded from published dist |
 
