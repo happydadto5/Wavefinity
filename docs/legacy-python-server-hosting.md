@@ -26,6 +26,12 @@ This old HTTP server is NOT the same thing as the canonical Python geometry code
 - The legacy local desktop process can locate and launch Bambu Studio; the hosted/browser variant cannot run local desktop executables. The browser uses showDirectoryPicker and WFFileSystem for authorized local file writes where possible.
 - The site can be woken, deployed or rolled back by Render; requests to server geometry cease only when the full static migration has finished.
 
+## Historical Print behavior and the browser replacement
+
+The local Windows Python implementation's `printModelWithReport()` (in `web/app/15-generate-dialogs.js`) uses `/api/print`, `wavefinity_web.launch_slicer()` and an installed slicer executable to generate/reuse output, launch Bambu Studio/OrcaSlicer, report success/partial failure and update the Inventory Printed status. The current hosted Python mode refuses native Print and directs users to Export, because a remote server cannot start a slicer on the visitor's PC.
+
+**Preservation requirement:** The browser-only cutover must KEEP a true Print command, retaining printer/Space validation, file preparation/3MF metadata, part selection and truthful Inventory status, with a browser-safe save/download-and-open-in-slicer handoff. It cannot claim arbitrary executable launch without a supported protocol. This is the explicitly documented legacy-vs-static Print behavior difference, not permission to remove Print. Exact work contract: `Future plans/Browser-only-core-detailed-build-contracts.md`, Owner Print preservation contract and B08.
+
 ## Starting the server for recovery and verification
 
 From a clean checkout at the intended historical source SHA and with Python 3.14 and the required native libraries installed:
