@@ -7,6 +7,10 @@
 **Stage 2:** final reviewer-agreed filing plan below; **NOT submitted**. File only after the recorded Stage 1 physical sign-off and Andrew's submission direction; screw holes are declined, and load capacity is intentionally not discussed, tested, or published.  
 **Collaboration result:** Velexa answered Q1–Q8 on 2026-11-12; GPT agrees with the proposed technical changes, which are incorporated into the authoritative Stage 2 story descriptions and filing ledger. The unedited responses remain preserved below. Do not reopen settled Stage 1 scope; record any newly demonstrated Stage 1 defect as a risk to its already-filed Story, not a duplicate.
 
+> **Owner rulings update (Andrew, 2026-11-12 — later than the plan text below; these rulings govern wherever the text conflicts):**
+> 1. The Stage 1 physical-fit sign-off is NOT a prerequisite for filing Stage 2. Stories 2978 and 3004 (the acceptance-record stories) were cancelled on Andrew's orders, the second after its coder stopped because the earlier check evidence was missing and re-running the checks conflicted with the no-coder-testing policy; Andrew chose to proceed on the story-by-story reviews alone. The Stage 2 prerequisite paragraph further down (demanding a recorded sign-off inside Story 2978) is superseded — do not apply it.
+> 2. NO AUTOMATED TESTING IN ANY STAGE 2 STORY. The plan text below predates the restated rule and prescribes tests in places (the Stage 2 common constraints, several acceptance lines, "tests" in likely-file lists, a "test protocol" deliverable in S2-00). All of that is superseded: no Stage 2 filing may require a coder to write, run, or repair automated tests, geometry/regression test runs, harnesses, or test prints. A coder reproduces a reported failure to diagnose it and inspects its own diff; fit claims stay marked unverified unless Andrew's own prints record them. S2-00's mating/closure material is written as measurements for Andrew to take, not a coder-run test protocol.
+
 The full original Stage 1 story submission record follows unchanged, including the exact IDs and dependencies.
 
 ---
