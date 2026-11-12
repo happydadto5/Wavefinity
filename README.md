@@ -1875,16 +1875,7 @@ follows the local workflow below.
 does and confirm that the execution is sound before beginning. If it is sound,
 implement the plan and commit the completed code.
 
-**One prompt may become one cohesive commit.** Keep all code, tests, and
-documentation needed to complete that prompt together; do not split a single
-request into artificial commits just to make the history look smaller. When a
-prompt is complete, commit and push it so the history has a clear entry and the
-work is backed up. For a Help Code fix, verification is exactly what the active
-cloud fix requires. For explicitly non-Help-Code work, the generic Class A/B/C
-testing guidance above applies. Separate unrelated prompts into separate
-commits when practical. No feature branches or pull requests are needed for
-explicitly non-Help-Code local work. Help Code follows the fresh helper
-protocol and outside completion review:
+**One prompt may become one cohesive commit.** Keep all product code and documentation needed to complete the request together; do not split a request into artificial commits. When implementation is logically complete, inspect the changes and commit/push them. **Do not write or execute tests or produce a manual test plan for the owner, including for Help-Code assignments.** If older helper instructions demand tests, request that the assignment be corrected. Separate unrelated prompts into separate commits where practical. No feature branches or pull requests are needed for explicitly non-Help-Code local work. Help Code follows its current protocol for routing and review:
 
 ```powershell
 git add -A
@@ -1892,15 +1883,7 @@ git commit -m "short description of what changed"
 git push
 ```
 
-Do NOT log to `TESTING.md` — that file is retired and archived.
-
-For explicitly non-Help-Code work, **do not be obsessed with testing** (see the
-proportional testing policy near the top). Short version: small/local work
-usually needs no tests; bounded runtime/integration work may use a few
-high-signal checks; broad shared-contract work and repeatedly corrected fixes
-require targeted verification. Never run the full suite or browser for routine
-work merely for reassurance. Help Code testing follows the active cloud fix
-only.
+**No automated tests, no manual application tests and no user test plans, without exceptions based on change size.** Review code logic and changed diffs instead. The owner will use and evaluate the application.
 
 **Write commit messages that say why.** The history is the record. A message
 that explains the reasoning is worth more here than a tidy branch structure.
@@ -1946,10 +1929,9 @@ unpleasant to resolve by hand. Small, frequent, pushed commits keep that from
 happening.
 
 If a non-Help-Code push is rejected because someone else pushed first, `git pull
---rebase` then push again. If that surfaces a real conflict, resolve it, inspect
-the merged diff, and continue under the same Class A/B/C testing rule. Do not
-automatically run the full suite just because a rebase occurred. Help Code
-corrections follow the fresh helper instruction and active cloud Fix.
+--rebase` then push again. If that surfaces a real conflict, resolve it and inspect
+the reconciled diff carefully. No test run is called for, even after rebasing. Help Code
+corrections follow current routing instructions while retaining the owner-tested policy.
 
 Also worth knowing before editing: the **traps** section below, and that
 `.venv/`, `__pycache__/` and `generated/` are gitignored and should stay that
@@ -2326,16 +2308,3 @@ This project keeps a folder named `local-temp/` at the repository root. It is lo
 # Reference appendix
 
 Material kept for occasional use. It is not part of the everyday read above; follow a pointer from the main text when a task needs it.
-
-## Capturing the UI for a review
-
-When a review needs the app's screens as they stand - a launch audit, a design review, a one-shot pass by a fresh reviewer - capture them this way. This is a method, not a snapshot of any past run: re-derive the inventory from the app each time.
-
-1. **Freeze the baseline first.** Run the hosted-shape app locally on the PC (it serves on 127.0.0.1:8765) at one consistent desktop viewport, 100% zoom. Point it at the user's real Wavefinity folder - the one their launcher uses, holding their actual spaces - and confirm the open screen lists those spaces before shooting anything: populated screens must show the user's real content, and a capture run against a fresh or empty folder is worthless. The user's spaces are read-only during capture: never save, rename, delete, edit, print from, or re-point the folder setting; a state reachable only by changing a real space is recorded as a gap instead. First-run/empty states, and editor states needing content the user does not have, are shot in a scratch profile or scratch space, clearly labelled as scratch in the map. Record the folder path, the viewport, and the exact main commit on the map's cover. If main moves mid-capture, re-shoot the affected screens, so the whole set is one build.
-2. **Capture by script, never by desktop computer-use.** A local browser-automation session (or the app's headed local browser captured programmatically) loads each route and state at the fixed viewport and saves full-resolution PNGs directly. Do not drive the desktop: do not depend on navigating a browser window by hand, on reading a browser window's current URL, or on screen coordinates - that route has already failed once in practice, when a computer-use layer could not verify the browser's current URL and refused to navigate at all.
-3. **Derive the inventory from the app, not from a guessed list.** Walk every left-pane route and options group: the welcome/open screen (first launch, no spaces, and again with spaces listed), space details for each kind (Storage Box, Storage Drawers, Surface, Pegboard) and the new-space kind picker, the bin editor, the storage box editor, the drawers setup screen, the Manage screen as the one print list (row-level Print/Export visible, exactly one tree row highlighted), every Settings dialog, Printer Settings, and the confirmations and modals a first-time user meets. The surfaces live in: `web/index.html` (static screens, dialogs, settings), `web/app/08-draft-fields-render.js` (bin and storage-box editor forms and their options groups), `web/app/15-generate-dialogs.js` (generate/print dialogs and their failure states), `web/spaces/07-welcome-folders.js` (welcome/open screen), `web/spaces/08-space-setup.js` (space details and kind picker), `web/drawer-panel.js` (drawers setup, Manage/print surfaces).
-4. **States, not just screens.** Capture each screen showing the user's real spaces as they are, AND in its first-run/empty state where that state exists (scratch profile, per step 1). Capture options groups collapsed and expanded wherever expanding reveals a different cluster of controls. For scrollable panes, take overlapping vertical shots so no control is cut off.
-5. **Only genuine failure states.** Capture validation messages and a real print-failure state only where they can be reproduced without faking anything. Never simulate an error. A state that genuinely cannot be reached by scripted capture is recorded as a gap, with its reason - never silently dropped, and never worked around by falling back to desktop computer-use.
-6. **One journey in order.** As well as screen by screen, follow one ordered first-time journey as a numbered sequence - open or create a space, add and edit a bin, open Manage, print/export - so the set shows the flow in navigation order.
-7. **Deliverables.** The full-resolution originals (filenames matching the map IDs); the numbered screen/state map (each ID: filename, the navigation path to reach the state, build/commit, viewport, state notes); and a validation report confirming every listed image opens and is legible, with gaps named. The acceptance check: every inventory ID has a matching file that opens, and each captured state can be re-reached by following its map path.
-
