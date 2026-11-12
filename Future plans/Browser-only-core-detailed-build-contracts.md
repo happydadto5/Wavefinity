@@ -279,15 +279,18 @@ Patch:
 3. Inspect production code and import/call graph logically for HTTP fallback; failing WASM must report an error, never upload designs to the old server. This is code reasoning, **not an empirically certified zero-network claim**, automated scanner or test.
 Deliverable: retired Render execution and preserved legacy source/rollback documentation with exact SHA, while canonical geometry remains packaged for browser execution.
 
-### B16 — Remove prototype-only code and testing scaffold
+### B16 — DELETE ALL testing infrastructure and remove the prototype
 
-Requires: B14–B15 complete.
-Existing files: `web/browser-local-poc.html`, `web/browser-local-poc.js`, `web/browser-local-poc-worker.js`, PoC-only `web/browser-local-poc/{bridge.py,canonical.zip,reference.json,style.css}`, old `browser-tests/` historical files and `web/browser-local-poc/manifold64/*`. B14 explicitly excludes PoC paths from dist already; B16 removes source scaffolding but retains B02 production-bridged MeshGL64 files/LICENSE.
+Requires: B15 complete. B14 already excludes every prototype/test source path from published dist before B16 happens.
+
+**Current main source inventory:** entire `tests/` (all Python test modules, `__init__.py`, test data); entire `browser-tests/` (README, runner `run-local-poc.mjs`, `prepare-local-poc.py`, browser evidence JSON, reference NPZ, test HTML and any other files); root `run_tests.py`; experimental `web/browser-local-poc.html`, `web/browser-local-poc.js`, `web/browser-local-poc-worker.js`, the `web/browser-local-poc/` experiment directory and PoC-only fixtures. These test assets totaled 41 files at the planning baseline before considering PoC web assets; read current main for any additional testing-only files at GO.
+
 Patch:
-1. Delete the superseded experimental page, isolated worker, obsolete comparison harness and testing-only fixtures; preserve production Manifold64 source, build script, license and binary by moving them to the production vendor path. No new test or fixture directories.
-2. Replace outdated unsuccessful-POC notes with accurate retained history: the original failure, custom double-precision breakthrough, Windows manual confirmation and cutover. Preserve docs rather than showing obsolete "POC failed" as the current state.
-3. Do not recreate the nine removed tests or add replacement automation. Coders instead inspect implementation contracts, source correctness and file paths. Retain the original history in docs only.
-Deliverable: no shipped references to obsolete prototype paths, no experiment page or test scaffolding in the static bundle, and retained functional MeshGL64 runtime and geometry rules. No executed tests.
+1. **Remove the full `tests/` and `browser-tests/` trees, `run_tests.py` and every other automation fixture/harness/CI test script referenced in current source.** Do not merely disable or archive executable tests in the repo. Remove stale test commands, links and required-test language from README, package scripts, workflows and developer notes. Preserve only concise historical feasibility evidence in normal documentation without runnable harnesses; change README browser PoC links to the retained history.
+2. Delete the public PoC HTML/JS/worker and experiment-only `web/browser-local-poc/` assets. Prior B02 must already have moved/copied the custom MeshGL64 `bridge64.cpp`, `bridge64.mjs`, `bridge64.wasm`, `build.sh` and upstream LICENSE into the production vendor/source locations. Never delete the **shipping bridge**.
+3. Do not create replacement tests, fixtures, browser automation, test command, QA script or user testing instructions. The final repository contains production code, production build/route integrity checks and docs only; no test infrastructure.
+
+Deliverable: zero remaining automated test code/harnesses/fixtures and no prototype page, with correct README/deployment documentation, actual shipping MeshGL64 sources/assets/license intact, and old approach preserved in historical prose/Git commits. NO test execution.
 
 ## Mandatory coding rules (NOT testing rules)
 
