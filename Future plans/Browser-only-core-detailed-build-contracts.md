@@ -1,9 +1,13 @@
 # Wavefinity full browser-only cutover — executable implementation contracts
 
-Status: DETAILED DESIGN, not implemented. Revision 3, November 12, 2026.
+Status: DETAILED DESIGN, not implemented. Revision 4, November 12, 2026.
 Owner decisions: desktop Windows Chrome and Edge; visitor installs nothing; RETAIN THE PRINT BUTTON and its complete print-preparation workflow; keep the existing Wavefinity interface; calculations and saves occur on the user's computer; no paid cloud geometry compute; keep wavefinity.org; do not create branches or worktrees; land safely on main. Do NOT file Poller Stories merely to follow this plan. These B00–B16 work packages are Story-sized coder assignments, NOT Story submissions. The owner accepts that the application may remain NON-FUNCTIONAL throughout partial implementation; do not invest in interim deployability.
 
 This is the detailed companion to Browser-only-core-integration-plan.md. The two together govern the migration; this document wins wherever the original phase description was underspecified. Every package specifies files, code changes, dependencies and implementation deliverables, NOT test assignments. **The owner tests the actual application. Coders must never author, run or repair automated tests, perform manual application tests, or create manual user test plans/checklists.** Coders reason through logic and inspect changed code instead.
+
+**LOW-TOKEN READING RULE:** [Browser-only-core-diff-map.md](Browser-only-core-diff-map.md) gives exact source symbols, before/after edits, asset layout and static-host handoff. [Browser-only-core-source-route-index.md](Browser-only-core-source-route-index.md) indexes 91 source routes and major UI call sites. A coder assigned Bxx reads only that Bxx package and matching diff/source-index sections, then the current affected source files. No repeated repo-wide architectural investigation. Line numbers can drift while Gridfinity is being completed.
+
+**FINAL HOST:** Render **Static Site** is the default (free subject to bandwidth/build allowances); not a Render Free Python Web Service. Static CDN has no web-service idle sleep or roughly 60-second server wake-up. First browser download/Pyodide/WASM initialization can still take time. Do not switch or repoint the live domain until Andrew expressly approves. Cloudflare Pages is fallback only if current limits/costs warrant it.
 
 ## Definition of COMPLETE
 
@@ -68,7 +72,7 @@ DEPRECATED SERVER-ONLY: GET /api/export/<token>/<filename> becomes named local B
 
 Requires: none.
 Existing files: render.yaml, Dockerfile, wavefinity_web.py, requirements.txt, README.md, docs (create directory).
-Create docs/legacy-python-server-hosting.md, docs/browser-runtime-architecture.md.
+Already created: `docs/legacy-python-server-hosting.md` (do not recreate). Create only `docs/browser-runtime-architecture.md` if missing.
 Patch:
 1. Document the old request path (index.html -> /api/* -> wavefinity_web.py -> native engine -> temporary export URL), process start from Dockerfile/render.yaml, server-side preference/folder paths, configuration/environment variables as read from actual files (NO example secrets with values), manual rollback/deploy commands, health endpoint, evidence-gathering commands, strengths/limitations (Render sleep/RAM), and migration risks.
 2. Record exact starting baseline SHA, source fingerprint and last known working Render URL; link the relevant Git commit containing the old server implementation. No branch required. Distinguish old server framework from the Python geometry engine still packaged for browsers.
@@ -220,17 +224,24 @@ Patch:
 3. Keep ABOUT / Brochure.md as a static file in the deployed output with the same URL. Display truthful capability/status indicators; printer profile remains local.
 Deliverable: browser-legal capabilities, accurate labels, honest AI restrictions and no embedded secret keys. No test plan.
 
-### B14 — Static-only build, deployment and rollout
+### B14 — Build the complete static site; tell Andrew exactly how to cut over
 
-Requires: B00–B13 implemented.
-Existing files: web/index.html, web/app.js, Dockerfile, render.yaml, README.md, scripts/build-browser-core.py, docs/browser-runtime-architecture.md.
-Create scripts/build-static-site.py (actual deployment build only), docs/static-host-rollout.md, docs/static-host-rollback.md, deployment/static-host-config/ (only if needed).
-Patch:
-1. Build dist/ containing only required static assets and pinned Pyodide/WASM bundles, Brochure.md, images, fonts and metadata. Keep product asset integrity hashes and visible mismatch errors. Configure content types, CSP/CORS and hosting size limits by reviewing host constraints. Do not create static-smoke or test runners.
-2. Ensure final frontend code has no core /api/* fetch dependence and static outputs don't require the Python HTTP process. Inspect source imports, route-dispatch logic and generated build configuration. **Do not start browsers, drive UI, run network-blocking drills or create user test plans.**
-3. After completing the implementation, prepare dist for a free/near-free static host (Cloudflare Pages default if compatible, otherwise GitHub Pages subject to limits), configure wavefinity.org/www and HTTPS when owner authorizes deployment. Preserve Render rollback documentation. The owner is responsible for application evaluation; do not gate coder completion on a scripted user test.
-4. Switch production ONCE after all packages are complete; no gradual per-feature toggles or interim production releases. Monitor load/error status without collecting private designs. DNS rollback to the preserved Render setup does not restore browser-held files. Optional AI or asset hosting may have independent costs.
-Deliverable: static-only Wavefinity UI and files with all original Print/Export functions implemented, browser storage and WASM geometry wired, and no Python HTTP server dependency. Owner will use and evaluate it; no automated or manual tester workflow is part of coding.
+Requires: all B00–B13 code implemented. No coder testing.
+
+Existing source: `web/index.html`, `web/app.js`, `web/browser-files.js`, `wavefinity_web.py:do_GET`, `render.yaml` (old Python service), `Dockerfile` (legacy Hugging Face), `README.md`, B02 browser runtime.
+
+Create: `scripts/build-static-site.py` (production asset copier/bundler only), `docs/static-host-rollout.md`, `docs/static-host-rollback.md`; optionally a separate static hosting config that **does not mutate old Render service**. See [Browser-only-core-diff-map.md](Browser-only-core-diff-map.md) B14 for exact paths, setup values, DNS and owner-facing handoff.
+
+Patch (implementation, not testing):
+1. Ship `dist/index.html` from `web/index.html`, copy ALL UI-reachable `web/*` paths relative to dist root (including `app/`, `spaces/`, CSS, JS, browser-core production WASM/Python bundle), copy repository-root `images/` to `dist/images/`, and `Brochure.md` to `dist/Brochure.md`. These are three distinct Python-server static roots in current code; omission is a release defect. Do not ship source-only docs/tests/user secrets.
+2. Replace core frontend HTTP transports entirely with worker-local dispatch. Keep the existing Print UI separate from Export; include complete Bambu-compatible 3MF packaging/handoff, local space state, preview and all structural features. Review final source imports and asset paths logically (not through application test runs). Include production integrity/version manifests, safe cache headers, proper WASM MIME and security headers.
+3. **Choose Render Static Site by default** for the completed build. Render currently offers free static CDN hosting subject to included bandwidth/pipeline limits, HTTPS, custom domains and no sleeping Python process. The current Web Service cannot be switched to static in place. Prepare instructions for a **new** Render Static Site connected to `happydadto5/Wavefinity`, branch `main`, publish directory `dist`, build command provisionally `python3 scripts/build-static-site.py` when the final toolchain supports it, with auto-deploy OFF initially. Do not create it yet or change old `render.yaml`.
+4. Preserve Porkbun as registrar, `wavefinity.org` as preferred apex, `www.wavefinity.org` redirect to apex. Current Porkbun records are A apex `216.24.57.1` and `www` CNAME `wavefinity.onrender.com`; new Render Static Site gets a different onrender hostname which must be copied from the real dashboard. Root A remains only if Render's current DNS instructions still specify it; `www` CNAME must target the real Static Site hostname. Domains may need detachment from old Web Service before attachment to new Static Site. **NEVER** silently detach domains, change DNS, switch plans, disable the old service or incur fees.
+5. **ASK/TELL ANDREW AT THE RIGHT TIME:** On completion, explain the final static edition no longer has Render's ~60-second sleeping Python Web Service; disclose remaining first-load browser Pyodide/WASM delay, applicable free limits and any cost; provide exact new Static Site creation settings, real new hostname, and pending Porkbun/Render domain steps. Request authorization to move the domains and retire the old service. This is an operational approval, **not a QA or user-testing checklist**.
+6. If Render static bandwidth/build limits or asset constraints become unfavorable, report a short side-by-side alternative with Cloudflare Pages. Current Pages Free limits include <=25 MiB per asset and <=20,000 files; apex `wavefinity.org` on Pages requires moving authoritative DNS nameservers to Cloudflare while Porkbun remains registrar. Do not select Cloudflare or change nameservers without owner permission.
+7. Prepare one final cutover, no half-working deployments or dual-mode runtime. Preserve legacy recovery guide and record actual last live Render Web Service source SHA. Browser persistence remains on the PC; a DNS change neither uploads nor restores user files.
+
+Deliverable: full `dist/`, static-host instructions/config, complete local-only frontend with first-class Print, and exact **Andrew-facing hosting approval request**. No automated tests, manual application tests, test-only tools or user test plans.
 
 ### B15 — Retire old service *from execution*, retain historical documentation
 
