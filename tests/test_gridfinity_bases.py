@@ -216,7 +216,7 @@ class GridfinityBaseTests(unittest.TestCase):
     def test_effective_base_normalization(self):
         for grid in PITCHES:
             x, y = EXTENTS[grid][0]
-            raw = BoxSpec(x=x, y=y, z=40.0, base_thickness=2.0)
+            raw = BoxSpec(x=x, y=y, z=42.0, base_thickness=2.0)
             self.assertEqual(gf.normalize_gridfinity_settings(raw, grid).base_thickness, 5.75)
             self.assertEqual(gf.effective_base(raw, grid), 5.75)
             thick = replace(raw, base_thickness=7.0)
@@ -241,7 +241,7 @@ class GridfinityBaseTests(unittest.TestCase):
         with mock.patch.object(_preview, "make_box", wraps=make_box) as spy:
             for grid in PITCHES:
                 x, y = EXTENTS[grid][0]
-                box = gf.normalize_gridfinity_settings(BoxSpec(x=x, y=y, z=40.0), grid)
+                box = gf.normalize_gridfinity_settings(BoxSpec(x=x, y=y, z=42.0), grid)
                 scene = _preview.preview_geometry(box, layout=replace(Layout(), design_grid=grid))
                 self.assertEqual(spy.call_args.kwargs.get("grid"), grid)
                 self.assertTrue(scene["geometry"])

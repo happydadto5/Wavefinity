@@ -21,7 +21,7 @@ import trimesh
 from shapely.geometry import Polygon
 
 from organizer_engine import BoxSpec, MIN_HEIGHT_ABOVE_BASE
-from organizer_engine._specs import GRID_PITCHES
+from organizer_engine._specs import GRID_PITCHES, vertical_stack_enabled
 from organizer_geometry import (
     _extrude_polygon,
     _loft_cavity,
@@ -79,6 +79,68 @@ def _profile(grid: str) -> dict:
         raise ValueError(f"{grid!r} is not a Gridfinity grid") from None
 
 
+# --------------------------------------------------------------------------- #
+# stacking rim (female receiving profile) - Story 2970, spec section 1-2
+# --------------------------------------------------------------------------- #
+HEIGHT_UNIT = 7.0          # one Gridfinity height unit, foot bottom to nominal rim
+RIM_OVERSHOOT = 0.5        # the cutter's mouth continues this far above the rim
+# A cutter band never leaves less than this much wall at the outside face, so a
+# narrow pitch cannot cut through its own bin (42 mm keeps 0.6, so is untouched).
+RIM_MIN_WALL = 0.4
+
+# 42 mm: the specification's table exactly, as (depth below the rim, opening
+# width, corner radius). The theoretical tip is 4.4 deep at 41.5 / R3.75; this
+# reference trims 0.6 from it, so the profile ends at 3.8.
+RIM_TIP_THEORETICAL = (4.4, 41.5, 3.75)
+RIM_TIP_TRIM = 0.6
+_RIM_42 = ((0.0, 36.3, 1.15), (0.7, 37.7, 1.85), (2.5, 37.7, 1.85), (3.8, 40.3, 3.15))
+# 21 mm: not a scaled 42. Each band is that pitch's own foot band (z, radius from
+# RADIUS_SCHEDULE on the +/-6.5 corner centres) grown by a per-side clearance:
+# 0.25 in the lower and straight bands, 0.35 at the top band (z 4.75).
+_RIM_21_CLEARANCE = {0.0: 0.25, 0.8: 0.25, 2.6: 0.25, FOOT_HEIGHT: 0.35}
+
+
+def _derived_rim_bands(grid: str, clearance: dict[float, float]) -> tuple:
+    half = _profile(grid)["foot_half"]
+    return tuple(
+        (z, round(2.0 * (half + radius + clearance[z]), 9), round(radius + clearance[z], 9))
+        for z, radius in _profile(grid)["radii"]
+    )
+
+
+RIM_PROFILES = {
+    "gridfinity": _RIM_42,
+    "gridfinity_half": _derived_rim_bands("gridfinity_half", _RIM_21_CLEARANCE),
+}
+
+
+def _rim_bands(grid: str) -> tuple:
+    _profile(grid)
+    return RIM_PROFILES[grid]
+
+
+def rim_depth(grid: str) -> float:
+    """How far the receiving profile reaches below the rim."""
+    return _rim_bands(grid)[-1][0]
+
+
+def _seat_descent(grid: str) -> float:
+    """How far a foot sinks past the nominal datum before its chamfer lands.
+
+    The rim opening is wider than the foot's bottom by the chamfer clearance; the
+    foot's first band flares at a constant rate, so the descent follows from the
+    profile data alone (42 mm: (36.3 - 35.6) / 2 = 0.35).
+    """
+    profile = _profile(grid)
+    (z0, r0), (z1, r1) = profile["radii"][:2]
+    flare = 2.0 * (r1 - r0) / (z1 - z0)           # foot width gained per mm of z
+    bottom = 2.0 * (profile["foot_half"] + r0)    # foot width at z = 0
+    return round((_rim_bands(grid)[0][1] - bottom) / flare, 9)
+
+
+SEAT_DESCENT = {grid: _seat_descent(grid) for grid in PROFILES}
+
+
 def cell_counts(spec: BoxSpec, grid: str) -> tuple[int, int]:
     """Whole cells along X and Y."""
     pitch = _profile(grid)["pitch"]
@@ -109,14 +171,79 @@ def gridfinity_base_minimum(grid: str) -> float:
     return MIN_GRID_BASE if grid in PROFILES else 0.0
 
 
+def nominal_height_units(spec: BoxSpec, grid: str) -> float:
+    """Height in 7 mm units, foot bottom to rim, foot included."""
+    _profile(grid)
+    return spec.z / HEIGHT_UNIT
+
+
+def exterior_height(spec: BoxSpec, grid: str) -> float:
+    """Actual exterior height: for a grid design spec.z is foot bottom to rim top."""
+    _profile(grid)
+    return spec.z
+
+
+def interior_depth(spec: BoxSpec, grid: str) -> float:
+    """Usable cavity depth above the effective floor."""
+    return spec.z - effective_base(spec, grid)
+
+
+def assembled_stack_height(lower: BoxSpec, upper: BoxSpec, grid: str) -> float:
+    """Two stacked grid bins: both exteriors less the descent the rim allows."""
+    _profile(grid)
+    return lower.z + upper.z - SEAT_DESCENT[grid]
+
+
+def minimum_height_units(grid: str, stackable: bool, floor: float | None = None) -> int:
+    """Fewest whole units a bin may be: 1 plain; stackable also fits floor + rim.
+
+    ``floor`` is the effective cavity floor, defaulting to the foot's minimum.
+    """
+    _profile(grid)
+    if not stackable:
+        return 1
+    floor = MIN_GRID_BASE if floor is None else floor
+    # round() first so 14.000000000000002 / 7 never costs a whole extra unit
+    return max(1, math.ceil(round((floor + rim_depth(grid)) / HEIGHT_UNIT, 9)))
+
+
 def normalize_gridfinity_settings(box: BoxSpec, grid: str) -> BoxSpec:
-    """Raise a grid design's base to the foot's minimum; wavefinity is untouched."""
+    """Raise a grid design's base to the foot's minimum and enforce its height
+    rules; wavefinity is untouched."""
     if grid == "wavefinity":
         return box
     _profile(grid)
-    if box.base_thickness >= MIN_GRID_BASE:
-        return box
-    return replace(box, base_thickness=MIN_GRID_BASE, standard_base=False)
+    units = box.z / HEIGHT_UNIT
+    stackable = vertical_stack_enabled(box)
+    floor = effective_base(box, grid)
+    needed = minimum_height_units(grid, stackable, floor)
+
+    def too_short() -> ValueError:
+        why = (
+            f"a Stackable bin needs its {floor:g} mm floor plus the "
+            f"{rim_depth(grid):g} mm stacking rim" if stackable
+            else "a bin is at least one height unit"
+        )
+        return ValueError(
+            f"a {grid} bin's Z must be at least {needed} height unit"
+            f"{'s' if needed != 1 else ''} ({needed * HEIGHT_UNIT:g} mm): {why}; "
+            f"{box.z:g} mm is too short"
+        )
+
+    if units < 1.0 - 1e-9:
+        raise too_short()
+    if abs(units - round(units)) > 1e-9:
+        below = math.floor(units) * HEIGHT_UNIT
+        raise ValueError(
+            f"a {grid} bin's Z must be a whole number of {HEIGHT_UNIT:g} mm height "
+            f"units; {box.z:g} mm is {units:.3g} units - use {below:g} mm or "
+            f"{below + HEIGHT_UNIT:g} mm"
+        )
+    if round(units) < needed:
+        raise too_short()
+    if box.base_thickness < MIN_GRID_BASE:
+        return replace(box, base_thickness=MIN_GRID_BASE, standard_base=False)
+    return box
 
 
 # --------------------------------------------------------------------------- #
@@ -243,6 +370,35 @@ def gridfinity_body(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
     body = difference([fused, cavity])
     _single_volume(body, "the Gridfinity body")
     return body
+
+
+def rim_cutter(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
+    """The stacking rim's receiving void: every cell's profile, rim top downward.
+
+    One loft per cell at pitch spacing, spanning ``rim_depth`` below the rim
+    (``spec.z``) plus ``RIM_OVERSHOOT`` of straight mouth above it. It is the void
+    only: cutting it from the shell leaves the rim. Bands are the table in
+    ``RIM_PROFILES``, narrowed only where a pitch's outer wall would otherwise
+    fall under ``RIM_MIN_WALL``.
+    """
+    profile = _profile(grid)
+    bands = _rim_bands(grid)
+    depth = bands[-1][0]
+    floor = effective_base(spec, grid)
+    if spec.z - depth < floor:
+        raise ValueError(
+            f"a Stackable {grid} bin needs Z of at least {floor + depth:g} mm "
+            f"({floor:g} mm floor plus the {depth:g} mm stacking rim)"
+        )
+    half = profile["foot_half"]
+    widest = profile["pitch"] - 0.5 - 2.0 * RIM_MIN_WALL
+    sections = [
+        (spec.z - band_depth, min(width, widest) / 2.0 - half)
+        for band_depth, width, _radius in reversed(bands)
+    ]
+    sections.append((spec.z + RIM_OVERSHOOT, sections[-1][1]))
+    cells = [_lofted_cell(centre, half, sections) for centre in _cell_centres(spec, grid)]
+    return cells[0] if len(cells) == 1 else union(cells)
 
 
 def socket_cutter(grid: str, nx: int, ny: int) -> trimesh.Trimesh:
