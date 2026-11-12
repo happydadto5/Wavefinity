@@ -32,6 +32,7 @@ SP.storageBoxEdgeBevel = "default";
 SP.storageBoxHingeType = "screw";
 
 SP.fillStorageBoxForm = box => {
+  SP.newStorageBox = !box;
   const one = { ...SP.storageBoxDefaults(), ...(box || {}) };
   SP.storageBoxEdgeBevel = box ? (box.edge_bevel || "none") : "default";
   SP.storageBoxHingeType = box && box.hinge_type === "piano" ? "piano" : "screw";
@@ -128,7 +129,9 @@ SP.readStorageBoxForm = () => {
   const labelled = location !== "none";
   return {
     secure_lid: latched,
-    latch_count: latched ? (value("portable-latch-count") || "1") : "1",
+    latch_count: SP.newStorageBox
+      ? (SP.snap(Number(value("portable-x"))) > 96 ? "2" : "1")
+      : (value("portable-latch-count") || "1"),
     hinge_count: latched ? (value("portable-hinge-count") === "1" ? "1" : "2") : "2",
     hinge_type: latched ? SP.storageBoxHingeType : "screw",
     lid_headroom_mm: parseFloat(value("portable-lid-snugness")) || 1,
