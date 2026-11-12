@@ -1,8 +1,8 @@
 # Wavefinity current source route lookup — migration navigation only
 
-Frozen source map from current code during November 12, 2026 migration planning. **No test code, test scanners, test execution, or user QA plans.** Before implementing a package, read its named current source functions because ongoing Gridfinity changes can shift code.
+Source ownership baseline from November 12, 2026; source locations are a frozen navigation snapshot. The **fourth column is authoritative single-owner Bxx**, not a list of contributors. **No test code, test scanners, test execution, or user QA plans.** Before implementing a package, read its named current source functions because ongoing Gridfinity changes can shift code.
 
-`wavefinity_web.py` registers the core Python routes and `organizer_drawer/__init__.py:drawer_routes` adds drawer routes. `organizer_spaces/__init__.py:space_routes` is registered only under `if not HOSTED` in the legacy web server; the final browser app needs those Space operations anyway. The frontend column lists prominent literal call sites, **not every indirect caller**.
+`wavefinity_web.py` registers the core Python routes and `organizer_drawer/__init__.py:drawer_routes` adds drawer routes. `organizer_spaces/__init__.py:space_routes` is registered only under `if not HOSTED` in the legacy web server; the final browser app needs those Space operations anyway. The frontend column lists prominent literal call sites, **not every indirect caller**. **Ownership is singular:** a consuming UI package is not a second route owner. For example, **B10 owns all `/api/drawer/*` routes, including its print variants**, while B08 supplies shared print preparation/3MF helpers; **B11 owns all structural/Storage Drawers routes and pegboard hooks**. B09 owns folder/Space operations and `/api/space/warm`; B13 owns the browser-only replacement for the legacy slicer-browse and show-log paths. `route-dispatch.py` is a shared routing integration point owned first by B04 and finally by B14, not a second owner of those route semantics.
 
 | API path | Existing handler | Main frontend reference(s) | Package |
 |---|---|---|---|
@@ -12,54 +12,55 @@ Frozen source map from current code during November 12, 2026 migration planning.
 | `/api/ai/prompt` | `ai_prompt_payload` · `wavefinity_web.py:3492` | `web/app/02-lifecycle-ai-help.js:604` | B13 |
 | `/api/ai/repair-prompt` | `ai_repair_prompt_payload` · `wavefinity_web.py:3494` | `web/app/02-lifecycle-ai-help.js:801` | B13 |
 | `/api/browse-output-folder` | `browse_output_folder_payload` · `wavefinity_web.py:3526` | `web/spaces/07-welcome-folders.js:46` | B09 |
-| `/api/browse-slicer-path` | `browse_slicer_path_payload` · `wavefinity_web.py:3528` | `web/app/15-generate-dialogs.js:619` | B09 |
-| `/api/catalog` | `catalog_payload (GET)` · `wavefinity_web.py:3676` | No literal reference in sampled callers | B03/04 |
+| `/api/browse-slicer-path` | `browse_slicer_path_payload` · `wavefinity_web.py:3528` | `web/app/15-generate-dialogs.js:619` | B13 |
+| `/api/catalog` | `catalog_payload (GET)` · `wavefinity_web.py:3676` | No literal reference in sampled callers | B04 |
 | `/api/connector` | `connector_save_payload` · `wavefinity_web.py:3511` | `web/app/15-generate-dialogs.js:285`, `web/app/15-generate-dialogs.js:291` | B06 |
-| `/api/design/division-label-fit` | `division_label_fit_payload` · `wavefinity_web.py:3496` | No literal reference in sampled callers | B04/05 |
-| `/api/design/inventory-preview` | `inventory_preview_payload` · `wavefinity_web.py:3495` | No literal reference in sampled callers | B04/05 |
-| `/api/design/validate` | `_validate_design_open_guard` · `wavefinity_web.py:3489` | `web/app/03-history-utils-catalog.js:162`, `web/app/11-parts-preview-requests.js:45`, `web/spaces/04-metadata-persistence.js:143` | B04/05 |
-| `/api/drawer/connectors` | `connectors` · `organizer_drawer/__init__.py:1267` | No literal reference in sampled callers | B10 (Print B08) |
-| `/api/drawer/design-source/duplicate` | `duplicate_design_source` · `organizer_drawer/__init__.py:1259` | `web/app/03-history-utils-catalog.js:130` | B10 (Print B08) |
-| `/api/drawer/design-source/save` | `save_design_source` · `organizer_drawer/__init__.py:1257` | `web/spaces/06-inventory-io.js:172`, `web/app/02-lifecycle-ai-help.js:95` | B10 (Print B08) |
-| `/api/drawer/design-source/status` | `change_design_status` · `organizer_drawer/__init__.py:1260` | `web/app/15-generate-dialogs.js:254`, `web/app/15-generate-dialogs.js:488`, `web/app/15-generate-dialogs.js:516` | B10 (Print B08) |
-| `/api/drawer/generate-bin` | `generate_hosted_bin` · `organizer_drawer/__init__.py:1258` | `web/spaces/06-inventory-io.js:62` | B10 (Print B08) |
-| `/api/drawer/load` | `load` · `organizer_drawer/__init__.py:1255` | `web/spaces/06-inventory-io.js:280`, `web/drawer-model.js:1185` | B10 (Print B08) |
-| `/api/drawer/print-bins` | `print_bins` · `organizer_drawer/__init__.py:1270` | `web/drawer-model.js:1850` | B10 (Print B08) |
-| `/api/drawer/print-complete` | `print_complete` · `organizer_drawer/__init__.py:1268` | `web/drawer-model.js:1893` | B10 (Print B08) |
-| `/api/drawer/print-spacers` | `print_spacers_only` · `organizer_drawer/__init__.py:1269` | `web/drawer-model.js:1713` | B10 (Print B08) |
-| `/api/drawer/report` | `report` · `organizer_drawer/__init__.py:1261` | `web/drawer-model.js:1408` | B10 (Print B08) |
-| `/api/drawer/save` | `save` · `organizer_drawer/__init__.py:1256` | `web/spaces/06-inventory-io.js:67`, `web/spaces/06-inventory-io.js:166`, `web/spaces/06-inventory-io.js:257` | B10 (Print B08) |
-| `/api/drawer/save-bins` | `save_bins` · `organizer_drawer/__init__.py:1271` | `web/drawer-model.js:1812` | B10 (Print B08) |
-| `/api/drawer/spacers` | `spacers` · `organizer_drawer/__init__.py:1264` | No literal reference in sampled callers | B10 (Print B08) |
-| `/api/drawer/spacers/generate` | `spacers_generate` · `organizer_drawer/__init__.py:1265` | No literal reference in sampled callers | B10 (Print B08) |
-| `/api/drawer/spacers/refresh` | `spacers_refresh` · `organizer_drawer/__init__.py:1266` | `web/spaces/06-inventory-io.js:168`, `web/drawer-model.js:1574` | B10 (Print B08) |
-| `/api/drawer/surface-fill` | `surface_fill` · `organizer_drawer/__init__.py:1262` | `web/drawer-model.js:1492` | B10 (Print B08) |
-| `/api/drawer/surface-fill/create` | `surface_fill_create` · `organizer_drawer/__init__.py:1263` | `web/drawer-model.js:1511` | B10 (Print B08) |
-| `/api/export/<token>/<filename>` | `token download (GET)` · `wavefinity_web.py:3682` | No literal reference in sampled callers | B06/08 |
-| `/api/feature/apply` | `apply_feature_payload` · `wavefinity_web.py:3502` | No literal reference in sampled callers | B04/05 |
-| `/api/feature/default` | `default_feature_payload` · `wavefinity_web.py:3499` | No literal reference in sampled callers | B04/05 |
-| `/api/feature/delete` | `delete_feature_payload` · `wavefinity_web.py:3504` | `web/app/11-parts-preview-requests.js:97` | B04/05 |
-| `/api/feature/draft` | `draft_payload` · `wavefinity_web.py:3500` | No literal reference in sampled callers | B04/05 |
-| `/api/feature/duplicate` | `duplicate_feature_payload` · `wavefinity_web.py:3503` | No literal reference in sampled callers | B04/05 |
-| `/api/feature/fit` | `feature_fit_payload` · `wavefinity_web.py:3501` | `web/app/11-parts-preview-requests.js:845` | B04/05 |
+| `/api/design/division-label-fit` | `division_label_fit_payload` · `wavefinity_web.py:3496` | No literal reference in sampled callers | B04 |
+| `/api/design/inventory-preview` | `inventory_preview_payload` · `wavefinity_web.py:3495` | No literal reference in sampled callers | B04 |
+| `/api/design/validate` | `_validate_design_open_guard → validate_design_payload` · `wavefinity_web.py:3489; see function immediately before POST_ROUTES` | `web/app/03-history-utils-catalog.js:162`, `web/app/11-parts-preview-requests.js:45`, `web/spaces/04-metadata-persistence.js:143` | B04 |
+| `/api/drawer/connectors` | `connectors` · `organizer_drawer/__init__.py:1267` | No literal reference in sampled callers | B10 |
+| `/api/drawer/design-source/duplicate` | `duplicate_design_source` · `organizer_drawer/__init__.py:1259` | `web/app/03-history-utils-catalog.js:130` | B10 |
+| `/api/drawer/design-source/save` | `save_design_source` · `organizer_drawer/__init__.py:1257` | `web/spaces/06-inventory-io.js:172`, `web/app/02-lifecycle-ai-help.js:95` | B10 |
+| `/api/drawer/design-source/status` | `change_design_status` · `organizer_drawer/__init__.py:1260` | `web/app/15-generate-dialogs.js:254`, `web/app/15-generate-dialogs.js:488`, `web/app/15-generate-dialogs.js:516` | B10 |
+| `/api/drawer/generate-bin` | `generate_hosted_bin` · `organizer_drawer/__init__.py:1258` | `web/spaces/06-inventory-io.js:62` | B10 |
+| `/api/drawer/load` | `load` · `organizer_drawer/__init__.py:1255` | `web/spaces/06-inventory-io.js:280`, `web/drawer-model.js:1185` | B10 |
+| `/api/drawer/print-bins` | `print_bins` · `organizer_drawer/__init__.py:1270` | `web/drawer-model.js:1850` | B10 |
+| `/api/drawer/print-complete` | `print_complete` · `organizer_drawer/__init__.py:1268` | `web/drawer-model.js:1893` | B10 |
+| `/api/drawer/print-spacers` | `print_spacers_only` · `organizer_drawer/__init__.py:1269` | `web/drawer-model.js:1713` | B10 |
+| `/api/drawer/report` | `report` · `organizer_drawer/__init__.py:1261` | `web/drawer-model.js:1408` | B10 |
+| `/api/drawer/save` | `save` · `organizer_drawer/__init__.py:1256` | `web/spaces/06-inventory-io.js:67`, `web/spaces/06-inventory-io.js:166`, `web/spaces/06-inventory-io.js:257` | B10 |
+| `/api/drawer/save-bins` | `save_bins` · `organizer_drawer/__init__.py:1271` | `web/drawer-model.js:1812` | B10 |
+| `/api/drawer/spacers` | `spacers` · `organizer_drawer/__init__.py:1264` | No literal reference in sampled callers | B10 |
+| `/api/drawer/spacers/generate` | `spacers_generate` · `organizer_drawer/__init__.py:1265` | No literal reference in sampled callers | B10 |
+| `/api/drawer/spacers/refresh` | `spacers_refresh` · `organizer_drawer/__init__.py:1266` | `web/spaces/06-inventory-io.js:168`, `web/drawer-model.js:1574` | B10 |
+| `/api/drawer/surface-fill` | `surface_fill` · `organizer_drawer/__init__.py:1262` | `web/drawer-model.js:1492` | B10 |
+| `/api/drawer/surface-fill/create` | `surface_fill_create` · `organizer_drawer/__init__.py:1263` | `web/drawer-model.js:1511` | B10 |
+| `/api/export/<token>/<filename>` | `token download (GET)` · `wavefinity_web.py:3682` | No literal reference in sampled callers | B06 |
+| `/api/feature/apply` | `apply_feature_payload` · `wavefinity_web.py:3502` | No literal reference in sampled callers | B04 |
+| `/api/feature/default` | `default_feature_payload` · `wavefinity_web.py:3499` | No literal reference in sampled callers | B04 |
+| `/api/feature/delete` | `delete_feature_payload` · `wavefinity_web.py:3504` | `web/app/11-parts-preview-requests.js:97` | B04 |
+| `/api/feature/draft` | `draft_payload` · `wavefinity_web.py:3500` | No literal reference in sampled callers | B04 |
+| `/api/feature/duplicate` | `duplicate_feature_payload` · `wavefinity_web.py:3503` | No literal reference in sampled callers | B04 |
+| `/api/feature/fit` | `feature_fit_payload` · `wavefinity_web.py:3501` | `web/app/11-parts-preview-requests.js:845` | B04 |
 | `/api/folder/inventory` | `set_inventory` · `organizer_spaces/__init__.py:1461` | No literal reference in sampled callers | B09 |
 | `/api/folder/no-defined-space` | `no_defined_space` · `organizer_spaces/__init__.py:1453` | `web/spaces/08-space-setup.js:313` | B09 |
 | `/api/folder/use` | `open_folder` · `organizer_spaces/__init__.py:1452` | `web/spaces/07-welcome-folders.js:90`, `web/spaces/07-welcome-folders.js:94` | B09 |
 | `/api/generate` | `generate_payload` · `wavefinity_web.py:3510` | `web/app/15-generate-dialogs.js:237` | B06 |
-| `/api/health` | `health_payload (GET)` · `wavefinity_web.py:3673` | `web/app/15-generate-dialogs.js:749` | B03/04 |
-| `/api/layout/expand` | `expand_layout_payload` · `wavefinity_web.py:3509` | `web/app/11-parts-preview-requests.js:977`, `web/app/11-parts-preview-requests.js:1057` | B04/05 |
-| `/api/layout/mode` | `mode_payload` · `wavefinity_web.py:3508` | `web/app/03-history-utils-catalog.js:858` | B04/05 |
+| `/api/health` | `health_payload (GET)` · `wavefinity_web.py:3673` | `web/app/15-generate-dialogs.js:749` | B03 |
+| `/api/layout/expand` | `expand_layout_payload` · `wavefinity_web.py:3509` | `web/app/11-parts-preview-requests.js:977`, `web/app/11-parts-preview-requests.js:1057` | B04 |
+| `/api/layout/mode` | `mode_payload` · `wavefinity_web.py:3508` | `web/app/03-history-utils-catalog.js:858` | B04 |
 | `/api/nest/photo` | `photo_nest_payload` · `wavefinity_web.py:3506` | No literal reference in sampled callers | B12 |
 | `/api/nest/retrace` | `nest_retrace_payload` · `wavefinity_web.py:3507` | No literal reference in sampled callers | B12 |
 | `/api/nest/trace` | `nest_trace_payload` · `wavefinity_web.py:3505` | No literal reference in sampled callers | B12 |
-| `/api/operation-status` | `operation_status_payload` · `wavefinity_web.py:3556` | `web/app/03-history-utils-catalog.js:466`, `web/app/03-history-utils-catalog.js:499`, `web/app/03-history-utils-catalog.js:508` | B03/04 |
-| `/api/pegboard/hooks` | `pegboard_hooks_payload` · `wavefinity_web.py:3498` | No literal reference in sampled callers | B04/05 |
-| `/api/pegboard/layouts` | `pegboard_layouts_payload` · `wavefinity_web.py:3497` | `web/drawer-model.js:1149` | B04/05 |
+| `/api/operation-status` | `operation_status_payload` · `wavefinity_web.py:3556` | `web/app/03-history-utils-catalog.js:466`, `web/app/03-history-utils-catalog.js:499`, `web/app/03-history-utils-catalog.js:508` | B03 |
+| `/api/pegboard/hooks` | `pegboard_hooks_payload` · `wavefinity_web.py:3498` | No literal reference in sampled callers | B11 |
+| `/api/pegboard/layouts` | `pegboard_layouts_payload` · `wavefinity_web.py:3497` | `web/drawer-model.js:1149` | B04 |
 | `/api/preferences` | `preferences_payload` · `wavefinity_web.py:3524` | `web/app/15-generate-dialogs.js:631` | B09 |
 | `/api/preview` | `preview_payload` · `wavefinity_web.py:3487` | `web/app/11-parts-preview-requests.js:767` | B05 |
 | `/api/print` | `print_payload` · `wavefinity_web.py:3513` | `web/app/15-generate-dialogs.js:455`, `web/app/15-generate-dialogs.js:467` | B08 |
-| `/api/sampler` | `sampler_payload` · `wavefinity_web.py:3512` | No literal reference in sampled callers | B04/05 |
+| `/api/sampler` | `sampler_payload` · `wavefinity_web.py:3512` | No literal reference in sampled callers | B06 |
 | `/api/show-log` | `show_log_payload` · `wavefinity_web.py:3529` | No literal reference in sampled callers | B13 |
+| `/api/suggestions` | `_post_suggestion` · `wavefinity_web.py:3738` (POST, external request) | Main UI reference must be read in current source; not a core local-geometry route | B13 |
 | `/api/space/browse-storage-parent` | `browse_space_parent_payload` · `wavefinity_web.py:3527` | `web/spaces/07-welcome-folders.js:377` | B09 |
 | `/api/space/configure` | `configure_migrate` · `organizer_spaces/__init__.py:1457` | `web/spaces/08-space-setup.js:682` | B09 |
 | `/api/space/configure-text` | `configure_space_text_payload` · `wavefinity_web.py:3531` | `web/spaces/08-space-setup.js:611` | B09 |
@@ -72,7 +73,7 @@ Frozen source map from current code during November 12, 2026 migration planning.
 | `/api/space/delete` | `delete_space` · `organizer_spaces/__init__.py:1460` | No literal reference in sampled callers | B09 |
 | `/api/space/forget` | `forget` · `organizer_spaces/__init__.py:1466` | No literal reference in sampled callers | B09 |
 | `/api/space/inspect` | `inspect` · `organizer_spaces/__init__.py:1446` | `web/spaces/07-welcome-folders.js:82`, `web/spaces/07-welcome-folders.js:253`, `web/spaces/08-space-setup.js:343` | B09 |
-| `/api/space/no-inventory` | `lambda` · `organizer_spaces/__init__.py:1465` | No literal reference in sampled callers | B09 |
+| `/api/space/no-inventory` | `lambda payload: set_inventory({...payload, inventory: False})` · `organizer_spaces/__init__.py:1465` | No literal reference in sampled callers | B09 |
 | `/api/space/open` | `open_folder` · `organizer_spaces/__init__.py:1464` | No literal reference in sampled callers | B09 |
 | `/api/space/other-spaces` | `other_spaces_route` · `organizer_spaces/__init__.py:1449` | `web/spaces/07-welcome-folders.js:166` | B09 |
 | `/api/space/printer-profile` | `printer_profile_route` · `organizer_spaces/__init__.py:1471` | No literal reference in sampled callers | B09 |
@@ -102,9 +103,13 @@ Frozen source map from current code during November 12, 2026 migration planning.
 
 - `/` and HTML/CSS/JS requests resolve beneath `web/`. **Build must copy web contents to dist root**, not to `dist/web`.
 - `/images/*` resolves from repository-root `images/`; **copy into `dist/images/`**.
-- `/Brochure.md` (also lowercase legacy path) resolves from repository-root `Brochure.md`; **copy into `dist/Brochure.md`** (alias only if current caller requires).
+- `/Brochure.md` (also lowercase legacy path `/brochure.md`) resolves from repository-root `Brochure.md`. The static build copies BOTH `dist/Brochure.md` and a byte-identical `dist/brochure.md` alias; no redirect/rule dependency.
 - `/api/export/<token>/<filename>` is a server stream of temporary generated files; replace with transferable buffers and local Blobs, not a static URL.
 - `/api/catalog` and `/api/health` currently come from server GET handlers. The browser edition serves static/generated catalog and runtime/build identity without a network API.
+
+## Bxx authoritative single-owner resolution
+
+All route rows above have exactly one primary Bxx owner. If a newly added Gridfinity endpoint exists when the Stories are created, assign it ONE semantic owner and update its row and the static B01 manifest. B04 supplies `web/browser-core/engine/route-dispatch.py` as a registration primitive; later packages export their own `ROUTES` dictionaries from their own new files without editing the central registry. **B14 assembles all package route registries once** after the other packages are finished. No parallel central-registry edits. The B01 manifest is saved at `web/browser-core/contracts/route-manifest.json` (within the shipped code tree but excluded from the production `dist/` if it contains only design notes); not the old root `browser-core/contracts/` path.
 
 ## Route ownership warning
 
