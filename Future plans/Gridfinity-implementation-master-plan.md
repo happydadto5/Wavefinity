@@ -134,14 +134,14 @@ Stories are filed through Poller with unique `submission_id` values, `applicatio
 
 | Filing sequence | Key | Story title / scope | Review depth · tier · thinking | Numeric start-after at filing | Poller ID | State |
 |---|---|---|---|---|---|---|
-| 1 | S2-00 | Verify and document Storage Box stacking closure/geometry contract only | slim · medium · high | `[2978]` | — | NOT FILED |
-| 2 | S2-01 | Optional standard magnet holes in 42 mm bin feet | standard · medium · medium | `[2978]` | — | NOT FILED |
-| 3 | S2-03a | Plain lids for 21/42 mm Gridfinity bins | standard · high · medium | `[2978]` | — | NOT FILED |
-| 4 | S2-03b | Hinged lids within Gridfinity bin envelope | standard · high · medium | `[2978]` (add S2-03a ID only if live file conflicts require serialization) | — | NOT FILED |
+| 1 | S2-00 | Verify and document Storage Box stacking closure/geometry contract only | slim · medium · high | `[]` (2978 gate removed on Andrew's order, 2026-11-12) | 3006 | SUBMITTED 2026-11-12 |
+| 2 | S2-01 | Optional standard magnet holes in 42 mm bin feet | standard · medium · medium | `[]` (2978 gate removed on Andrew's order, 2026-11-12) | 3007 | SUBMITTED 2026-11-12 |
+| 3 | S2-03a | Plain lids for 21/42 mm Gridfinity bins | standard · high · medium | `[]` (2978 gate removed on Andrew's order, 2026-11-12) | 3008 | SUBMITTED 2026-11-12 |
+| 4 | S2-03b | Hinged lids within Gridfinity bin envelope | standard · high · medium | `[3008]` (S2-03a added: both write organizer_features/stack.py, organizer_engine/_specs.py and web/index.html) | 3009 | SUBMITTED 2026-11-12 |
 | — | S2-05 | Measured edge shims — declined by Andrew 2026-11-12: no shims anywhere; spacers are the only gap fill, including for a loose baseplate | OUT OF SCOPE | **do not file** | — | DECLINED |
-| 6 | S2-06 | Third-party bin placeholders, inventory/layout only | comprehensive · high · medium | `[2978]` | — | NOT FILED |
+| 6 | S2-06 | Third-party bin placeholders, inventory/layout only | comprehensive · high · medium | `[]` (2978 gate removed on Andrew's order, 2026-11-12) | 3010 | SUBMITTED 2026-11-12 |
 | 7* | S2-02 | Storage Box-on-Box stacking, both pitches, preservation of closures | comprehensive · high · high | `[2978, actual S2-00 ID]` | — | NOT FILED |
-| 8 | S2-04 | Side Openings that preserve foot/rim and cell envelope | standard · high · medium | `[2978, actual S2-01 ID]` | — | NOT FILED |
+| 8 | S2-04 | Side Openings that preserve foot/rim and cell envelope | standard · high · medium | `[3007]` | 3011 | SUBMITTED 2026-11-12 |
 | — | S2-07 | Screw holes — declined by Andrew 2026-11-12 | OUT OF SCOPE | **do not file** | — | DECLINED |
 
 *Do **not** file S2-02 just because S2-00 was entered: wait for the S2-00 contract to be **completed, reviewed, and accepted**, then incorporate its actual resolved eligibility and clearance map in the S2-02 description/design. For S2-04, use the actual returned numeric S2-01 ID. The parallel stories are independent only after checking live changed-file ownership; if code paths would collide, file a safe additional numeric `start_after` gate before work starts and record the reason. Filing order is not necessarily work order.
