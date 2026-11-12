@@ -38,7 +38,9 @@ function commitBinGrid(event) {
   }
   if (candidate.grid !== "wavefinity" && candidate.box.lid?.enabled &&
       (candidate.box.lid.flip_enabled || candidate.box.lid.handle_enabled || candidate.box.lid.label_enabled)) {
-    toast("Remove the hinged, handle or label lid before switching grid.", true);
+    toast(candidate.box.lid.flip_enabled && binGridRules(candidate).hinged_lid_refusal
+      ? `${binGridRules(candidate).hinged_lid_refusal} Remove the hinged lid before switching grid.`
+      : "Remove the hinged, handle or label lid before switching grid.", true);
     refused = true;
   }
   if (refused) { event.target.value = previous.grid || "wavefinity"; return; }

@@ -2299,11 +2299,31 @@ receiving socket in a perimeter ridge. The body shortens by the plate plus
 ridge rise, so the closed bin retains its nominal whole-7-mm height. Interior
 parts retain the regular lid's skirt clearance and 0.5 mm margin. A lid and an
 open stacking rim are alternatives on one bin. Only the same footprint and
-pitch stack on a lid; lid-on-lid uses the standard rim seat descent. Hinged,
-label and handle variants remain Wavefinity-only. The two-unit lid minimum
+pitch stack on a lid; lid-on-lid uses the standard rim seat descent. Label
+and handle variants remain Wavefinity-only. The two-unit lid minimum
 does not replace the existing body clearance check: the remaining body must
 still clear its effective floor by 5 mm. Physical compatibility remains
 **not yet printed**, pending S1-13.
+
+### Gridfinity hinged lid: unsupported on both pitches (Story 3009)
+
+The ordinary filament-pin hinged lid (`organizer_features/lid_hinge.py`) was
+assessed against one cell's external allowance: 41.5 mm on the 42 pitch and the
+20.5 mm body on the 21 pitch (`gridfinity-stage1-spec.md`), each leaving 0.25 mm
+per side before the next bin. `assess_gridfinity_hinge` takes the open swing of
+the lid plate from closed to the 110 degree stop about the back-top axis, at or
+below the lid-top plane, and compares how far behind the back plane it reaches
+with that gap. It reaches about 2.4 mm on both pitches, so both are recorded
+**unsupported** and the option is refused in plain language: absent from the
+Gridfinity Lid selector, with the reason beside it, and invalid at
+`validate_grid_lid` for saved or API designs. Nothing is reshaped to make it
+fit. The hinged lid and Lid for stacking are mutually exclusive, and no stackable
+claim is made for a hinged lid. These are nominal figures, **unverified** by any
+print. **Raised for Andrew's product decision:** no usable hinged-lid design
+fits the Gridfinity envelope as it stands; options are a different hinge
+(a printed-in-place or shorter-swing design), a smaller stop angle with a
+relieved lid corner, or leaving the hinged lid Wavefinity-only. Wavefinity
+hinged-lid behaviour is unchanged.
 
 ## Local temp space
 

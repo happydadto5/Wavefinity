@@ -42,7 +42,12 @@ in whole 7 mm units; its body and interior shorten to make room for the lid.
 The same skirt clears a plain or rimmed body. Stacking uses the same footprint
 and grid pitch and the standard rim seat descent, including lid-on-lid stacks.
 Grid lids require at least two height units and enough remaining body clearance
-for the floor and lid. Hinged, label and handle lids remain Wavefinity options.
+for the floor and lid. Label and handle lids remain Wavefinity options. The Hinged
+lid is assessed against the one-cell envelope and is **unsupported on both
+Gridfinity pitches** (its open swing reaches about 2.4 mm behind the bin against
+a 0.25 mm gap; nominal, unverified): the Lid selector omits it, says why, and
+saved or API designs asking for it are refused. It is never combined with Lid
+for stacking and makes no stackable claim. Awaiting Andrew's product decision.
 The No-Space Designer now has a Grid selector. Switching grid keeps dimensions
 in millimetres and refuses sizes that are not whole cells. Width/Depth accept
 `u` or `mm` on commit; bare values below the pitch mean units, other bare values

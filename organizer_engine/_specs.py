@@ -47,6 +47,21 @@ def cross_grid_message(bin_grid: object, space_grid: object, what: str = "This b
             "Nothing was changed.")
 
 
+def grid_hinged_lid_refusal(grid: object) -> str | None:
+    """Plain-language refusal of the hinged lid on a grid, or None where it fits.
+
+    Wavefinity is never refused. A Gridfinity pitch is offered the hinged lid
+    only if the envelope assessment in ``organizer_features.lid_hinge`` finds
+    the whole hinge and open swing inside one cell's allowance (Story 3009);
+    otherwise that pitch is recorded unsupported and this message is the refusal.
+    """
+    if grid == "wavefinity":
+        return None
+    from organizer_features.lid_hinge import assess_gridfinity_hinge
+    result = assess_gridfinity_hinge(validate_grid(grid))
+    return None if result.supported else result.reason
+
+
 def validate_built_in_grid(value: object) -> str:
     if not isinstance(value, str) or value not in ("floor", "none"):
         raise ValueError("Built-in grid must be floor or none.")

@@ -12,7 +12,7 @@ from organizer_inserts import FEATURE_DEFINITIONS
 from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED
 
 from organizer_engine import GRID_PITCH
-from organizer_engine._specs import validate_grid, cross_grid_message
+from organizer_engine._specs import validate_grid, cross_grid_message, grid_hinged_lid_refusal
 from ._runtime import default_design
 from ._designs import _is_base_trim_design, validate_design_payload
 
@@ -54,10 +54,15 @@ def grid_editor_catalog() -> list[dict[str, Any]]:
                  if grid != "wavefinity" else None),
              "rim_depth_mm": 0 if grid == "wavefinity" else rim_depth(grid),
              "side_connectors": grid == "wavefinity",
+             # Story 3009: the hinged lid is listed only on a pitch whose envelope
+             # assessment supports it; otherwise ``hinged_lid_refusal`` says why.
              "lid_choices": ([{"value": "none", "label": "No lid"},
                               {"value": "resting", "label": "Gridfinity Lid"},
                               {"value": "stacking", "label": "Gridfinity Lid for stacking"}]
-                             if grid != "wavefinity" else None)}
+                             + ([] if grid_hinged_lid_refusal(grid) else
+                                [{"value": "hinged", "label": "Gridfinity Hinged lid"}])
+                             if grid != "wavefinity" else None),
+             "hinged_lid_refusal": grid_hinged_lid_refusal(grid)}
             for grid, pitch in GRID_PITCHES.items()]
 
 
@@ -110,7 +115,8 @@ AI_MODIFIER_BLOCKS = (
      "Stackable Bin is box.stack = {\"mode\": \"direct\"} (its own base sits in the bin below); it may be combined with a lid. "
      "A Lid is box.lid; a resting lid (not flip_enabled) may set stack_rim=true (this is the \"Lid for stacking\" lid type; OFF by default, add it only when a bin is to stand on the lid) to carry a 2 mm rim on its top face that another stackable bin sits into. "
      "A lid with a handle (the handle is optional and OFF by default, so add handle_enabled=true only when one is asked for, with handle_type knob (the only handle), handle_size and handle_position), a Flip lid, or a lid with raised lettering cannot receive a stack, and neither can a lid that is not a Lid for stacking (stack_rim false). "
-     "Any lid may also be a Flip lid: flip_enabled=true (OFF by default; add it only when a hinged lid is asked for) hinges it on the back inside edge with a 1.75 mm filament pin, independent of the handle; optional alignment=\"off\"|\"thin\"|\"standard\"|\"thick\" (default off, only add when asked) adds front-corner alignment tabs 0/1/2/3 mm deep and makes the lid need support. "
+     "On a Gridfinity grid (gridfinity or gridfinity_half) a Flip lid is refused: its open swing overruns the one-cell envelope and the neighbour gap, so use a plain or stacking lid there; a Flip lid and stack_rim are never combined. "
+     "Any lid may also be a Flip lid (Wavefinity grid only): flip_enabled=true (OFF by default; add it only when a hinged lid is asked for) hinges it on the back inside edge with a 1.75 mm filament pin, independent of the handle; optional alignment=\"off\"|\"thin\"|\"standard\"|\"thick\" (default off, only add when asked) adds front-corner alignment tabs 0/1/2/3 mm deep and makes the lid need support. "
      "",
      ("box.lid", "box.stack")),
     ("inside_handles", "Inside Grip",

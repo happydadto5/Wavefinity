@@ -129,14 +129,27 @@ def _grid() -> str:
 
 
 def validate_grid_lid(box: BoxSpec, grid: str) -> None:
-    """Stage 1 offers only a loose plate lid, optionally receiving a stack."""
+    """Gridfinity lids: a plain plate or stacking socket, plus the hinged lid
+    only on a pitch whose envelope assessment supports it (Story 3009).
+
+    The hinged lid and 'Lid for stacking' are mutually exclusive, and a hinged
+    lid never receives a stack. Unsupported combinations are refused here, at
+    the spec boundary, never reshaped.
+    """
     if grid == "wavefinity" or not lid_enabled(box):
         return
     spec = lid_spec(box)
-    if spec.flip_enabled or spec.handle_enabled or spec.label_enabled:
+    if spec.flip_enabled:
+        from organizer_engine._specs import grid_hinged_lid_refusal
+        refusal = grid_hinged_lid_refusal(grid)
+        if refusal:
+            raise ValueError(refusal)
+        if spec.stack_rim:
+            raise ValueError("A Hinged lid cannot also be a Lid for stacking - choose one.")
+    if spec.handle_enabled or spec.label_enabled:
         raise ValueError(
-            "Gridfinity Stage 1 lids support a plain plate or stacking socket only; "
-            "hinged, handle and label lids are Wavefinity options"
+            "Gridfinity lids support a plain plate or stacking socket only; "
+            "handle and label lids are Wavefinity options"
         )
 
 
@@ -788,6 +801,10 @@ def make_lid_parts(
         raise ValueError("this bin has no lid")
     if _grid() != "wavefinity":
         validate_grid_lid(box, _grid())
+        if lid_has_flip(eff):
+            # Only reachable if an assessment ever supports a pitch: the grid lid
+            # builder makes no hinge, so never return a plain plate as a hinged lid.
+            raise ValueError("No Gridfinity hinged lid geometry exists yet; choose Lid or Lid for stacking.")
         return _make_grid_lid(eff, _grid()), []
 
     rim = eff.z

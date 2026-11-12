@@ -681,6 +681,11 @@ function syncLidForm() {
   populateLidChoices();
   $("#bin-stackable").value = String(state.design?.box?.stack?.mode === "direct");
   $("#lid-choice").value = !lid.enabled ? "none" : lid.flip_enabled ? "hinged" : lid.stack_rim ? "stacking" : "resting";
+  // Story 3009: a grid whose envelope assessment refuses the hinged lid says so in plain words.
+  const hingedRefusal = binGridRules().hinged_lid_refusal || "";
+  const hingedNote = $("#lid-hinged-refusal-note");
+  hingedNote.textContent = hingedRefusal;
+  hingedNote.hidden = !hingedRefusal;
   for (const [noteSelector, controlSelector] of [["#lid-wall-change-note", "#lid-choice"], ["#stackable-base-change-note", "#bin-stackable"]]) {
     const note = $(noteSelector);
     if (note && note.dataset.choice !== $(controlSelector).value) note.hidden = true;

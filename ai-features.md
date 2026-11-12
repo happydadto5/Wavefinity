@@ -80,8 +80,11 @@ socket (`box.lid.enabled`, `box.lid.stack_rim`) on both pitches. Closed Z stays 
 interior shorten by the lid rise. A grid lid needs at least two height units and
 enough body clearance for its floor and lid. Use the same footprint and pitch
 when stacking on a grid lid; lid-on-lid uses the standard rim seat descent.
-Hinged, label and handle lids and side connectors are Wavefinity options,
-hidden on grid bodies. The capability manifest filters lid choices by the
+Label and handle lids and side connectors are Wavefinity options, hidden on
+grid bodies. The Hinged lid is refused on both Gridfinity pitches (Story 3009:
+its open swing overruns the one-cell envelope and neighbour gap; nominal,
+unverified), so it is not a Gridfinity Lid choice and each grid row carries a
+`hinged_lid_refusal` message. A hinged lid is never also a Lid for stacking. The capability manifest filters lid choices by the
 selected grid, using the same catalog as the editor.
 Physical grid-lid fit is not yet printed (S1-13 gate).
 Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Gridfinity side openings are unavailable; the Wavefinity Side Openings modifier is omitted from the grid manifest and palette. No additional Gridfinity features are exposed.
@@ -398,7 +401,7 @@ and Lid (No lid / Lid / Lid for stacking / Hinged lid). Width and Depth use the
 selected pitch on commit and display millimetres and unit count. Gridfinity
 Height uses independent 7 mm units; Wavefinity Height stays in millimetres.
 The options below describe Wavefinity; Gridfinity exposes only the rim and
-Gridfinity Lid choices described above.
+Gridfinity Lid choices described above (no Hinged lid).
 
 Choosing Lid, Lid for stacking, or Hinged lid includes a lid and shows the lid options. A hinged lid also has Alignment (Off by default, saved as `box.lid.alignment`: off / thin 1 mm / standard 2 mm / thick 3 mm): L-shaped tabs under the two front corners. A hinged lid with Alignment on needs support for these tabs; that is expected and fine. Lid thickness, an optional Knob (the only handle), and label text are available. Older saved Pull handles open as a Knob. Editing non-empty label text enables its options; clearing it disables the label. A saved off label stays off until its text is edited, and division labels retain their editor.
 

@@ -390,3 +390,79 @@ def body_hinge_parts(
     parts = intersection([union(solids), _keeper(hinge, outer)])
     # The caller cuts the swing relief and blind bore once in the joined bin.
     return [parts]
+
+
+# --------------------------------------------------------------------------- #
+# Gridfinity envelope assessment (Story 3009)
+# --------------------------------------------------------------------------- #
+# The per-cell external allowance of a Gridfinity bin: 42 x count - 0.5 on the
+# 42 pitch (41.5 for one cell), and the 20.5 mm body of the 21 pitch
+# (gridfinity-stage1-spec.md sections 1 and 2). The rest of the pitch is the
+# 0.25 mm-per-side gap a neighbouring bin stands in.
+GRID_HINGE_ALLOWANCE = {"gridfinity": (42.0, 41.5), "gridfinity_half": (21.0, 20.5)}
+GRID_HINGE_LABELS = {"gridfinity": "Gridfinity 42 mm", "gridfinity_half": "Gridfinity half 21 mm"}
+
+
+@dataclass(frozen=True)
+class GridHingeAssessment:
+    grid: str
+    pitch_mm: float
+    allowance_mm: float           # one cell's external width
+    gap_mm: float                 # clear room behind the back plane (neighbour gap)
+    knuckle_mm: float             # knuckle length the five-knuckle run leaves
+    swing_overrun_mm: float       # open-swing reach behind the back plane, at or below the lid top
+    supported: bool
+    reason: str                   # plain language; why it is, or is not, offered
+
+
+def _swing_overrun(lid_length: float) -> float:
+    """How far behind the back plane the swinging plate reaches at or below the
+    lid-top plane, closed to ``HINGE_STOP_ANGLE``.
+
+    Same frame and construction as ``_relief_section``: the axis is the origin,
+    the lid top is ``axis_v`` above it, the plate starts at the swing circle and
+    runs ``lid_length`` forward, and the back plane lies ``HINGE_HALF`` behind
+    the axis. The plate is taken at the thickest lid (1.6 mm), the worst case. Anything
+    above the lid-top plane is clear of a neighbour of the same height, so it
+    is clipped away here (a neighbour's lid or stack above it is not assessed).
+    """
+    swing = HINGE_BARREL_RADIUS + HINGE_SWING_GAP
+    axis_v = HINGE_ROOF + swing
+    plate = box(swing, axis_v - 1.6, swing + lid_length, axis_v)   # thickest lid, 1.6 mm
+    steps = int(math.ceil(HINGE_STOP_ANGLE / HINGE_RELIEF_STEP))
+    angles = [min(HINGE_STOP_ANGLE, i * HINGE_RELIEF_STEP) for i in range(steps + 1)]
+    swept = unary_union([rotate(plate, a, origin=(0.0, 0.0)) for a in angles])
+    swept = swept.intersection(box(-1000.0, -1000.0, 1000.0, axis_v))
+    if swept.is_empty:
+        return 0.0
+    return max(0.0, -swept.bounds[0] - HINGE_HALF)
+
+
+def assess_gridfinity_hinge(grid: str) -> GridHingeAssessment:
+    """Whether the filament-pin hinged lid fits one cell of a Gridfinity pitch.
+
+    Nominal geometry only: nothing here is a printed fit. A pitch is supported
+    only if the five-knuckle run is long enough and the open swing stays inside
+    the neighbour gap; otherwise it is recorded unsupported, never reshaped.
+    """
+    if grid not in GRID_HINGE_ALLOWANCE:
+        raise ValueError(f"{grid!r} is not a Gridfinity grid")
+    pitch, allowance = GRID_HINGE_ALLOWANCE[grid]
+    gap = (pitch - allowance) / 2.0
+    knuckle = (allowance - (HINGE_MIN_KNUCKLES - 1) * HINGE_AXIAL_GAP) / HINGE_MIN_KNUCKLES
+    lid_length = allowance - (HINGE_HALF + HINGE_BARREL_RADIUS + HINGE_SWING_GAP)
+    overrun = _swing_overrun(lid_length)
+    label = GRID_HINGE_LABELS[grid]
+    if knuckle < HINGE_KNUCKLE_MIN:
+        ok, reason = False, (
+            f"A Hinged lid is not available on {label} bins: the {allowance:g} mm bin leaves "
+            f"knuckles of {knuckle:.1f} mm, under the {HINGE_KNUCKLE_MIN:g} mm the hinge needs.")
+    elif overrun > gap + 1e-9:
+        ok, reason = False, (
+            f"A Hinged lid is not available on {label} bins: its open swing reaches "
+            f"{overrun:.1f} mm behind the {allowance:g} mm bin, and only {gap:g} mm is clear "
+            f"before the next bin. Use Lid or Lid for stacking.")
+    else:
+        ok, reason = True, (
+            f"Hinged lid swing stays within the {gap:g} mm gap on {label} (nominal, unverified by a print).")
+    return GridHingeAssessment(grid, pitch, allowance, gap, knuckle, overrun, ok, reason)
