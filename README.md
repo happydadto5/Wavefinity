@@ -13,12 +13,12 @@ license: mit
 
 > **OWNER'S CODER POLICY — READ FIRST (2026-11-12): Wavefinity is USER-TESTED. Coders validate changes by reading and reasoning about code, not by executing tests. Do NOT write, update, repair or run automated tests. Do NOT manually test the application or prepare test plans/checklists for users. Implement, inspect your diff, commit/push safely, and report what changed. See [Owner-mandated user-tested development policy](#3-owner-mandated-user-tested-development-policy--no-coder-testing).**
 
-> **PLANNED BROWSER-ONLY MIGRATION (not live yet):** The end state is browser/PC geometry on `wavefinity.org` via a **new free Render Static Site**, with no Render Python Web Service idle wake-up and with Print retained. Do not create Stories, hosting services, or domain changes until Andrew finishes Gridfinity and gives the explicit **go**. Future coders read only their numbered Bxx scope in [detailed contracts](Future%20plans/Browser-only-core-detailed-build-contracts.md), the matching [function-level diff map](Future%20plans/Browser-only-core-diff-map.md), and relevant [route index rows](Future%20plans/Browser-only-core-source-route-index.md). [Overview](Future%20plans/Browser-only-core-integration-plan.md). No coder tests or user QA plans.
+> **PLANNED BROWSER-ONLY MIGRATION (NOT LIVE):** [FINAL EXECUTION SPECIFICATION](Future%20plans/Browser-only-migration-execution-spec.md) is the one authoritative design; [one-line Story-creation handoff](Future%20plans/Browser-only-migration-story-creation-handoff.md) is executed ONLY when Andrew finishes Gridfinity and says GO. Exact [B00–B16 contracts](Future%20plans/Browser-only-core-detailed-build-contracts.md), [source diff map](Future%20plans/Browser-only-core-diff-map.md), and [route index](Future%20plans/Browser-only-core-source-route-index.md) are supporting implementation references. Target: complete browser-local float64 geometry and Print on FREE Render Static Site, with Porkbun registrar AND authoritative DNS unchanged. AI Help uses user-key direct provider access where allowed and retains copy/paste. No coder tests, no QA plans, no partial working builds, no hosting/DNS changes without approval.
 
 
 Parametric Python generator for a 3D-printable modular drawer organizer with
 **wavy walls that interlock** and configurable holders inside. The local browser
-UI, command-line interface, fit sampler and tests share the same Python box,
+UI, command-line interface and fit sampler share the same Python box,
 insert and export engines.
 
 The basic system has a box and **connectors**. The normal **Side connector** is a
