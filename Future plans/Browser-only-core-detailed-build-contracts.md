@@ -1,6 +1,6 @@
 # Wavefinity full browser-only cutover — executable implementation contracts
 
-**DOMAIN OWNERSHIP/DNS LOCK (owner decision, 2026-11-12):** The domain `wavefinity.org` **stays registered, paid and renewed at Porkbun**. Keep **Porkbun authoritative DNS/nameservers**, too. No registration transfer, registrar change, Cloudflare nameserver switch, additional domain purchase or domain renewal payment. **Render Static Site is the selected hosting path**, with a new static site under the existing Render account. At final cutover only, request Andrew's permission to adjust the necessary existing DNS **records within Porkbun** (for example the `www` CNAME) and move the custom-domain association between Render services; the already-configured apex A `216.24.57.1` should remain if Render continues specifying it. These are routing changes, not registrar/DNS hosting transfers. A fallback host requiring moving nameservers is **out of scope and not to be proposed** without Andrew specifically reversing this rule. Document the actual record edits in private Help-Code, not public registration/account details.
+**DOMAIN OWNERSHIP/DNS LOCK (owner decision, 2026-11-12):** The domain `wavefinity.org` **stays registered, paid and renewed at Porkbun**. Keep **Porkbun authoritative DNS/nameservers**, too. No registration transfer, registrar change, Cloudflare nameserver switch, additional domain purchase or domain renewal payment. **Render Static Site is the selected hosting path**, with a new static site under the existing Render account. At final cutover only, request Andrew's permission to adjust the necessary existing DNS **records within Porkbun** (for example the `www` CNAME) and move the custom-domain association between Render services; the already-configured apex A `<actual apex A from private Help-Code>` should remain if Render continues specifying it. These are routing changes, not registrar/DNS hosting transfers. A fallback host requiring moving nameservers is **out of scope and not to be proposed** without Andrew specifically reversing this rule. Document the actual record edits in private Help-Code, not public registration/account details.
 
 
 Status: DETAILED DESIGN, not implemented. Revision 5, November 12, 2026.
@@ -153,6 +153,9 @@ Deliverable: local generation and connector paths, transferable output buffers a
 
 ### B07 — Exact 3MF and printer-file equivalence
 
+**Native 3MF porting limitation:** `organizer_engine/_export.py` uses lib3mf Wrapper/CreateModel, QueryReader/ReadFromBuffer, GetMeshObjects, GetBuildItems, RemoveBuildItem, AddComponentsObject/AddComponent/AddBuildItem, GetMetaDataGroup/AddMetaData, AddAttachment/ReadFromBuffer, strict QueryWriter/WriteToFile and re-read. The actual native library XML serialization/ordering is not visible from Python; cannot claim literal XML/byte equivalence from inspection. Reimplement OPC/3MF objects, transforms, resources, Application/Title metadata, Bambu relationship `http://schemas.bambulab.com/package/2021` and `Metadata/model_settings.config` slots/names. Keep runtime validity safeguards. Isolate native `lib3mf` from the Pyodide import graph; leave historical native source available for recovery. No testing programs.
+
+
 Requires: B06. MUST NOT be skipped just because STL succeeds.
 Existing reference: organizer_engine/_export.py (export_bambu_compatible_3mf, export_text_body_3mf, export_assembly_3mf, export_object_groups_3mf, validate_3mf, validate_object_groups_3mf), organizer_outputs/*.
 Create web/browser-core/engine/three_mf.py.
@@ -170,7 +173,7 @@ No testing files created.
 Patch:
 1. Route /api/print and reusable print operations through browser output builder. Preserve printer volume limits, part/plate packing, labels and status on inventory rows.
 2. KEEP the current Print buttons and part selection dialogs. Replace only the prohibited native executable auto-launch with the Print contract above: autosave, validation, generation/reuse, arranged 3MF, save/download, explicit slicer-opening handoff. Preserve a separate Export action. Do not report "Sent to slicer" without verified proof.
-3. Keep progress, cancellation, partial-save truth and Printed/Prepared state. Acknowledgement or distinct Prepared state must not falsely claim handoff. Replace /api/operation-status polling with local worker job status; /api/health now checks browser bundle version. No compatibility tests.
+3. Keep progress, cancellation, partial-save truth and the **existing Printed schema only**. Do not add a persistent Prepared field. After valid 3MF save/download, show `I opened it in Bambu Studio`; mark Printed only on explicit user confirmation with the same current design and Space ID. Replace `/api/operation-status` polling with local job status and `/api/health` with local bundle identity. No test requirements.
 Deliverable: Print remains a real main-UI command with browser-side 3MF preparation, printer/Space limits, save/download, handoff guidance and honest state transitions. No coder execution or user test plan.
 
 ### B09 — Browser persistence, preferences and Space identity
@@ -209,6 +212,9 @@ Deliverable: all structural Space and print/export routes translated to client-s
 
 ### B12 — Text, photo/nesting and advanced features
 
+**Photo Nest native-library boundary:** `wavefinity_web_impl/_nest.py` delegates to `photo_nest.py`, using `cv2`, NumPy, Shapely and Pillow `PIL.Image`. The native requirements use `opencv-python-headless 5.0.0.93`, Pillow 13; Pyodide 0.28.3 offers opencv-python 4.11.0.86 and Pillow 11.3.0. Adapt only incompatible APIs by reading the source; preserve all existing contour and perspective logic. This does not prove ABI equivalence. B12 finishes edits to `web/spaces/12-space-info.js` before B13 begins.
+
+
 Requires: B05 and B11 (B07 transitively).
 Existing files: wavefinity_web_impl/_nest.py, wavefinity_web_impl/_designs/*, organizer_inserts/_nest/*, organizer_inserts/_text.py, web/app/11-parts-preview-requests.js, web/app/04-side-openings-wall-choices.js, web/spaces/12-space-info.js.
 Create web/browser-core/engine/nest-routes.py.
@@ -219,6 +225,11 @@ Patch:
 Deliverable: advanced-feature routes use the local engine, with equivalent geometry and print/export semantics derived from original source; no /api/nest calls.
 
 ### B13 — Optional AI and intentional desktop-only capability replacements
+
+**Browser support:** B13 shows an honest Chrome/Edge notice for browsers lacking File System Access directory pickers/handle persistence. Firefox/Safari may use safe previews and Blob downloads if available but must NOT claim durable folder/Space autosave. Do not build a second storage architecture simply for unsupported browsers.
+
+**AI decision before Story creation:** Preserve AI Help UI, local prompt generation/candidate validation, and paste/copy workflow. If direct chat cannot be implemented safely with user-controlled credentials and browser CORS, Andrew must decide between copy/paste-only and an explicitly authorized external AI mechanism BEFORE B13 Story submission, not at B14. No API keys in static files and no secret server geometry proxy.
+
 
 Requires: B08, B09 and B12. **B13 is serialized after B08 for `web/app/15-generate-dialogs.js`, and after B12 for `web/spaces/12-space-info.js`; this forbids concurrent same-file edits on main.**
 Existing files: web/app/02-lifecycle-ai-help.js, wavefinity_web.py (AI handlers), web/spaces/12-space-info.js, web/app/15-generate-dialogs.js, web/app/16-suggestions.js, web/index.html.
@@ -240,30 +251,30 @@ Existing source: `web/index.html`, `web/app.js`, `web/browser-files.js`, `wavefi
 Create: `scripts/build-static-site.py` (production asset copier/bundler only), `docs/static-host-rollout.md`, `docs/static-host-rollback.md`; optionally a separate static hosting config that **does not mutate old Render service**. See [Browser-only-core-diff-map.md](Browser-only-core-diff-map.md) B14 for exact paths, setup values, DNS and owner-facing handoff.
 
 Patch (implementation, not testing):
-1. Ship `dist/index.html` from `web/index.html`, copy ALL UI-reachable `web/*` paths relative to dist root (including `app/`, `spaces/`, CSS, JS, browser-core production WASM/Python bundle), copy repository-root `images/` to `dist/images/`, and `Brochure.md` to `dist/Brochure.md`. These are three distinct Python-server static roots in current code; omission is a release defect. Do not ship source-only docs/tests/user secrets.
-2. Replace core frontend HTTP transports entirely with worker-local dispatch. Keep the existing Print UI separate from Export; include complete Bambu-compatible 3MF packaging/handoff, local space state, preview and all structural features. Review final source imports and asset paths logically (not through application test runs). Include production integrity/version manifests, safe cache headers, proper WASM MIME and security headers.
-3. **Choose Render Static Site by default** for the completed build. Render currently offers free static CDN hosting subject to included bandwidth/pipeline limits, HTTPS, custom domains and no sleeping Python process. The current Web Service cannot be switched to static in place. Prepare instructions for a **new** Render Static Site connected to `happydadto5/Wavefinity`, branch `main`, publish directory `dist`, build command provisionally `python3 scripts/build-static-site.py` when the final toolchain supports it, with auto-deploy OFF initially. Do not create it yet or change old `render.yaml`.
-4. Preserve Porkbun as registrar, `wavefinity.org` as preferred apex, `www.wavefinity.org` redirect to apex. Current Porkbun records are A apex `216.24.57.1` and `www` CNAME `wavefinity.onrender.com`; new Render Static Site gets a different onrender hostname which must be copied from the real dashboard. Root A remains only if Render's current DNS instructions still specify it; `www` CNAME must target the real Static Site hostname. Domains may need detachment from old Web Service before attachment to new Static Site. **NEVER** silently detach domains, change DNS, switch plans, disable the old service or incur fees.
+1. Ship `dist/index.html` from `web/index.html`, approved production `web/*` UI paths at dist root, repository-root `images/` at `dist/images/`, and `Brochure.md` at **BOTH** `dist/Brochure.md` and byte-identical `dist/brochure.md`. **EXCLUDE** `web/browser-local-poc.html`, `web/browser-local-poc.js`, `web/browser-local-poc-worker.js`, and **ALL** `web/browser-local-poc/**`, even though B16 deletes them only later. The bridge must ship from its B02 production vendor path. Do not ship non-production source, tests or secrets.
+2. Replace core HTTP with worker-local dispatch. **B14 alone finalizes `web/browser-core/engine/route-dispatch.py`**, importing each package's `ROUTES` map into B04's registry; that is shared wiring, not semantic ownership. Keep Print/Export separate, Bambu 3MF, Space state and preview. Source-review the final imports/asset paths logically, not by tests or browser automation. Specify MIME, CSP and Cache-Control in **new Render Static Site Dashboard → Settings → Headers**, using exact paths in the diff map; do not alter legacy `render.yaml`. Pinned bridge is single-threaded and does not require COOP/COEP.
+3. **Choose Render Static Site** in the existing Render account, free within current bandwidth/build limits, HTTPS/custom domains, without sleeping Python process. The old Web Service cannot convert in place; prepare a NEW Static Site on `happydadto5/Wavefinity` `main`, publishing `dist` from the self-contained shipping build (provisionally `python3 scripts/build-static-site.py`). Auto-deploy OFF initially. Before a hosting change, use B02's shipping-bundle asset sizes and current Render limits; no hosting surprises deferred from B02. Do not provision or touch `render.yaml` early.
+4. Preserve Porkbun registration and authoritative nameservers, apex `wavefinity.org` and `www` redirect. Existing exact live DNS record values are in PRIVATE Help-Code, not in public plans; read them when Andrew approves. Attach the domain to the NEW actual Render Static Site hostname and edit only necessary records **within Porkbun**; detach old domain association only when needed and approved. **NEVER** silently detach domains, modify DNS, change plans, disable the old service or incur charges.
 5. **ASK/TELL ANDREW AT THE RIGHT TIME:** On completion, explain the final static edition no longer has Render's ~60-second sleeping Python Web Service; disclose remaining first-load browser Pyodide/WASM delay, applicable free limits and any cost; provide exact new Static Site creation settings, real new hostname, and pending Porkbun/Render domain steps. Request authorization to move the domains and retire the old service. This is an operational approval, **not a QA or user-testing checklist**.
 6. If Render Static Site limits or costs are unsuitable, stop and ask Andrew; do not propose a root-domain host that requires changing Porkbun nameservers. No Cloudflare Pages apex migration, no registrar transfer, no new domain or billing changes. The replacement must continue using the existing Porkbun registrar and authoritative DNS unless Andrew explicitly changes his decision.
 7. Prepare one final cutover, no half-working deployments or dual-mode runtime. Preserve legacy recovery guide and record actual last live Render Web Service source SHA. Browser persistence remains on the PC; a DNS change neither uploads nor restores user files.
 
-Deliverable: full `dist/`, static-host instructions/config, complete local-only frontend with first-class Print, and exact **Andrew-facing hosting approval request**. No automated tests, manual application tests, test-only tools or user test plans.
+Deliverable: static-only `dist/` with PoC excluded, correct brochure aliases/assets and Render header settings, complete local UI/Print, and Andrew-facing hosting approval request. Coders do not run tests or create user test plans.
 
 ### B15 — Retire old service *from execution*, retain historical documentation
 
 Requires: B14 complete and owner acceptance.
 Existing files: Dockerfile, render.yaml, wavefinity_web.py, wavefinity_web_impl/, organizer_engine/, organizer_geometry/, docs/legacy-python-server-hosting.md.
 Patch:
-1. Leave docs/legacy-python-server-hosting.md and its immutable commit references. Document the actual last working server deployment SHA and what to restore. Retain relevant source history accessible through Git. Move old HTTP/Render runtime out of the static build and remove production import/dependency paths; do not delete the canonical Python geometry modules still needed in the browser.
-2. Remove or visibly mark the old Render deployment config and Python HTTP entrypoint as historical, after rollback window. Keep ability to reconstitute from recorded old commit; no new branches required. Update README.md to prefer static deploy instructions and link historical recovery doc.
-3. Confirm no public frontend includes a "silent fallback" request to /api on a server. A failing WASM runtime must surface failure, not send designs to an external server.
+1. **HARD PRE-RETIREMENT RECORD:** Complete `docs/legacy-python-server-hosting.md` with the **actual last deployed** Python Web Service SHA, actual old service identity/hostname, **actual final static deployed** SHA, date of authorized switch and exact source/ref restore procedure; fill full DNS/host association rollback values in PRIVATE `Help-Code/docs/wavefinity-domain.md`. No recovery-critical placeholders may remain before retiring anything. Retain canonical Python geometry for browser.
+2. Only after Andrew's explicit authorization, completed rollback record and rollback window, retire the old Render Python Web Service and mark historical startup configs; keep Git history and pinned restore instructions. Update README static usage. No forced migration of user data or loss of canonical Python modules.
+3. Inspect production code and import/call graph logically for HTTP fallback; failing WASM must report an error, never upload designs to the old server. This is code reasoning, **not an empirically certified zero-network claim**, automated scanner or test.
 Deliverable: retired Render execution and preserved legacy source/rollback documentation with exact SHA, while canonical geometry remains packaged for browser execution.
 
 ### B16 — Remove prototype-only code and testing scaffold
 
 Requires: B14–B15 complete.
-Existing files: web/browser-local-poc.html, web/browser-local-poc.js, web/browser-local-poc-worker.js, web/browser-local-poc/{bridge.py,canonical.zip,reference.json,style.css}, browser-tests/{README.md,prepare-local-poc.py,run-local-poc.mjs,reference-42x42x28.npz}, web/browser-local-poc/manifold64/*.
+Existing files: `web/browser-local-poc.html`, `web/browser-local-poc.js`, `web/browser-local-poc-worker.js`, PoC-only `web/browser-local-poc/{bridge.py,canonical.zip,reference.json,style.css}`, old `browser-tests/` historical files and `web/browser-local-poc/manifold64/*`. B14 explicitly excludes PoC paths from dist already; B16 removes source scaffolding but retains B02 production-bridged MeshGL64 files/LICENSE.
 Patch:
 1. Delete the superseded experimental page, isolated worker, obsolete comparison harness and testing-only fixtures; preserve production Manifold64 source, build script, license and binary by moving them to the production vendor path. No new test or fixture directories.
 2. Replace outdated unsuccessful-POC notes with accurate retained history: the original failure, custom double-precision breakthrough, Windows manual confirmation and cutover. Preserve docs rather than showing obsolete "POC failed" as the current state.
