@@ -816,9 +816,14 @@ def _datum_components(space, datum):
                 # Hook pocket: opens outward from the groove into the land, with
                 # the backing wall left between it and the side's rear face.
                 lug, backing = hook
-                out0, out1 = ((slot_x0-SD_REAR_HOOK_DEPTH_MM, slot_x0)
+                # The pocket reaches back into the groove by one joint clearance
+                # (void already) so the two cutters overlap instead of sharing
+                # a plane. Abutting faces differ by float noise at some widths
+                # (outer_x-derived slot_x1) and the boolean then leaves a
+                # zero-volume membrane as a second mesh component.
+                out0, out1 = ((slot_x0-SD_REAR_HOOK_DEPTH_MM, slot_x0+SD_JOINT_CLEARANCE_MM)
                               if left else
-                              (slot_x1, slot_x1+SD_REAR_HOOK_DEPTH_MM))
+                              (slot_x1-SD_JOINT_CLEARANCE_MM, slot_x1+SD_REAR_HOOK_DEPTH_MM))
                 cuts.append(_box(out0, datum.rear-block["cabinet_wall_mm"]-SD_JOINT_CLEARANCE_MM,
                                  datum.base+SD_JOINT_LAND_MIN_MM-SD_JOINT_CLEARANCE_MM, out1,
                                  datum.rear-backing,
