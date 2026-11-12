@@ -1,11 +1,11 @@
 # Gridfinity in Wavefinity — implementation master plan and Velexa review
 
-**Updated:** 2026-11-12  
+**Updated:** 2026-11-12 (Velexa response reconciled; Stage 2 filing instructions finalized)  
 **Repository owner:** Andrew; **reviewers:** GPT and Velexa  
 **Authority:** This document consolidates Andrew's latest instructions and the concluded reviewer agreement. It supersedes conflicting *implementation scope* in the historical [Gridfinity.md](Gridfinity.md) (November 4). It does **not** erase those historical rulings.  
 **Stage 1:** 12 Poller stories already submitted, numbered 2967–2978. Do not file duplicates.  
-**Stage 2:** detailed proposal below; **NOT submitted** and not authorized to dispatch by the existence of this document.  
-**Collaboration instructions:** Velexa should edit the response fields in §Review questions, mark each `AGREE / CHANGE / NEEDS ANDREW`, and propose specific changed requirements in place. Do not silently reopen the completed Stage 1 agreement. If a material Stage 1 defect is discovered, record it as a risk to existing stories, not as a replacement Story.
+**Stage 2:** final reviewer-agreed filing plan below; **NOT submitted**. File only after the recorded Stage 1 physical sign-off and Andrew's submission direction; optional screw holes and load-rating claims remain owner decisions.  
+**Collaboration result:** Velexa answered Q1–Q8 on 2026-11-12; GPT agrees with the proposed technical changes, which are incorporated into the authoritative Stage 2 story descriptions and filing ledger. The unedited responses remain preserved below. Do not reopen settled Stage 1 scope; record any newly demonstrated Stage 1 defect as a risk to its already-filed Story, not a duplicate.
 
 The full original Stage 1 story submission record follows unchanged, including the exact IDs and dependencies.
 
@@ -116,103 +116,154 @@ Stories are filed through Poller with unique `submission_id` values, `applicatio
 
 ---
 
-## Stage 2 — filing-ready draft for Velexa's in-document review
+## Stage 2 — agreed technical filing plan (not yet submitted)
 
-**Status:** `DRAFT / NOT SUBMITTED`. Nothing in this section has a Poller ID. This is not permission to start Stage 2 before Stage 1 physical acceptance. After Velexa reviews and Andrew decides any marked owner questions, another LLM can submit these records in the approved order using the Poller `wavefinity` application and `Wavefinity` target repository; enter returned numbers into the ledger, do not invent them.
+**Status:** Reviewer agreement reached 2026-11-12. These are complete *future* Poller story briefs, not filed Stories. Stage 1 remains Stories **2967–2978**; **never file those again**. This section incorporates the Velexa responses preserved below. It takes precedence over earlier draft wording and proposed story labels.
 
-**Stage 2 assumptions (do not silently change):** 21 mm and 42 mm Gridfinity, open-bin rim, stacking grid lid, ordinary bin editor, Plain Drawer, Storage Box/Drawers, and `Floor/None` are Stage 1 requirements. Their Stories 2967–2978 already exist. Stage 2 must not redo, regress, or weaken them. Magnets in 42 mm bin feet are optional and default off; **21 mm magnets are not specified**. No Gridfinity bin-to-bin connectors/spacers. The entire Storage Box stacking system is an advanced Stage 2 addition; ordinary bins' rim and grid-lid stacking are already Stage 1. Existing Wavefinity geometry is unchanged. Screw holes were declined by Andrew on 2026-11-12. Automatic printer-bed splitting is a separate future proposal and is not part of an approved Stage 2.
+**Blocking prerequisite for filing:** Poller Story **2978** must contain Andrew's documented **physical-fit acceptance** for *both* 42 mm and 21 mm, including independent third-party plate/bin mating and both stack directions. A numeric `start_after: [2978]` gate is not a substitute for that recorded human sign-off. If the sign-off is absent or ambiguous, **do not file any Stage 2 story**; first obtain or record the acceptance through the appropriate existing Stage 1 workflow. Do not assume `done` alone proves a successful physical print test. If a prerequisite fails or is cancelled, stop and request instructions rather than routing around it.
 
-### Proposed Stage 2 story ledger
+**Authority and scope:** The owner has approved Stage 1 and jointly agreed *what belongs in* Stage 2, but this document is not a claim that any Stage 2 story was submitted. A future filing agent should use this signed-off plan when asked to submit the remaining stories, after the Stage 1 physical gate is met. No screw-hole story without separate explicit Andrew approval. No promise of Storage Box stacking load rating; **omit all numeric/qualitative capacity claims by default**. If Andrew later wants a load rating, use independently tested evidence and obtain his separate approval to publish it. Lack of a load rating is **not** a blocker for ordinary box stacking.
 
-| Key | Proposal | Review / tier / thinking | Submission prerequisites | Poller ID | Status |
-|---|---|---|---|---|---|
-| S2-01 | Optional magnet pockets in 42 mm bin feet | standard / medium / medium | Stage 1 acceptance + magnet spec Q1 | — | Not submitted |
-| S2-02 | Storage Box-to-Storage Box Gridfinity stacking | comprehensive / high / high | Stage 1 acceptance + box interface Q2 | — | Not submitted |
-| S2-03 | Other ordinary-bin Gridfinity lids (plain and hinged) | standard / high / medium | Stage 1 acceptance + lid matrix Q3 | — | Not submitted |
-| S2-04 | Gridfinity side openings without losing baseplate compatibility | standard / high / medium | Stage 1 acceptance + opening matrix Q4 | — | Not submitted |
-| S2-05 | Optional loose-baseplate retention in Plain Drawer Spaces | standard / medium / medium | Stage 1 acceptance + plate retention Q5 | — | Not submitted |
-| S2-06 | Third-party Gridfinity bin placeholders in layout | comprehensive / high / medium | Stage 1 acceptance + metadata rules Q6 | — | Not submitted |
-| S2-07 | Optional screw holes in 42 mm feet | **declined by Andrew 2026-11-12** | — | — | Declined — will not be filed |
-| Future | Printer-bed split-and-join geometry | **not Stage 2** | Separate scope and owner approval | — | Out of scope |
+**Common constraints for all Stage 2 stories:** Both Gridfinity pitches 21 mm and 42 mm continue to work except the explicitly 42 mm-only magnet-hole option. Preserve the one-grid-per-Space rule, single editor/layout and existing Wavefinity geometry, file compatibility and printed outputs. Stage 1 already implements open-top rim, receiving-grid lid, Plain Drawer, both printed-container floor options and proper height semantics; do not recreate or regress those. Change AI Design feature declarations in the same story as each new user-visible option; update README/features, run save/load/print/export regression and 1×1 and 2×3 geometry tests. All fit claims require actual test prints or are explicitly marked unverified. Automatic printer-bed splitting, separately generated baseplates, Edge Mount, container magnet/screw holes and 21 mm magnet holes remain excluded.
 
-**Recommended filing sequence and start-after gates:** First confirm Stage 1 physical sign-off in the S1-12 acceptance record, **not merely that Story 2978 is marked complete**. File S2-01, S2-02, S2-03, S2-04, S2-05 and S2-06 in that order once their specific review questions are resolved. Give each `start_after: [2978]` as a minimum automated gate, but keep the separate manual sign-off requirement in its description. S2-01/S2-03/S2-04/S2-05/S2-06 can otherwise proceed independently when their interface contracts are settled; S2-02 should not be bundled with unrelated bin-lid changes. If any actual files or invariants collide, add `start_after` for the prerequisite **real returned** Stage 2 ID before filing the dependent story. Never put a proposed key such as S2-01 into the numeric gate. S2-07 was declined by Andrew on 2026-11-12 and will not be filed.
+### Final Story ledger, proposed order and numeric dependency rules
 
-### S2-01 — Optional magnet pockets in 42 mm bin feet
+| Filing sequence | Key | Story title / scope | Review depth · tier · thinking | Numeric start-after at filing | Poller ID | State |
+|---|---|---|---|---|---|---|
+| 1 | S2-00 | Verify and document Storage Box stacking closure/geometry contract only | slim · medium · high | `[2978]` | — | NOT FILED |
+| 2 | S2-01 | Optional standard magnet holes in 42 mm bin feet | standard · medium · medium | `[2978]` | — | NOT FILED |
+| 3 | S2-03a | Plain lids for 21/42 mm Gridfinity bins | standard · high · medium | `[2978]` | — | NOT FILED |
+| 4 | S2-03b | Hinged lids within Gridfinity bin envelope | standard · high · medium | `[2978]` (add S2-03a ID only if live file conflicts require serialization) | — | NOT FILED |
+| 5 | S2-05 | Measured edge-shim retention for loose drawer baseplates | standard · medium · medium | `[2978]` | — | NOT FILED |
+| 6 | S2-06 | Third-party bin placeholders, inventory/layout only | comprehensive · high · medium | `[2978]` | — | NOT FILED |
+| 7* | S2-02 | Storage Box-on-Box stacking, both pitches, preservation of closures | comprehensive · high · high | `[2978, actual S2-00 ID]` | — | NOT FILED |
+| 8 | S2-04 | Side Openings that preserve foot/rim and cell envelope | standard · high · medium | `[2978, actual S2-01 ID]` | — | NOT FILED |
+| — | S2-07? | Optional 42 mm foot screw holes | **NO OWNER APPROVAL** | **do not file** | — | NOT AUTHORIZED |
 
-**Problem:** Stage 1 bins locate mechanically but do not offer magnetic retention on standard 42 mm Gridfinity bases. The 21 mm pitch does not have enough independent room for the agreed magnet pattern and was not promised magnets.
+*Do **not** file S2-02 just because S2-00 was entered: wait for the S2-00 contract to be **completed, reviewed, and accepted**, then incorporate its actual resolved eligibility and clearance map in the S2-02 description/design. For S2-04, use the actual returned numeric S2-01 ID. The parallel stories are independent only after checking live changed-file ownership; if code paths would collide, file a safe additional numeric `start_after` gate before work starts and record the reason. Filing order is not necessarily work order.
 
-**Intended behavior:** Add `Magnet holes: None (default) / 6×2 mm magnets` to **ordinary 42 mm Gridfinity bin feet only**. Use the verified standard location pattern on every 42 mm cell and conservative clearance/depth from approved reference/test prints. Account for the foot's tapered profile, material between bore and floor, print orientation and press-fit/adhesive retention. Never cut a hole through the useful bin floor or interfere with support-free printing. No magnets in container floors, in 21 mm feet, or in legacy Wavefinity designs. Preserve existing 42 mm foot fit whether magnet holes are selected or not.
+The exact `submission_id` values proposed for idempotent filing are `gridfinity-s2-20261112-00`, `-01`, `-03a`, `-03b`, `-05`, `-06`, `-02`, `-04` appended to the same prefix. Before using them, check Poller for an already-filed Story by title/ID; never create a duplicate. When a submission succeeds, immediately replace **that row's** em dash with the **returned numeric Story ID** and change state to `SUBMITTED`. Record the date, result, and actual gates. If creation fails, leave state `NOT FILED`, record the error, and do not invent or reserve an ID.
 
-**Likely touch points (verify current file paths):** `organizer_features/gridfinity.py`, `organizer_engine/_specs.py`, mesh cutters in `organizer_engine/_boxes.py`, No-Space editor, save/load, AI option text, tests and print export.
+### S2-00 — Storage Box stacking contract, specification only
 
-**Acceptance:** 1×1 and 2×3 42 mm bins with and without magnets remain watertight and fit the same third-party plate; confirmed magnet fit/retention test print; no unusable/through holes; serialized choice and exported geometry match; 21 mm and legacy Wavefinity paths unchanged. **Do not file until Q1 establishes whether geometry and magnet retention have a settled fit reference.**
+**Problem:** Adding Gridfinity feet under a Storage Box and a receiving grid over its closed lid may collide with the newly completed hinge, latch and headroom geometry or create unsupported load-bearing assertions. It is unsafe to select lid eligibility or clearance by guesswork while coding the build.
 
-### S2-02 — Gridfinity stacking for entire Storage Boxes
+**Deliverable:** A checked-in, versioned contract at `Future plans/Gridfinity-Storage-Box-Stacking-Contract.md` derived from current source, with no production geometry/UI changes. Trace `organizer_b4b` and verified construction Stories 2956–2959; document the latched 2.4 mm lid skin, selectable lid headroom 0.5/1.0/2.0 mm, latch detent 0.35/0.40/0.45 mm, two-latch threshold over 96 mm and screw-hinge geometry; independently confirm in live code, not just notes. Record for both 21/42 pitches: which *existing* box lid types may safely carry a top grid; top-label location prohibited while grid stacking is enabled (front labeling remains usable); lid grid must not alter skin/headroom underside measurement; hinge-and-grid sweep envelope, hinge screw bite, latch reach/clearance and foot landing; assembled exterior/stack heights, effective load path, and detailed 1×1/multi-cell physical fit/load test protocol. If hinge/grid coexistence cannot be established from geometry, list the specific unsupported configurations and test required; do not invent a workaround or capacity rating. No load-rating claim without later Andrew approval.
 
-**Problem:** Stage 1 supports loose-bin rim/lid stacking but not a complete Storage Box sitting on another Storage Box or a third-party 42/21 mm Gridfinity plate.
+**Likely code to inspect (verify paths before writing spec):** `organizer_b4b/_geometry/_body.py`, `organizer_b4b/_geometry/_hinges.py`, `organizer_b4b/_geometry/_cutters.py`, `organizer_b4b/_plans.py`, `organizer_b4b/_constants.py`, `organizer_b4b/_outputs.py`, storage box settings/UI and lid assembly tests.
 
-**Intended behavior:** When Storage Box stacking is enabled in a Gridfinity Space, provide correctly located feet under the box and a compatible receiving grid on the closed lid/top, for **both 42 and 21 mm grids**. State the assembled exterior height and box-to-box stack height correctly; refuse layout/collision/over-height use and handle unsupported sizes or load-bearing geometry. Reuse verified shared floor/foot profiles and existing stacking grid lid geometry when compatible.
+**Acceptance:** Contract includes explicit allowed/forbidden combinations, geometry and interference diagram or table, testable elevations and tolerances, preserving the construction-system latch and closure operation, plus a reviewed acceptance sign-off. The S2-02 build story remains unfiled until the resulting contract is accepted. **No production feature here.**
 
-**Non-negotiable regression guard:** The current Storage Box construction-package hinge, latch count/tightness, lid snugness/headroom, screw engagement, opening clearance and closed-lid rigidity must remain intact. Do not replace the existing latch mechanism as a shortcut. Check real load/closure geometry and third-party plate interaction. Do not extend this mode to Wavefinity boxes or unapproved lid variants by accident.
+**Filing fields:** `type=task`; `review_depth=slim`; `tier=medium`; `thinking=high`; `tier_reason="A bounded source and geometry audit must settle lid, hinge and load-path compatibility before the large Storage Box stacking implementation."`
 
-**Likely touch points:** `organizer_b4b/_geometry/_body.py`, `organizer_b4b/_geometry/_lid.py` (if present; verify), `organizer_b4b/_plans.py`, box outputs, layout and storage-box form, shared Gridfinity profile helpers, tests.
+### S2-01 — 42 mm-only optional magnet pockets in bin feet
 
-**Acceptance:** Both pitches with 1×1 and multi-cell footprints, closed box on a third-party plate, one box on another, loose bin on top of a box, full opening/closing of hinge and latches, mesh watertightness, correct printed exterior/stack dimensions. Existing Storage Box Wavefinity lid/latch regression snapshots match before/after. Perform physical strength and fit checks rather than claiming heavy stacking capacity without test. **Do not file until Q2 resolves lid-grid/latch compatibility details.**
+**Problem:** Stage 1 Gridfinity bins locate in baseplates but cannot accept the standard 6×2 mm magnets.
 
-### S2-03 — Remaining ordinary-bin lids (plain and hinged) on Gridfinity
+**Deliverable:** Add `Magnet holes: None (default) / 6×2 mm` on ordinary **42 mm** Gridfinity bins only. Use four locations per 42 mm cell at nominal centers ±13 mm in X/Y around cell center (26 mm pattern), **but first cite the same named external reference family established for the Stage 1 foot**. Hole diameter **6.5 mm** and blind depth **2.4 mm** are *test starting values*, not final agreed tolerances; confirm with Andrew's actual printer/material/slicer and a fit/retention print. Prefer press-fit retention, allow optional adhesive, do not bore through the bottom into useful floor geometry and do not break minimum structural material thickness. Do not change outside foot profile or require support prints. Do not add magnet holes to 21 mm feet or either container floor. Preserve the exported bin shape when option is off.
 
-**Problem:** Stage 1 offers the Gridfinity `Lid for stacking` but leaves other ordinary-bin lid choices unsupported.
+**Likely touch points:** `organizer_features/gridfinity.py`, `organizer_engine/_specs.py`, `organizer_engine/_boxes.py`, web bin controls, save/load, AI docs and print/export tests.
 
-**Intended behavior:** For both pitches, enable existing plain lid and hinged lid configurations only where their closure geometry can stay inside the Gridfinity footprint and avoid interfering with feet, upper rim, adjacent bins or baseplate seating. Explicitly define the compatibility matrix among `Stackable`, stacking grid lid, plain lid and hinged lid; never label a lid as stack-compatible unless it has proven receiving geometry. Preserve Wavefinity lids. This is **ordinary-bin lids**, not whole Storage Box-on-box stacking (S2-02).
+**Acceptance:** Watertight 1×1 and 2×3 magnets-on/off specimens; confirm measured magnets and retention by physical test; unchanged third-party baseplate fit; no through-floor cuts; choice survives reload; no 21 mm or Wavefinity geometry regressions. Reference check and physical test are **part of this story**: no extra prerequisite story needed.
 
-**Likely touch points:** `organizer_features/stack.py`, `lid_hinge.py`, `organizer_engine/_specs.py`, existing editor controls, export, layout height and tests.
+**Filing fields:** `type=feature`; `review_depth=standard`; `tier=medium`; `thinking=medium`; `tier_reason="An isolated optional 42 mm foot cutter and UI/save-load choice can reuse the Stage 1 foot geometry once dimensions are verified by print tests."`
 
-**Acceptance:** Tested 1×1 and 2×3 lid configurations for 21/42, no external hinge protrusions making neighbor fit falsely pass, correct closed/assembled heights, support/clearance and mesh tests, valid persisted options, no Wavefinity regressions. **Do not file until Q3 settles which legacy lid combinations actually fit.**
+### S2-02 — Stack complete Storage Boxes on Gridfinity feet and lid grids
 
-### S2-04 — Gridfinity Side Openings
+**Problem:** Stage 1 stacks ordinary bins, but a complete Storage Box cannot yet seat on a standard Gridfinity plate or another closed box.
 
-**Problem:** Side Openings have been kept Wavefinity-only pending geometry and wall-strength verification.
+**Deliverable:** Follow the **accepted S2-00 contract exactly** on which box lid types are eligible for stacking; do not assume every hinged or latched lid is safe. For allowed 21 and 42 mm Gridfinity Storage Boxes, add feet under the body and a compatible receiving grid to the top of a closed lid. Keep the confirmed **2.4 mm latched lid skin** and 0.5/1.0/2.0 mm headroom semantics unchanged; neither upper grid nor bottom feet may interfere with hinge sweep, screw engagement, latch detents/reach, two-latch configuration or box closure. Disable/refuse a lid-top label in stacking configuration, retaining supported front label. Use proper foot/socket positioning, collision/height model and tests. No advertised weight capacity unless Andrew later explicitly permits publication based on real load tests.
 
-**Intended behavior:** Support existing Side Openings on flat Gridfinity bins for both pitches while preserving external dimensions, standard baseplate placement, neighboring bins' clearance and foot/stack-rim strength. Reject or constrain openings that intersect functional feet, rim support, hinges, or wall thickness rather than emitting fragile/unprintable meshes. Keep Edge Mount unsupported unless Andrew separately authorizes a compatible inside-footprint design; it can project beyond Gridfinity cell allowance.
+**Likely touch points:** `organizer_b4b/_geometry/_body.py`, verified lid and hinge builders, `organizer_b4b/_plans.py`, storage-box form, lid/box outputs, shared grid helpers, tests. Verify file existence; do not assume a `_lid.py` module exists.
 
-**Likely touch points:** `organizer_features/side_openings.py`, `organizer_engine/_boxes.py`, specs, editor controls, AI descriptions, tests.
+**Acceptance:** Both pitches, 1×1 and multi-cell box; box on bought plate, stacked closed boxes and loose bin atop box; opening and closing without latches/hinges fouling; accurate exterior and assembled height; strength/fit physical protocol; watertight export; existing Wavefinity box latch/hinge/headroom/regression remains unchanged. If physical proof is missing, mark stack fit/load as unverified and do not claim accepted.
 
-**Acceptance:** Both pitches, side opening cases with normal interior features and stacking rim/lid, watertight mesh, no over-cell protrusions, minimum wall strength and unchanged mating-foot fit. Stage 1 bins without openings and legacy Wavefinity designs remain unchanged. **Do not file until Q4 defines opening/hinge interactions.**
+**Filing fields:** `type=feature`; `review_depth=comprehensive`; `tier=high`; `thinking=high`; `tier_reason="Storage Box stacking alters integrated shell/lid/hinge/latch algorithms and load paths, requiring coordinated architectural review and physical acceptance."`
 
-### S2-05 — Retain loose external baseplates inside Plain Drawer Spaces
+### S2-03a — Plain lids for 21 and 42 mm Gridfinity bins
 
-**Problem:** A purchased baseplate in a real drawer can slide within the leftover gap although bins are held to that plate.
+**Problem:** Stage 1 supplies the grid stacking lid but not the existing ordinary plain lid option.
 
-**Intended behavior:** Provide optional measured retaining pieces or stops to locate the user's own baseplate inside the real drawer without reintroducing bin-to-bin spacers or claiming Wavefinity prints separate baseplates. Support arbitrary unused left/right/front/back margins from actual drawer and plate measurements; do not quietly assume a nominal plate has exact physical external dimensions. Keep bin seating/lift model from Stage 1 accurate.
+**Deliverable:** Enable plain, non-stacking ordinary-bin lids on both 21/42 pitches while preserving the external Gridfinity cell footprint, correct closed/exterior height, seating of adjacent bins and no collision with the chosen stackable open-top rim. Keep one Lid selector: `Lid for stacking` is mutually exclusive with the ordinary plain lid, and the plain lid must **never** be represented as having a receiving grid or accepting another bin unless its geometry really permits it. If a rim is incompatible with the chosen plain lid, explicitly hide/refuse that combination. Retain Wavefinity lid behavior.
 
-**Likely touch points:** `organizer_drawer/_spacers.py` (or new retaining feature), `web/drawer-panel.js`, Plain Drawer setup/layout and print outputs.
+**Likely touch points:** `organizer_features/stack.py`, `organizer_engine/_specs.py` and `LidSpec`, bin editor UI, export and height/layout tests.
 
-**Acceptance:** Placement and print examples for both pitch types and a non-multiple real drawer width, plate held without forced dimensional changes, unobstructed bin insertion, output only when user requests retention, no bin-to-bin connectors/spacers. Unspecified plate dimensions result in a clear prompt or unverified fit claim, not a guessed part. **Do not file until Q5 chooses the simplest retention design.**
+**Acceptance:** Both pitches, 1×1 and 2×3; lid closing and adjacent placement, correct height/footprint, watertight mesh, reload/AI parity, no unsupported stacking claim or Wavefinity regression.
 
-### S2-06 — Third-party bin placeholders in layout
+**Filing fields:** `type=feature`; `review_depth=standard`; `tier=high`; `thinking=medium`; `tier_reason="Adding plain Gridfinity lids crosses shared rim, height and editor semantics but does not require redesigning the existing lid system."`
 
-**Problem:** Layout currently models only bins made by Wavefinity, even when the user physically uses third-party Gridfinity bins.
+### S2-03b — Hinged lids for 21 and 42 mm Gridfinity bins
 
-**Intended behavior:** Add inventory/layout-only placeholders with selected grid pitch (21 or 42), whole-cell width/depth, optional measured actual exterior height and readable name/label. Place them by the same collision, mixed-grid refusal, and stack-height rules as Wavefinity-made bins. Show a clearly different icon/label; do not fabricate a mesh, geometry editor, STL, print file or AI-generated bin from a placeholder. Define how importing, duplicating, moving between Spaces, and save/reload work without violating Space grid authority. Unknown height must never pass a vertical fit as verified.
+**Problem:** The existing ordinary-bin rear filament-pin hinged lid (nominal **1.75 mm** pin) is not validated within the much tighter Gridfinity footprint and neighbor clearance.
 
-**Likely touch points:** `organizer_inventory/_rows.py`, `web/drawer-model.js`, `web/drawer-view.js`, layout editor and save/import, tests.
+**Deliverable:** Assess hinge knuckles, pin channel, hinge line and full open/close swing against the **41.5 mm per-cell external allowance for a single 42 mm cell** (with equivalent independently verified 21 mm clearance) and against feet/rim/lids and immediately adjacent bins. Add an ordinary hinged lid on each pitch **only where it actually fits** within the entire permitted envelope and coexists with chosen rim and lid options. Stage 1 `Lid for stacking` and hinged lid are mutually exclusive; never claim stackable geometry from a hinged lid unless separately verified receiving geometry exists. Unsupported sizes or combinations must be disabled/refused in plain language, not silently reshaped. If a usable 21 mm or 42 mm hinged-lid design cannot satisfy the envelope, record a clear blocker and obtain Andrew's product decision instead of dropping the promised option silently.
 
-**Acceptance:** A user can place one 1×1 and one 2×3 third-party placeholder on both grids, accurately detect overlap/height, preserve records across save/reload, reject cross-grid entry and avoid export as manufactured parts. Existing real-bin inventory remains unchanged. **Do not file until Q6 settles the record schema and unknown-height behavior.**
+**Likely touch points:** `organizer_features/stack.py`, the existing ordinary-bin hinge builder (locate rather than guess filename), `organizer_engine/_specs.py`, editor, collision/height engine, tests.
 
-### S2-07 — Screw holes — DECLINED by Andrew (2026-11-12)
+**Acceptance:** 1×1 and 2×3 on both pitches, neighbor clearance, hinge sweep and printability, correct height and option visibility/refusal, no over-cell projections, persisted/reloaded results and Wavefinity unchanged. Any non-fit case must be explicitly documented as unsupported.
 
-**Decision boundary:** The older November 4 plan referred to screw holes in the first pass, but Andrew's November 11–12 decisions explicitly deferred them and says they **may** be added in Stage 2. No tool or reviewer may interpret this as approval. If Andrew requests them, create a separate 42 mm ordinary-bin foot story for screw-hole selection, with an independently verified reference location, clearances, compatibility with optional magnet pockets, print/fastener safety and non-regression tests. **Andrew decided on 2026-11-12: declined. No story will be filed; screw holes are out unless Andrew himself raises them again.** Container-floor screw/magnet holes remain excluded unless separately approved.
+**Filing fields:** `type=feature`; `review_depth=standard`; `tier=high`; `thinking=medium`; `tier_reason="A constrained geometric feasibility and implementation task must reconcile the filament hinge with tight Gridfinity neighboring-bin envelopes."`
 
-### Exclusions and release policy
+### S2-04 — Side Openings on both Gridfinity pitches
 
-- **No Stage 2 story submission yet.** This plan is editable review material for Velexa, not a Poller submission authorization.
-- Automatic splitting of oversized parts, 21 mm magnets, separately generated baseplates, Edge Mount and stronger mechanical attachment systems are not included.
-- Stage 2 acceptance requires physical fit tests appropriate to each new geometry, including confirmation that existing Stage 1 21 mm and 42 mm interoperability is still intact.
-- Every submitted story must independently include the exact intended behavior, affected files (updated by a quick source inspection), acceptance criteria, `application_id=wavefinity`, `target_repo=Wavefinity`, review depth, tier/thinking/tier reason and numeric `start_after` Story IDs, and then record its returned Story ID in the ledger. Never write `Submitted` before Poller returns success.
+**Problem:** Side Openings are still Wavefinity-only because openings can damage functional foot, top rim or wall structures.
 
-## Review questions for Velexa — answer **directly in this document**
+**Deliverable:** Support existing Side Openings on flat 21/42 mm Gridfinity bins while preserving the complete outside Gridfinity envelope. **Reject at point of entry**, with plain text and no silent clipping or shrinking, any opening intersecting: (a) the **4.75 mm foot zone plus its base**, (b) the optional open-bin **stacking rim zone**, (c) foot-carrying corner-radius regions, or (d) a remaining wall segment thinner than the selected wall thickness. Maintain stack-rim support, third-party baseplate fit and standard bins' neighbor clearance. **Edge Mount stays excluded**; it projects beyond the cell and only Andrew may separately approve an inside-envelope replacement. Gate this story behind completed S2-01 to avoid shared gridfinity foot/wall cutter conflicts.
 
-**Do not reopen settled Stage 1 scope** unless identifying a demonstrable contradiction. For each question, replace the response line with your reasoning, recommendation and any exact edits to the Stage 2 story above. Mark `AGREE`, `CHANGE` or `NEEDS ANDREW`. If there is a genuine product choice, don't decide it on Andrew's behalf. Add source paths or standards where applicable.
+**Likely touch points:** `organizer_features/side_openings.py`, `organizer_engine/_boxes.py`, `organizer_features/gridfinity.py`, specs, editor and AI option docs, tests.
+
+**Acceptance:** Maximal permitted opening on 1×1 and 2×3 at both pitches; mates bought reference baseplate, accepts another standard bin on optional upper rim, watertight, minimum wall and foot/rim strength remain; rejected intersection cases show a clear message and do not emit corrupt mesh; no Wavefinity regression.
+
+**Filing fields:** `type=feature`; `review_depth=standard`; `tier=high`; `thinking=medium`; `tier_reason="Openings must validate multiple structural no-cut zones in shared bin geometry while preserving third-party mating and stack behavior."`
+
+### S2-05 — Measured edge-shim retention for a loose Plain Drawer baseplate
+
+**Problem:** In an ordinary real drawer, an externally supplied baseplate can slide because its actual footprint is smaller than the drawer cavity.
+
+**Deliverable:** Generate **optional, measured edge shims** (simple printed strips) from user-entered **actual measured outside size of the purchased plate** and actual drawer inside size. Fill the existing hatched leftover gap with a user-chosen positioning arrangement and a verified **0.25–0.5 mm per-side working clearance starting range**, not a force fit. Ask for actual measured plate size when missing; never assume nominal Gridfinity size equals printed outside size, silently change the plate layout, or create a new baseplate. Output only the requested retaining shims; **no bin-to-bin spacer system**. Preserve Stage 1 measured seating-lift/stack-height model.
+
+**Likely touch points:** `organizer_drawer/_spacers.py` or dedicated retainer builder, `web/drawer-panel.js`, Plain Drawer layout/print, sizing UI and tests.
+
+**Acceptance:** Both pitches and non-grid-multiple real drawer sizes; measurable strips fit without obstructing plate/bin seating, dimensions honor actual plate size and clearance, missing measurements requested before print, save/reload and export appropriate, no baseplate output and no Wavefinity regression.
+
+**Filing fields:** `type=feature`; `review_depth=standard`; `tier=medium`; `thinking=medium`; `tier_reason="Measured drawer/plate strips are straightforward geometry, with bounded UI measurement and output integration."`
+
+### S2-06 — Third-party Gridfinity bin placeholders in layout
+
+**Problem:** A Gridfinity Space cannot accurately represent a purchased or externally printed bin that has no Wavefinity design.
+
+**Deliverable:** Add a **distinct inventory row kind** representing an external, **non-printable layout placeholder** with grid pitch 21 or 42, whole-cell width/depth, optional measured **actual exterior height** and name. **No design payload** is ever attached. It cannot enter bin editor, AI Design, STL/mesh generation or print/export, and cannot be converted into a design in place. Duplicate and Space copy preserve kind and grid; import into a mismatched Space is refused at UI/API/save boundary under existing cross-grid authority. Unknown height is a true unknown (never zero/default) displayed as **Not measured**: floor placement may show its footprint, but any vertical collision/stack calculation involving it is **unverified**, not passed; a stack above an unmeasured placeholder cannot be claimed valid. When measured height is supplied, apply ordinary vertical and same-grid layout rules. Distinguish external placeholder visually and in any output lists.
+
+**Likely touch points:** `organizer_inventory/_rows.py`, `web/drawer-model.js`, `web/drawer-view.js`, storage layout UI/save/import/API, tests.
+
+**Acceptance:** 1×1 and 2×3 placeholders in both pitches, overlap and known-height rejection, unknown-height unverified state, duplicate/copy/import and mismatch refusal, unaltered save/load, no accidental print/export/AI path, no real-bin regression.
+
+**Filing fields:** `type=feature`; `review_depth=comprehensive`; `tier=high`; `thinking=medium`; `tier_reason="A distinct persisted inventory kind affects shared data structures, import/save boundaries, layout collision and downstream print eligibility."`
+
+### S2-07? — Screw holes: not filed, not approved
+
+The November owner decision deferred screw holes, **not** authorized them. This optional future story needs a new **explicit** Andrew approval. If he requests it, verify the 42 mm standard screw-hole geometry, compatibility with S2-01 magnet patterns, material strength and supported fastener, and file a distinct story with appropriate numeric gate. **No new screw holes in container floors; no 21 mm screw holes by default.**
+
+### Filing protocol for the next LLM (operational checklist)
+
+1. Read this complete plan, preserved Velexa Q1–Q8 answers and the current repository implementation. Check Poller **Story 2978** and its actual physical 21/42 mm sign-off. If missing, **stop without filing Stage 2**; the immediate next step is to finish/record Stage 1 acceptance.
+2. If Andrew has requested Stage 2 submission and the sign-off is present, read the current Poller Story list to detect already-submitted Stage 2 work; do not duplicate any story. Verify repository file paths and that new Stage 1 code actually provides the claimed prerequisites. Record any changed file/API names in each submitted description without changing approved behavior.
+3. File in the ledger's sequence. Use `application_id="wavefinity"`, `target_repo="Wavefinity"`, the ledger's `type`, `review_depth`, `tier`, `thinking`, and exact one-sentence `tier_reason`; `description` must include the *complete* problem, deliverable, constraints, file paths (verified), acceptance, physical-test requirement, and owner authority. Do **not** pass `andrew_instruction` on standard/comprehensive/slim filings (the Poller endpoint rejects it); that field is for direct or debate. For `start_after`, pass the numeric IDs exactly; do not pass textual keys or future guessed IDs.
+4. Use the listed stable `submission_id` per key, and do not reuse the same ID for different descriptions. On success, record Poller's actual returned ID, stage, numeric `start_after`, submission date, and `SUBMITTED` in this table **immediately**. On error, leave `NOT FILED` and write the error alongside the key. If a Story must be changed after filing, use Poller's proper review/contract workflow rather than filing a duplicate.
+5. S2-02 is **special**: S2-00 must be submitted, completed, and its contract reviewed/accepted before filing S2-02. Copy the accepted contract's eligible lid types, forbidden cases and clearance map into S2-02; only then use `start_after: [2978, S2-00 numeric ID]`. S2-04 must use `start_after: [2978, S2-01 numeric ID]`. Optional S2-07 is excluded unless new owner permission exists.
+6. Each completed geometry Story must show reproducible mesh tests, both-pitch compatibility (where applicable), no Wavefinity regression, and physical print acceptance. If tests are not yet performed, label that part unverified and do not claim release-ready fit. The agent should not claim an entire Stage is released merely because every Poller story is `done`.
+
+### Stage 2 non-goals and owner-only decisions
+
+- **Not in the agreed Stage 2:** automatic printer-bed split/join, standalone baseplate creation, Gridfinity Edge Mount, 21 mm magnets, container floor magnets or screws, any redesign of settled Stage 1 dimension entry.
+- **Andrew approval required for:** (1) optional 42 mm bin-foot screw holes; (2) publishing a validated Storage Box stacking capacity figure. Neither approval is needed to file S2-00..S2-06 using their **no-screw/no-load-claim** defaults.
+- Velexa's complete answers remain below as the historical review record. Their technical recommendations are incorporated above. If a future answer conflicts with this accepted section, record and resolve the difference before creating conflicting stories.
+
+---
+
+## Velexa review record — answered 2026-11-12 (preserved verbatim)
+
+**Historical record only:** These questions and Velexa's original responses are preserved for traceability. Their agreed technical edits have been applied to the authoritative Stage 2 filing plan above. Do not treat the old proposed S2 labels or draft status language inside the responses as live filing instructions.
 
 ### Q1 — Magnet-hole geometry and retention
 
