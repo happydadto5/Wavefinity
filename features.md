@@ -25,6 +25,13 @@ regenerate bins and side clips made with that profile as a set.
 
 ## Status
 
+An isolated browser geometry experiment is available directly at
+`/browser-local-poc.html` (Story 2979). It downloads tools into browser memory
+without installation and leaves designs untouched. The full-bin feasibility
+attempt failed because the pinned browser dependencies lack float64 Mesh64
+booleans; it does not offer a finished bin or STL. See `browser-tests/README.md`.
+Production creation/export and AI Design options are unchanged.
+
 Space and design records preserve their grid identity: Wavefinity (7 mm),
 Gridfinity half (21 mm), or Gridfinity (42 mm). A Space keeps the grid chosen at
 creation; bin entry across different grids is refused without changing either

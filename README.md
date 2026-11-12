@@ -2390,6 +2390,18 @@ divider's feature in, `labels: [{index, kept}]` out). Lid division labels are
 not covered. Separately, `make_fused_box` drops zero-volume boolean slivers
 (under 2 mm) that a divider/wavy-wall join could leave as extra "pieces".
 
+### Browser-only geometry feasibility (Story 2979, 2026-11-12)
+
+`/browser-local-poc.html` is an opt-in, isolated experiment on the existing
+host. It loads tools into browser memory without installation. Chrome and Edge
+reproduce the canonical wall/cavity profiles and 0.25 mm seam, including with
+network blocked after load. **The full-bin POC failed:** the pinned browser
+dependencies lack the engine's required float64 Mesh64 boolean interface.
+No finished bin or STL is claimed. Production geometry still uses Python.
+The baseline, measurements, dependency evidence, limitations and proposed next
+Story are in [browser-tests/README.md](browser-tests/README.md). No production
+design option or AI Design contract changes.
+
 ## Local temp space
 
 This project keeps a folder named `local-temp/` at the repository root. It is local temp space: files that belong with this project on this machine but are never backed up to the cloud repo - captures, trial output, scratch files. The project's .gitignore ignores `local-temp/`, so nothing in it is ever committed. Its contents are disposable: never keep the only copy of anything that matters in it. The convention is defined once for every project in Help-Code (REVIEWER-CHAT.md, 'Local temp space').

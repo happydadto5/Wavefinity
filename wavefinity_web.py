@@ -3617,12 +3617,30 @@ class WavefinityHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
-        self.send_header(
-            "Content-Security-Policy",
+        # Only the opt-in experiment may load its pinned browser runtimes.
+        # Production pages retain the original same-origin policy.
+        browser_poc = resolved_root == WEB_ROOT.resolve() and candidate in {
+            resolved_root / "browser-local-poc.html",
+            resolved_root / "browser-local-poc-worker.js",
+        }
+        policy = (
             "default-src 'self'; script-src 'self'; style-src 'self'; "
             "connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; "
-            "base-uri 'none'; frame-ancestors 'none'",
+            "base-uri 'none'; frame-ancestors 'none'"
         )
+        if browser_poc:
+            # The pinned WASM binding creates JS wrappers with Function().
+            # Permit that only inside the experiment's dedicated worker.
+            worker_eval = " 'unsafe-eval'" if candidate.name == "browser-local-poc-worker.js" else ""
+            policy = (
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'"
+                + worker_eval + " https://cdn.jsdelivr.net; "
+                "style-src 'self'; worker-src 'self'; "
+                "connect-src 'self' https://cdn.jsdelivr.net https://files.pythonhosted.org; "
+                "img-src 'self' data: blob:; object-src 'none'; "
+                "base-uri 'none'; frame-ancestors 'none'"
+            )
+        self.send_header("Content-Security-Policy", policy)
         self.end_headers()
         self.wfile.write(body)
 
