@@ -153,7 +153,7 @@
       box.hinge_type === "piano" ? "piano" : "screw");
     hingeType.id = id("hinge-type");
     const hingeTypeRow = labeled("Hinge type", hingeType);
-    const snugnessRow = labeled("Lid snugness", snugness);
+    const snugnessRow = labeled("Lid head-room", snugness);
     lidRow.append(labeled("Lid type", lidType), snugnessRow, latchRow, latchTightnessRow, hingeTypeRow, hingeRow);
     const screwsLine = el("p", "dl-note");
     screwsLine.hidden = true;

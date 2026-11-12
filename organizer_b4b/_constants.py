@@ -52,10 +52,9 @@ B4B_LID_SKIRT_WALL = 2.0       # locating skirt wall thickness
 # enough that the closed lid does not rattle on the spigot.
 B4B_LID_SEAT_CLEARANCE = 0.15
 B4B_LID_SKIRT_LAP = 2.0        # centering lap: how far the skirt laps down past the body rim
-# Skirt-tip clearance above a child of the stated inside height is the user's
-# Lid snugness choice (``lid_headroom_mm``: 0.5 / 1.0 / 2.0); the skirt lap is
-# added on top of it, so each choice yields its own labelled clearance.
-B4B_LID_SKIRT_TIP_CLEARANCE = 0.5   # smallest (Tight) choice; kept for reference
+# Plate clearance above a child of the stated inside height is the user's
+# Lid head-room choice; the skirt lap is limited to that available clearance.
+B4B_LID_SKIRT_TIP_CLEARANCE = 0.5   # legacy reference
 B4B_LID_SKIRT_MIN_LAP = 0.30   # smallest lap that still counts as a locating skirt
 # A latched lid needs a printable body wall below its latch pad, independent
 # of the selected latch strength - see organizer_engine.product_rules.B4B_LATCHED_MIN_HEIGHT.

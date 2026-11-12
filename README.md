@@ -86,7 +86,7 @@ Side connectors are unavailable while a lid is fitted.
 **Controls follow their meaning, not their mechanism.**
 
 - A **select** is for choosing one of several named states —
-  *Lid type*, *Lid snugness*, *Show*, *Orientation*, *Base*, *Walls*, and the Storage Box case's
+  *Lid type*, *Lid head-room*, *Show*, *Orientation*, *Base*, *Walls*, and the Storage Box case's
   *Stacking* and *Carrying handle*. This holds even at two
   options: a row of big buttons for a two-state setting reads as two actions,
   and gives no clue the two are exclusive.

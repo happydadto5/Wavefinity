@@ -266,7 +266,7 @@ SCOOP_CURVE_SEGMENTS = 32
 # B4B (Bin for Bins) - a container mode, not an interior feature.  All of its
 # tuning lives in ``organizer_b4b.py``; this dataclass is only the saved intent.
 # --------------------------------------------------------------------------- #
-B4B_LID_HEADROOM_CHOICES = (0.5, 1.0, 2.0)   # UI: Lid snugness (Tight/Standard/Loose)
+B4B_LID_HEADROOM_CHOICES = (0.5, 1.0, 2.0)   # UI: Lid head-room (Tight/Standard/Loose)
 # Latch choices for a Storage Box. BoxSpec converts the legacy "auto" value
 # using this shared width threshold when it loads an older design.
 B4B_LATCH_TWO_ABOVE_FIELD_X = 96.0
@@ -513,7 +513,7 @@ class B4BSpec:
     latch_strength: str = "standard"   # legacy only; derived from screw family
     hinge_count: str = "2"             # 1 | 2; meaningful only with a secure lid
     hinge_type: str = "screw"          # screw | piano; meaningful only with a secure lid
-    lid_headroom_mm: float = 1.0       # UI: Lid snugness
+    lid_headroom_mm: float = 1.0       # UI: Lid head-room
     latch_tightness: str = "default"   # loose | default | tight; an older design reads default
     edge_bevel: str = "default"        # none | light | default | heavy; a design
                                         # saved before this existed loads as "none"
@@ -566,13 +566,13 @@ class B4BSpec:
                 f"label size must be one of {', '.join(B4B_LABEL_SIZES)}"
             )
         if not math.isfinite(self.lid_headroom_mm) or self.lid_headroom_mm <= 0:
-            raise ValueError("lid snugness (headroom) must be a positive number")
+            raise ValueError("lid head-room must be a positive number")
         if not any(
             math.isclose(self.lid_headroom_mm, choice, abs_tol=1e-6)
             for choice in B4B_LID_HEADROOM_CHOICES
         ):
             allowed = ", ".join(f"{c:g}" for c in B4B_LID_HEADROOM_CHOICES)
-            raise ValueError(f"lid snugness must be one of {allowed} mm")
+            raise ValueError(f"lid head-room must be one of {allowed} mm")
 
     def normalised(self) -> "B4BSpec":
         """Return the coherent Storage Box configuration used by geometry.

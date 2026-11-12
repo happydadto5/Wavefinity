@@ -602,7 +602,7 @@ def validate_b4b_design(
                 f"this Lid Only Storage Box only has {lap:.2f} mm of locating skirt "
                 f"lap (need {B4B_LID_SKIRT_MIN_LAP:g} mm); the lid would sit "
                 "as a loose, unlocated flat plate - raise the bin height or "
-                "loosen the lid snugness"
+                "increase the lid head-room"
             )
 
     cx, cy = b4b_capacity_units(box)

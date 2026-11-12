@@ -331,7 +331,7 @@ def _skirt_lap(eff: BoxSpec) -> float:
     ``B4B_LID_SKIRT_LAP`` alone.
     """
     clearance_above_child = b4b_rim_z_from_eff(eff) - (eff.base_thickness + eff.z)
-    return max(0.0, min(B4B_LID_SKIRT_LAP, clearance_above_child - eff.b4b.lid_headroom_mm))
+    return max(0.0, min(B4B_LID_SKIRT_LAP, clearance_above_child))
 
 
 def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
