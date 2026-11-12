@@ -56,11 +56,16 @@ Never assume a successful GitHub push triggers deployment; checked-in Render aut
 
 On a free Render plan, idle/sleep and CPU/RAM limits can affect complex mesh generation, and server-side processing scales with visitor usage. The browser-only replacement aims to eliminate server geometry computation, but the full cutover requires client-side validation, 3MF, persistence, all Space types, and backend-free acceptance—not merely the two successful proof-of-concept bins.
 
-## Exact recovery-source references (fill at actual cutover)
+## Exact recovery-source references (HARD B15 prerequisite — do not retire the old service while incomplete)
+
+**Current status:** The values below are NOT YET RECORDED because no static cutover has happened. This is intentional honesty, not an already workable rollback. B15 must read actual Render dashboard/revision data, fill every recovery-critical field and document a real source restore procedure BEFORE disabling/retiring the old service. Full DNS target/rollback and service association details belong in private Help-Code/docs/wavefinity-domain.md, not this public document. Do not invent values from GitHub main. No application tests are required by coders.
 
 - Last actually verified production Render commit: NOT YET RECORDED; must be read from live Render Events.
 - Last known historical server source baseline for the successful browser experiment: f25fee144d556a819a80eec6a89313603ce0460b (the branch also contains experimental browser files).
-- Final static deployment commit: NOT YET RECORDED.
-- Render retirement / DNS switch date: NOT YET RECORDED.
+- Final **actually deployed** Render Static Site commit SHA: NOT YET RECORDED.
+- Render Static Site real hostname/service identifier and TLS association: NOT YET RECORDED.
+- Render retirement / approved DNS cutover date: NOT YET RECORDED.
+- Exact restore source/ref and legacy Web Service reactivation steps: NOT YET RECORDED.
+- Private Porkbun old/new DNS records + old/new Render service-domain associations, with rollback procedure: NOT YET RECORDED in private Help-Code.
 
 See Future plans/Browser-only-core-detailed-build-contracts.md work packages B00, B14 and B15 for the explicit cutover and rollback gates.
