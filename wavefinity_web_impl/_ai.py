@@ -12,7 +12,7 @@ from organizer_inserts import FEATURE_DEFINITIONS
 from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED
 
 from organizer_engine import GRID_PITCH
-from organizer_engine._specs import validate_grid
+from organizer_engine._specs import validate_grid, cross_grid_message
 from ._runtime import default_design
 from ._designs import _is_base_trim_design, validate_design_payload
 
@@ -20,10 +20,24 @@ from ._designs import _is_base_trim_design, validate_design_payload
 def grid_editor_catalog() -> list[dict[str, Any]]:
     """Shared editor/AI choices, with dimensions taken from the geometry model."""
     from organizer_engine._specs import GRID_PITCHES
-    from organizer_features.gridfinity import HEIGHT_UNIT, MIN_GRID_BASE, rim_depth
+    from organizer_engine._specs import BoxSpec
+    from organizer_features.gridfinity import (
+        HEIGHT_UNIT, MIN_GRID_BASE, assembled_lid_stack_height, assembled_stack_height, rim_depth,
+    )
     labels = {"wavefinity": "Wavefinity 7 mm", "gridfinity_half": "Gridfinity half 21 mm",
               "gridfinity": "Gridfinity 42 mm"}
+
+    def seat_descent(grid: str, pitch: float, height_of) -> float | None:
+        """How far an upper bin sinks into the one below, read from the engine's own
+        assembled heights (Stories 2970/2971) so the layout never keeps a second copy."""
+        if grid == "wavefinity":
+            return None
+        probe = BoxSpec(pitch, pitch, 2 * HEIGHT_UNIT)
+        return round(probe.z + probe.z - height_of(probe, probe, grid), 9)
+
     return [{"value": grid, "label": labels[grid], "pitch_mm": pitch,
+             "stack_seat_descent_mm": seat_descent(grid, pitch, assembled_stack_height),
+             "lid_stack_seat_descent_mm": seat_descent(grid, pitch, assembled_lid_stack_height),
              "height_unit_mm": None if grid == "wavefinity" else HEIGHT_UNIT,
              "minimum_base_mm": 0 if grid == "wavefinity" else MIN_GRID_BASE,
              "rim_depth_mm": 0 if grid == "wavefinity" else rim_depth(grid),
@@ -41,7 +55,7 @@ def ai_context_grid(candidate: Any, grid: str) -> dict[str, Any]:
     if not isinstance(candidate, dict):
         raise ValueError("The response has no design object.")
     if "grid" in candidate and validate_grid(candidate["grid"]) != grid:
-        raise ValueError("The AI design uses a different grid from the open Space or editor.")
+        raise ValueError(cross_grid_message(candidate["grid"], grid, "The AI design"))
     return {**candidate, "grid": grid}
 
 

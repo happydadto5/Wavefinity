@@ -14,6 +14,7 @@ from organizer_app import (
 )
 from organizer_features.stack import stack_summary
 from organizer_engine import BASE_UNIT, MAX_BOX_SIZE, WAVE_AMPLITUDE, WAVE_MATING_GAP
+from organizer_engine._specs import GRID_PITCHES, BoxSpec, grid_label, validate_grid
 from organizer_inventory import design_specs, normalise_storage_box
 from organizer_b4b import B4B_STACK_PEG_EXPOSED, b4b_summary
 from organizer_engine.product_rules import DRAWER_HARD_CLEARANCE_MM, DRAWER_LAYER_MAX_USABLE_HEIGHT_MM
@@ -149,6 +150,13 @@ def normalise_drawer(raw: dict[str, Any]) -> dict[str, Any]:
         drawer["bin_axis"] = "x"
     # Old 8 mm drawers (snap 8 / 4) re-base deterministically onto 7 / 3.5.
     drawer["snap"] = 3.5 if float(drawer.get("snap") or 7.0) in (3.5, 4.0) else 7.0
+    # A Plain Drawer Space may record a Gridfinity grid (Story 2973). Its pitch
+    # is the snap, its dimensions are the real ones (no wall allowance), and the
+    # field starts at the front-left wall. A Wavefinity drawer carries no key.
+    grid = validate_grid(drawer.pop("grid", "wavefinity"))
+    if grid != "wavefinity" and drawer["boundary"] == "wall":
+        drawer.update(grid=grid, snap=GRID_PITCHES[grid], clearance=0.0,
+                      anchor="front-left", bin_axis="x")
     drawer.pop("keepouts", None)  # the old Keep-out Zone feature is gone
     drawer["placements"] = [one for one in drawer.get("placements") or [] if isinstance(one, dict)]
     return drawer
@@ -160,7 +168,15 @@ def find_drawer(layout: dict[str, Any], drawer_id: str | None = None) -> dict[st
     if not drawers:
         raise ValueError("the layout has no drawers")
     wanted = drawer_id or (layout or {}).get("active")
-    return next((one for one in drawers if one.get("id") == wanted), drawers[0])
+    found = next((one for one in drawers if one.get("id") == wanted), drawers[0])
+    # A Plain Drawer Space's recorded grid is authoritative over the drawer copy.
+    grid = space_drawer_grid(layout)
+    if grid is not None and found.get("grid", "wavefinity") != grid:
+        if grid == "wavefinity":
+            found.pop("grid", None)
+        else:
+            found["grid"] = grid
+    return found
 
 
 def drawer_grid(drawer: dict[str, Any]) -> dict[str, Any]:
@@ -204,18 +220,75 @@ def drawer_grid(drawer: dict[str, Any]) -> dict[str, Any]:
     spare_y = usable_y - rows * step
     ox = slack / 2.0 + (spare_x / 2.0 if drawer["anchor"] == "center" else 0.0)
     oy = slack / 2.0 + (spare_y / 2.0 if drawer["anchor"] == "center" else 0.0)
-    return {
+    result = {
         "step": step, "cols": cols, "rows": rows, "ox": ox, "oy": oy,
         "gap_left": ox,
         "gap_right": drawer["width"] - ox - cols * step,
         "gap_front": oy,
         "gap_back": drawer["depth"] - oy - rows * step,
     }
+    if drawer.get("grid"):
+        result["grid"] = drawer["grid"]
+    return result
+
+
+def drawer_unit_mm(drawer: dict[str, Any]) -> float:
+    """One layout unit: 7 mm on a Wavefinity drawer, the cell pitch on a Gridfinity one."""
+    return GRID_PITCHES[drawer["grid"]] if drawer.get("grid") else UNIT
 
 
 def _per_unit(drawer: dict[str, Any]) -> int:
-    """Grid cells per 7 mm unit: 1, or 2 on a drawer that snaps to 3.5 mm."""
-    return int(round(UNIT / drawer["snap"]))
+    """Grid cells per layout unit: 1, or 2 on a drawer that snaps to 3.5 mm."""
+    return int(round(drawer_unit_mm(drawer) / drawer["snap"]))
+
+
+def space_drawer_grid(layout: dict[str, Any] | None) -> str | None:
+    """The recorded grid of a Plain Drawer Space, else None (every other kind)."""
+    space = layout.get("space") if isinstance(layout, dict) else None
+    if isinstance(space, dict) and space.get("kind") == "drawer":
+        return validate_grid(space.get("grid", "wavefinity"))
+    return None
+
+
+def drawer_in_space(raw: dict[str, Any], layout: dict[str, Any] | None) -> dict[str, Any]:
+    """``raw`` stamped with its Plain Drawer Space's recorded grid (the Space is
+    the authority, never a client-supplied drawer copy)."""
+    grid = space_drawer_grid(layout)
+    if grid is None:
+        return raw
+    stamped = {key: value for key, value in raw.items() if key != "grid"}
+    if grid != "wavefinity":
+        stamped["grid"] = grid
+    return stamped
+
+
+def space_seated_lift(layout: dict[str, Any] | None) -> float | None:
+    """The measured seated lift recorded for the Space (Story 2974), else None
+    (unverified). Read through the one measured_seated_lift validator."""
+    from organizer_features.gridfinity import measured_seated_lift
+    space = layout.get("space") if isinstance(layout, dict) else None
+    if not isinstance(space, dict):
+        return None
+    value = space.get("seated_lift_mm")
+    if value is None and isinstance(space.get("storage_box"), dict):
+        value = space["storage_box"].get("seated_lift_mm")
+    try:
+        return measured_seated_lift(value)
+    except ValueError:
+        return None
+
+
+def gridfinity_seat_offset(lower: dict[str, Any], upper: dict[str, Any],
+                           specs: dict[str, Any], grid: str) -> float:
+    """How far above the lower bin's foot bottom the upper bin's foot bottom
+    seats: the rim seating (Story 2970) or, when the lower bin is closed with a
+    stacking lid, the lid-socket seating (Story 2971). Both are the engine's
+    assembled heights less the upper bin's own height."""
+    from organizer_features.gridfinity import assembled_lid_stack_height, assembled_stack_height
+    low = BoxSpec(float(lower["x"]), float(lower["y"]), float(lower["z"]))
+    high = BoxSpec(float(upper["x"]), float(upper["y"]), float(upper["z"]))
+    height = (assembled_lid_stack_height if lid_takes_stack(lower, specs) else assembled_stack_height)
+    return height(low, high, grid) - float(upper["z"])
 
 
 def _cell(units: Any, drawer: dict[str, Any]) -> int:
@@ -530,6 +603,9 @@ def _stack_item(root: dict, drawer: dict[str, Any], by_id: dict[str, dict],
     metrics = storage_box or surface
     pegboard = drawer.get("boundary") == "pegboard"
     per_unit = _per_unit(drawer)
+    grid_name = drawer.get("grid")
+    unit_mm = drawer_unit_mm(drawer)
+    lift = float(drawer.get("seated_lift_mm") or 0.0) if grid_name else 0.0
     base = root["p"]
     first = by_id[base["bin"]]
     layers: list[dict[str, Any]] = []
@@ -544,7 +620,7 @@ def _stack_item(root: dict, drawer: dict[str, Any], by_id: dict[str, dict],
         one = by_id[placement["bin"]]
         w, d = bin_cells(one, drawer)
         if parent is None:
-            gx, gy, bottom, depth = _cell(placement["gx"], drawer), _cell(placement["gy"], drawer), 0.0, 0
+            gx, gy, bottom, depth = _cell(placement["gx"], drawer), _cell(placement["gy"], drawer), lift, 0
         else:
             below = by_id[parent["bin"]]
             gx = parent["gx"] + _cell(_offset(placement.get("ox")), drawer)
@@ -557,11 +633,16 @@ def _stack_item(root: dict, drawer: dict[str, Any], by_id: dict[str, dict],
                     or gx + w > parent["gx"] + parent["w"] or gy + d > parent["gy"] + parent["d"]):
                 issues.append(f"{_label(one)} sticks out past the edge of {_label(below)}")
             if per_unit == 1 and (_offset(placement.get("ox")) % 1 or _offset(placement.get("oy")) % 1):
-                issues.append(f"{_label(one)} sits off the 7 mm grid on {_label(below)}")
+                issues.append(f"{_label(one)} sits off the {unit_mm:g} mm grid on {_label(below)}")
             below_plan = (plans or {}).get(below["id"], {})
             pitch = below_plan.get("pitch_mm", stack_pitch(below))
             bottom = (parent["z0"] + pitch
                       if metrics else parent["z1"] - STACK_STEPS.get(one.get("stack", "none"), 0.0))
+            if grid_name:
+                if (w, d) != (parent["w"], parent["d"]):
+                    issues.append(f"{_label(one)} cannot stack on {_label(below)}: "
+                                  f"only a same-footprint bin stacks on another in a {grid_label(grid_name)} Space")
+                bottom = parent["z0"] + gridfinity_seat_offset(below, one, specs or {}, grid_name)
             if surface:
                 # The upper bin seats at z0 + pitch of its direct parent. A known
                 # installed object that rises past that plane blocks the stack; an

@@ -747,7 +747,12 @@ function drawerHardClearance() {
   return number(state.catalog?.drawer_rules?.hard_wall_clearance_mm, 0);
 }
 
-function drawerSpaceCapacity(mm) {
+const DRAWER_GRID_PITCHES = { gridfinity_half: 21, gridfinity: 42 };
+
+function drawerSpaceCapacity(mm, grid = "wavefinity") {
+  // Story 2973: a Gridfinity drawer keeps its real size - the whole cells at the
+  // Space's pitch, with no wall allowance.
+  if (DRAWER_GRID_PITCHES[grid]) return Math.max(0, Math.floor(number(mm, 0) / DRAWER_GRID_PITCHES[grid] + 1e-9));
   const unit = number(state.catalog?.base_unit, 7);
   const clearance = drawerHardClearance();
   return Math.max(
@@ -827,8 +832,8 @@ function applySpaceSizingDefaults(design, remembered = null, keepStarterXY = fal
   const rememberedZ = Number(rememberedBox.z);
   const haveRememberedZ = Number.isFinite(rememberedZ) && rememberedZ > 0;
 
-  const spaceXUnits = kind === "drawer" ? drawerSpaceCapacity(space.x) : Math.floor(space.x / unit);
-  const spaceYUnits = kind === "drawer" ? drawerSpaceCapacity(space.y) : Math.floor(space.y / unit);
+  const spaceXUnits = kind === "drawer" ? drawerSpaceCapacity(space.x, space.grid) : Math.floor(space.x / unit);
+  const spaceYUnits = kind === "drawer" ? drawerSpaceCapacity(space.y, space.grid) : Math.floor(space.y / unit);
   const startX = Math.min(4, Math.max(1, spaceXUnits));
   const startY = Math.min(4, Math.max(1, spaceYUnits));
 

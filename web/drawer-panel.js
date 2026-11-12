@@ -633,6 +633,10 @@ DP.openStructuralTarget = async () => {
 // Duplicate a design-source row through the accepted atomic owner. The new
 // row is In Design and unplaced, so it appears in the staging rail.
 DP.duplicateRow = async one => {
+  // Story 2973: a bin of another grid never enters this Space (the server refuses
+  // the same duplicate; this names both grids before any call is made).
+  const mismatch = DL.gridRefusal([one]);
+  if (mismatch) { toast(mismatch, true, 6000); return; }
   if (typeof flushSpaceDesignAutosave === "function" &&
       !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   const context = DL.spaceContext();
@@ -846,7 +850,7 @@ DP.renderDrawer = () => {
   // A Storage Drawers cabinet owns its drawers (the navigator); the generic
   // drawer selector, size and Add/Delete card never applies to it.
   if (detailsCard) detailsCard.hidden = DP.singleTypedSpace() || DL.isStorageDrawers();
-  if (spacerSection) spacerSection.hidden = pegboard || surface;
+  if (spacerSection) spacerSection.hidden = pegboard || surface || DL.isGridfinity(drawer);
   $("#dl-surface-planning").hidden = !surface;
   $("#dl-surface-fill").hidden = !surface;
   $("#dl-height").closest("label").hidden = surface;
@@ -915,7 +919,14 @@ DP.renderDrawer = () => {
   const edges = [["left", grid.gapLeft], ["right", grid.gapRight], ["front", grid.gapFront], ["back", grid.gapBack]]
     .map(([side, gap]) => [side, gap - wall]).filter(([, play]) => play >= 0.1)
     .map(([side, play]) => `${side} ${play.toFixed(1)} mm`);
-  const units = value => fmt(value * grid.step / DL.UNIT);
+  const units = value => fmt(value * grid.step / grid.unit);
+  if (grid.grid) {
+    // Story 2973: the whole cells that fit inside the real size; the partial strip
+    // along the far edges is hatched and refuses placement.
+    $("#dl-grid-note").textContent = `${DL.gridLabel(grid.grid)}: ${grid.cols} × ${grid.rows} cell${grid.cols === 1 && grid.rows === 1 ? "" : "s"} (${fmt(grid.cols * grid.step)} × ${fmt(grid.rows * grid.step)} mm usable). `
+      + (edges.length ? `Hatched strip left over at the far edges (nothing can be placed there): ${edges.join(", ")}.` : "No spare strip at the edges.");
+    return;
+  }
   // Fix 081 E: physical mm first, then the spelled-out unit count.
   $("#dl-grid-note").textContent = `Grid ${fmt(grid.cols * grid.step)} × ${fmt(grid.rows * grid.step)} mm (${units(grid.cols)} × ${units(grid.rows)} units). `
     + (edges.length ? `Left over at the edges: ${edges.join(", ")}.` : "No spare strip at the edges.");
@@ -1193,8 +1204,8 @@ DP.renderInventory = (force = false) => {
     const holdingId = cabinet ? StorageDrawers.drawerHoldingRow(DL.layout, one.id) : null;
     const home = (holdingId && DL.layout.drawers.find(one => one.id === holdingId)) || drawer;
     const [w, d] = DL.cells(one, home);
-    const units = value => fmt(value * DL.grid(home).step / DL.UNIT);
-    const tooTall = !DL.isSurface() && one.z > home.height + 1e-6;
+    const units = value => fmt(value * DL.grid(home).step / (DL.grid(home).unit ?? DL.UNIT));
+    const tooTall = !DL.isSurface() && one.z + DL.baseLift(home) > home.height + 1e-6;
     const plan = DL.rowPlanning(one);
     const planningText = DL.isSurface()
       ? one.object_height_mm == null ? "Object height not set"

@@ -970,9 +970,16 @@
             <label class="space-field"><span>Interior depth <span class="unit">mm</span></span><input id="drawer-y" type="number" min="1" max="2000" step="any"></label>
             <label class="space-field"><span>Usable height <span class="unit">mm</span></span><input id="drawer-z" type="number" min="1" max="2000" step="any"></label>
           </div>
+          <label class="space-field"><span>Grid</span>
+            <select id="drawer-grid">
+              <option value="wavefinity" selected>Wavefinity 7 mm</option>
+              <option value="gridfinity_half">Gridfinity half 21 mm</option>
+              <option value="gridfinity">Gridfinity 42 mm</option>
+            </select>
+          </label>
           <div id="drawer-readout" class="derived-readout" hidden>
              <dt>Physical Size</dt><dd id="drawer-size-readout"></dd>
-             <dt>Wavefinity Capacity</dt><dd id="drawer-capacity-readout"></dd>
+             <dt id="drawer-capacity-label">Wavefinity Capacity</dt><dd id="drawer-capacity-readout"></dd>
           </div>
         </div>
 

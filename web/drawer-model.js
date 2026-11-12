@@ -271,7 +271,7 @@ DL.legacySpacerName = name => String(name || "").replace(/\s*\(?\bunvalidated\b\
 DL.label = one => (DL.isSpacer(one) ? DL.legacySpacerName(one.name) : one.name) || `${fmt(one.x)} × ${fmt(one.y)} mm`;
 // The user-facing Wavefinity unit is always 7 mm - see the "7 mm size grid"
 // section of README.md. The one place this conversion belongs.
-DL.mmToUnits = mm => fmt(mm / 7);
+DL.mmToUnits = mm => fmt(mm / (DL.layout ? DL.gridUnit() : 7));
 DL.isSpacer = one => one?.kind === "spacer";
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
 // Both displays use these roles and the same stacked-box glyph.
@@ -290,6 +290,59 @@ DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
 DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
 DL.isPegboard = (drawer = DL.drawer()) => drawer?.boundary === "pegboard";
+// Story 2973: a Plain Drawer Space records its grid (set at setup, immutable).
+// Every other Space kind keeps the Wavefinity 7 mm grid here.
+DL.GRID_PITCHES = { wavefinity: 7, gridfinity_half: 21, gridfinity: 42 };
+DL.GRID_LABELS = { wavefinity: "Wavefinity 7 mm", gridfinity_half: "Gridfinity half 21 mm", gridfinity: "Gridfinity 42 mm" };
+DL.gridLabel = grid => DL.GRID_LABELS[grid] || String(grid);
+DL.spaceGrid = () => {
+  const space = DL.layout?.space;
+  return space?.kind === "drawer" && DL.GRID_PITCHES[space.grid] ? space.grid : "wavefinity";
+};
+// True when this drawer lays out on a Gridfinity pitch (a Plain Drawer only).
+DL.isGridfinity = (drawer = DL.drawer()) => !DL.isPegboard(drawer) && DL.spaceGrid() !== "wavefinity";
+// One layout unit in mm: the Space's pitch on a Gridfinity drawer, 7 mm otherwise.
+DL.gridUnit = (drawer = DL.drawer()) => DL.isGridfinity(drawer) ? DL.GRID_PITCHES[DL.spaceGrid()] : DL.UNIT;
+// The grid a bin was designed on; an unrecorded design is Wavefinity.
+DL.binGrid = one => one?.grid || DL.layout?.design_specs?.[one?.id]?.grid || "wavefinity";
+// Why these bins may not enter this Space (their design grid differs), or "".
+DL.gridRefusal = (bins, drawer = DL.drawer()) => {
+  const spaceGrid = DL.isPegboard(drawer) ? "wavefinity" : DL.spaceGrid();
+  const wrong = (Array.isArray(bins) ? bins : [bins]).find(one => one && DL.binGrid(one) !== spaceGrid);
+  return wrong
+    ? `${DL.label(wrong)} is a ${DL.gridLabel(DL.binGrid(wrong))} design and this Space is ${DL.gridLabel(spaceGrid)}. Nothing was changed.`
+    : "";
+};
+// The measured seated lift recorded for the Space (Story 2974), or null when
+// none is recorded. Only a Gridfinity drawer carries a lift.
+DL.seatedLift = () => {
+  const space = DL.layout?.space;
+  const value = space?.seated_lift_mm ?? space?.storage_box?.seated_lift_mm;
+  return value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < 0 ? null : Number(value);
+};
+DL.baseLift = (drawer = DL.drawer()) => DL.isGridfinity(drawer) ? (DL.seatedLift() ?? 0) : 0;
+// What the height state may claim. A Gridfinity fit is verified only when the
+// Space's seated lift is recorded; otherwise it is presented as unverified.
+DL.heightFit = (drawer = DL.drawer()) => {
+  if (!DL.isGridfinity(drawer)) return null;
+  const lift = DL.seatedLift();
+  return lift === null
+    ? { verified: false, lift: null, note: "Height fit is not verified: no seated lift is recorded for this Space's baseplate." }
+    : { verified: true, lift, note: `Heights include the recorded ${fmt(lift)} mm seated lift.` };
+};
+// The foot-bottom height of `one` seated on `parent` (a support layer): the
+// engine's rim seating or stacking-lid seating (Stories 2970/2971) for the
+// Gridfinity pitch, read from the catalog; null while that is not loaded.
+DL.gridSeatAbove = (parent, one) => {
+  const grid = state.catalog?.grids?.find(row => row.value === DL.spaceGrid());
+  const descent = Number(DL.lidTakesStack(parent.bin) ? grid?.lid_stack_seat_descent_mm : grid?.stack_seat_descent_mm);
+  return Number.isFinite(descent) ? parent.z0 + DL.partHeight(parent.bin) - descent : null;
+};
+DL.seatAbove = (parent, one) => {
+  if (DL.isGridfinity()) return DL.gridSeatAbove(parent, one);
+  return DL.usesStackMetrics() ? parent.z0 + DL.pitch(parent.bin)
+    : parent.z1 - (DL.stackSteps[one.stack] ?? 0);
+};
 DL.isSurface = () => DL.layout?.space?.kind === "surface";
 DL.isStorageBox = () => ["portable", "box"].includes(DL.layout?.space?.kind);
 DL.heightCap = drawer => DL.isStorageBox()
@@ -321,7 +374,7 @@ DL.stackPlanningHeight = layers => Math.max(0, ...layers.map(layer => layer.z0 +
 
 // The wall allowance is a product rule (see DL.canonicalLayoutRules), not a
 // per-drawer setting.
-DL.slack = drawer => DL.canonicalLayoutRules(drawer.boundary).clearance;
+DL.slack = drawer => DL.isGridfinity(drawer) ? 0 : DL.canonicalLayoutRules(drawer.boundary).clearance;
 DL.grid = (drawer = DL.drawer()) => {
   if (DL.isPegboard(drawer)) {
     const standard = state.catalog?.pegboard_rules?.standards?.find(row => row.id === drawer.pegboard_standard);
@@ -335,7 +388,8 @@ DL.grid = (drawer = DL.drawer()) => {
       gapLeft: ox, gapRight: drawer.width - ox - cols * stepX,
       gapFront: oy, gapBack: drawer.depth - oy - rows * stepY };
   }
-  const step = 7;
+  const gridfinity = DL.isGridfinity(drawer);
+  const step = gridfinity ? DL.gridUnit(drawer) : 7;
   const slack = DL.slack(drawer);
   const usableX = drawer.width - slack;
   const usableY = drawer.depth - slack;
@@ -344,9 +398,11 @@ DL.grid = (drawer = DL.drawer()) => {
   const ox = slack / 2;
   const oy = slack / 2;
   return {
-    step, stepX: step, stepY: step, perUnit: DL.UNIT / step, cols, rows, ox, oy,
+    step, stepX: step, stepY: step, perUnit: gridfinity ? 1 : DL.UNIT / step, unit: gridfinity ? step : DL.UNIT,
+    cols, rows, ox, oy,
     gapLeft: ox, gapRight: drawer.width - ox - cols * step,
     gapFront: oy, gapBack: drawer.depth - oy - rows * step,
+    ...(gridfinity ? { grid: DL.spaceGrid() } : {}),
   };
 };
 
@@ -498,14 +554,15 @@ DL.supportTree = (drawer = DL.drawer()) => {
     if (!node.parent) {
       node.gx = DL.toCell(node.p.gx, drawer);
       node.gy = DL.toCell(node.p.gy, drawer);
-      node.z0 = 0;
+      node.z0 = DL.baseLift(drawer);
       node.depth = 0;
     } else {
       const parent = node.parent;
       node.gx = parent.gx + DL.toCell(DL.offsetOf(node.p.ox), drawer);
       node.gy = parent.gy + DL.toCell(DL.offsetOf(node.p.oy), drawer);
       // Seating comes from the direct parent, never from sibling order.
-      node.z0 = metrics ? parent.z0 + DL.pitch(parent.bin)
+      node.z0 = DL.isGridfinity(drawer) ? (DL.gridSeatAbove(parent, one) ?? parent.z1)
+        : metrics ? parent.z0 + DL.pitch(parent.bin)
         : parent.z1 - (DL.stackSteps[one.stack] ?? 0);
       node.depth = parent.depth + 1;
     }
@@ -619,7 +676,8 @@ DL.movingForBins = (bins, drawer = DL.drawer()) => {
   let previous = null;
   const layers = bins.map((one, index) => {
     const [w, d] = DL.cells(one, drawer);
-    const z0 = !previous ? 0 : metrics ? previous.z0 + DL.pitch(previous.bin)
+    const z0 = !previous ? 0 : DL.isGridfinity(drawer) ? (DL.gridSeatAbove(previous, one) ?? previous.z1)
+      : metrics ? previous.z0 + DL.pitch(previous.bin)
       : previous.z1 - (DL.stackSteps[one.stack] ?? 0);
     previous = { bin: one, z0, z1: z0 + DL.partHeight(one) };
     return { key: `__new${index}`, bin: one, gx: 0, gy: 0, w, d, z0, z1: previous.z1,
@@ -755,13 +813,15 @@ DL.fitsAt = (drawer, movingSet, gx, gy, ignore = new Set(), { skipHeight = false
   const moving = DL.asMoving(movingSet, drawer);
   const blocked = DL.placementDataBlock(drawer);
   if (blocked) return { ok: false, reason: blocked };
+  const mismatch = DL.gridRefusal(moving.bins, drawer);
+  if (mismatch) return { ok: false, reason: mismatch };
   const grid = DL.grid(drawer);
   const bins = moving.bins;
   const rect = DL.nodesRect(moving.nodes.map(node => ({ bin: node.bin, gx: gx + node.dx, gy: gy + node.dy, w: node.w, d: node.d })), drawer);
-  const height = moving.height;
+  const height = moving.height + DL.baseLift(drawer);
   const cap = DL.heightCap(drawer);
   if (!skipHeight && !DL.isPegboard(drawer) && !DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
-  if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > grid.cols || rect.y1 > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the Pegboard." : "That would stick out of the Space." };
+  if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > grid.cols || rect.y1 > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the Pegboard." : DL.isGridfinity(drawer) ? "That would reach the unused strip at the far edge of the Space." : "That would stick out of the Space." };
   if (DL.isPegboard(drawer)) {
     const layout = DL.pegboardLayouts[bins[0].id] || bins[0].pegboard_layout;
     if (!layout || layout.error) return { ok: false, reason: layout?.error || "Mount layout is still loading." };
@@ -802,19 +862,24 @@ DL.fitsOn = (drawer, movingSet, target, movingKeys = null) => {
   const keys = new Set([...moving.keys, ...(movingKeys || [])]);
   const blocked = DL.placementDataBlock(drawer);
   if (blocked) return { ok: false, reason: blocked };
+  const mismatch = DL.gridRefusal(moving.bins, drawer);
+  if (mismatch) return { ok: false, reason: mismatch };
   const { item, layer: support } = target;
   const lower = support.bin;
   const root = moving.nodes[0];
   if (keys.has(support.key)) return { ok: false, reason: "A bin cannot stack on itself or on something stacked on it." };
-  const seat = DL.usesStackMetrics() ? support.z0 + DL.pitch(lower)
-    : support.z1 - (DL.stackSteps[root.bin.stack] ?? 0);
+  const seat = DL.seatAbove(support, root.bin);
+  if (seat === null) return { ok: false, reason: "Gridfinity stack heights are still loading. Try the placement again." };
   const height = seat + moving.height;
   const cap = DL.heightCap(drawer);
   if (!DL.isSurface() && height > cap + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this Space's ${fmt(cap)} mm.` };
   const refusal = DL.stackRefusal(root.bin, lower);
   if (refusal) return { ok: false, reason: refusal };
+  if (DL.isGridfinity(drawer) && (root.w !== support.w || root.d !== support.d)) {
+    return { ok: false, reason: `Only a same-footprint bin stacks on another in a ${DL.gridLabel(DL.spaceGrid())} Space.` };
+  }
   const { cx, cy } = target;
-  if (!Number.isInteger(cx) || !Number.isInteger(cy)) return { ok: false, reason: "Stacked bins sit on the 7 mm grid." };
+  if (!Number.isInteger(cx) || !Number.isInteger(cy)) return { ok: false, reason: `Stacked bins sit on the ${fmt(DL.gridUnit(drawer))} mm grid.` };
   if (cx < 0 || cy < 0 || cx + root.w > support.w || cy + root.d > support.d) {
     return { ok: false, reason: `${DL.label(root.bin)} would stick out past the edge of ${DL.label(lower)}.` };
   }
@@ -842,7 +907,7 @@ DL.fitsOn = (drawer, movingSet, target, movingKeys = null) => {
     ...moving.nodes.map(node => ({ bin: node.bin, gx: originX + node.dx, gy: originY + node.dy, w: node.w, d: node.d })),
   ], drawer);
   const grid = DL.grid(drawer);
-  if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > grid.cols || rect.y1 > grid.rows) return { ok: false, reason: "That would stick out of the Space." };
+  if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > grid.cols || rect.y1 > grid.rows) return { ok: false, reason: DL.isGridfinity(drawer) ? "That would reach the unused strip at the far edge of the Space." : "That would stick out of the Space." };
   const conflict = DL.rectConflict(drawer, rect, keys, item.key);
   return conflict ? { ok: false, reason: conflict } : { ok: true, reason: "" };
 };
@@ -1494,6 +1559,10 @@ DL.removePlacement = key => {
 };
 
 DL.refreshSpacers = () => DL.busyWith("spacers", async context => {
+  if (DL.isGridfinity()) {
+    WS.showNote("dl-sp-action-note", `A ${DL.gridLabel(DL.spaceGrid())} Space has no spacers or side connectors.`);
+    return;
+  }
   if (!(await DL.save())) return;
   DL.requireSpaceContext(context);
   const result = await DL.inventoryCall("/api/drawer/spacers/refresh", {

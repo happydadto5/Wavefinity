@@ -26,11 +26,25 @@ GRID_PITCH = 2.0 * WAVE_LENGTH   # 7.0
 GRID_PITCHES = {"wavefinity": GRID_PITCH, "gridfinity_half": 21.0, "gridfinity": 42.0}
 
 
+GRID_LABELS = {"wavefinity": "Wavefinity 7 mm", "gridfinity_half": "Gridfinity half 21 mm",
+               "gridfinity": "Gridfinity 42 mm"}
+
+
 def validate_grid(value: object) -> str:
     """Validate an explicit grid. Only record readers supply the legacy default."""
     if not isinstance(value, str) or value not in GRID_PITCHES:
         raise ValueError("Choose wavefinity, gridfinity, or gridfinity_half for the grid.")
     return value
+
+
+def grid_label(grid: object) -> str:
+    return GRID_LABELS.get(grid, str(grid)) if isinstance(grid, str) else str(grid)
+
+
+def cross_grid_message(bin_grid: object, space_grid: object, what: str = "This bin") -> str:
+    """The one plain refusal for a bin entering a Space of another grid."""
+    return (f"{what} is a {grid_label(bin_grid)} design and this Space is {grid_label(space_grid)}. "
+            "Nothing was changed.")
 
 
 def validate_built_in_grid(value: object) -> str:
@@ -43,7 +57,9 @@ def retain_space_grid(proposed: dict, existing: dict) -> dict:
     """All existing-Space writers preserve the creation-time grid."""
     grid = validate_grid(existing.get("grid", "wavefinity"))
     if "grid" in proposed and validate_grid(proposed["grid"]) != grid:
-        raise ValueError("A Space's grid cannot be changed. Create a new Space for another grid.")
+        raise ValueError(
+            f"A Space's grid is immutable: this Space is {grid_label(grid)} and cannot become "
+            f"{grid_label(proposed['grid'])}. Create a new Space for another grid.")
     result = {**proposed, "grid": grid}
     block_edit = any(isinstance(result.get(key), dict) and "built_in_grid" in result[key]
                      for key in ("storage_box", "storage_drawers"))

@@ -471,8 +471,14 @@ function aiSpaceViolation(design, baseline) {
       ? null : "Pegboard mounting belongs to a Pegboard Space and cannot be changed here.";
   }
   const kind = space.kind;
-  const unit = number(state.catalog?.base_unit, 7);
-  const capacity = mm => kind === "drawer" ? drawerSpaceCapacity(mm) : Math.floor(number(mm, 0) / unit + 1e-9);
+  // Story 2973: an AI bin of another grid never enters this Space; both grids are named.
+  const spaceGrid = space.grid || "wavefinity", designGrid = design.grid || "wavefinity";
+  if (designGrid !== spaceGrid) {
+    const named = grid => state.catalog?.grids?.find(row => row.value === grid)?.label || grid;
+    return `This AI bin is a ${named(designGrid)} design and this Space is ${named(spaceGrid)}. Nothing was changed.`;
+  }
+  const unit = kind === "drawer" && DRAWER_GRID_PITCHES[spaceGrid] ? DRAWER_GRID_PITCHES[spaceGrid] : number(state.catalog?.base_unit, 7);
+  const capacity = mm => kind === "drawer" ? drawerSpaceCapacity(mm, spaceGrid) : Math.floor(number(mm, 0) / unit + 1e-9);
   const maxX = capacity(space.x) * unit, maxY = capacity(space.y) * unit;
   if (box.x > maxX + 1e-6 || box.y > maxY + 1e-6) {
     return `The bin is ${fmt(box.x)} x ${fmt(box.y)} mm but this Space fits at most ${fmt(maxX)} x ${fmt(maxY)} mm.`;

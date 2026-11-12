@@ -20,6 +20,7 @@ from organizer_engine import (
     differing_connector_plan,
     wavy_rect_outer,
 )
+from organizer_engine._specs import grid_label
 from organizer_engine._wave import wall_crest_overshoot
 from organizer_geometry import _extrude_polygon
 from organizer_outputs.slicer import slicer_display_name
@@ -142,6 +143,10 @@ def spacer_plan_signature(
 def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options: dict[str, Any] | None = None) -> dict[str, Any]:
     options = options or {}
     drawer = normalise_drawer(raw_drawer)
+    if drawer.get("grid"):
+        raise ValueError(
+            f"A {grid_label(drawer['grid'])} Space has no bin-to-bin spacers or side connectors. "
+            "Nothing was changed.")
     grid = drawer_grid(drawer)
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
     flexible = options.get("flexible", True)

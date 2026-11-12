@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import math
-from organizer_engine._specs import validate_grid, validate_built_in_grid, retain_space_grid
+from organizer_engine._specs import validate_grid, validate_built_in_grid, retain_space_grid, cross_grid_message
 from typing import Any
 from organizer_engine import (
     B4B_DEFAULT_BASE,
@@ -254,6 +254,11 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
 
     if kind == "drawer":
         minimum_xy = BASE_UNIT + DRAWER_HARD_CLEARANCE_MM
+        if grid != "wavefinity":
+            # A Gridfinity drawer keeps its real size and no wall allowance:
+            # it needs room for one whole cell at its pitch.
+            from organizer_engine._specs import GRID_PITCHES
+            minimum_xy = GRID_PITCHES[grid]
         if x + 1e-9 < minimum_xy or y + 1e-9 < minimum_xy:
             raise ValueError(
                 f"a drawer space needs at least {minimum_xy:g} mm width and depth"
@@ -326,8 +331,10 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
     from ._rows import owned_design_grid
     destination_grid = validate_grid(space_def.get("grid", "wavefinity"))
     for spec in design_specs(layout).values():
-        if isinstance(spec, dict) and owned_design_grid(spec, layout.get("space")) != destination_grid:
-            raise ValueError("An existing bin uses a different grid from this Space. Nothing was changed.")
+        if isinstance(spec, dict):
+            existing_grid = owned_design_grid(spec, layout.get("space"))
+            if existing_grid != destination_grid:
+                raise ValueError(cross_grid_message(existing_grid, destination_grid, "An existing bin"))
     layout["version"] = 1
     layout["space"] = space_def
 
@@ -372,6 +379,8 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
         except (TypeError, ValueError):
             previous_clearance = DRAWER_HARD_CLEARANCE_MM
         clearance = max(DRAWER_HARD_CLEARANCE_MM, previous_clearance)
+        if space_def["grid"] != "wavefinity":
+            clearance = 0.0   # real dimensions: the whole-cell field starts at the front-left wall
     elif kind == "pegboard":
         boundary = "pegboard"
         clearance = 0.0
@@ -385,6 +394,10 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
     primary["height"] = z
     primary["clearance"] = clearance
     primary["boundary"] = boundary
+    if kind == "drawer" and space_def["grid"] != "wavefinity":
+        primary["grid"] = space_def["grid"]
+    else:
+        primary.pop("grid", None)
     if kind == "portable":
         from organizer_features.gridfinity import container_floor_record
         primary.update(container_floor_record(space_def["grid"], space_def["built_in_grid"], x, y,

@@ -161,4 +161,4 @@ SP.resolvePegboard = () => {
   return { ok: true, standard, mode, holesX, holesY, width, height, residualX, residualY };
 };
 
-SP.drawerCapacity = mm => drawerSpaceCapacity(mm);
+SP.drawerCapacity = (mm, grid = "wavefinity") => drawerSpaceCapacity(mm, grid);

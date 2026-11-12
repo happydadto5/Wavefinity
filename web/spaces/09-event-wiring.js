@@ -190,7 +190,10 @@ SP.updateReadouts = () => {
         if (x > 0 && y > 0 && z > 0) {
             document.getElementById("drawer-readout").hidden = false;
             document.getElementById("drawer-size-readout").textContent = `${x} × ${y} × ${z} mm`;
-            document.getElementById("drawer-capacity-readout").textContent = `${SP.drawerCapacity(x)} × ${SP.drawerCapacity(y)} units`;
+            const gridChoice = document.getElementById("drawer-grid").value;
+            const gridfinity = gridChoice !== "wavefinity";
+            document.getElementById("drawer-capacity-label").textContent = gridfinity ? "Cell Capacity" : "Wavefinity Capacity";
+            document.getElementById("drawer-capacity-readout").textContent = `${SP.drawerCapacity(x, gridChoice)} × ${SP.drawerCapacity(y, gridChoice)} ${gridfinity ? "cells" : "units"}`;
         } else {
             document.getElementById("drawer-readout").hidden = true;
         }

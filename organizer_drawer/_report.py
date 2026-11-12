@@ -15,6 +15,7 @@ from organizer_engine import (
     differing_connector_plan,
 )
 from organizer_inventory import design_specs
+from organizer_engine._specs import cross_grid_message, grid_label, validate_grid
 from organizer_features.stack import STACK_MIN_WALL
 from organizer_features.pegboard import pegboard_layout_for_bin
 
@@ -25,6 +26,9 @@ from ._core import (
     normalise_drawer,
     find_drawer,
     drawer_grid,
+    drawer_in_space,
+    drawer_unit_mm,
+    space_seated_lift,
     _per_unit,
     is_surface_layout,
     is_storage_box_layout,
@@ -421,9 +425,13 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
                   layout: dict[str, Any] | None = None) -> dict[str, Any]:
     """Everything the Layout view says about one drawer: fill, what is left,
     what is wrong, what is still to print, and the connectors it needs."""
-    drawer = normalise_drawer(raw_drawer)
+    drawer = normalise_drawer(drawer_in_space(raw_drawer, layout))
     if drawer.get("boundary") == "pegboard":
         return _pegboard_report(drawer, bins)
+    space_grid_name = drawer.get("grid")
+    lift = space_seated_lift(layout) if space_grid_name else None
+    if space_grid_name:
+        drawer["seated_lift_mm"] = lift
     grid = drawer_grid(drawer)
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
     by_id = {one["id"]: one for one in bins}
@@ -437,6 +445,16 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     for placement in drawer["placements"]:
         if placement.get("bin") not in by_id:
             problems.append({"type": "missing", "keys": [_key(placement)], "message": f"{placement.get('bin')} is no longer in the inventory"})
+    # Story 2973: no bin of another grid is admitted to a Space, whatever path
+    # put it in the layout. Only a row that records a grid can disagree.
+    layout_space = layout.get("space") if isinstance(layout, dict) else None
+    if isinstance(layout_space, dict):
+        destination_grid = validate_grid(layout_space.get("grid", "wavefinity"))
+        for placement in drawer["placements"]:
+            row = by_id.get(placement.get("bin"))
+            if row is not None and validate_grid(row.get("grid", destination_grid)) != destination_grid:
+                problems.append({"type": "grid", "keys": [_key(placement)],
+                                 "message": cross_grid_message(row["grid"], destination_grid, _label(row))})
     roots, loose = _support_trees(drawer, by_id)
     for placement in loose:
         problems.append({"type": "floating", "keys": [_key(placement)], "message": f"{_label(by_id[placement['bin']])} is stacked on nothing"})
@@ -468,10 +486,13 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
             problems.append({"type": "too_tall", "keys": item["keys"], "message": f"{label} is {item['h']:g} mm tall; this Space takes {height_cap:g} mm"})
         base = item["chain"][0]
         if per_unit == 1 and (float(base["gx"]) % 1 or float(base["gy"]) % 1):
-            problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sits off the 7 mm grid - move it to snap it back"})
+            problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sits off the {drawer_unit_mm(drawer):g} mm grid - move it to snap it back"})
         x0, y0, x1, y1 = item["rect"]
         if x0 < 0 or y0 < 0 or x1 > cols or y1 > rows:
-            problems.append({"type": "outside", "keys": item["keys"], "message": f"{label} sticks out of the Surface" if surface else f"{label} sticks out of the drawer"})
+            problems.append({"type": "outside", "keys": item["keys"], "message": (
+                f"{label} sticks out of the Surface" if surface
+                else f"{label} reaches the unused strip at the far edge of the drawer" if space_grid_name and (x1 > cols or y1 > rows) and x0 >= 0 and y0 >= 0
+                else f"{label} sticks out of the drawer")})
         cx0, cy0, cx1, cy1 = max(0, x0), max(0, y0), min(cols, x1), min(rows, y1)
         if cx1 <= cx0 or cy1 <= cy0:
             continue
@@ -490,6 +511,10 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     for placement in drawer["placements"]:
         spacer = by_id.get(placement.get("bin"))
         if "gx" in placement or "on" in placement or not spacer or spacer.get("kind") not in SPACER_KINDS:
+            continue
+        if space_grid_name:
+            problems.append({"type": "edge_spacer", "keys": [_key(placement)],
+                             "message": f"A {grid_label(space_grid_name)} Space has no spacers - remove this one"})
             continue
         edge = {key: float(placement.get(key, 0.0)) for key in ("x", "y", "w", "d")}
         outside = (edge["x"] < -0.1 or edge["y"] < -0.1
@@ -545,13 +570,23 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         item["has_lid"] = item["bin"] in lid_rows
         item["rim_walls"] = _rim_label_walls(specs.get(item["bin"]))
         item["opening_cuts"] = _side_opening_cuts(specs.get(item["bin"]))
-    connectors, mismatched, short_seams, rim_blocked, opening_blocked = _connectors(items, step)
+    # Gridfinity Spaces never offer or place side connectors (Story 2973).
+    connectors, mismatched, short_seams, rim_blocked, opening_blocked = _connectors([] if space_grid_name else items, step)
     if surface:
         for component in _interior_components(items, cols, rows):
             problems.append({"type": "restraint", "keys": component, "message": INTERIOR_COMPONENT_MESSAGE})
     for problem in problems:
         problem["severity"] = "advisory" if problem["type"] in ADVISORY_PROBLEM_TYPES else "hard"
+    height_fit = None
+    if space_grid_name:
+        # Never state a verified fit that was not measured: the seated lift of
+        # the Space's baseplate (Story 2974) is either recorded or unverified.
+        height_fit = ({"verified": True, "seated_lift_mm": lift,
+                       "note": f"Heights include the recorded {lift:g} mm seated lift."} if lift is not None
+                      else {"verified": False, "seated_lift_mm": None,
+                            "note": "Height fit is not verified: no seated lift is recorded for this Space's baseplate."})
     return {
+        **({"height_fit": height_fit} if height_fit else {}),
         "grid": grid,
         "physical_envelopes": physical_envelopes,
         "cells": {"total": usable, "used": used, "free": int(free.sum())},

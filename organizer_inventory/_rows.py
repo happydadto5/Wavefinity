@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 import re
 import threading
-from organizer_engine._specs import validate_grid
+from organizer_engine._specs import validate_grid, cross_grid_message
 from typing import Any, Iterable
 
 
@@ -520,7 +520,7 @@ def owned_design_grid(design: dict, space: dict | None) -> str:
         return validate_grid(design.get("grid", "wavefinity"))
     grid = validate_grid(space.get("grid", "wavefinity"))
     if "grid" in design and validate_grid(design["grid"]) != grid:
-        raise ValueError("This bin's grid does not match its owning Space. Nothing was changed.")
+        raise ValueError(cross_grid_message(design["grid"], grid))
     return grid
 
 
@@ -543,7 +543,7 @@ def resolve_source_grid(design: dict, source: dict | None = None, row_id: str | 
             grid = owned_design_grid(saved, layout.get("space"))
             if "grid" in design:
                 if validate_grid(design["grid"]) != grid:
-                    raise ValueError("This bin's grid does not match its source Space.")
+                    raise ValueError(cross_grid_message(design["grid"], grid))
                 return grid
             if {key: value for key, value in design.items() if key != "grid"} != {
                     key: value for key, value in saved.items() if key != "grid"}:
@@ -558,7 +558,7 @@ def checked_design_entry(design: dict, destination: dict | None, *,
                          source: dict | None = None, row_id: str | None = None) -> dict:
     grid = resolve_source_grid(design, source, row_id)
     if isinstance(destination, dict) and grid != validate_grid(destination.get("grid", "wavefinity")):
-        raise ValueError("This bin uses a different grid from this Space. Nothing was changed.")
+        raise ValueError(cross_grid_message(grid, destination.get("grid", "wavefinity")))
     return {**copy.deepcopy(design), "grid": grid}
 
 

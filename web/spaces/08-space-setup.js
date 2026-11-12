@@ -183,6 +183,11 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById('drawer-x').value = prefillSpace?.x || '';
       document.getElementById('drawer-y').value = prefillSpace?.y || '';
       document.getElementById('drawer-z').value = prefillSpace?.z || '';
+      // Story 2973: the grid is chosen at setup and immutable once the Space exists.
+      const gridSelect = document.getElementById("drawer-grid");
+      gridSelect.value = prefillSpace?.grid || "wavefinity";
+      gridSelect.disabled = update;
+      gridSelect.title = update ? "A Space's grid is set when it is created and cannot be changed." : "";
   } else if (kind === 'surface') {
       const trimSelect = document.getElementById("surface-trim");
       if (trimSelect) {
@@ -414,14 +419,17 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
         if (raw < minimum) fail(kind === "drawer"
           ? `Usable drawer height must be at least ${fmt(minimum)} mm.`
           : `A Storage Box's usable height must be at least ${fmt(minimum)} mm.`, selector);
-      } else if (kind === "drawer" && SP.drawerCapacity(raw) < 1) {
-        fail("The drawer must have room for at least one Wavefinity unit after wall clearance.", selector);
+      } else if (kind === "drawer" && SP.drawerCapacity(raw, $("#drawer-grid").value) < 1) {
+        fail($("#drawer-grid").value === "wavefinity"
+          ? "The drawer must have room for at least one Wavefinity unit after wall clearance."
+          : `The drawer must have room for at least one ${state.catalog?.grids?.find(row => row.value === $("#drawer-grid").value)?.label || "Gridfinity"} cell.`, selector);
       } else if (kind === "portable" && used < Number(state.catalog?.b4b_rules?.min_field_mm)) {
         fail(`A Storage Box needs at least ${fmt(state.catalog.b4b_rules.min_field_mm)} mm of child-bin field.`, selector);
       }
     }
     values = { kind, name, ...dimensions, trimSize: null,
-      ...(kind === "portable" ? { extra: { storage_box: SP.readStorageBoxForm() } } : {}) };
+      ...(kind === "portable" ? { extra: { storage_box: SP.readStorageBoxForm() } } : {}),
+      ...(kind === "drawer" ? { extra: { grid: $("#drawer-grid").value } } : {}) };
   } else if (kind === "surface") {
     const trimSize = $("#surface-trim").value;
     const maxX = readNumber("#surface-x"), maxY = readNumber("#surface-y");

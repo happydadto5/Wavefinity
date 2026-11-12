@@ -433,9 +433,13 @@ DV.render = () => {
   }
   const heightLegend = $("#dl-height-legend");
   if (heightLegend) {
-    const showLegend = DL.isStorageBox() || DL.isStorageDrawers();
-    heightLegend.hidden = !showLegend;
-    if (showLegend) heightLegend.innerHTML = `<span class="dl-height-swatch yellow"></span>Yellow: below full height · <span class="dl-height-swatch red"></span>Red: over space height · ${DL.stackIconForRoles({ bottom: true })} can take a stack · ${DL.stackIconForRoles({ top: true })} can sit on a bin`;
+    // Story 2973: a Gridfinity Space states plainly whether its height fit is
+    // verified (its baseplate's seated lift is recorded) - a note, never a dialog.
+    const fit = DL.heightFit(drawer);
+    const keyed = DL.isStorageBox() || DL.isStorageDrawers();
+    heightLegend.hidden = !keyed && !fit;
+    heightLegend.innerHTML = (keyed ? `<span class="dl-height-swatch yellow"></span>Yellow: below full height · <span class="dl-height-swatch red"></span>Red: over space height · ${DL.stackIconForRoles({ bottom: true })} can take a stack · ${DL.stackIconForRoles({ top: true })} can sit on a bin` : "")
+      + (fit ? `<div class="dl-height-fit" data-verified="${fit.verified}">${fit.note}</div>` : "");
   }
 };
 
@@ -598,8 +602,8 @@ DV.paintScene = (ctx, drawer, cam) => {
     .forEach(([x0, y0, x1, y1]) => { if (x1 - x0 > 0.05 && y1 - y0 > 0.05) face(flat(x0, y0, x1, y1), hatch); });
   const line = (a, b) => { const [ax, ay] = cam.project(a); const [bx, by] = cam.project(b); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); };
   ctx.lineWidth = 1;
-  for (const [every, tone] of [[step, "rgba(120,100,70,.10)"], [DL.UNIT, "rgba(120,100,70,.2)"]]) {
-    if (every === step && step === DL.UNIT) continue;
+  for (const [every, tone] of [[step, "rgba(120,100,70,.10)"], [grid.unit, "rgba(120,100,70,.2)"]]) {
+    if (every === step && step === grid.unit) continue;
     ctx.strokeStyle = tone;
     ctx.beginPath();
     for (let x = 0; x <= grid.cols * step + 1e-6; x += every) line([grid.ox + x, grid.oy, 0], [grid.ox + x, gy1, 0]);
@@ -645,10 +649,10 @@ DV.paintScene = (ctx, drawer, cam) => {
           ctx.textBaseline = "middle";
           // Units only when the free area is a whole number of units; a
           // fractional figure is never rounded, so the label stays mm-only.
-          const wUnits = spot.w_mm / DL.UNIT, dUnits = spot.d_mm / DL.UNIT;
+          const wUnits = spot.w_mm / grid.unit, dUnits = spot.d_mm / grid.unit;
           const whole = value => Math.abs(value - Math.round(value)) < 1e-9;
           const units = whole(wUnits) && whole(dUnits)
-            ? ` - ${Math.round(wUnits)} × ${Math.round(dUnits)} units` : "";
+            ? ` - ${Math.round(wUnits)} × ${Math.round(dUnits)} ${grid.grid ? "cells" : "units"}` : "";
           ctx.fillText(`${fmt(spot.w_mm)} × ${fmt(spot.d_mm)} mm free${units}`, mx, my);
         }
       });
