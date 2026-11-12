@@ -729,6 +729,7 @@ def nest_trace_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def catalog_payload() -> dict[str, Any]:
+    from wavefinity_web_impl._ai import grid_editor_catalog
     parts = [
         {
             "kind": definition.kind,
@@ -792,6 +793,7 @@ def catalog_payload() -> dict[str, Any]:
         "api_compat": API_COMPAT_VERSION,
         "build": SERVER_BUILD,
         "base_unit": BASE_UNIT,
+        "grids": grid_editor_catalog(),
         "max_box_size": MAX_BOX_SIZE,
         "min_height_above_base_mm": MIN_HEIGHT_ABOVE_BASE,
         "drawer_rules": {
@@ -3010,13 +3012,14 @@ def surface_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     })
 
 
-def ai_capability_manifest() -> dict[str, Any]:
+def ai_capability_manifest(grid: str = "wavefinity") -> dict[str, Any]:
     """The AI's authoritative list of what it may put in a design.
 
     Everything is read from the catalog, the feature registry, rule constants and
     the canonical serializer - there is no second copy of any range or choice.
     """
     catalog = catalog_payload()
+    grid_rules = next(row for row in catalog["grids"] if row["value"] == grid)
     base = _ai_example_base()
     features: list[dict[str, Any]] = []
     for part in catalog["parts"]:
@@ -3072,12 +3075,23 @@ def ai_capability_manifest() -> dict[str, Any]:
         }
         for kind, title, description, paths in AI_MODIFIER_BLOCKS
     ]
+    if grid != "wavefinity":
+        stacking = next(row for row in modifiers if row["kind"] == "lid_stacking")
+        stacking.update(
+            description="Stackable rim: box.stack.mode=direct without a lid; or Gridfinity Lid, optionally with stack_rim=true. No hinged, handle or label variants; no side connectors. All heights use whole 7 mm units.",
+            rules={"grid": grid_rules},
+            example={"stackable_rim": {"box.stack": {"mode": "direct"}},
+                     "grid_lid": {"box.lid": {"enabled": True, "stack_rim": True,
+                                                "flip_enabled": False, "handle_enabled": False,
+                                                "label_enabled": False}}})
     return {
         "features": features,
         "box_modifiers": modifiers,
         "bin_controls": {
+            "grid_choices": catalog["grids"],
+            "active_grid": grid_rules,
             "units_are": "millimetres",
-            "base_unit_mm": catalog["base_unit"],
+            "base_unit_mm": grid_rules["pitch_mm"],
             "max_box_size_mm": catalog["max_box_size"],
             "min_height_above_base_mm": catalog["min_height_above_base_mm"],
             "ordinary_bin_min_height_mm": catalog["drawer_rules"]["ordinary_bin_min_height_mm"],
@@ -3087,8 +3101,9 @@ def ai_capability_manifest() -> dict[str, Any]:
             "layout_modes": catalog["modes"],
             "label_positions": list(LABEL_POSITIONS),
             "design_fields": {
+                "grid": "the selected context grid from grid_choices; choose it in the standalone editor before AI Design",
                 "box.x / box.y": "footprint, whole multiples of base_unit_mm",
-                "box.z": "height in whole millimetres",
+                "box.z": "height in whole millimetres" if grid == "wavefinity" else "height in whole 7 mm units, satisfying the floor/rim/lid minimum",
                 "box.wall / box.base_thickness": "use the wall_rules / base_rules choices",
                 "scoop": "true adds the front finger scoop (also available as an interior part)",
                 "label / label_position": "rim ledge label text and its side",
@@ -3214,11 +3229,11 @@ def ai_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "space_controlled_fields": _ai_controlled_fields(space),
         "current_baseline_layout_bounds_mm": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
         "interior_margin_mm": [round(box.x - bounds.width, 3), round(box.y - bounds.depth, 3)],
-        "base_unit_mm": BASE_UNIT,
+        "base_unit_mm": next(row["pitch_mm"] for row in catalog_payload()["grids"] if row["value"] == context_grid),
         "existing_bin_names": existing_names,
     }
     prompt = _ai_prompt_text(
-        description, request_id, fingerprint, context, ai_capability_manifest(), design)
+        description, request_id, fingerprint, context, ai_capability_manifest(context_grid), design)
     return {"request_id": request_id, "context_fingerprint": fingerprint, "prompt": prompt}
 
 

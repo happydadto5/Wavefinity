@@ -65,12 +65,24 @@ This file is supplemental explanation. Do not substitute values from this file f
 Design data carries `grid`: `wavefinity` (7 mm), `gridfinity_half` (21 mm), or
 `gridfinity` (42 mm). Keep it equal to the supplied Space/editor context. A
 missing AI candidate grid inherits that context; an explicit conflict is refused.
-Gridfinity Stage 1 supports a loose plain plate lid or a plate lid with a stacking
+The No-Space Designer offers a Grid selector with those three choices, defaulting
+to Wavefinity. Select the grid before requesting AI Design; AI keeps that context.
+Changing grid preserves millimetres and refuses dimensions that do not fit whole
+cells. Width/Depth parse only on commit: `6u` means six cells, `6mm` is millimetres;
+a bare positive number below the pitch means units, otherwise millimetres.
+Units must be whole cells; millimetres snap to the nearest cell. Range errors
+are refused, never clamped. The settled field shows millimetres and unit count.
+Gridfinity height uses the same rules against 7 mm, with the model's floor,
+rim and lid minimums; Wavefinity height keeps plain millimetres. Space forms
+keep their existing millimetre entry.
+Gridfinity Stage 1 offers a Stackable rim, a loose Gridfinity Lid or a lid with a stacking
 socket on both pitches. Closed Z stays nominal in whole 7 mm units; the body and
 interior shorten by the lid rise. A grid lid needs at least two height units and
 enough body clearance for its floor and lid. Use the same footprint and pitch
 when stacking on a grid lid; lid-on-lid uses the standard rim seat descent.
-Hinged, label and handle lids are Wavefinity options, unavailable on grid bodies.
+Hinged, label and handle lids and side connectors are Wavefinity options,
+hidden on grid bodies. The capability manifest filters lid choices by the
+selected grid, using the same catalog as the editor.
 Physical grid-lid fit is not yet printed (S1-13 gate).
 A Space's grid is fixed when created. Bins cannot enter a Space
 with a different grid. An external older design without a grid means Wavefinity;
@@ -374,7 +386,12 @@ These alter the ordinary bin shell rather than acting like independent interior 
 
 ## Lid & Stacking
 
-The bin Specification area has Stackable (Not Stackable / Stackable) and a single Lid choice (No lid / Lid / Lid for stacking / Hinged lid). Width and Depth snap to whole 7 mm units on blur and display the unit count; Height stays in millimetres.
+The Wavefinity bin Specification area has Stackable (Not Stackable / Stackable)
+and Lid (No lid / Lid / Lid for stacking / Hinged lid). Width and Depth use the
+selected pitch on commit and display millimetres and unit count. Gridfinity
+Height uses independent 7 mm units; Wavefinity Height stays in millimetres.
+The options below describe Wavefinity; Gridfinity exposes only the rim and
+Gridfinity Lid choices described above.
 
 Choosing Lid, Lid for stacking, or Hinged lid includes a lid and shows the lid options. A hinged lid also has Alignment (Off by default, saved as `box.lid.alignment`: off / thin 1 mm / standard 2 mm / thick 3 mm): L-shaped tabs under the two front corners. A hinged lid with Alignment on needs support for these tabs; that is expected and fine. Lid thickness, an optional Knob (the only handle), and label text are available. Older saved Pull handles open as a Knob. Editing non-empty label text enables its options; clearing it disables the label. A saved off label stays off until its text is edited, and division labels retain their editor.
 

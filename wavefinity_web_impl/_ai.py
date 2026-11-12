@@ -17,6 +17,24 @@ from ._runtime import default_design
 from ._designs import _is_base_trim_design, validate_design_payload
 
 
+def grid_editor_catalog() -> list[dict[str, Any]]:
+    """Shared editor/AI choices, with dimensions taken from the geometry model."""
+    from organizer_engine._specs import GRID_PITCHES
+    from organizer_features.gridfinity import HEIGHT_UNIT, MIN_GRID_BASE, rim_depth
+    labels = {"wavefinity": "Wavefinity 7 mm", "gridfinity_half": "Gridfinity half 21 mm",
+              "gridfinity": "Gridfinity 42 mm"}
+    return [{"value": grid, "label": labels[grid], "pitch_mm": pitch,
+             "height_unit_mm": None if grid == "wavefinity" else HEIGHT_UNIT,
+             "minimum_base_mm": 0 if grid == "wavefinity" else MIN_GRID_BASE,
+             "rim_depth_mm": 0 if grid == "wavefinity" else rim_depth(grid),
+             "side_connectors": grid == "wavefinity",
+             "lid_choices": ([{"value": "none", "label": "No lid"},
+                              {"value": "resting", "label": "Gridfinity Lid"},
+                              {"value": "stacking", "label": "Gridfinity Lid for stacking"}]
+                             if grid != "wavefinity" else None)}
+            for grid, pitch in GRID_PITCHES.items()]
+
+
 def ai_context_grid(candidate: Any, grid: str) -> dict[str, Any]:
     """Check the candidate before supplying missing context metadata."""
     grid = validate_grid(grid)
@@ -400,7 +418,7 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "=== HOW TO WORK ===",
         "- Design exactly ONE object. If the request describes several, ask the person to narrow it to one BEFORE giving the final answer.",
         "- If any critical measurement is missing, ambiguous, suspicious or has conflicting units, ASK the person first. Do not guess it and do not reinterpret the units they gave.",
-        "- The bin you design must have a width and depth that are whole multiples of 7 mm (for example 63 mm or 70 mm), so it interlocks with bins of other sizes.",
+        "- Width and depth must be whole cells of the selected grid pitch in the catalog-built CAPABILITY MANIFEST (7, 21 or 42 mm). Gridfinity height uses independent 7 mm units; Wavefinity height stays plain millimetres. The standalone editor offers these three grids; choose the grid there before requesting an AI design, then keep the context grid.",
         "- All values in the design are millimetres. Convert nothing silently; ask if unsure.",
         "- You may use any legal part, option or modifier in the CAPABILITY MANIFEST that best solves the request.",
         "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",

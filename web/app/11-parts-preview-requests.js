@@ -115,7 +115,7 @@ async function deleteSupportAt(index) {
 
 function mutationControls() {
   return $$(
-    '#x-size, #y-size, #z, #base-thickness, #wall-thickness, #part-name, ' +
+    '#bin-grid, #x-size, #y-size, #z, #base-thickness, #wall-thickness, #part-name, ' +
     '#lift-grabber-size, #lift-grabber-location, #connector-height-mode, ' +
     '#mode-select, ' +
     '#bin-stackable, #lid-choice, #lid-thickness,#lid-fit, #lid-alignment, #lid-handle-type, #lid-handle-size, ' +

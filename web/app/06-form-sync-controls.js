@@ -350,12 +350,18 @@ function bindBinSizeFields(design = state.design) {
     const raw = String(design.box[axis]);
     state.binSizeFields[axis] = { raw };
     const input = $(binSizeSelector(axis));
-    if (input) input.value = raw;
+    if (input) {
+      input.value = raw;
+      input.setCustomValidity("");
+      input.removeAttribute("aria-invalid");
+    }
   }
   syncBinPrinterWarning();
 }
 
 function readBinSizeField(axis) {
+  // Standalone sizes enter the design only through the blur/Enter commit.
+  if (standaloneBinUnits()) return state.design.box[axis];
   if (!state.binSizeFields) bindBinSizeFields();
   const input = $(binSizeSelector(axis));
   const previous = state.binSizeFields[axis];
@@ -395,9 +401,19 @@ function syncBinPrinterWarning() {
 }
 
 function formatDimField(axis) {
+  syncBinGridControl();
   if (!state.binSizeFields) bindBinSizeFields();
   const input = $(binSizeSelector(axis));
   if (!input) return;
+  input.inputMode = standaloneBinUnits() ? "text" : "numeric";
+  if (standaloneBinUnits()) {
+    const field = state.binSizeFields[axis];
+    if (field.edited || input.hasAttribute("aria-invalid")) return;
+    const mm = state.design.box[axis];
+    const pitch = axis === "z" ? binGridRules().height_unit_mm : binGridRules().pitch_mm;
+    showBinDimensionResult(axis, { mm, units: pitch ? mm / pitch : null });
+    return;
+  }
   const raw = input.value.trim();
   const requested = Number(raw);
   const valid = raw !== "" && Number.isFinite(requested) && requested > 0;
@@ -650,6 +666,7 @@ function wireControls() {
         const axis = selector === "#x-size" ? "x" : selector === "#y-size" ? "y" : "z";
         if (!state.binSizeFields) bindBinSizeFields();
         state.binSizeFields[axis].edited = true;
+        if (standaloneBinUnits()) return;
         formatDimField(axis);
       }
       if (selector === "#x-size" || selector === "#y-size") {
@@ -835,11 +852,12 @@ function wireControls() {
   ["#x-size", "#y-size"].forEach(selector => {
     const axis = selector === "#x-size" ? "x" : "y";
     const input = $(selector);
-    input.addEventListener("input", () => markBinAxisManual(axis));
+    input.addEventListener("input", () => { if (!standaloneBinUnits()) markBinAxisManual(axis); });
     input.addEventListener("focus", () => {
       input.select();
     });
     input.addEventListener("blur", () => {
+      if (standaloneBinUnits()) { commitBinDimension(axis); return; }
       const previousDesign = clone(state.design);
       const snapped = readBinSizeField(axis);
       const prev = state.design.box[axis];
@@ -858,6 +876,10 @@ function wireControls() {
         input.blur();
       } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         event.preventDefault();
+        if (standaloneBinUnits()) {
+          commitBinDimension(axis, `${state.design.box[axis] + (event.key === "ArrowUp" ? 1 : -1) * binGridRules().pitch_mm}mm`);
+          return;
+        }
         const previousDesign = clone(state.design);
         const unit = state.catalog.base_unit;
         const current = number(input.value, state.design.box[axis]);
@@ -875,6 +897,10 @@ function wireControls() {
     });
     input.addEventListener("wheel", event => {
       event.preventDefault();
+      if (standaloneBinUnits()) {
+        commitBinDimension(axis, `${state.design.box[axis] + (event.deltaY < 0 ? 1 : -1) * binGridRules().pitch_mm}mm`);
+        return;
+      }
       const previousDesign = clone(state.design);
       const unit = state.catalog.base_unit;
       const current = number(input.value, state.design.box[axis]);
@@ -894,10 +920,13 @@ function wireControls() {
     }, { passive: false });
   });
   const heightInput = $("#z");
+  $("#bin-grid").addEventListener("change", commitBinGrid);
+  heightInput.addEventListener("keydown", event => { if (event.key === "Enter") heightInput.blur(); });
   heightInput.addEventListener("focus", () => {
     heightInput.select();
   });
   heightInput.addEventListener("blur", () => {
+    if (standaloneBinUnits()) { commitBinDimension("z"); return; }
     const previousDesign = clone(state.design);
     const next = readBinSizeField("z");
     const changed = next !== state.design.box.z;

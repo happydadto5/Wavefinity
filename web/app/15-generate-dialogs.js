@@ -562,7 +562,7 @@ async function printModelWithReport(target, initiatingButton, report) {
 // Connectors are physically unavailable for a B4B, a Base Trim or a lidded
 // bin.
 function connectorsUnavailable() {
-  return b4bEnabled() || baseTrimEnabled() || Boolean(state.design?.box?.lid?.enabled);
+  return b4bEnabled() || baseTrimEnabled() || !binGridRules().side_connectors || Boolean(state.design?.box?.lid?.enabled);
 }
 
 let includeIndividualBinConnectors = true;
@@ -570,6 +570,7 @@ let includeIndividualBinConnectors = true;
 function syncPrintChoiceAvailability() {
   const option = $("#individual-bin-include-connectors");
   const unavailable = connectorsUnavailable();
+  option.closest("label").hidden = !binGridRules().side_connectors;
   option.disabled = unavailable;
   option.checked = !unavailable && includeIndividualBinConnectors;
   $("#individual-bin-connectors-unavailable").hidden = !unavailable;

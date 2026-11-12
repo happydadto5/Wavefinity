@@ -924,9 +924,11 @@ async function saveDesign() {
 // The design as the form currently shows it, without touching state.design.
 function visibleDesignSnapshot() {
   const visibleDesign = clone(state.design);
-  visibleDesign.box.x = normalizeBinDimension("x", $("#x-size").value, visibleDesign.box.x);
-  visibleDesign.box.y = normalizeBinDimension("y", $("#y-size").value, visibleDesign.box.y);
-  visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
+  if (!standaloneBinUnits()) {
+    visibleDesign.box.x = normalizeBinDimension("x", $("#x-size").value, visibleDesign.box.x);
+    visibleDesign.box.y = normalizeBinDimension("y", $("#y-size").value, visibleDesign.box.y);
+    visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
+  }
   if (isSurfaceBinDesign(visibleDesign) &&
       resolveSurfaceBase(visibleDesign, { fromForm: true }) === false) {
     throw new Error("Enter a positive Object height, or leave it blank.");

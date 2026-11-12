@@ -1,5 +1,55 @@
 "use strict";
 
+function commitBinDimension(axis, raw = null) {
+  const input = $(binSizeSelector(axis));
+  const field = state.binSizeFields[axis];
+  const suffix = axis === "z" && !binGridRules().height_unit_mm ? "" : "mm";
+  const requested = raw ?? (!field.edited && input.value === field.raw ? `${state.design.box[axis]}${suffix}` : input.value);
+  const result = binDimensionResult(axis, requested);
+  showBinDimensionResult(axis, result);
+  if (result.reason) return false;
+  const previous = clone(state.design);
+  state.design.box[axis] = result.mm;
+  input.value = axis === "z" && !binGridRules().height_unit_mm ? String(result.mm) : `${fmt(result.mm)}mm`;
+  state.binSizeFields[axis] = { raw: input.value, edited: false };
+  if (previous.box[axis] !== result.mm) {
+    if (axis !== "z") markBinAxisManual(axis);
+    state.canGenerate = false;
+    updateGenerateAvailability();
+    changedDesign(previous);
+  }
+  syncBinPrinterWarning();
+  return true;
+}
+
+function commitBinGrid(event) {
+  const previous = clone(state.design);
+  const candidate = { ...state.design, grid: event.target.value };
+  let refused = false;
+  for (const axis of ["x", "y", "z"]) {
+    const suffix = axis === "z" && !binGridRules(candidate).height_unit_mm ? "" : "mm";
+    const result = binDimensionResult(axis, `${candidate.box[axis]}${suffix}`, candidate);
+    if (!result.reason && Math.abs(result.mm - candidate.box[axis]) > 1e-9) {
+      result.reason = "grid_alignment";
+      result.message = `Current size must be a whole ${axis === "z" ? 7 : binGridRules(candidate).pitch_mm} mm cell. Change this dimension before switching grid.`;
+    }
+    showBinDimensionResult(axis, result);
+    refused ||= Boolean(result.reason);
+  }
+  if (candidate.grid !== "wavefinity" && candidate.box.lid?.enabled &&
+      (candidate.box.lid.flip_enabled || candidate.box.lid.handle_enabled || candidate.box.lid.label_enabled)) {
+    toast("Remove the hinged, handle or label lid before switching grid.", true);
+    refused = true;
+  }
+  if (refused) { event.target.value = previous.grid || "wavefinity"; return; }
+  state.design.grid = candidate.grid;
+  state.canGenerate = false;
+  updateGenerateAvailability();
+  bindBinSizeFields();
+  syncLidForm();
+  changedDesign(previous);
+}
+
 function updateDraftFromFields(event) {
   bumpBoreEpoch();
   const previousConflictDesign = clone(state.design);

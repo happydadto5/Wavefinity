@@ -1,5 +1,12 @@
 "use strict";
 
+function syncBinGridControl() {
+  const row = $("#bin-grid-row"), select = $("#bin-grid");
+  row.hidden = !standaloneBinUnits();
+  select.replaceChildren(...state.catalog.grids.map(choice => new Option(choice.label, choice.value)));
+  select.value = state.design.grid || "wavefinity";
+}
+
 function renderDraftFields() {
   if (!state.draft) return;
   const info = partInfo();

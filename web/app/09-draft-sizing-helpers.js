@@ -1,5 +1,77 @@
 "use strict";
 
+function standaloneBinUnits() {
+  return !state.activeSpace && !b4bEnabled() && !baseTrimEnabled();
+}
+
+function binGridRules(design = state.design) {
+  return state.catalog.grids.find(row => row.value === (design.grid || "wavefinity"));
+}
+
+function parseCellDimension(raw, pitch, minimum, maximum = Infinity) {
+  const match = String(raw).trim().match(/^(\d+(?:\.\d*)?|\.\d+)\s*(u|mm)?$/i);
+  if (!match || !Number.isFinite(Number(match[1])) || Number(match[1]) <= 0)
+    return { reason: "positive_number", message: "Enter a positive number, with u or mm if needed." };
+  const value = Number(match[1]);
+  const units = match[2]?.toLowerCase() === "u" || (!match[2] && value < pitch);
+  if (units && Math.abs(value - Math.round(value)) > 1e-9)
+    return { reason: "whole_cells", message: "Units must be a whole number of cells; use mm to snap a measurement." };
+  const requested = units ? value * pitch : value;
+  const mm = units ? requested : Math.round(value / pitch) * pitch;
+  if (requested > maximum || mm < minimum - 1e-9 || mm > maximum)
+    return { reason: "range", message: `Use at least ${fmt(minimum)} mm${Number.isFinite(maximum) ? ` and at most ${fmt(maximum)} mm` : ""}.` };
+  return { mm, units: mm / pitch };
+}
+
+function parseHorizontalDimension(raw, design = state.design) {
+  const pitch = binGridRules(design).pitch_mm;
+  const maximum = Math.floor(state.catalog.max_box_size / pitch) * pitch;
+  return parseCellDimension(raw, pitch, pitch, maximum);
+}
+
+function parseVerticalDimension(raw, design = state.design) {
+  const rules = binGridRules(design), box = design.box;
+  const clearance = state.catalog.min_height_above_base_mm;
+  if (!rules.height_unit_mm) {
+    // Preserve Wavefinity's existing plain-mm height model.
+    const value = Number(raw);
+    return String(raw).trim() && Number.isFinite(value) && value > 0
+      ? { mm: normalizeBinDimension("z", value, box.z, design), units: null }
+      : { reason: "positive_number", message: "Enter a size in mm greater than zero." };
+  }
+  const pitch = rules.height_unit_mm;
+  const floor = Math.max(box.base_thickness, rules.minimum_base_mm);
+  let minimum = floor + clearance;
+  if (box.stack?.mode === "direct") minimum = Math.max(minimum, floor + rules.rim_depth_mm);
+  if (box.lid?.enabled) {
+    const thickness = ({ thin: 1.2, medium: 1.4, thick: 1.6 })[box.lid.thickness] || Number(box.lid.thickness || 1.2);
+    minimum = Math.max(2 * pitch, minimum + thickness + (box.lid.stack_rim ? rules.rim_depth_mm : 0));
+  }
+  minimum = Math.ceil((minimum - 1e-9) / pitch) * pitch;
+  return parseCellDimension(raw, pitch, minimum);
+}
+
+function binDimensionResult(axis, raw, design = state.design) {
+  return axis === "z" ? parseVerticalDimension(raw, design) : parseHorizontalDimension(raw, design);
+}
+
+function showBinDimensionResult(axis, result) {
+  const input = $(binSizeSelector(axis));
+  let note = document.getElementById(`${input.id}-size-note`);
+  if (!note) {
+    note = document.createElement("small");
+    note.id = `${input.id}-size-note`;
+    note.setAttribute("aria-live", "polite");
+    input.after(note);
+    input.setAttribute("aria-describedby", note.id);
+  }
+  note.className = result.reason ? "field-error" : "field-help";
+  note.textContent = result.message || (result.units == null ? `${fmt(result.mm)} mm` : `${fmt(result.mm)} mm · ${fmt(result.units)} units`);
+  note.hidden = false;
+  input.toggleAttribute("aria-invalid", Boolean(result.reason));
+  input.setCustomValidity(result.message || "");
+}
+
 // Probe the same authoritative layout-expansion owner used for the final
 // resize, with a cloned candidate. Until OK there is no draft/history/save or
 // preview mutation; Cancel only restores the control's displayed value.

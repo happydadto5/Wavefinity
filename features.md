@@ -43,7 +43,17 @@ The same skirt clears a plain or rimmed body. Stacking uses the same footprint
 and grid pitch and the standard rim seat descent, including lid-on-lid stacks.
 Grid lids require at least two height units and enough remaining body clearance
 for the floor and lid. Hinged, label and handle lids remain Wavefinity options.
-Grid controls are not enabled yet. Physical grid-lid fit is **not yet printed**;
+The No-Space Designer now has a Grid selector. Switching grid keeps dimensions
+in millimetres and refuses sizes that are not whole cells. Width/Depth accept
+`u` or `mm` on commit; bare values below the pitch mean units, other bare values
+mean millimetres. Units must be whole cells; millimetres snap to the selected
+pitch without clamping out-of-range sizes. The field shows millimetres and units.
+Gridfinity Height uses the same entry rules at the independent 7 mm height pitch
+and enforces floor/rim/lid minimums. Wavefinity Height and Space forms keep their
+existing entry rules. Gridfinity offers the Stackable rim and Gridfinity Lid
+(plain or for stacking), hiding connectors and hinged/handle/label lid variants.
+AI Design uses the selected grid and those catalog choices. Older designs
+without a grid remain Wavefinity. Physical grid-lid fit is **not yet printed**;
 the S1-13 print gate remains outstanding.
 
 - **Current** — accepted on `main`.

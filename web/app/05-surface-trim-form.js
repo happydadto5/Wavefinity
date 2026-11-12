@@ -575,6 +575,12 @@ function renderLidLabelEditor() {
 // Fit and label-depth choices, and the Thin/Medium/Thick measurements, are all
 // read from the backend (catalog + the latest matching preview report).
 function populateLidChoices() {
+  const gridChoices = binGridRules().lid_choices;
+  const choices = gridChoices || [
+    { value: "none", label: "No lid" }, { value: "resting", label: "Lid" },
+    { value: "stacking", label: "Lid for stacking" }, { value: "hinged", label: "Hinged lid" },
+  ];
+  $("#lid-choice").replaceChildren(...choices.map(choice => new Option(choice.label, choice.value)));
   const rules = state.catalog?.lid_rules || {};
   const fit = $("#lid-fit");
   if (fit && Array.isArray(rules.fits) && fit.options.length !== rules.fits.length) {
@@ -735,6 +741,15 @@ function syncLidForm() {
   }
   renderLidLabelDepthLegality();
   renderLidLabelEditor();
+  const grid = (state.design.grid || "wavefinity") !== "wavefinity";
+  if (grid) {
+    ["#lid-handle-type-row", "#lid-handle-size-row", "#lid-handle-position-row",
+     "#lid-label-text-row", "#lid-label-orientation-row", "#lid-label-details",
+     "#lid-alignment-row", "#lid-alignment-note", "#lid-flip-note"].forEach(selector => $(selector).hidden = true);
+  } else {
+    $("#lid-label-text-row").hidden = false;
+  }
+  $("#bin-stackable").closest("label").firstChild.textContent = grid ? "Stackable rim" : "Stackable base";
   applyStackVisibility();
 }
 
@@ -803,7 +818,7 @@ function applyStackVisibility() {
   // Fix 111 N10: one eligibility contract - a lid locks ordinary side
   // connectors everywhere. The section stays visible with a compact reason
   // (rendered by renderConnectorReadout); only the actions hide.
-  if (connectorSection) connectorSection.hidden = b4b || baseTrimEnabled();
+  if (connectorSection) connectorSection.hidden = b4b || baseTrimEnabled() || !binGridRules().side_connectors;
   syncPrintChoiceAvailability();
 }
 
@@ -823,7 +838,8 @@ function readStackForm(design) {
   }
   const divider = lidDivider(design);
   let divisionLabels = Array.isArray(remembered.division_labels) ? [...remembered.division_labels] : [];
-  const labelEnabled = Boolean(state.lidLabelEnabled);
+  const grid = (design.grid || "wavefinity") !== "wavefinity";
+  const labelEnabled = !grid && Boolean(state.lidLabelEnabled);
   if (!labelEnabled) divisionLabels = [];
   if (divider && labelEnabled && !divisionLabels.some(value => String(value || "").trim())) {
     divisionLabels = dividerLabelsForLid(divider);
@@ -839,7 +855,7 @@ function readStackForm(design) {
     label_size: $("#lid-label-size").value || "default",
     label_text: $("#lid-label-text").value,
     division_labels: divisionLabels,
-    handle_enabled: $("#lid-choice").value !== "stacking" && ($("#lid-handle-type").value || "none") !== "none",
+    handle_enabled: !grid && $("#lid-choice").value !== "stacking" && ($("#lid-handle-type").value || "none") !== "none",
     handle_type: "knob",
     handle_size: $("#lid-handle-size").value || remembered.handle_size,
     handle_position: $("#lid-handle-position").value || remembered.handle_position,
@@ -860,6 +876,9 @@ function readStackForm(design) {
 // to [unit, max_box_size]; ordinary Z stays on whole millimetres, while
 // Surface Z uses half millimetres. A computed minimum always rounds upward.
 function normalizeBinDimension(axis, requestedValue, fallback, design = state.design) {
+  if (standaloneBinUnits() && (axis !== "z" || binGridRules(design).height_unit_mm)) {
+    return binDimensionResult(axis, `${requestedValue}mm`, design).mm ?? fallback;
+  }
   const value = number(requestedValue, fallback);
   if (axis === "z") {
     const base = number(
