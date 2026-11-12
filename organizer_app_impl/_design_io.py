@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from organizer_engine._specs import validate_grid
 import math
 from pathlib import Path
 from typing import Iterable
@@ -169,6 +170,7 @@ def inventory_bin_record(
     assembled envelope, not its child-bin field - without touching ``box``.
     Ordinary bins continue using ``box.x/y/z`` when no override is supplied.
     """
+    grid = validate_grid(layout.design_grid)
     b4b_stack_mode = None
     if box.b4b.enabled:
         b4b_stack_mode = "b4b" if box.b4b.stacking else "none"
@@ -212,6 +214,7 @@ def inventory_bin_record(
 
     return {
         "file": file_names,
+        "grid": grid,
         "x": phys_x, "y": phys_y, "z": phys_z,
         "label": "" if label_text == "-" else label_text,
         "interior": interior_text,
@@ -731,6 +734,7 @@ def design_to_dict(
         # never silently rewritten; versions 1-7 migrate a (65, 70] lean
         # down to 65 at the load boundary.
         "version": 8,
+        "grid": validate_grid(layout.design_grid),
         # Story 2265: marks a record saved on the current 7 mm module. The
         # editor-open path judges this marker, never the dimensions.
         MODULE_MARKER_KEY: MODULE_MARKER_MM,
@@ -772,6 +776,7 @@ def _bore_tilt_for_version(
 def design_from_dict(
     data: dict, *, validate_layout: bool = True
 ) -> tuple[BoxSpec, Layout, str, str, str, bool]:
+    grid = validate_grid(data.get("grid", "wavefinity"))
     design_version = data.get("version", 1)
     if design_version not in (1, 2, 3, 4, 5, 6, 7, 8):
         raise ValueError(f"unsupported design version {data.get('version')!r}")
@@ -1129,7 +1134,7 @@ def design_from_dict(
             if not (str(error).startswith("Only one Label is allowed")
                     or (legacy_text and "will not fit the bin" in str(error))):
                 raise
-    return (box, layout, label, str(data.get("part_name", "")), location, scoop)
+    return (box, replace(layout, design_grid=grid), label, str(data.get("part_name", "")), location, scoop)
 
 
 def design_source_payload(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1146,5 +1151,6 @@ def design_source_payload(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str
     box, layout, label, part_name, label_location, scoop = design_from_dict(raw)
     canonical = design_to_dict(box, layout, label, part_name, label_location, scoop)
     record = inventory_bin_record(box, layout, None, label, part_name, scoop)
+    record["grid"] = canonical["grid"]
     record["file"] = ""
     return canonical, record

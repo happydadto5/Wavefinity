@@ -309,6 +309,7 @@ from organizer_features.pegboard import (
 from dataclasses import replace
 import ipaddress
 import json
+import copy
 import math
 import mimetypes
 import os
@@ -3182,8 +3183,13 @@ def ai_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
     description = description.strip()
     if len(description) > AI_MAX_DESCRIPTION:
         raise ValueError(f"Keep the description under {AI_MAX_DESCRIPTION} characters.")
-    design, checkable = _ai_baseline_design(payload.get("design"))
-    space = _ai_space_context(payload.get("space"))
+    _current, stored_space = _grid_inventory(payload)
+    from wavefinity_web_impl._ai import ai_context_grid
+    context_grid = _editor_context_grid(payload, stored_space)
+    stored_space = _ai_grid_space(payload, _current, stored_space)
+    design, checkable = _ai_baseline_design(ai_context_grid(payload.get("design"), context_grid))
+    space = _ai_space_context(stored_space)
+    space["grid"] = context_grid
     request_id = "wf-ai-" + secrets.token_hex(6)
     fingerprint = _ai_fingerprint(design, space)
     box, layout, *_ = _design(checkable)
@@ -3219,7 +3225,11 @@ def ai_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     violation = _ai_semantic_violation(payload.get("design"))
     if violation:
         raise ValueError(f"That design is not legal: {violation}.")
-    canonical = _ai_bin_design(payload.get("design"))
+    from wavefinity_web_impl._ai import ai_context_grid
+    _current, stored_space = _grid_inventory(payload)
+    candidate = ai_context_grid(payload.get("design"), _editor_context_grid(payload, stored_space))
+    stored_space = _ai_grid_space(payload, _current, stored_space)
+    canonical = _ai_bin_design(candidate)
     request: dict[str, Any] = {"design": canonical}
     if isinstance(payload.get("client_id"), str):
         request["client_id"] = payload["client_id"]
@@ -3238,7 +3248,7 @@ def ai_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not preview.get("fits") and not problems:
         problems.append("The design does not fit.")
     if not problems:
-        cap_problem = _ai_space_cap_violation(preview["design"], payload.get("space"))
+        cap_problem = _ai_space_cap_violation(preview["design"], stored_space)
         if cap_problem:
             problems.append(cap_problem)
     return {"design": preview["design"], "preview": preview, "problems": problems}
@@ -3310,6 +3320,124 @@ OLD_MODULE_NOTICE = (
 )
 
 
+def _grid_inventory(payload: dict[str, Any], *, source: bool = False) -> tuple[dict, dict | None]:
+    """Read authority from stored records, including browser-folder snapshots.
+
+    A client-supplied Space object is never ownership or destination evidence.
+    Reading here never migrates or rewrites a folder.
+    """
+    from organizer_inventory._rows import parse_inventory, owned_design_grid
+    from organizer_spaces._core import _json_file, _space, METADATA_FILE
+    prefix = "source_" if source else ""
+    text_key, output_key = prefix + "inventory_text", prefix + "output"
+    if HOSTED and text_key in payload:
+        current = parse_inventory(str(payload[text_key] or ""))
+        expected = payload.get(prefix + "space_id")
+        if expected and expected != (current.get("layout") or {}).get("space_id"):
+            raise ValueError("The saved Space ownership could not be verified.")
+        return current, (current.get("layout") or {}).get("space")
+    if HOSTED:
+        return {"bins": [], "layout": None}, None
+    prefs = load_preferences()
+    output = payload.get(output_key)
+    if source and not output:
+        raise ValueError("The source Space's saved records are missing.")
+    root = Path(str(output or prefs.get("output") or DEFAULT_OUTPUT)).expanduser().resolve()
+    current = load_inventory(root)
+    stored = (current.get("layout") or {}).get("space")
+    metadata = _json_file(root / METADATA_FILE, strict=True)
+    if metadata and metadata.get("folder_mode") == "space":
+        canonical = _space(metadata.get("space"))
+        if canonical is None:
+            raise ValueError("The saved Space definition could not be read.")
+        if isinstance(stored, dict) and owned_design_grid({}, stored) != owned_design_grid({}, canonical):
+            raise ValueError("The saved Space records disagree about its grid.")
+        stored = canonical
+        current = {**current, "layout": {**(current.get("layout") or {}), "space": stored}}
+        expected = payload.get(prefix + "space_id")
+        if expected and expected != metadata.get("space_id"):
+            raise ValueError("The saved Space ownership could not be verified.")
+    elif payload.get(prefix + "space_id"):
+        raise ValueError("The saved Space ownership could not be verified.")
+    return current, stored
+
+
+def _editor_context_grid(payload: dict, space: dict | None) -> str:
+    from organizer_engine._specs import validate_grid
+    if isinstance(space, dict):
+        return validate_grid(space.get("grid", "wavefinity"))
+    if isinstance(payload.get("space"), dict) and payload["space"].get("kind"):
+        raise ValueError("Open the saved Space before generating an AI bin for it.")
+    return validate_grid(payload.get("editor_grid", payload.get("grid", "wavefinity")))
+
+
+def _ai_grid_space(payload: dict, current: dict, space: dict | None) -> dict | None:
+    if not isinstance(space, dict):
+        return None
+    result = dict(space)
+    if space.get("kind") == "storage_drawers":
+        from organizer_storage.drawers import storage_drawers_active_limits
+        result.update(storage_drawers_active_limits(space, (current.get("layout") or {}).get("active")))
+    if space.get("kind") == "pegboard" and isinstance(payload.get("space"), dict):
+        # Existing board-specific starter hints are independent of grid identity.
+        result.update({key: payload["space"][key] for key in ("min_x", "min_z") if key in payload["space"]})
+    return result
+
+
+def _checked_entry_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    from organizer_inventory._rows import checked_design_entry, design_specs
+    if "source_space" in payload:
+        raise ValueError("Name the saved source records instead of claiming a source Space.")
+    current, destination = _grid_inventory(payload)
+    if isinstance(payload.get("space"), dict) and payload["space"].get("kind") and destination is None:
+        raise ValueError("The destination Space's saved records are missing.")
+    source = None
+    row_id = str(payload.get("source_row_id") or "") or None
+    if any(key in payload for key in ("source_output", "source_inventory_text", "source_space_id")):
+        source, _source_space = _grid_inventory(payload, source=True)
+        if not row_id:
+            raise ValueError("Name the saved source bin before copying it from a Space.")
+    elif row_id:
+        source = current
+    if source is not None and row_id:
+        raw_source = design_specs(source.get("layout")).get(row_id)
+        if not isinstance(raw_source, dict):
+            raise ValueError("The saved source bin could not be verified.")
+        checked_design_entry(raw_source, destination, source=source, row_id=row_id)
+    request = dict(payload)
+    for key in ("design", "resume_design"):
+        raw = request.get(key)
+        if isinstance(raw, dict) and raw.get("design_kind") != "base_trim":
+            # Saved reads stamp verified ownership. Unowned files with no grid
+            # remain legacy Wavefinity designs at every entry boundary.
+            request[key] = checked_design_entry(raw, destination, source=source, row_id=row_id)
+    if "new_bin_specs" in request:
+        request["new_bin_specs"] = [
+            checked_design_entry(raw, destination, source=source, row_id=row_id)
+            if isinstance(raw, dict) else raw for raw in request["new_bin_specs"] or ()]
+    proposed = request.get("layout")
+    if isinstance(proposed, dict):
+        from organizer_engine._specs import retain_space_grid
+        proposed = copy.deepcopy(proposed)
+        if isinstance(destination, dict):
+            proposed["space"] = retain_space_grid(proposed.get("space") or destination, destination)
+        existing = design_specs(current.get("layout"))
+        for key, raw in design_specs(proposed).items():
+            if key not in existing and isinstance(raw, dict):
+                proposed["design_specs"][key] = checked_design_entry(raw, destination, source=source, row_id=row_id)
+        request["layout"] = proposed
+    return request
+
+
+def _grid_entry_route(handler):
+    def guarded(payload):
+        from organizer_inventory._rows import INVENTORY_LOCK
+        with INVENTORY_LOCK:
+            request = _checked_entry_payload(payload)
+        return handler(request)
+    return guarded
+
+
 def _validate_design_open_guard(payload: dict[str, Any]) -> dict[str, Any]:
     """Every editor entry validates its raw saved design here (Story 2265).
 
@@ -3317,6 +3445,7 @@ def _validate_design_open_guard(payload: dict[str, Any]) -> dict[str, Any]:
     refused with a notice and never handed to the editor or rewritten. Fresh
     in-editor designs and non-record payloads pass through unchanged.
     """
+    payload = _checked_entry_payload(payload)
     raw = payload.get("design") if isinstance(payload, dict) else None
     if (
         isinstance(raw, dict)
@@ -3386,6 +3515,15 @@ POST_ROUTES.update({
         printer_profile_for=_printer_profile_for,
     ),
 })
+# Every editor/load/import/restore uses design/validate; row insertion and Save
+# also need the destination check before their handlers can write or build.
+for _grid_entry_path in (
+    "/api/drawer/save", "/api/drawer/design-source/save", "/api/drawer/design-source/duplicate",
+    "/api/drawer/design-source/status", "/api/drawer/generate-bin",
+    "/api/generate", "/api/print", "/api/layout/expand",
+):
+    if _grid_entry_path in POST_ROUTES:
+        POST_ROUTES[_grid_entry_path] = _grid_entry_route(POST_ROUTES[_grid_entry_path])
 # (Fix 096 A5) Read-only operation status, plus the side-effecting route set.
 # Reads keep ordinary timeout/retry behavior: the wrapper is a pure
 # pass-through unless the client supplied an operation_id. structural_design
@@ -3428,6 +3566,7 @@ if not HOSTED:
     # it at all.
     POST_ROUTES["/api/space/storage-drawers-mutate"] = _idempotent_operation(
         POST_ROUTES["/api/space/storage-drawers-mutate"])
+    POST_ROUTES["/api/space/resume"] = _grid_entry_route(POST_ROUTES["/api/space/resume"])
 
 
 # Anonymous submissions are serialized so concurrent requests cannot exceed the caps.

@@ -258,6 +258,13 @@ def _write_metadata(
             resolved_space = saved_space if preserve_space else space
             if not resolved_space:
                 raise FolderMetadataError("This folder is not the Space that was open before. Nothing was changed.")
+            from organizer_engine._specs import retain_space_grid, validate_grid
+            from organizer_inventory._rows import checked_design_entry
+            if saved_space is not None:
+                resolved_space = retain_space_grid(resolved_space, saved_space)
+            resolved_space = {**resolved_space, "grid": validate_grid(resolved_space.get("grid", "wavefinity"))}
+            if isinstance(resume_design, dict):
+                resume_design = checked_design_entry(resume_design, resolved_space)
             payload["inventory"] = True
             payload["space"] = resolved_space
             resolved_keep = saved_keep if keep_bin_defaults is _UNSET else bool(keep_bin_defaults)
@@ -751,6 +758,7 @@ def space_routes(
 
     def configure(payload):
         raw_def = {
+            **{key: payload[key] for key in ("grid", "built_in_grid") if key in payload},
             "name": payload.get("name"),
             "kind": payload.get("kind"),
             "x": payload.get("x"),
@@ -854,6 +862,7 @@ def space_routes(
         (_mode, _space, inventory, _keep, _defaults, _part_defaults,
          _needs_setup, _source, _prefill) = _folder_state(target, load_preferences())
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
+        raw_def.update({key: payload[key] for key in ("grid", "built_in_grid") if key in payload})
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
         for key in ("max_x_mm", "max_y_mm"):
@@ -906,6 +915,7 @@ def space_routes(
             raise ValueError("not a typed space")
 
         raw_def = {"name": payload.get("name"), "kind": existing_space["kind"], "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
+        raw_def.update({key: payload[key] for key in ("grid", "built_in_grid") if key in payload})
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
         for key in ("max_x_mm", "max_y_mm"):
@@ -1143,6 +1153,14 @@ def space_routes(
         from organizer_inventory import parse_inventory, render_inventory
         with _SPACE_CREATE_LOCK, INVENTORY_LOCK:
             target, info, prefs = action_space(payload)
+            from organizer_inventory import load_inventory
+            from organizer_inventory._rows import verify_space_bins, owned_design_grid
+            source = load_inventory(target)
+            verified_space = verify_space_bins(source, info["space"])
+            metadata_source = _json_file(target / METADATA_FILE, strict=True)
+            resume_source = metadata_source.get("resume_design")
+            if isinstance(resume_source, dict):
+                owned_design_grid(resume_source, verified_space)
             spaces = [*other_spaces(prefs), *recent(prefs), {"name": info["space"]["name"]}]
             name = _duplicate_name(spaces, info["space"]["name"])
             destination = target.parent / _space_folder_name(name)
@@ -1158,7 +1176,7 @@ def space_routes(
                 def omit_identity(directory, _names):
                     return {METADATA_FILE} if Path(directory) == target else set()
                 shutil.copytree(target, destination, dirs_exist_ok=True, ignore=omit_identity)
-                space = {**info["space"], "name": name}
+                space = {**verified_space, "name": name}
                 metadata = _json_file(target / METADATA_FILE, strict=True)
                 metadata["space_id"] = _new_space_id()
                 (destination / METADATA_FILE).write_text(json.dumps(metadata), encoding="utf-8")

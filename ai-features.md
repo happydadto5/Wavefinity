@@ -62,6 +62,14 @@ This file is supplemental explanation. Do not substitute values from this file f
 
 # 3. Space context
 
+Design data carries `grid`: `wavefinity` (7 mm), `gridfinity_half` (21 mm), or
+`gridfinity` (42 mm). Keep it equal to the supplied Space/editor context. A
+missing AI candidate grid inherits that context; an explicit conflict is refused.
+This stage stores and enforces grid identity only; it adds no Gridfinity geometry
+or size rules. A Space's grid is fixed when created. Bins cannot enter a Space
+with a different grid. An external older design without a grid means Wavefinity;
+a saved bin inside a Space inherits that verified source Space's grid.
+
 Wavefinity may be used without a typed Space or inside one of these typed Spaces.
 
 ## Hard object-height cap

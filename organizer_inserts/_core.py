@@ -244,6 +244,8 @@ class Layout:
     object_height_mm: float | None = None
     surface_base_mode: str = "custom"
     surface_lightweight_base: bool = False
+    # Design metadata only; serialized at the design root, never used by geometry.
+    design_grid: str = "wavefinity"
 
     def __post_init__(self) -> None:
         if self.mode not in LAYOUT_MODES:

@@ -12,8 +12,19 @@ from organizer_inserts import FEATURE_DEFINITIONS
 from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED
 
 from organizer_engine import GRID_PITCH
+from organizer_engine._specs import validate_grid
 from ._runtime import default_design
 from ._designs import _is_base_trim_design, validate_design_payload
+
+
+def ai_context_grid(candidate: Any, grid: str) -> dict[str, Any]:
+    """Check the candidate before supplying missing context metadata."""
+    grid = validate_grid(grid)
+    if not isinstance(candidate, dict):
+        raise ValueError("The response has no design object.")
+    if "grid" in candidate and validate_grid(candidate["grid"]) != grid:
+        raise ValueError("The AI design uses a different grid from the open Space or editor.")
+    return {**candidate, "grid": grid}
 
 
 # ---------------------------------------------------------------- AI Help (Fix 073)
@@ -313,7 +324,8 @@ def _ai_space_context(raw: Any) -> dict[str, Any]:
     """Only the user-relevant Space facts; nothing else from the browser."""
     if not isinstance(raw, dict) or raw.get("kind") not in AI_SPACE_KINDS:
         return {"typed_space": False}
-    space: dict[str, Any] = {"typed_space": True, "kind": raw["kind"]}
+    space: dict[str, Any] = {"typed_space": True, "kind": raw["kind"],
+                             "grid": validate_grid(raw.get("grid", "wavefinity"))}
     # Fix 078: Drawer and Storage Box (current `portable`, legacy `box`) are a
     # hard vertical ceiling at their Space z; Surface and Pegboard are not.
     space["capped"] = raw["kind"] in ("drawer", "box", "portable", "storage_drawers")
@@ -394,6 +406,7 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",
         "- Interior part zones are [x0,y0,x1,y1] in mm from the bin centre. current_baseline_layout_bounds_mm is only the interior of the CURRENT bin size. If you change box.x/box.y/box.z, the legal interior changes with it (each axis keeps about interior_margin_mm of shell in total): every zone you return must fit inside the interior of the design you RETURN, not the old one. Adjust the example zones, counts and sizes to the real item.",
         "- Keep every field listed in space_controlled_fields exactly as it is in the current design.",
+        "- Keep design.grid equal to the context grid (wavefinity, gridfinity_half, or gridfinity). A missing grid inherits this context; a conflicting grid is refused. These tags do not enable new geometry or size rules yet.",
         cap_line,
         "- design.part_name must be a short, descriptive, non-blank name (1-80 characters) for what the bin holds - for example \"Lipstick\" or \"Hex Drivers\", never a generic \"Bin\" or dimensions-only text. Existing Inventory names, when supplied below, are advisory: avoid an obvious duplicate, but Wavefinity enforces final uniqueness itself, so do not invent your own numbering suffix.",
         "- A design may contain at most one rim Label in total, not one per rim side.",

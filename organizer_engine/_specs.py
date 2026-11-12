@@ -23,6 +23,35 @@ SAMPLES_PER_MM = 16
 # every physical wall still follows the same global seam. Mixed lengths and
 # partial seams therefore need no per-bin phase or orientation setting.
 GRID_PITCH = 2.0 * WAVE_LENGTH   # 7.0
+GRID_PITCHES = {"wavefinity": GRID_PITCH, "gridfinity_half": 21.0, "gridfinity": 42.0}
+
+
+def validate_grid(value: object) -> str:
+    """Validate an explicit grid. Only record readers supply the legacy default."""
+    if not isinstance(value, str) or value not in GRID_PITCHES:
+        raise ValueError("Choose wavefinity, gridfinity, or gridfinity_half for the grid.")
+    return value
+
+
+def validate_built_in_grid(value: object) -> str:
+    if not isinstance(value, str) or value not in ("floor", "none"):
+        raise ValueError("Built-in grid must be floor or none.")
+    return value
+
+
+def retain_space_grid(proposed: dict, existing: dict) -> dict:
+    """All existing-Space writers preserve the creation-time grid."""
+    grid = validate_grid(existing.get("grid", "wavefinity"))
+    if "grid" in proposed and validate_grid(proposed["grid"]) != grid:
+        raise ValueError("A Space's grid cannot be changed. Create a new Space for another grid.")
+    result = {**proposed, "grid": grid}
+    block_edit = any(isinstance(result.get(key), dict) and "built_in_grid" in result[key]
+                     for key in ("storage_box", "storage_drawers"))
+    if "built_in_grid" not in result and "built_in_grid" in existing and not block_edit:
+        result["built_in_grid"] = existing["built_in_grid"]
+    return result
+
+
 MIN_BOX_SIZE = GRID_PITCH        # 7.0 - one grid step
 MAX_BOX_SIZE = 350.0             # public-service resource ceiling for X and Y
 BASE_UNIT = GRID_PITCH           # one unit is one grid step, so sizes are whole

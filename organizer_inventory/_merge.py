@@ -7,6 +7,8 @@ import copy
 from pathlib import Path
 import re
 from typing import Any, Iterable
+from organizer_engine._specs import retain_space_grid, validate_grid
+from ._rows import checked_design_entry, owned_design_grid
 
 from ._rows import (
     INVENTORY_LOCK,
@@ -337,6 +339,9 @@ def _merge_design_source(
     current: dict[str, Any], *, design: dict[str, Any], record: dict[str, Any], row_id: str | None,
     folder: Path | None = None, available_filenames: Iterable[str] = (),
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str, bool]:
+    current = copy.deepcopy(current)
+    space = (current.get("layout") or {}).get("space")
+    design = checked_design_entry(design, space, source=current, row_id=row_id)
     bins = current["bins"]
     by_id = {one["id"]: one for one in bins}
     target = by_id.get(row_id) if row_id else None
@@ -508,6 +513,17 @@ def _merge_inventory(
     new_bin_specs: Iterable[Any] = (),
     delete_ids: Iterable[str] = (),
 ) -> tuple[list[dict[str, Any]], dict | None]:
+    current = copy.deepcopy(current)
+    layout = copy.deepcopy(layout) if layout is not _KEEP else _KEEP
+    existing_space = (current.get("layout") or {}).get("space")
+    if isinstance(existing_space, dict) and layout is None:
+        raise ValueError("A Space's saved layout cannot be removed. Nothing was changed.")
+    if isinstance(existing_space, dict) and isinstance(layout, dict):
+        proposed_space = layout.get("space")
+        if isinstance(proposed_space, dict):
+            layout["space"] = retain_space_grid(proposed_space, existing_space)
+        else:
+            layout["space"] = copy.deepcopy(existing_space)
     if layout is not _KEEP and layout is not None and not isinstance(layout, dict):
         raise ValueError("drawer layout must be an object")
     bins = current["bins"]
@@ -516,6 +532,9 @@ def _merge_inventory(
     if layout is not _KEEP and isinstance(chosen, dict):
         chosen = _keep_current_cabinet(current["layout"], chosen)
     if isinstance(chosen, dict):
+        destination_space = chosen.get("space")
+        if isinstance(destination_space, dict):
+            owned_design_grid({}, destination_space)
         # Layout saves may have been queued before a design autosave. The
         # Inventory source map always comes from the latest file transaction.
         submitted_specs = dict(design_specs(chosen))
@@ -560,6 +579,7 @@ def _merge_inventory(
         raw_wall = _number(raw.get("wall")) if _text(raw.get("wall")) else None
         bins.append({
             "id": wanted if re.fullmatch(r"B\d+", wanted) and wanted not in taken else next_bin_id(bins),
+            "grid": validate_grid(raw.get("grid", "wavefinity")),
             "date": now,
             "kind": kind if kind in KINDS else "manual",
             "boundary": boundary if boundary == "edge" else "",
@@ -593,10 +613,19 @@ def _merge_inventory(
             if isinstance(spec, dict):
                 chosen["design_specs"][row["id"]] = spec
     final_specs = design_specs(chosen) if isinstance(chosen, dict) else {}
+    destination_space = chosen.get("space") if isinstance(chosen, dict) else existing_space
     for row in created:
         if row.get("kind") in ("bin", "b4b") and not isinstance(final_specs.get(row["id"]), dict):
             raise ValueError(
                 f"new row {row['id']} needs its editable design source; nothing was recorded")
+        spec = final_specs.get(row["id"])
+        if isinstance(spec, dict):
+            final_specs[row["id"]] = checked_design_entry(spec, destination_space, source=current)
+        elif row.get("kind") == "manual":
+            checked_design_entry(row, destination_space)
+    for row in bins:
+        spec = final_specs.get(row["id"])
+        row["grid"] = owned_design_grid(spec if isinstance(spec, dict) else row, destination_space)
     return bins, _prune_layout(chosen, bins)
 
 

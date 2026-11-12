@@ -234,6 +234,17 @@ def _json_file(path: Path, *, strict: bool = False) -> dict[str, Any] | None:
 def _space(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict) or raw.get("kind") not in {"drawer", "box", "surface", "portable", "pegboard", "storage_drawers"}:
         return None
+    from organizer_engine._specs import validate_grid, validate_built_in_grid
+    grid = validate_grid(raw.get("grid", "wavefinity"))
+    for key in ("storage_box", "storage_drawers"):
+        settings = raw.get(key)
+        if isinstance(settings, dict):
+            if "grid" in settings and validate_grid(settings["grid"]) != grid:
+                raise ValueError("The printed container grid must match its Space grid.")
+            if "built_in_grid" in settings:
+                validate_built_in_grid(settings["built_in_grid"])
+    if "built_in_grid" in raw:
+        validate_built_in_grid(raw["built_in_grid"])
     if raw.get("kind") == "storage_drawers":
         try:
             return normalise_storage_drawers_definition(raw)
@@ -251,6 +262,7 @@ def _space(raw: Any) -> dict[str, Any] | None:
     if not all(math.isfinite(value) and value > 0 for value in size):
         return None
     res = {
+        "grid": grid,
         "kind": raw["kind"],
         "name": str(raw.get("name") or "").strip()[:80],
         "x": size[0], "y": size[1], "z": size[2],
@@ -268,7 +280,13 @@ def _space(raw: Any) -> dict[str, Any] | None:
         # A legacy Storage Box Space with no block reads the established
         # defaults; it needs no migration.
         try:
-            res["storage_box"] = normalise_storage_box(raw.get("storage_box"), size[0])
+            settings = dict(raw.get("storage_box") or {})
+            if "grid" in settings and validate_grid(settings["grid"]) != grid:
+                raise ValueError("Storage Box grid must match its Space grid.")
+            settings["grid"] = grid
+            settings["built_in_grid"] = validate_built_in_grid(raw.get("built_in_grid", settings.get("built_in_grid", "floor")))
+            res["storage_box"] = normalise_storage_box(settings, size[0])
+            res["built_in_grid"] = settings["built_in_grid"]
         except ValueError:
             return None
     return res
@@ -357,6 +375,9 @@ def _metadata_resume(
         raise FolderMetadataError(
             "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
         )
+    if isinstance(design, dict):
+        from organizer_inventory._rows import owned_design_grid
+        design = {**design, "grid": owned_design_grid(design, metadata.get("space"))}
     return design, (pending if design is not None else False)
 
 

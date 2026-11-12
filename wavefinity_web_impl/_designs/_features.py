@@ -314,7 +314,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         with GEOMETRY_LOCK:
             validate_b4b_design(box, layout_feature_kinds=("divider",), deep=True)
             b4b_divider_solids(box, [one])
-        updated = Layout((one,), "fused", layout.snap)
+        updated = Layout((one,), "fused", layout.snap, design_grid=layout.design_grid)
         return {
             "design": design_to_dict(
                 box, updated, label, part_name, label_location, False
@@ -505,7 +505,7 @@ def delete_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         index = int(payload["index"])
         if index != 0 or len(layout.features) == 0 or layout.features[0].kind != "divider":
             raise ValueError("the selected interior part no longer exists")
-        updated = Layout((), "fused", layout.snap)
+        updated = Layout((), "fused", layout.snap, design_grid=layout.design_grid)
         return {"design": design_to_dict(
             box, updated, label, part_name, label_location, False,
         )}

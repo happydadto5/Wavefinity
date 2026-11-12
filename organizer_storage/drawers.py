@@ -1,5 +1,6 @@
 """Storage Drawers schema and placement-preserving layout plans."""
 from __future__ import annotations
+from organizer_engine._specs import validate_grid, validate_built_in_grid, retain_space_grid
 
 import copy
 import math
@@ -105,6 +106,7 @@ def storage_drawers_defaults(drawer_count: int = 3) -> dict:
     if isinstance(drawer_count, bool) or not isinstance(drawer_count, int) or not 1 <= drawer_count <= STORAGE_DRAWERS_MAX_DRAWERS:
         raise ValueError(f"Number of drawers must be {STORAGE_DRAWERS_MIN_DRAWERS}–{STORAGE_DRAWERS_MAX_DRAWERS}")
     return {
+        "grid": "wavefinity", "built_in_grid": "floor",
         "drawers": [new_drawer_descriptor() for _ in range(drawer_count)],
         "cabinet_style": "full", "rear_support": "cross", "open_frame_width_mm": 14.0,
         "wall_mounting": "off", "wall_mount_keyholes_per_drawer": 2,
@@ -139,7 +141,9 @@ def normalise_storage_drawers_block(raw: object) -> dict:
         if height + fit < STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM:
             raise ValueError(f"Drawer usable height must be at least {STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM:g} mm")
         drawers.append({"id": drawer_id, "height_mm": _usable_drawer_height(height, fit), "label_text": _label(row.get("label_text", ""), "Drawer label")})
-    result = {"drawers": drawers}
+    result = {"drawers": drawers,
+              "grid": validate_grid(raw.get("grid", "wavefinity")),
+              "built_in_grid": validate_built_in_grid(raw.get("built_in_grid", "floor"))}
     result["cabinet_style"] = _choice(raw.get("cabinet_style", defaults["cabinet_style"]), ("full", "open"), "cabinet style")
     result["rear_support"] = _choice(raw.get("rear_support", defaults["rear_support"]), ("cross", "solid"), "rear support")
     result["wall_mounting"] = _choice(raw.get("wall_mounting", defaults["wall_mounting"]), ("off", "keyholes"), "wall mounting")
@@ -179,6 +183,11 @@ def normalise_storage_drawers_definition(raw: dict) -> dict:
     if not isinstance(raw, dict) or raw.get("kind") != STORAGE_DRAWERS_KIND:
         raise ValueError("Expected a Storage Drawers Space")
     result = copy.deepcopy(raw)
+    result["grid"] = validate_grid(raw.get("grid", "wavefinity"))
+    settings = dict(raw.get("storage_drawers") or {})
+    if "grid" in settings and validate_grid(settings["grid"]) != result["grid"]:
+        raise ValueError("Storage Drawers grid must match its Space grid.")
+    result["built_in_grid"] = validate_built_in_grid(raw.get("built_in_grid", settings.get("built_in_grid", "floor")))
     result["name"] = _label(raw.get("name", ""), "Space name")
     if not result["name"]:
         raise ValueError("Enter a Space name")
@@ -189,6 +198,7 @@ def normalise_storage_drawers_definition(raw: dict) -> dict:
             raise ValueError(f"Space {axis} must be 6–250 whole units")
         result[axis] = round(units) * BASE_UNIT
     result["storage_drawers"] = normalise_storage_drawers_block(raw.get("storage_drawers"))
+    result["storage_drawers"].update(grid=result["grid"], built_in_grid=result["built_in_grid"])
     result["z"] = storage_drawers_compatibility_z(result["storage_drawers"])
     return result
 
@@ -399,7 +409,7 @@ def plan_delete_drawer(space: dict, layout: dict, drawer_id: str) -> tuple[dict,
 
 def plan_reconfigure(space: dict, layout: dict, proposed_space: dict, bins: list[dict]) -> tuple[dict, dict]:
     current = reconcile_storage_drawers_layout(layout, space)
-    proposed = normalise_storage_drawers_definition(proposed_space)
+    proposed = normalise_storage_drawers_definition(retain_space_grid(proposed_space, current["space"]))
     old_ids = [row["id"] for row in current["space"]["storage_drawers"]["drawers"]]
     new_ids = [row["id"] for row in proposed["storage_drawers"]["drawers"]]
     if old_ids != new_ids:

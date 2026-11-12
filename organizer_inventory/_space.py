@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import math
+from organizer_engine._specs import validate_grid, validate_built_in_grid, retain_space_grid
 from typing import Any
 from organizer_engine import (
     B4B_DEFAULT_BASE,
@@ -88,6 +89,7 @@ STORAGE_BOX_MAX_MATERIAL_MM = 4.0
 def storage_box_defaults() -> dict[str, Any]:
     """The established B4B/Storage Box settings a new or legacy Space starts from."""
     return {
+        "grid": "wavefinity", "built_in_grid": "floor",
         "secure_lid": True,
         "latch_count": "1",
         "hinge_count": "2",
@@ -182,6 +184,8 @@ def normalise_storage_box(raw: Any, width_mm: Any = None) -> dict[str, Any]:
         raise ValueError(f"storage box label text is at most {STORAGE_BOX_LABEL_LIMIT} characters")
     return {
         "secure_lid": _storage_box_flag(merged["secure_lid"], "secure lid"),
+        "grid": validate_grid(merged["grid"]),
+        "built_in_grid": validate_built_in_grid(merged["built_in_grid"]),
         "latch_count": _storage_box_choice(merged["latch_count"], B4B_LATCH_COUNTS, "latch count"),
         "hinge_count": _storage_box_choice(merged["hinge_count"], B4B_HINGE_COUNTS, "hinge count"),
         "hinge_type": _storage_box_choice(merged["hinge_type"], B4B_HINGE_TYPES, "hinge type"),
@@ -202,6 +206,7 @@ def normalise_storage_box(raw: Any, width_mm: Any = None) -> dict[str, Any]:
 
 
 def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = False) -> dict[str, Any]:
+    grid = validate_grid(raw.get("grid", "wavefinity"))
     name = str(raw.get("name") or "").strip()[:80]
     if not name:
         raise ValueError("a space needs a name")
@@ -217,7 +222,7 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
 
     if kind == "pegboard":
         resolved = normalise_pegboard_space(raw)
-        return {"name": name, "kind": kind, **resolved}
+        return {"name": name, "kind": kind, **resolved, "grid": grid}
 
     if kind == "storage_drawers":
         # Strict re-normalisation of a saved/edited cabinet; Create prepares
@@ -272,7 +277,7 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
                 f"surface trim size {trim_size!r} requires Z={expected_z:g} mm"
             )
 
-    result = {"name": name, "kind": kind, "x": x, "y": y, "z": z}
+    result = {"name": name, "kind": kind, "x": x, "y": y, "z": z, "grid": grid}
     if kind == "surface":
         result["trim_size"] = trim_size
         # Fix 095: the user's maximum finished outside rectangle is durable
@@ -281,10 +286,22 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
         result["max_x_mm"], result["max_y_mm"] = surface_maximums(
             raw, x, y, trim_size, strict=True)
     if kind == "portable":
-        result["storage_box"] = normalise_storage_box(raw.get("storage_box"), x)
+        settings = dict(raw.get("storage_box") or {})
+        if "grid" in settings and validate_grid(settings["grid"]) != grid:
+            raise ValueError("Storage Box grid must match its Space grid.")
+        settings["grid"] = grid
+        if "built_in_grid" in raw:
+            settings["built_in_grid"] = raw["built_in_grid"]
+        result["storage_box"] = normalise_storage_box(settings, x)
+        result["built_in_grid"] = result["storage_box"]["built_in_grid"]
     return result
 
 def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> None:
+    from ._rows import owned_design_grid
+    destination_grid = validate_grid(space_def.get("grid", "wavefinity"))
+    for spec in design_specs(layout).values():
+        if isinstance(spec, dict) and owned_design_grid(spec, layout.get("space")) != destination_grid:
+            raise ValueError("An existing bin uses a different grid from this Space. Nothing was changed.")
     layout["version"] = 1
     layout["space"] = space_def
 
@@ -392,6 +409,9 @@ def _carry_storage_box(raw_def: dict[str, Any], layout: dict[str, Any], mode: st
 def _configured_space_definition(
     raw_def: dict[str, Any], layout: dict[str, Any], mode: str, allow_legacy: bool,
 ) -> dict[str, Any]:
+    existing = layout.get("space")
+    if isinstance(existing, dict):
+        raw_def = retain_space_grid(raw_def, existing)
     if raw_def.get("kind") == "storage_drawers":
         if mode == "update":
             raise ValueError("Edit a Storage Drawers Space from its cabinet editor.")
@@ -432,6 +452,11 @@ def _plan_cabinet_mutation(
     base = space if isinstance(space, dict) else layout.get("space")
     if not isinstance(base, dict) or base.get("kind") != "storage_drawers":
         raise ValueError("This folder does not hold a Storage Drawers Space.")
+    persisted = layout.get("space")
+    if isinstance(persisted, dict):
+        base = retain_space_grid(base, persisted)
+    if isinstance(proposed, dict):
+        proposed = retain_space_grid(proposed, base)
     if operation == "reset":
         # Damaged cabinet settings: rebuild only the cabinet definition, then
         # reconcile the layout by stable drawer ID. A repaired-away drawer that

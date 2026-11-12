@@ -174,7 +174,7 @@ def _b4b_preview_payload(payload: dict[str, Any], token=None) -> dict[str, Any]:
             feature_errors.append(str(err))
             invalid_feature_indexes.append(idx)
 
-    saved_layout = Layout(tuple(normalized_saved), "fused", layout.snap)
+    saved_layout = Layout(tuple(normalized_saved), "fused", layout.snap, design_grid=layout.design_grid)
     display_features = list(normalized_saved)
 
     draft_raw = payload.get("draft")

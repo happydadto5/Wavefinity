@@ -25,6 +25,12 @@ regenerate bins and side clips made with that profile as a set.
 
 ## Status
 
+Space and design records preserve their grid identity: Wavefinity (7 mm),
+Gridfinity half (21 mm), or Gridfinity (42 mm). A Space keeps the grid chosen at
+creation; bin entry across different grids is refused without changing either
+record. Older external designs use Wavefinity. This is data support for Stage 1;
+new geometry and grid controls are not enabled yet.
+
 - **Current** — accepted on `main`.
 - **In review** — implemented on a fix branch but not yet accepted into `main`.
 - **Legacy/internal** — still understood by the code where necessary, but not offered as a normal current UI feature.

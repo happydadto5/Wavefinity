@@ -9,6 +9,7 @@ import math
 from pathlib import Path
 import re
 import threading
+from organizer_engine._specs import validate_grid
 from typing import Any, Iterable
 
 
@@ -362,6 +363,17 @@ def parse_inventory(text: str) -> dict[str, Any]:
             except json.JSONDecodeError as error:
                 warnings.append(f"the drawer layout block could not be read ({error.msg}); it will be rewritten on the next save")
     _migrate_drawer_boundaries(layout)
+    space = layout.get("space") if isinstance(layout, dict) else None
+    if isinstance(space, dict):
+        space["grid"] = validate_grid(space.get("grid", "wavefinity"))
+    for spec in design_specs(layout).values():
+        if isinstance(spec, dict) and "grid" in spec:
+            validate_grid(spec["grid"])
+    for row in bins:
+        spec = design_specs(layout).get(row["id"])
+        row["grid"] = owned_design_grid(spec if isinstance(spec, dict) else {}, space)
+        if isinstance(spec, dict):
+            spec["grid"] = row["grid"]
     return {"bins": bins, "layout": layout, "warnings": warnings, "legacy": legacy}
 
 
@@ -502,6 +514,67 @@ def design_specs(layout: dict[str, Any] | None) -> dict[str, Any]:
     return specs if isinstance(specs, dict) else {}
 
 
+def owned_design_grid(design: dict, space: dict | None) -> str:
+    """Only call with ownership established by a stored inventory or metadata record."""
+    if not isinstance(space, dict):
+        return validate_grid(design.get("grid", "wavefinity"))
+    grid = validate_grid(space.get("grid", "wavefinity"))
+    if "grid" in design and validate_grid(design["grid"]) != grid:
+        raise ValueError("This bin's grid does not match its owning Space. Nothing was changed.")
+    return grid
+
+
+def resolve_source_grid(design: dict, source: dict | None = None, row_id: str | None = None) -> str:
+    """Prove an inherited grid from stored ownership, never from a client Space claim.
+
+    Missing metadata may inherit only for the exact saved source. Edited/new
+    designs carry the explicit grid supplied when they were opened.
+    """
+    if any(key in design for key in ("space", "space_id", "source_space", "source_space_id")):
+        raise ValueError("A design cannot claim Space ownership. Open its saved source first.")
+    if source is not None:
+        layout = source.get("layout") or {}
+        specs = design_specs(layout)
+        rows = {row["id"] for row in source.get("bins", [])}
+        if row_id:
+            saved = specs.get(row_id)
+            if row_id not in rows or not isinstance(saved, dict):
+                raise ValueError("The source bin's Space ownership could not be verified.")
+            grid = owned_design_grid(saved, layout.get("space"))
+            if "grid" in design:
+                if validate_grid(design["grid"]) != grid:
+                    raise ValueError("This bin's grid does not match its source Space.")
+                return grid
+            if {key: value for key, value in design.items() if key != "grid"} != {
+                    key: value for key, value in saved.items() if key != "grid"}:
+                raise ValueError("The source bin changed. Open its saved source again.")
+            return grid
+    elif row_id:
+        raise ValueError("The source bin's Space ownership could not be verified.")
+    return validate_grid(design.get("grid", "wavefinity"))
+
+
+def checked_design_entry(design: dict, destination: dict | None, *,
+                         source: dict | None = None, row_id: str | None = None) -> dict:
+    grid = resolve_source_grid(design, source, row_id)
+    if isinstance(destination, dict) and grid != validate_grid(destination.get("grid", "wavefinity")):
+        raise ValueError("This bin uses a different grid from this Space. Nothing was changed.")
+    return {**copy.deepcopy(design), "grid": grid}
+
+
+def verify_space_bins(current: dict, space: dict | None = None) -> dict:
+    """Validate a whole-Space copy before creating its destination."""
+    stored = (current.get("layout") or {}).get("space")
+    if not isinstance(stored, dict):
+        raise ValueError("The source Space has no saved definition.")
+    if space is not None and owned_design_grid({}, stored) != owned_design_grid({}, space):
+        raise ValueError("The source Space records disagree about its grid.")
+    for spec in design_specs(current.get("layout")).values():
+        if isinstance(spec, dict):
+            owned_design_grid(spec, stored)
+    return {**stored, "grid": owned_design_grid({}, stored)}
+
+
 def _next_simple_bin_name(bins: list[dict[str, Any]]) -> str:
     names = {str(one.get("name") or "").casefold() for one in bins}
     number = 1
@@ -541,11 +614,13 @@ def _duplicate_design_source(current: dict[str, Any], row_id: str) -> tuple[list
     spec = design_specs(layout).get(row_id)
     if source is None or not isinstance(spec, dict):
         raise ValueError(f"no canonical design source for {row_id!r}")
+    verified = checked_design_entry(spec, layout.get("space"), source=current, row_id=row_id)
     name = _duplicate_name(bins, source.get("name", ""))
-    design = copy.deepcopy(spec)
+    design = verified
     design["part_name"] = name
     new_id = next_bin_id(bins)
     bins.append({**copy.deepcopy(source), "id": new_id, "name": name,
+                 "grid": design["grid"],
                  "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
                  "file": "", "status": "in_design", "qty": 0})
     layout = {**layout, "design_specs": {**design_specs(layout), new_id: design}}
