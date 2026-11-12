@@ -1,96 +1,57 @@
-> **OWNER UPDATE — PRINT & SINGLE CUTOVER (2026-11-12):** The full details are in [Browser-only-core-detailed-build-contracts.md](Browser-only-core-detailed-build-contracts.md). **Do not remove the Print button or turn Print into generic Export.** Browser Print must perform complete printer/Space validation, produce slicer-ready arranged 3MF, save/download, offer a clear Open-in-Bambu Studio handoff, and maintain truthful Printed/Prepared status. A static page cannot force-launch arbitrary Windows executables without an optional registered integration; do not falsely promise automatic launch. **No half-working intermediate app is required.** Build all components, allowing nonfunctional interim states, then one complete tested cutover. Do not spend engineering effort on a server/browser toggle, hybrid fallback, or supporting individual partially migrated releases.
+# Wavefinity — complete browser-only core conversion
 
-> **AUTHORITATIVE IMPLEMENTATION DETAIL (2026-11-12):** This file is the overview. Implement the numbered B00–B16 work contracts in [Browser-only-core-detailed-build-contracts.md](Browser-only-core-detailed-build-contracts.md). The companion contains exact existing/new file paths, route groups, adapter/worker protocol, dependencies, acceptance tests, static-host cutover, and retirement gates. Preserve the former Python/Render method in [docs/legacy-python-server-hosting.md](../docs/legacy-python-server-hosting.md), which now exists. Do not treat the high-level phases in this overview as sufficient coder instructions.\n\n# Wavefinity browser-only core integration and experiment retirement
+**Status: implementation plan only; no coder Stories submitted yet.**
+**Owner direction, November 12, 2026:** Keep the Wavefinity interface and Print workflow, host at wavefinity.org without server geometry processing, require no installed Wavefinity software, finish all Gridfinity work first, and create implementation-ready Stories only after the owner's explicit "go".
 
-**Status:** Implementation plan; NOT yet implemented.  
-**Owner direction:** No installation for site visitors. Desktop Chrome and Edge on Windows are the target. Do not create a separate application or new hosting service while integrating. No feature branches/worktrees; land safely on `main` with fresh remote checks.  
-**Goal:** Serve Wavefinity as static site assets while the visitor's own PC performs all geometry and file generation. Retain `wavefinity.org` regardless of host.  
-**Evidence:** Story 2979 established a browser-only experimental runner. Direct local implementation pushed as `f25fee144d556a819a80eec6a89313603ce0460b` built 42x42x28 and 84x42x28 ordinary bins in Linux Chromium with the custom Manifold MeshGL64 WASM bridge. Geometry comparison and network-blocked builds passed according to its reported test results; Andrew manually confirmed the experiment generated printable STLs in Windows Chrome and Edge on 2026-11-12. This does **not** yet mean the core application works without the Python server.
+**Development policy: WAVEFINITY IS USER-TESTED. CODERS DO NOT TEST.** Coders reason through logic, read source and callers, inspect their changes, and implement. They do not write, modify, repair or run automated tests; they do not manually operate the app; and they do not create user test plans, checklists or QA instructions. The owner tests the actual application when they decide. Code-level input validation, error handling, geometry invariants, integrity checks and other real production protections remain required.
 
-## Non-negotiable invariants
+**Implementation authority:** [Browser-only-core-detailed-build-contracts.md](Browser-only-core-detailed-build-contracts.md) contains the exact B00–B16 work packages, source files, created production modules, route ownership, change instructions and dependencies. This overview does not supersede it. The old Render/Python method is preserved in [docs/legacy-python-server-hosting.md](../docs/legacy-python-server-hosting.md) without exposing any private Porkbun credentials.
 
-1. One canonical geometry implementation: reuse Wavefinity's real engine and its 64-bit Boolean path; no parallel lower-fidelity model or float32 silent fallback. Retain existing 7 mm Wavefinity, 21/42 mm Gridfinity, and all precise fit/clearance rules.
-2. No installed Python, local server, native application, browser extension, or helper is required of visitors. Use browser worker(s), WebAssembly and browser APIs only.
-3. Keep the existing application UI and its saved-design semantics. Preserve exports, parts, printer profiles and space workflows; do not call a static-host migration complete with core controls broken or silently disabled.
-4. No cloud geometry/API processing from the static build. A feature that genuinely needs external services (e.g. AI) must be explicitly separated and labeled, not represented as local. Never expose server secrets or provider keys in the static bundle.
-5. Do not maintain a partially functioning dual-mode application. The current server method is documented for recovery; interim implementation may be broken until final full-suite acceptance.
-6. No feature branches, Git worktrees, force pushes, or rewriting shared history. Before each direct-main publication fetch and safely reconcile any new origin/main changes; keep unrelated in-progress Stories intact.
-7. Do not delete the browser experiment or its reference artifacts until the production implementation has replaced their useful validation coverage.
+## Destination architecture
 
-## Current code boundaries
+- Render/Python HTTP processing is retired after the final static deployment. The existing canonical Python geometry is bundled into the browser via pinned Pyodide, WebAssembly and the proven custom Manifold MeshGL64 bridge. User PC CPU performs all geometry and file preparation.
+- Existing Wavefinity UI, models and controls remain authoritative; no second application, no watered-down geometry, no float32 fallback and no loss of Gridfinity/Wavefinity, Storage Boxes/Drawers, Surface, Pegboard, inserts, lids, stacks, text or photo nesting.
+- Browser-side calls replace the existing `/api/*` responsibilities via the central adapter. Retain route response semantics, per-Space state ownership, preview cancellation, autosave, inventory and design source metadata.
+- Reuse `web/browser-files.js`, IndexedDB directory handle persistence and local writable folder semantics already in the app. Generated files use local Blobs and the folder picker/download mechanism rather than server export URLs.
+- Preserve genuine 3MF packaging (parts, arrangement, labels, material/filament metadata) and STL generation. Produce the actual printer-ready outputs in browser memory.
+- **Print remains separate from Export.** Every Print button prepares selected parts, validates printer/Space rules, generates or reuses slicer-ready 3MF, saves/downloads it, and gives a clear "Open in Bambu Studio" handoff. Preserve truthful inventory state. Browser security prevents automatic execution of an arbitrary Windows slicer .exe; do not silently delete Print or pretend that saving a file proves the slicer opened.
+- Optional AI that requires a provider may be disclosed as separate; never put private service API keys into the static site or require cloud geometry processing.
+- Keep `wavefinity.org` on Porkbun and point DNS to a free/near-free static host only after the full implementation is complete. Retain the old server deployment documentation and Git source history for recovery.
 
-- Existing live web UI: `web/index.html`, `web/app.js`, `web/app/*.js`, `web/spaces.js`, `web/spaces/*.js` plus related drawer, printer and preview modules.
-- Existing Python HTTP interface: `wavefinity_web.py`, `wavefinity_web_impl/` and a broad catalog of `/api/*` routes. This is more than a compute endpoint; it also owns application preferences, folder and design I/O, preview, print/3MF, photo/AI, inventory and Space operations.
-- Browser proof of concept: `web/browser-local-poc.html`, `web/browser-local-poc.js`, `web/browser-local-poc-worker.js`, `web/browser-local-poc/bridge.py`, `web/browser-local-poc/manifold64/`, and `web/browser-local-poc/{canonical.zip,reference.json}`.
-- Browser reference harness: `browser-tests/prepare-local-poc.py`, `browser-tests/run-local-poc.mjs`, `browser-tests/reference-42x42x28.npz`. Do not confuse these with unrelated browser tests.
-- Python engine: `organizer_geometry/`, `organizer_engine/`, `organizer_features/`, `organizer_inserts/`, `organizer_b4b/`, `organizer_drawer/`, `organizer_outputs/`, `organizer_storage/`, etc.
-- Test baseline: the nine previously failing tests in `tests/test_wavefinity_web.py` were deleted in commit `acc74c1af7c34defe4865a842e62c5987076d609` at Andrew's instruction. Removing tests is NOT evidence that the behaviors they once checked are correct. Require fresh functional coverage for the affected flows during integration.
+## Implementation policy: one final migration, no halfway functionality
 
-## Execution phases and acceptance gates
+The owner accepts that the full application may be broken between coding packages. Do not add server/browser compatibility toggles, hybrid production fallbacks, partial-operation workarounds or temporary hosting solely to preserve a working interim app. Build the complete local execution path, commit safely to `main` without branches/worktrees/force pushes, and deploy the finished static site in one cutover.
 
-### Phase 0 — Inventory the whole API contract and establish parity fixtures
+**There are no coder testing phases, no suite requirements, no generated fixtures, no browser-driving instructions, no test automation, no developer-run manual tests and no user test scripts or checklists.** Coders validate the **logic** in the implementation through code reading and review, not by running the application. Preserve real runtime safety checks.
 
-- Enumerate every `/api/*` usage from all web modules and pair it with a Python handler and its side effects. Classify each endpoint: (a) pure rules/validation, (b) preview/mesh, (c) print/export/geometry, (d) persistence/filesystem, (e) cloud/external integration, or (f) local desktop-only operation.
-- Document all indirect dependencies (fonts, geometry kernels, triangulation, material profiles, fixtures, resource paths, backend-dependent state).
-- Establish native golden references for ordinary bins in several dimensions, connectors and fit, lids/stacking, text, dividers/inserts, Gridfinity 21/42 geometry, Space and Storage Drawers structures, and representative multi-part 3MF outputs. Compare with the canonical engine; make no unsupported precision concessions.
-- Set up repeatable desktop browser harnesses. Check WASM build provenance, license compliance, pinned dependencies and reproducible binaries. The currently CDN-loaded Pyodide/Earcut/Trimesh packages must be pinned; for future static hosting decide whether to vendor/copy required assets locally with integrity checks.
-- **Gate:** A complete endpoint inventory and deterministic reference fixtures exist; existing production tests still run as before, and there is a reliable browser CI/smoke procedure.
+## Exact work order
 
-### Phase 1 — Extract a reusable browser engine (no UI switchover)
+The detailed specification defines 17 work packages with concrete files and patches:
 
-- Promote the proof-of-concept worker, Python loader, `manifold64` WASM bridge and data conversion into a supported `web/` browser geometry runtime with a stable typed/versioned request/response protocol. Do not keep the generic experiment page as the runtime owner.
-- Package the necessary real Python geometry modules, rules and non-compiled assets via a reproducible build step; enforce parity with the native source and reject stale/corrupt archives.
-- Provide worker cancellation, superseded-job handling, progress updates, memory/timeout/error reporting, and a cache/startup strategy; prevent repeated runtime downloads for every button click.
-- Preserve MeshGL64 float64 conversion and numerical invariants across Python/JS/WASM boundaries. Benchmark realistic large meshes and concurrent actions on ordinary Windows PCs.
-- **Gate:** Browser engine can generate + validate the reference set, including more than plain boxes, with no geometry endpoint calls; independent mesh checks pass; new runtime can be tested without the experimental page.
+1. **B00:** Preserve and document old Python/Render server architecture and recovery procedure.
+2. **B01:** Read every current route/caller and document exact response and state-side-effect mapping; architecture only, no test scanners.
+3. **B02:** Package canonical Python engine, pinned Pyodide and MeshGL64 as production static assets.
+4. **B03:** Implement browser worker, message protocol, central local API adapter and Blob transfer.
+5. **B04:** Port catalog, validation, fit, part/feature edit and layout rules.
+6. **B05:** Integrate local geometry preview into the existing main UI.
+7. **B06:** Implement ordinary bin and connector building, STL, file output handling.
+8. **B07:** Implement real 3MF ZIP/model metadata packaging, part/group/filament layout and output safety handling.
+9. **B08:** Keep every Print action and printer workflow. Generate print-ready 3MF and provide browser-legal slicer handoff.
+10. **B09:** Move preference, Space, resume, folder, file and autosave operations to browser storage.
+11. **B10:** Move inventory, bin source, drawer layout, spacers and file ownership to browser processing.
+12. **B11:** Complete structural Space calculations for Storage Box, Storage Drawers, Drawer, Surface and Pegboard.
+13. **B12:** Complete advanced features (text, dividers, bores, photo nest, openings, lids, etc.).
+14. **B13:** Replace browser-incompatible desktop/AI-specific operations honestly, without breaking core Print.
+15. **B14:** Build the full static site, configure the static host and prepare the one-time cutover after code completion.
+16. **B15:** Retire the live Python HTTP service while retaining written legacy recovery and old source history.
+17. **B16:** Delete temporary experiment page and superseded experiment/test scaffolding; keep the production MeshGL64 assets and license.
 
-### Phase 2 — Attach engine to actual Wavefinity UI behind an explicit opt-in
+**Dependencies:** B00→B01→B02→B03→B04→B05→B06→B07→B08. B09 needs B03–B05, B10 needs B06+B09, B11 needs B07–B10, B12 needs B05+B07+B11, B13 needs B03+B09. B14 starts after all core code B00–B13 exists; B15→B16 follow. The independent packages may be organized for safe parallel coding if their files do not collide.
 
-- Introduce the final browser-side API/geometry adapter at the existing UI request boundary rather than rewriting controls; implement the local response shapes with no requirement to preserve server-mode routing while incomplete.
-- Wire core catalog/rules, draft validation, preview, fit/feature changes and generated mesh previews first. Ensure latest request wins and a failed build does not erase the last valid state. Keep UI responsive during heavy builds.
-- Require coherent preview and final export geometry; do not introduce a preview-only geometry rewrite with different rules.
-- Do not build a temporary browser/server toggle or force a usable partial app. Finish all integration packages and switch to the completed static build once.
-- **Gate:** Ordinary bin edit -> preview -> generate -> download works entirely through the original core UI using browser engine, with no server geometry requests and unchanged design behavior.
+## Coder completion handoff
 
-### Phase 3 — Finish real product coverage and file exports
+The coder reports only: the behavior implemented, files modified, important code decisions, identified limitations and pushed commit SHA. **No "Tests run", "Testing needed", "How to test", "QA checklist", or owner testing instructions.** A code change is treated as logically implemented and handed back for natural owner use, without claiming it has been empirically proven to work.
 
-- Migrate other geometry families systematically: connectors/lock fit, labels/text, dividers/cradles/pockets, lids/hinges, Storage Box, Storage Drawers, spaces/layouts, base trim/surface parts, Gridfinity, structural designs and all used part generators. Require feature-specific parity fixtures for each.
-- Implement reliable STL and multi-part **3MF** generation, including Bambu/Orca-compatible object naming, placement, filament assignments and packaging metadata. This may require a WASM-capable replacement for the Python `lib3mf` path; do not claim done with STL alone.
-- Convert server-side ZIP/staged download flows into browser Blob/file actions. Preserve all **Print** buttons and their distinct print-preparation workflow, full 3MF generation, correct printer/inventory rules, and a clear slicer-opening handoff; the only nonportable behavior is direct native executable auto-launch. Export remains separate.
-- Explicitly classify photo nesting, AI assistant/provider calls and other network features. Photo processing can be client-side if ported; AI API access may require a separate optional, clearly disclosed service. Never bundle secrets in JavaScript.
-- **Gate:** Every supported user workflow and exported part produces equivalent meshes/files. Any feature that cannot be static is transparently identified and deliberately retained as optional external functionality (or explicitly removed with Andrew's approval).
+Historical context: Story #2979's initial feasibility runner required float64; direct implementation at `f25fee144d556a819a80eec6a89313603ce0460b` supplied custom MeshGL64 WASM and successfully generated ordinary bin STLs. The owner previously confirmed its browser result in Windows Chrome/Edge. That proof of concept is an implementation reference, **not a requirement to add tests**. Earlier nine failing web tests were removed in `acc74c1af7c34defe4865a842e62c5987076d609` and are not to be rebuilt.
 
-### Phase 4 — Replace server storage and local filesystem operations
-
-- Identify what currently lives in server `DATA_DIR` and generated directories: spaces, inventory, drafts/resume checkpoints, printer preferences, project files, export tokens and user-selected folders.
-- Define browser storage semantics (IndexedDB/OPFS for local cache and automatic recovery; browser File System Access API where supported, plus explicit import/export and backups). Ensure data stays on that visitor's PC, not on Render.
-- Preserve save/reload, restore, autosave, cross-Space moves, layout identity, inventory consistency and error recovery; test file permissions, browser clearing, version upgrades and data export/reimport.
-- Migration from server-held data must be explicit and safe: no automatic loss or silent substitution of a different storage location.
-- **Gate:** Complete return-visit workflow, backups/restore and print/export work with Render's backend inaccessible.
-
-### Phase 5 — Cut over and qualify static hosting
-
-- Bundle a truly self-contained static site (`index.html`, JS/CSS, WASM, Python assets, images and required metadata). Add build/version stamps and cache invalidation to prevent mismatched JS/geometry revisions.
-- After all modules are implemented, run the whole intended workflow, including Print, in Windows Chrome and Edge against a static-only local test server with all `/api` calls blocked; no requirement to keep a partially migrated Render backend available. Inspect Network traffic to prove that no Python backend is required for covered workflows. Test large files, cancellation and a later return visit.
-- Compare load time, network bytes and memory. Preserve historical Render documentation for recovery. Only after complete app acceptance choose a free static host (e.g., Cloudflare Pages or GitHub Pages), deploy the same assets and repoint DNS for `wavefinity.org`.
-- **Gate:** No backend dependency for the full committed scope, secure origin, successful STL/3MF exports, reliable browser persistence, and all applicable tests green. Render can then be retired for core geometry.
-
-### Phase 6 — Remove the testing scaffold, not production assets
-
-After Phase 5 passes, remove `web/browser-local-poc.html`, `web/browser-local-poc.js`, `web/browser-local-poc-worker.js`, and experiment-only fixture/bootstrap files not reused by the production runtime. Remove stale temporary page routes and UI controls. Keep the proven `manifold64` build/source/licenses and whichever real reference fixtures/testing infrastructure the production browser engine still uses, relocating them into their supported locations first.
-
-Do not remove `browser-tests/test-1105-two-instance.html` or unrelated tools simply because they share the `browser-tests` directory.
-
-- **Gate:** Nothing in the shipped core runtime imports a removed experiment path; no broken links; production browser tests and parity tests still provide coverage. Final test run is green without skips that hide required functionality.
-
-## Operational rollout / safety
-
-1. Continue existing Render hosting and direct-`main` publishing during development; all experimental activation is opt-in.
-2. Keep data local and private by default; no hidden upload of user geometry. Be explicit about browser storage not being equivalent to cloud backup.
-3. Integrate in bounded, verifiable slices (runtime, ordinary bin, other shapes, 3MF, persistence, static-site cutover, cleanup). Each slice has its own observable acceptance, not merely a code review.
-4. If a regression surfaces, disable browser mode and route the current site back to the existing Python service while fixing parity. Never silently generate different geometry.
-5. Completion claim requires a real Windows Chrome + Edge manual acceptance run and a clean automated relevant test suite, not simply passing the original two-bin proof of concept.
-
-## Immediate next implementation step
-
-**Begin Phase 0**, then Phase 1. Do not delete the experiment now: it is the working comparison harness. The nine test removals do not replace acceptance testing of the once-covered behaviors.
+**No Stories are to be filed until the owner finishes Gridfinity and says "go".**
