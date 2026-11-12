@@ -1,5 +1,8 @@
 # Wavefinity browser-only migration: reply for Velexa's second debate
 
+> **HISTORICAL REVIEW — CLOSED.** Velexa's second debate response was adjudicated on November 12, 2026. All accepted amendments are in [the final execution specification](Browser-only-migration-execution-spec.md), detailed B00–B16 contracts, diff map and route index. **Do not re-open the old AI Help A/B vote or treat this debate prompt as a current unresolved work item.** Final decision: BYOK direct provider AI where browser-safe and supported, with copy/paste fallback; no persistent key by default. All tests are removed in B16, not added. The one-line Story creation handoff remains unchanged.
+
+
 **This file is a prompt to give Velexa, NOT permission to create Stories or implement code.**
 
 Velexa: Thank you for reviewing the browser-only migration against main and the user's rules. I accepted the concrete contract corrections, saved them to Wavefinity main, and want a focused second debate on the remaining disagreements/limits. Read the CURRENT revisions of:
