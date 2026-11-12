@@ -1,3 +1,5 @@
+> **OWNER UPDATE — PRINT & SINGLE CUTOVER (2026-11-12):** The full details are in [Browser-only-core-detailed-build-contracts.md](Browser-only-core-detailed-build-contracts.md). **Do not remove the Print button or turn Print into generic Export.** Browser Print must perform complete printer/Space validation, produce slicer-ready arranged 3MF, save/download, offer a clear Open-in-Bambu Studio handoff, and maintain truthful Printed/Prepared status. A static page cannot force-launch arbitrary Windows executables without an optional registered integration; do not falsely promise automatic launch. **No half-working intermediate app is required.** Build all components, allowing nonfunctional interim states, then one complete tested cutover. Do not spend engineering effort on a server/browser toggle, hybrid fallback, or supporting individual partially migrated releases.
+
 > **AUTHORITATIVE IMPLEMENTATION DETAIL (2026-11-12):** This file is the overview. Implement the numbered B00–B16 work contracts in [Browser-only-core-detailed-build-contracts.md](Browser-only-core-detailed-build-contracts.md). The companion contains exact existing/new file paths, route groups, adapter/worker protocol, dependencies, acceptance tests, static-host cutover, and retirement gates. Preserve the former Python/Render method in [docs/legacy-python-server-hosting.md](../docs/legacy-python-server-hosting.md), which now exists. Do not treat the high-level phases in this overview as sufficient coder instructions.\n\n# Wavefinity browser-only core integration and experiment retirement
 
 **Status:** Implementation plan; NOT yet implemented.  
@@ -11,7 +13,7 @@
 2. No installed Python, local server, native application, browser extension, or helper is required of visitors. Use browser worker(s), WebAssembly and browser APIs only.
 3. Keep the existing application UI and its saved-design semantics. Preserve exports, parts, printer profiles and space workflows; do not call a static-host migration complete with core controls broken or silently disabled.
 4. No cloud geometry/API processing from the static build. A feature that genuinely needs external services (e.g. AI) must be explicitly separated and labeled, not represented as local. Never expose server secrets or provider keys in the static bundle.
-5. Keep the current Render-hosted app available during integration, using opt-in browser execution, until the full acceptance suite is green.
+5. Do not maintain a partially functioning dual-mode application. The current server method is documented for recovery; interim implementation may be broken until final full-suite acceptance.
 6. No feature branches, Git worktrees, force pushes, or rewriting shared history. Before each direct-main publication fetch and safely reconcile any new origin/main changes; keep unrelated in-progress Stories intact.
 7. Do not delete the browser experiment or its reference artifacts until the production implementation has replaced their useful validation coverage.
 
@@ -44,17 +46,17 @@
 
 ### Phase 2 — Attach engine to actual Wavefinity UI behind an explicit opt-in
 
-- Introduce a browser-side API/geometry adapter at the existing UI's request boundary instead of rewriting controls: the same UI request/response shapes route either to current server functions or to the new local runtime for the covered operations.
+- Introduce the final browser-side API/geometry adapter at the existing UI request boundary rather than rewriting controls; implement the local response shapes with no requirement to preserve server-mode routing while incomplete.
 - Wire core catalog/rules, draft validation, preview, fit/feature changes and generated mesh previews first. Ensure latest request wins and a failed build does not erase the last valid state. Keep UI responsive during heavy builds.
 - Require coherent preview and final export geometry; do not introduce a preview-only geometry rewrite with different rules.
-- Use a visible but isolated development toggle on `wavefinity.org` during the migration. Production default stays on existing server until parity gates pass.
+- Do not build a temporary browser/server toggle or force a usable partial app. Finish all integration packages and switch to the completed static build once.
 - **Gate:** Ordinary bin edit -> preview -> generate -> download works entirely through the original core UI using browser engine, with no server geometry requests and unchanged design behavior.
 
 ### Phase 3 — Finish real product coverage and file exports
 
 - Migrate other geometry families systematically: connectors/lock fit, labels/text, dividers/cradles/pockets, lids/hinges, Storage Box, Storage Drawers, spaces/layouts, base trim/surface parts, Gridfinity, structural designs and all used part generators. Require feature-specific parity fixtures for each.
 - Implement reliable STL and multi-part **3MF** generation, including Bambu/Orca-compatible object naming, placement, filament assignments and packaging metadata. This may require a WASM-capable replacement for the Python `lib3mf` path; do not claim done with STL alone.
-- Convert server-side ZIP/staged download flows into browser Blob/download/export actions; for printer handoff, provide files users can open in Bambu Studio rather than claiming a static webpage can directly launch arbitrary local executables.
+- Convert server-side ZIP/staged download flows into browser Blob/file actions. Preserve all **Print** buttons and their distinct print-preparation workflow, full 3MF generation, correct printer/inventory rules, and a clear slicer-opening handoff; the only nonportable behavior is direct native executable auto-launch. Export remains separate.
 - Explicitly classify photo nesting, AI assistant/provider calls and other network features. Photo processing can be client-side if ported; AI API access may require a separate optional, clearly disclosed service. Never bundle secrets in JavaScript.
 - **Gate:** Every supported user workflow and exported part produces equivalent meshes/files. Any feature that cannot be static is transparently identified and deliberately retained as optional external functionality (or explicitly removed with Andrew's approval).
 
@@ -69,8 +71,8 @@
 ### Phase 5 — Cut over and qualify static hosting
 
 - Bundle a truly self-contained static site (`index.html`, JS/CSS, WASM, Python assets, images and required metadata). Add build/version stamps and cache invalidation to prevent mismatched JS/geometry revisions.
-- Run the whole intended workflow in Windows Chrome and Edge against a static-only local test server, then against the existing Render server with all `/api` calls intentionally blocked. Inspect Network traffic to prove that no Python backend is required for covered workflows. Test large files, cancellation and a later return visit.
-- Compare load time, network bytes and memory. Preserve a rollback path through current Render configuration. Only after acceptance choose a free static host (e.g., Cloudflare Pages or GitHub Pages), deploy the same assets and repoint DNS for `wavefinity.org`.
+- After all modules are implemented, run the whole intended workflow, including Print, in Windows Chrome and Edge against a static-only local test server with all `/api` calls blocked; no requirement to keep a partially migrated Render backend available. Inspect Network traffic to prove that no Python backend is required for covered workflows. Test large files, cancellation and a later return visit.
+- Compare load time, network bytes and memory. Preserve historical Render documentation for recovery. Only after complete app acceptance choose a free static host (e.g., Cloudflare Pages or GitHub Pages), deploy the same assets and repoint DNS for `wavefinity.org`.
 - **Gate:** No backend dependency for the full committed scope, secure origin, successful STL/3MF exports, reliable browser persistence, and all applicable tests green. Render can then be retired for core geometry.
 
 ### Phase 6 — Remove the testing scaffold, not production assets
