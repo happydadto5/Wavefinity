@@ -1,32 +1,48 @@
 # Wavefinity full browser-only cutover — executable implementation contracts
 
-Status: DETAILED DESIGN, not implemented. Revision 1, November 12, 2026.
-Owner decisions: desktop Windows Chrome and Edge; visitor installs nothing; keep the existing Wavefinity interface; calculations and saves occur on the user's computer; no paid cloud geometry compute; keep wavefinity.org; do not create branches or worktrees; land safely on main. Do NOT file Poller Stories merely to follow this plan. These B00–B16 work packages are Story-sized coder assignments, NOT Story submissions.
+Status: DETAILED DESIGN, not implemented. Revision 2, November 12, 2026.
+Owner decisions: desktop Windows Chrome and Edge; visitor installs nothing; RETAIN THE PRINT BUTTON and its complete print-preparation workflow; keep the existing Wavefinity interface; calculations and saves occur on the user's computer; no paid cloud geometry compute; keep wavefinity.org; do not create branches or worktrees; land safely on main. Do NOT file Poller Stories merely to follow this plan. These B00–B16 work packages are Story-sized coder assignments, NOT Story submissions. The owner accepts that the application may remain NON-FUNCTIONAL throughout partial implementation; do not invest in interim deployability.
 
 This is the detailed companion to Browser-only-core-integration-plan.md. The two together govern the migration; this document wins wherever the original phase description was underspecified. Every package contains files, concrete patch, preconditions and a falsifiable acceptance gate.
 
 ## Definition of COMPLETE
 
 A) wavefinity.org serves HTML, CSS, JS, fonts, pictures, pinned Python/Pyodide packages and WASM/static assets only; no running Python HTTP service is needed for any supported core operation.
-B) The *existing* main UI designs ordinary bins, Wavefinity 7 mm and Gridfinity 21/42 mm, previews, edits features, handles all five Space types, maintains inventory and printer profiles, saves/recovers locally, generates valid individual and multipart STL and Bambu-compatible 3MF and downloads/exports files. Core paths NEVER POST to a geometry server.
+B) The *existing* main UI designs ordinary bins, Wavefinity 7 mm and Gridfinity 21/42 mm, previews, edits features, handles all five Space types, maintains inventory and printer profiles, saves/recovers locally, generates valid individual and multipart STL and Bambu-compatible 3MF and preserves distinct first-class Print and Export actions. Print prepares validated, slicer-ready 3MF, provides a clear download/open-in-slicer handoff, and keeps honest inventory status. Core paths NEVER POST to a geometry server.
 C) Entire end-to-end workflow passes with all /api/ requests blocked and with the existing Render Python app stopped. The user's GPU is optional; browser WASM processing runs on CPU. It must not require an installed Python interpreter, Bambu Studio, a separate helper, or a browser extension.
 D) The old Render/Python-server approach is documented sufficiently to restore deliberately if the static cutover proves defective. No registrar account credentials or secrets in the public Wavefinity repo; the private Help-Code domain record remains in Help-Code.
 E) Temporary proof-of-concept page and duplicate scaffolding are deleted AFTER the core runtime replaces them and checks pass. Keep enduring tests, fixture provenance, MeshGL64 build source/license and accuracy checks.
 F) Full relevant test suite green. The nine tests removed in commit acc74c1 were not behavior fixes; replace their important coverage with actual passing tests, not skip/xfail, and never silently regress their former behavior.
 
-The only intentional nonlocal class is an explicitly configured external AI provider, if supported. Optional AI Help is NOT ordinary local geometry and must not require a Wavefinity-operated server. Never expose a Wavefinity-owned API key in static assets. A browser cannot arbitrarily launch desktop slicer executables; the final UI downloads compatible files instead. These exceptions must be visible to users, not described as equivalent to local service behavior.
+The only intentional nonlocal class is an explicitly configured external AI provider, if supported. Optional AI Help is NOT ordinary local geometry and must not require a Wavefinity-operated server. Never expose a Wavefinity-owned API key in static assets. A browser cannot arbitrarily launch desktop slicer executables; the **Print UI remains** and performs full print preparation and slicer-ready 3MF handoff, not merely generic Export. The difference from native automatic slicer launch must be disclosed truthfully. The owner does not require the application to function at any intermediate migration phase.
 
 ## Frozen architecture decisions
 
 - Preserve the original UI and the DOM/state abstractions: web/index.html, web/app/*.js, web/drawer-*.js, web/spaces/*.js, web/storage-*.js, web/workspace.js and web/structural-design.js. Do not build a second app.
 - One shared production worker runtime wrapping the canonical Python geometry source from organizer_engine, organizer_geometry, organizer_inserts, organizer_features, organizer_drawer and related modules. Use pinned Pyodide plus the custom float64 Manifold MeshGL64 bridge already proven in browser-local-poc. No float32 fallback.
-- One transport adapter in web/app/03-history-utils-catalog.js, NOT dozens of independent fetch rewrites. Existing api(path,payload,opts) and apiSideEffect(...) signatures remain stable for consumers; a new WFLocalAPI dispatch layer implements local paths and errors. During transition server adapter stays default with a clearly isolated browser-mode switch; static build makes local mode the only core execution mode.
+- One transport adapter in web/app/03-history-utils-catalog.js, NOT dozens of independent fetch rewrites. Existing api(path,payload,opts) and apiSideEffect(...) signatures remain stable for consumers; a new WFLocalAPI dispatch layer implements local paths and errors. Build only the final local-mode adapter. Do not implement a temporary server/browser switch or fallback merely to keep intermediate releases functioning. A partly migrated app may be broken until final integration.
 - One versioned worker protocol: request = {v:1, job_id:string, path:string, payload:object|null, design_epoch:string|null}; emitted messages are {v:1,job_id,type:"progress"|"result"|"error"|"file", ...}. Match request/response shapes of the existing routes, not just example calls. Progress and cancellation must never alter a later design epoch.
 - One file result protocol: worker returns named bytes via transferable ArrayBuffers; main thread holds Blob objects in a one-shot WFLocalFiles table keyed by opaque local_file_id, and normal route responses list files with {name,local_file_id}. The existing saveGeneratedFiles() resolves these Blob handles, not GET /api/export tokens. Revoke consumed/expired objects.
 - Reuse existing window.WFFileSystem in web/browser-files.js, which ALREADY supports IndexedDB handles, showDirectoryPicker, explicit permission checks, file reads/writes and Blob download fallback. Do not invent a second folder abstraction. Use browser storage for lightweight preferences and recovery; writable user folder remains authority for Space and inventory files where selected.
 - No invisible semantics change: folder permissions, inventory operations, Space IDs, printer limits, 7/21/42 grids, stale-work cancellation, overwrite prompts, resume checkpoints, 3MF filament metadata, generated part names and error behavior are contract behavior.
 - Production canonical Python files remain the single source of geometry rules. A deterministic pack step builds the browser zip from the checked-out main version. Prevent drift with file/hash/version checks; never hand-edit duplicate geometry formulas in JS.
 - Direct-main process: before coding fetch and fast-forward, and immediately before publishing fetch and reconcile remote changes, rerun affected checks and push without force. Do not reset or overwrite concurrently active coder changes.
+
+## Owner overrides: PRINT survives, one complete cutover, no interim compatibility work
+
+**Print is mandatory.** Do not remove, rename to Export, hide, or disable the existing Print buttons in the bin editor, individual bin selection, inventory, Storage Box, Storage Drawers, Surface/base trim, or other structural workflows. Export/Save remain separate operations. Print is an intent to *prepare and hand off a print job*, not a synonym for downloading raw geometry.
+
+**Present behavior to retain where technically possible:** The local Windows Python version of `printModelWithReport()` in `web/app/15-generate-dialogs.js` validates, autosaves, runs `/api/print`, generates/reuses the correct 3MF files, launches an installed slicer via the native server, and updates printed status. The current hosted mode explicitly refuses Print and says to use Export. The final static edition MUST revive a working Print button in the hosted web app, not carry that refusal forward.
+
+**Final browser Print contract:**
+1. User clicks the existing **Print** button; optional bin/connector selection remains unchanged. Print snapshots the current design, Space identity and selected printer profile; flushes pending edits/resume checkpoint; validates printer limits and geometry; builds accurate, correctly arranged and named Bambu/Orca-compatible multipart 3MF files locally via the canonical engine and new 3MF packager. Same checks as the old native Print flow.
+2. If a writable user folder is selected, write the prepared 3MF there using `WFFileSystem`; otherwise download it. Show a direct, prominent **Open in Bambu Studio** next-step message with the exact saved/downloaded filename; browser Downloads can open the .3mf using Windows file association, or the user can import it in the slicer. Do **not** send the user through generic Export settings after pressing Print. Preserve progress and part-selection feedback.
+3. Keep explicit and truthful status: prepared/downloaded ≠ proven opened in slicer ≠ physically printed. Acknowledge successful handoff before recording an existing Printed status, or introduce a distinct Prepared status with full inventory compatibility. Never display “Sent to slicer” or mark Printed simply because a Blob downloaded. Maintain partial-save errors, duplicate reuse and cancellation semantics.
+4. A normal static website cannot execute an arbitrary Windows BambuStudio.exe or OrcaSlicer.exe. Do not promise an identical one-click *automatic slicer launch* without a proven, supported, opt-in registered protocol. Such a protocol is optional and must fall back to the ordinary 3MF file. **No installed Wavefinity helper, PWA, local HTTP daemon or extension is permitted**. Users may have an installed slicer because they intend to print, but installing Wavefinity is not required.
+5. This one unavoidable browser-security difference is documented; preserve everything else about Print's distinct workflow and visual placement.
+6. Windows Chrome and Edge acceptance must include clicking Print for a normal bin+connector and a structural Space, verifying 3MF opens correctly in Bambu Studio, checking exact print metadata/part placement and status transitions, and confirming no /api/print request or server-side geometry use.
+
+**Single completion gate, no halfway app:** The owner explicitly accepts a broken/incomplete app until the entire browser-only implementation is finished. Therefore remove requirements for interim browser-mode switches, simultaneous Python/browser APIs, dual hosting, or stage-by-stage functional deployments. Build final components in isolated modules and test them individually with fixtures as needed; only after ALL B00–B13 packages are implemented is the full main UI expected to work. B14 is the only end-to-end application functionality and deployment gate. No partial cutover, no extra workarounds to keep each intermediate package operating. Keep the old Render/Python approach in documentation and version history, but don't spend effort on maintaining two working paths.
 
 ## Required API inventory (explicit route checklist)
 
@@ -87,10 +103,10 @@ Requires: B02.
 Existing files: web/index.html, web/app/03-history-utils-catalog.js, web/app/01-runtime-state.js, web/app.js, web/app/11-parts-preview-requests.js.
 Create web/browser-core/worker.js, web/browser-core/bootstrap.js, web/browser-core/local-api.js, web/browser-core/local-files.js, web/browser-core/runtime-status.js, browser-tests/core/worker-transport.test.mjs.
 Patch:
-1. At one point in api()/apiSideEffect(), delegate based on executionMode = "server"|"browser". Existing transport remains while migration is incomplete. Browser static edition selects "browser" before init() calls GET /api/catalog. Never fall back to server silently if browser worker fails.
+1. Replace network execution at one point in api()/apiSideEffect() with the final WFLocalAPI transport; no server/browser executionMode, intermediate compatibility toggle or silent server fallback. Initialize the local engine before catalog load. Broken UI until the last package is acceptable.
 2. Worker dispatch envelope: {v,job_id,path,payload,design_epoch}; returns progress, results/errors, and transferable file bytes. Preserve server-like object schemas and useful error.status/type. One worker initialization shared across calls; bounded queue for expensive geometry, cancellation via terminating/restarting worker, active design epoch guard, and release of stale file handles.
 3. LocalFileStore maintains file-ID-to-Blob mapping and exposes claim()/discard()/discardAll(); never inject fake /api/export URLs. apiSideEffect operation_id behavior maps to a local operation ledger and worker progress so retries cannot accidentally duplicate side effects.
-4. Keep hosted toggle opt-in on current Render site; do not expose browser mode as the normal default until later gates.
+4. Do not build a hosted/browser toggle, preview deploy, or dual-stack compatibility path. Final static-only mode is the sole target; incomplete UI need not be runnable.
 Gate: timeout, cancellation, error, retry, two rapid successive previews, stale result suppression, worker crash/restart, Blob lifetime and main-thread responsiveness pass automated browser tests.
 
 ### B04 — Catalog and pure edit/validation operations
@@ -124,7 +140,7 @@ Patch:
 1. Route /api/generate and /api/connector through canonical Python build functions, keeping outputs and the existing dialog progress/error semantics. Implement 42x42, 84x42, wavy 7 mm and Gridfinity 21/42 bins, actual wave locking connectors and installed feature cases.
 2. Return [{name,local_file_id}] file descriptors and buffer bytes, not hosted filesystem paths or ephemeral server tokens. Update saveGeneratedFiles() to save browser blobs to the already-selected writable handle or download if no folder exists; collision/overwrite prompts and all-or-nothing save logic remain.
 3. Verify every output file independently for watertightness, winding, intersections, wall fit, naming and sizes. Preserve cancellation if tab navigates away.
-Gate: original GUI edit -> generate parts -> browser save/download has no /api/generate or /api/connector calls; 0.25 mm seam rules retained; complex bin and connector open in Bambu Studio.
+Gate: local generation/output modules and contract/mesh fixtures pass without API network calls; 0.25 mm seam remains. Full original GUI integration is deferred to final B14 acceptance.
 
 ### B07 — Exact 3MF and printer-file equivalence
 
@@ -137,16 +153,16 @@ Patch:
 3. Build round-trip validator for object count, per-object mesh stats, material mapping, transforms and package integrity; compare against native references after stripping nonsemantic identifiers. Inspect opening in Bambu Studio on Windows.
 Gate: representative ordinary, labels, connectors, lids and multi-part 3MF load in Bambu Studio with correct placement/color assignments; parser validates the 3MF ZIP and every solid; no native lib3mf package or Python server required.
 
-### B08 — Print/export UI and local printer handoff
+### B08 — Preserve full Print workflow and slicer-ready handoff (distinct from Export)
 
 Requires: B07.
 Existing files: web/app/15-generate-dialogs.js (printModelWithReport, saveGeneratedFiles, browseSlicer, watchServerVersion), web/printer-profile.js, web/spaces/13-printer-profiles.js, web/browser-files.js.
 Create browser-tests/core/print-download.test.mjs.
 Patch:
 1. Route /api/print and reusable print operations through browser output builder. Preserve printer volume limits, part/plate packing, labels and status on inventory rows.
-2. Replace server-specific Bambu executable auto-launch and browse-slicer-path with an honest "Download/Open in Bambu Studio" path. Static website cannot programmatically execute local programs. If Bambu Studio is installed, user opens/imports the downloaded 3MF; do not imply automatic app launch.
-3. Keep progress, timeout/cancellation and export state. Replace /api/operation-status polling with local worker job status; /api/health now checks browser bundle version (not the server).
-Gate: print from original UI produces correct 3MF, opens manually in slicer, respects printer build volume and preserves status; no /api/print or token URL or subprocess dependency.
+2. KEEP the current Print buttons and part selection dialogs. Replace only the prohibited native executable auto-launch with the Print contract above: autosave, validation, generation/reuse, arranged 3MF, save/download, explicit slicer-opening handoff. Preserve a separate Export action. Do not report "Sent to slicer" without verified proof.
+3. Keep progress, timeout/cancellation, partial-save truth and printed-status state. Prepared does not equal Printed; use acknowledgement or a distinct Prepared state and compatibility tests. Replace /api/operation-status polling with local worker job status; /api/health now checks browser bundle version.
+Gate: Print module builds correct prepared 3MF and exposes working download/open-next-step protocol, printer/Space validation and honest state transitions. Whole GUI Print acceptance on Windows occurs at B14, not a requirement for intermediate runnable app.
 
 ### B09 — Browser persistence, preferences and Space identity
 
@@ -200,7 +216,7 @@ Existing files: web/app/02-lifecycle-ai-help.js, wavefinity_web.py (AI handlers)
 Create web/browser-core/capabilities.js, docs/static-capability-differences.md, browser-tests/core/capabilities.test.mjs.
 Patch:
 1. Preserve AI Help UI if configured: local prompt assembly and local candidate validation always use canonical rules. For actual LLM responses use only a user-configured third-party service reachable securely and directly from the browser when CORS/auth allows. No Wavefinity-owned keys or hidden server proxy. If no supported safe direct mode, show "AI Help requires an external provider and is unavailable in this browser-only edition" instead of silently calling Render or claiming the same functionality. This explicit feature exception requires owner approval before final cutover if preserving AI Help unchanged is mandatory.
-2. Replace /api/suggestions with harmless local static/help content or explicitly disabled UI; replace /api/space/show-folder, /api/browse-slicer-path, /api/show-log and related native desktop launch/dialog functions with browser-legal controls/help. Remove deceptive auto-start behavior; downloads remain available.
+2. Replace /api/suggestions with local static/help content; replace /api/space/show-folder, /api/browse-slicer-path, /api/show-log and native desktop dialogs with browser-legal equivalents. Preserve Print as a first-class action; remove only deceptive automatic-executable-launch claims and keep the true print workflow.
 3. Keep ABOUT / Brochure.md as a static file in the deployed output with the same URL. Display truthful capability/status indicators; printer profile remains local.
 Gate: no API key leaks, no unsupported native operations; every visible control does what its label says; users can accomplish all core geometry tasks without any external AI service.
 
@@ -212,9 +228,9 @@ Create scripts/build-static-site.py, browser-tests/core/static-smoke.test.mjs, d
 Patch:
 1. Build dist/ containing only required static assets, complete locally pinned Python/Pyodide/wasm bundles, Brochure.md, images, fonts and metadata. Manifest references must be integrity checked; stale mixed JS/WASM versions must fail visibly. Normalize content types, CSP/CORS, Brotli/gzip optional; check per-file static-host limits.
 2. Launch a simple STATIC file server against dist, intentionally block every /api/* request, and run a scripted full product tour for Chrome and Edge on Windows; verify no backend process started and inspect network logs.
-3. Upload same dist artifact to a free/near-free static provider (Cloudflare Pages default target if compatible, otherwise GitHub Pages after explicit constraints check), configure HTTPS for wavefinity.org/www, retain Render for rollback until production acceptance. Domain/DNS ownership continues with Porkbun and private Help-Code DNS record.
-4. Gradually switch production default to browser mode; monitor user errors and asset loads without collecting private designs. DNS rollback switches to Render rather than rolling back browser-stored user data. Do not claim zero costs for optional AI providers or outbound CDN until bundled assets verify.
-Gate: all core routes work with /api blocked; entire supported product usable in Chrome/Edge Windows, downloadable STL/3MF validates and opens in Bambu, data persists, all checks green, URL+TLS correct, no long-running Python service needed.
+3. After the entire app passes Windows Chrome/Edge acceptance including Print, upload the same dist artifact to a free/near-free static provider (Cloudflare Pages default if compatible, otherwise GitHub Pages subject to limits), configure HTTPS for wavefinity.org/www. Preserve legacy Render rollback docs but do not maintain two operational modes. Domain/DNS ownership remains at Porkbun with the private Help-Code DNS record.
+4. Switch production ONCE after all packages are complete; no gradual per-feature toggles or interim production releases. Monitor load/error status without collecting private designs. DNS rollback to the preserved Render setup does not restore browser-held files. Optional AI or asset hosting may have independent costs.
+Gate: all core routes work with /api blocked; entire product including all original Print and Export entry points works in Windows Chrome/Edge, 3MF slicer handoff and truthful inventory status validated, data persists, tests green, URL+TLS correct, no Python service. No halfway deployment.
 
 ### B15 — Retire old service *from execution*, retain historical documentation
 
@@ -250,7 +266,7 @@ B00 -> B01 -> B02 -> B03 -> B04 -> B05 -> B06 -> B07 -> B08.
 B03/B04 also unblock B09; B06+B09 unblock B10; B07+B10 unblock B11; B05+B07+B11 unblock B12.
 B03+B09 unblock B13. B00 through B13 -> B14 -> B15 -> B16.
 
-Each coder assignment uses one Bxx package as its complete scope; it reads this file and the current remote source, implements the specified files/tests and reports exact changes, runtime and browser verification, limitations and commit SHA. No package is "done" because a coder states it is done: use the explicit gate.
+Each coder assignment uses one Bxx package as its scope, reads this file and current main, implements specified files/tests, and reports changes, runtime, limits and commit SHA. Intermediate packages may leave the UI broken; a package gate tests its own modules/fixtures. B14 alone requires a fully runnable integrated UI and full Windows Print acceptance.
 
 ## Stop conditions / design escalations
 
