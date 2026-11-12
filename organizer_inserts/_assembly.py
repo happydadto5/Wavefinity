@@ -101,6 +101,20 @@ def _nest_recessed_deck_footprint(box: BoxSpec, mode: str) -> Polygon:
 def build_features(
     box: BoxSpec, features: Iterable[Feature], base_z: float,
     bounds: Zone | None = None, mode: str = "fused",
+    include_text: bool = False, grid: str = "wavefinity",
+) -> list[trimesh.Trimesh]:
+    """:func:`_build_features` with the design ``grid`` known to wall joins."""
+    from ._walljoin import BUILD_GRID
+    token = BUILD_GRID.set(grid)
+    try:
+        return _build_features(box, features, base_z, bounds, mode, include_text)
+    finally:
+        BUILD_GRID.reset(token)
+
+
+def _build_features(
+    box: BoxSpec, features: Iterable[Feature], base_z: float,
+    bounds: Zone | None = None, mode: str = "fused",
     include_text: bool = False,
 ) -> list[trimesh.Trimesh]:
     """Every holder's solids, ready to be added to the body.
@@ -489,10 +503,11 @@ def make_cartridge_insert(
 
 
 def make_fused_box(
-    box: BoxSpec, features: Iterable[Feature], box_mesh: trimesh.Trimesh
+    box: BoxSpec, features: Iterable[Feature], box_mesh: trimesh.Trimesh,
+    grid: str = "wavefinity",
 ) -> trimesh.Trimesh:
     """The bin with its holders grown straight out of the floor."""
-    parts = build_features(box, features, box.base_thickness)
+    parts = build_features(box, features, box.base_thickness, grid=grid)
     if not parts:
         return box_mesh
     return _without_slivers(union([box_mesh, *parts]))

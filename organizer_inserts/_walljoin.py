@@ -7,6 +7,7 @@ wall material, and never comes within ``JOIN_SKIN`` of the exterior.
 
 from __future__ import annotations
 
+import contextvars
 import math
 
 import numpy as np
@@ -33,6 +34,22 @@ from ._bore._consts import (
     JOIN_TOUCH,
     WAVE_SAMPLES_PER_CYCLE,
 )
+
+
+# The design's grid for the build in progress (set by ``build_features``).
+# Gridfinity grids have a flat outer wall, so wall-join tabs must be limited to
+# that flat outline; the wavy envelope reaches outside it.
+BUILD_GRID = contextvars.ContextVar("wall_join_build_grid", default="wavefinity")
+
+
+def _join_limit(box: BoxSpec):
+    """Outline a wall-join tab may reach, already inset by ``JOIN_SKIN``."""
+    grid = BUILD_GRID.get()
+    if grid != "wavefinity":
+        from organizer_features.gridfinity import PROFILES, flat_outer_polygon
+        if grid in PROFILES:
+            return flat_outer_polygon(box, grid).buffer(-JOIN_SKIN)
+    return wavy_outer_polygon(box).buffer(-JOIN_SKIN)
 
 
 def _polygons(shape) -> list[Polygon]:
@@ -250,7 +267,7 @@ def _join_tabs(
     join is no wider than what it joins - wave profile included.
     """
     whole = Zone.whole(box)
-    limit = wavy_outer_polygon(box).buffer(-JOIN_SKIN)
+    limit = _join_limit(box)
     reach = box.wall_depth + 2.0 * WAVE_AMPLITUDE
     x0, y0, x1, y1 = material.bounds
     big = 1.0e3

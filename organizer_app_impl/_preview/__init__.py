@@ -519,7 +519,7 @@ def _preview_geometry(
             with stage("features"):
                 built = build_features(
                     box, effective_recessed, base_z, layout_zone(box, mode), mode=mode,
-                    include_text=True,
+                    include_text=True, grid=grid,
                 )
             if built:
                 top_z = max(float(solid.bounds[1][2]) for solid in built)
@@ -643,7 +643,7 @@ def _preview_geometry(
             with stage("features"):
                 built = build_features(
                     box, [one], base_z, layout_zone(box, mode), mode=mode,
-                    include_text=True,
+                    include_text=True, grid=grid,
                 )
             if built:
                 top_z = max(float(solid.bounds[1][2]) for solid in built)
@@ -694,7 +694,7 @@ def _preview_geometry(
             try:
                 with stage("features"):
                     solids = build_features(box, [draft], base_z, layout_zone(box, mode),
-                                            mode=mode, include_text=True)
+                                            mode=mode, include_text=True, grid=grid)
                 if is_text(draft) and draft.options.get("level") == "rim":
                     from organizer_inserts._text import rim_text_geometry
                     draft_ledge, draft_glyph, _cap, _surface = rim_text_geometry(box, draft)
@@ -752,7 +752,7 @@ def _preview_geometry(
             try:
                 with stage("features"):
                     solids = build_features(box, [draft], base_z, layout_zone(box, mode),
-                                            mode=mode, include_text=True)
+                                            mode=mode, include_text=True, grid=grid)
                 if is_text(draft) and draft.options.get("level") == "rim":
                     from organizer_inserts._text import rim_text_geometry
                     draft_ledge, draft_glyph, _cap, _surface = rim_text_geometry(box, draft)
