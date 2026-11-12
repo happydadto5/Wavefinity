@@ -2359,8 +2359,11 @@ Export and single-bin Print poll it every 2 s from the click
 (`apiSideEffect(..., { onProgress })`); the status line counts seconds and
 shows a plain range, revised at stage boundaries and learned per machine from
 finished Exports. No percentage bar. The parts dialog opens docked in a corner
-and not modal; the left editing column stays locked during an Export, as
-before, so the file set cannot change under it. A second Export click for the
+and not modal. During an Export the Space tree stays live (it scrolls and
+highlights); opening another row or a row action is refused in place
+("Exporting this bin — other rows open once its files are saved.") because
+switching bins mid-Export would leave its files unrecorded. The header and
+the bin form stay locked, as before, so the file set cannot change under it. A second Export click for the
 same bin joins the running one and says so in place. The preview notice
 counts up after 2 s and shows a range learned from this session's own slow
 rebuilds; the old preview stays underneath. Inventory batch Save/Print does

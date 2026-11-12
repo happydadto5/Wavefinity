@@ -125,10 +125,23 @@ function mutationControls() {
   );
 }
 
-function setMutationSurfacesInert(inert) {
-  [$('header'), $('.controls')].forEach(surface => {
-    if (surface) surface.inert = inert;
-  });
+// keepTree: the Space tree (#ws-stage, at the top of the left pane) stays live
+// - it scrolls, highlights and answers clicks - while everything that edits
+// the bin (header, form, temporary editors) is locked. Used by Export, where a
+// 350 x 350 bin with a lid runs about a minute.
+function setMutationSurfacesInert(inert, { keepTree = false } = {}) {
+  const header = $('header');
+  if (header) header.inert = inert;
+  const controls = $('.controls');
+  if (!controls) return;
+  const tree = keepTree ? controls.querySelector(':scope > #ws-stage') : null;
+  if (!inert || !tree) {
+    controls.inert = inert;
+    for (const child of controls.children) child.inert = false;
+    return;
+  }
+  controls.inert = false;
+  for (const child of controls.children) child.inert = child !== tree;
 }
 
 let designMutationDone = Promise.resolve();

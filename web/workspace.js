@@ -321,6 +321,9 @@ WS.showSwitching = text => {
   box.hidden = false;
 };
 
+WS.EXPORT_HOLDS_TREE = "Exporting this bin — other rows open once its files are saved.";
+WS.exportHoldsTree = () => typeof isGenerating !== "undefined" && isGenerating;
+
 // A bin dragged from the tree and let go over the switching cover is refused
 // right there, in words, and stays exactly as it was (unplaced, unchanged).
 // Drops are never held or queued for after the switch, and none vanishes
@@ -1091,6 +1094,14 @@ SP.openTypedSpacePreferredView = async () => {
 
   const delegate = event => {
     if (WS.draggingRow || Date.now() < (WS.suppressRowClickUntil || 0)) return;
+    // The tree stays live during an Export (it scrolls and highlights), but
+    // opening another row, or a row action, waits for the files: switching the
+    // bin mid-Export would leave its saved files unrecorded. Said in place.
+    if (WS.exportHoldsTree() && event.target.closest("[data-ws-out], [data-ws-pick], [data-ws-act]")) {
+      event.preventDefault();
+      toastAt(WS.EXPORT_HOLDS_TREE, event.clientX, event.clientY, false, 4000);
+      return;
+    }
     const out = event.target.closest("[data-ws-out]");
     if (out) { if (!out.disabled) WS.output(out.dataset.kind, out.dataset.output, out, event); return; }
     const pick = event.target.closest("[data-ws-pick]");
@@ -1100,6 +1111,11 @@ SP.openTypedSpacePreferredView = async () => {
   };
   [stage, aux].forEach(host => host.addEventListener("click", delegate));
   stage.addEventListener("dragstart", event => {
+    if (WS.exportHoldsTree()) {
+      event.preventDefault();
+      toastAt(WS.EXPORT_HOLDS_TREE, event.clientX, event.clientY, false, 4000);
+      return;
+    }
     const row = event.target.closest('[data-ws-pick="bin"][draggable="true"]');
     const one = row && DL.bin(row.dataset.id);
     if (!one || WS.busy || WS.task === "newspace") { event.preventDefault(); return; }

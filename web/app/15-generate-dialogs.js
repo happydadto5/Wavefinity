@@ -177,7 +177,7 @@ async function generatePartsWithReport(target, report) {
 
   isGenerating = true;
   state.designMutationBusy = true;
-  setMutationSurfacesInert(true);
+  setMutationSurfacesInert(true, { keepTree: true });
   updateGenerateAvailability();
 
   openGenerationDialog(dialog);
