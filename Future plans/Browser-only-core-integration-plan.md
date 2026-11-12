@@ -8,7 +8,7 @@
 
 **Development policy: WAVEFINITY IS USER-TESTED. CODERS DO NOT TEST.** Coders reason through logic, read source and callers, inspect their changes, and implement. They do not write, modify, repair or run automated tests; they do not manually operate the app; and they do not create user test plans, checklists or QA instructions. The owner tests the actual application when they decide. Code-level input validation, error handling, geometry invariants, integrity checks and other real production protections remain required.
 
-**Implementation authority:** [Browser-only-core-detailed-build-contracts.md](Browser-only-core-detailed-build-contracts.md) contains the B00–B16 packages. The [diff-level implementation map](Browser-only-core-diff-map.md) gives source-function anchors, pseudo-diffs, static output layout and exact host cutover. The [source-route index](Browser-only-core-source-route-index.md) lists 91 currently registered routes/major callers. **Token-efficient coder reading:** only assigned Bxx, matching diff-map entry and relevant route rows/current source—not every plan, past debate or full README. This overview does not supersede the detailed contract. The old Render/Python method is preserved in [docs/legacy-python-server-hosting.md](../docs/legacy-python-server-hosting.md) without exposing any private Porkbun credentials.
+**FINAL IMPLEMENTATION AUTHORITY:** [Browser-only-migration-execution-spec.md](Browser-only-migration-execution-spec.md) is the single settled execution plan. [Detailed B00–B16 contracts](Browser-only-core-detailed-build-contracts.md) contain package edits and dependency table; the [diff map](Browser-only-core-diff-map.md) has source function-level instructions; the [route index](Browser-only-core-source-route-index.md) has **92 historical routes (91 local, 1 retired)** with owners/dispositions. Coders read only their assigned scope and current source. This overview cannot override the execution specification. The old Render/Python method is preserved in [docs/legacy-python-server-hosting.md](../docs/legacy-python-server-hosting.md) without exposing any private Porkbun credentials.
 
 ## Destination architecture
 
@@ -31,7 +31,7 @@ The owner accepts that the full application may be broken between coding package
 
 **Supported browser policy:** Windows Chrome/Edge are the complete Space/folder target; B13 owns an honest notice for browsers without File System Access directory handles. Blob downloads alone do not mean Firefox/Safari can save/reopen Spaces.
 
-**Open AI Help decision:** Local prompt generation/AI validation and paste/copy interaction stay. If safe browser-native direct provider chat cannot be delivered without exposing secrets, get Andrew's decision before B13 Story creation; do not silently downgrade AI Help or defer to the final hosting cutover.
+**AI Help DECIDED:** browser-direct chat with a user-supplied key where the chosen HTTPS provider/CORS permits it, key in session memory by default, copy/paste and local prompt/repair/candidate validation always available. Do not embed a Wavefinity credential, silently remove Help or defer a duplicate owner decision. Explicitly disclose that prompts/descriptors are sent to the selected AI provider when the user asks.
 
 **No coder runtime certification:** Coders inspect actual route implementations/source and static build composition; the owner uses the app to assess operation. Do not require blocked-network exercises, scanners, test suites or user QA plans. The B02 production build records real asset sizes; 64 MiB first-load and 1536 MiB combined WASM heap are planning targets, not claims about the unbuilt full app.
 
@@ -46,14 +46,14 @@ The detailed specification defines 17 work packages with concrete files and patc
 5. **B04:** Port catalog, validation, fit, part/feature edit and layout rules.
 6. **B05:** Integrate local geometry preview into the existing main UI.
 7. **B06:** Implement ordinary bin and connector building, STL, file output handling.
-8. **B07:** Implement real 3MF ZIP/model metadata packaging, part/group/filament layout and output safety handling.
+8. **B07:** Implement both native-export-equivalent 3MF **and `plate_layout.py` print-plate** packaging/placement, including the distinct four-member combined ZIP, resource ID remapping, 90°/translation transforms and Bambu metadata differences.
 9. **B08:** Keep every Print action and printer workflow. Generate print-ready 3MF and provide browser-legal slicer handoff.
 10. **B09:** Move preference, Space, resume, folder, file and autosave operations to browser storage.
 11. **B10:** Move inventory, bin source, drawer layout, spacers and file ownership to browser processing.
 12. **B11:** Complete structural Space calculations for Storage Box, Storage Drawers, Drawer, Surface and Pegboard.
 13. **B12:** Complete advanced features (text, dividers, bores, photo nest, openings, lids, etc.).
 14. **B13:** Replace browser-incompatible desktop/AI-specific operations honestly, without breaking core Print.
-15. **B14:** Build `dist/` from production-only `web/*`, copy `images/*` and BOTH `Brochure.md`/`brochure.md`, and explicitly **EXCLUDE** prototype page/JS/worker and `web/browser-local-poc/**`. Assemble the final route registry once. Specify Render Static headers/MIME/cache and **notify Andrew for authorization** before hosting/DNS changes.
+15. **B14:** Build production-only `dist/` with PoC excluded and Brochure aliases. Finalize Python+JS route registry, compare the actual flat registrations against B01 manifest and updated route index during normal shipping build (retired export token route not callable), fail closed for unknown `/api/*` without network. Specify Render Static headers/MIME/cache and **notify Andrew for authorization** before hosting/DNS changes.
 16. **B15:** Retire the live Python HTTP service only AFTER the actual last deployed server SHA, final static SHA, cutover date/hostname and private DNS rollback record have been filled in, with Andrew's permission.
 17. **B16:** Delete temporary experiment page and superseded experiment/test scaffolding; keep the production MeshGL64 assets and license.
 
