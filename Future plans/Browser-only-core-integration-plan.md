@@ -27,6 +27,14 @@ The owner accepts that the full application may be broken between coding package
 
 **There are no coder testing phases, no suite requirements, no generated fixtures, no browser-driving instructions, no test automation, no developer-run manual tests and no user test scripts or checklists.** Coders validate the **logic** in the implementation through code reading and review, not by running the application. Preserve real runtime safety checks.
 
+**Gridfinity preservation, beyond generic 21/42:** The migration preserves grid on designs, immutable Space grid, nominal grid footprint versus printed physical cavity, built-in Floor versus None/third-party baseplate, provisional 0.35-mm-per-side external plate allowance, seated lift measured/unverified, 7-mm Z units on both pitches, grid lids/rims and stacking, explicit cross-grid mismatch messages and pitch/nominal-unit file naming. Preserve Stage 2 only if merged by the user's go-ahead; see the detailed diff-map invariant table. The browser PoC proves ordinary bins, NOT all future structural/3MF geometry.
+
+**Supported browser policy:** Windows Chrome/Edge are the complete Space/folder target; B13 owns an honest notice for browsers without File System Access directory handles. Blob downloads alone do not mean Firefox/Safari can save/reopen Spaces.
+
+**Open AI Help decision:** Local prompt generation/AI validation and paste/copy interaction stay. If safe browser-native direct provider chat cannot be delivered without exposing secrets, get Andrew's decision before B13 Story creation; do not silently downgrade AI Help or defer to the final hosting cutover.
+
+**No coder runtime certification:** Coders inspect actual route implementations/source and static build composition; the owner uses the app to assess operation. Do not require blocked-network exercises, scanners, test suites or user QA plans. The B02 production build records real asset sizes; 64 MiB first-load and 1536 MiB combined WASM heap are planning targets, not claims about the unbuilt full app.
+
 ## Exact work order
 
 The detailed specification defines 17 work packages with concrete files and patches:
@@ -45,11 +53,11 @@ The detailed specification defines 17 work packages with concrete files and patc
 12. **B11:** Complete structural Space calculations for Storage Box, Storage Drawers, Drawer, Surface and Pegboard.
 13. **B12:** Complete advanced features (text, dividers, bores, photo nest, openings, lids, etc.).
 14. **B13:** Replace browser-incompatible desktop/AI-specific operations honestly, without breaking core Print.
-15. **B14:** Build full `dist/` (copy `web/*` to root, `images/*` to `/images/`, repo `Brochure.md` to root); specify free Render Static Site setup, source/branch/build/publish settings, real domain cutover steps, and **notify Andrew for authorization**. No early hosting/DNS changes.
-16. **B15:** Retire the live Python HTTP service while retaining written legacy recovery and old source history.
+15. **B14:** Build `dist/` from production-only `web/*`, copy `images/*` and BOTH `Brochure.md`/`brochure.md`, and explicitly **EXCLUDE** prototype page/JS/worker and `web/browser-local-poc/**`. Assemble the final route registry once. Specify Render Static headers/MIME/cache and **notify Andrew for authorization** before hosting/DNS changes.
+16. **B15:** Retire the live Python HTTP service only AFTER the actual last deployed server SHA, final static SHA, cutover date/hostname and private DNS rollback record have been filled in, with Andrew's permission.
 17. **B16:** Delete temporary experiment page and superseded experiment/test scaffolding; keep the production MeshGL64 assets and license.
 
-**Dependencies:** B00→B01→B02→B03→B04→B05→B06→B07→B08. B09 needs B03–B05, B10 needs B06+B09, B11 needs B07–B10, B12 needs B05+B07+B11, B13 needs B03+B09. B14 starts after all core code B00–B13 exists; B15→B16 follow. The independent packages may be organized for safe parallel coding if their files do not collide.
+**One authoritative dependency graph (exact direct edges are in detailed contracts):** B00→B01→B02→B03→B04→B05→B06→B07→B08. B09 requires B04; B10 requires B06+B09+B08; B11 requires B08+B10; B12 requires B05+B11; **B13 requires B08+B09+B12**, preventing simultaneous edits to `web/app/15-generate-dialogs.js` and `web/spaces/12-space-info.js`. B14 starts only after B00–B13 and is the sole final dispatcher integration owner; B15 requires approved hosting and completed rollback record; B16 follows B15. A shared service does not mean double route ownership. The 92-entry route index has ONE Bxx owner per route.
 
 ## Coder completion handoff
 
