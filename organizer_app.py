@@ -181,6 +181,7 @@ import shutil
 import sys
 import tempfile
 import trimesh
+from organizer_geometry import phase as _phase
 
 from organizer_app_impl._common import (
     SURFACE_BASE_CELL_MM,
@@ -424,6 +425,7 @@ def generate_organizer_files_transactional(
         )
         if not staged:
             raise RuntimeError("generating its files did not produce any")
+        _phase("promote")
         finals = _promote_staged_set(
             output_dir, staged, auto_timestamp=auto_timestamp, part_name=part_name)
         mapping: dict[str, str] = {}
@@ -503,6 +505,7 @@ def generate_organizer_files(
     # The request is kept for anything the user should recognise - the reported
     # height and the filename are the height they asked for, not the body the
     # lid is bolted onto.
+    _phase("checks")
     validate_stack_design(box)
     stack_request = box
     box = stack_effective_box(box)
@@ -556,6 +559,7 @@ def generate_organizer_files(
         None if layout.mode == "fused"
         else insert_footprint(box, layout.mode)
     )
+    _phase("features")
     texts = build_texts(box, layout.features, text_surface, text_limit)
     from organizer_inserts._text import rim_text_geometry
     rim_parts = [rim_text_geometry(box, one) for one in rim_features]
@@ -580,7 +584,10 @@ def generate_organizer_files(
         return target
 
     if layout.mode == "fused":
-        body = make_fused_box(box, layout.features, make_box(box))
+        _phase("shell")
+        shell = make_box(box)
+        _phase("features")
+        body = make_fused_box(box, layout.features, shell)
         if scoop:
             body = union([body, make_scoop(box)])
         output = _resolve_file(box_filename, stack_request, part_name)
@@ -611,6 +618,7 @@ def generate_organizer_files(
         # rim ledge, Edge Mount and floor text all already on it), so a later
         # body-level operation can never quietly fill a Side Opening back in.
         reported = apply_side_openings(box, reported)
+        _phase("export")
         output_dir.mkdir(parents=True, exist_ok=True)
         if inlays:
             written = export_text_body_3mf(
@@ -628,7 +636,9 @@ def generate_organizer_files(
         }
     else:
         box_output = _resolve_file(box_filename, stack_request, part_name)
+        _phase("shell")
         plain_box = make_box(box)
+        _phase("features")
         insert_features = tuple(one for one in layout.features
                                 if not (is_text(one) and one.options.get("level") == "rim"))
         insert = (
@@ -670,6 +680,7 @@ def generate_organizer_files(
         # body-level operation can never quietly fill a Side Opening back in.
         body = apply_side_openings(box, body)
         reported_box = body
+        _phase("export")
         if box_inlays:
             box_written = export_text_body_3mf(
                 reported_box, [(name, mesh) for name, mesh, _raised in box_inlays],
@@ -696,6 +707,7 @@ def generate_organizer_files(
             "text_objects": written,
             "box_text_objects": box_written,
         }
+    _phase("extras")
     if box.edge_mount.label_enabled and box.edge_mount.label_type == "separate":
         label_body = make_edge_mount_label_part(box)
         if label_body is not None:
@@ -750,6 +762,7 @@ def generate_organizer_files(
         result["side_openings"] = side_opening_summary(box)
     if lid_enabled(stack_request):
         lid_output = _resolve_file(lid_filename, stack_request, part_name)
+        _phase("lid")
         lid, lid_texts = make_lid_parts(
             stack_request, lid_label_regions(stack_request, layout),
         )
@@ -772,6 +785,7 @@ def generate_organizer_files(
             lid.apply_translation((0.0, 0.0, drop))
             for _text, mesh, _raised in lid_texts:
                 mesh.apply_translation((0.0, 0.0, drop))
+        _phase("export")
         if lid_texts:
             written = export_text_body_3mf(
                 lid, [(text, mesh) for text, mesh, _raised in lid_texts],

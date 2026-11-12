@@ -440,7 +440,7 @@ DP.renderBatch = () => {
   const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
   const printCount = scope.subset ? scope.picked.length + (DP.containerPinned ? 1 : 0) : 0;
-  button.textContent = (DL.busy === "print-bins" || DL.busy === "print-complete") ? currentOutputReport?.text || DL.printBusyLabel
+  button.textContent = (DL.busy === "print-bins" || DL.busy === "print-complete") ? currentOutputReport?.short || currentOutputReport?.text || DL.printBusyLabel
     : scope.subset ? `Print ${DP.containerPinned ? (printCount === 1 ? "container" : `${printCount} items`) : (printCount === 1 ? "bin" : `${printCount} bins`)}` : "Print whole space";
   button.disabled = noSlicer || busy || (scope.subset && !printCount);
   button.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."
@@ -1219,7 +1219,7 @@ DP.renderInventory = (force = false) => {
     const outputRunning = currentOutputReport?.busy && DL.spaceContextCurrent(currentOutputReport.context)
       && currentOutputReport.rowIds.includes(one.id);
     const outputLabel = mode => outputRunning && currentOutputReport.action === mode
-      ? escapeHtml(currentOutputReport.text) : mode === "print" ? "Print" : "Save";
+      ? escapeHtml(currentOutputReport.short ?? currentOutputReport.text) : mode === "print" ? "Print" : "Save";
     const statusTracked = spacer || ["bin", "b4b", "manual"].includes(one.kind);
     const printed = one.status === "printed";
     const picked = DP.printSelected.has(one.id);

@@ -83,6 +83,11 @@ SOURCE_ROOT = str(APP_DIR.resolve())
 SOURCE_FINGERPRINT = source_fingerprint()
 
 GEOMETRY_LOCK = threading.RLock()
+# Serialises one bin's file work end to end - serial reservation, staging,
+# promote and inventory logging - so two Exports never interleave those, while
+# GEOMETRY_LOCK is held only for the geometry build itself (see
+# generate_payload). Order: OUTPUT_LOCK before GEOMETRY_LOCK, never the reverse.
+OUTPUT_LOCK = threading.RLock()
 _PREVIEW_REQUEST_LOCK = threading.Lock()
 _PREVIEW_REQUESTS: OrderedDict[tuple[str, str], tuple[int, float]] = OrderedDict()
 
@@ -237,6 +242,31 @@ EXPORTS: dict[str, dict[str, Any]] = {}
 # is terminal instead of showing a generic "try again".
 OPERATION_LOCK = threading.RLock()
 OPERATION_REGISTRY: dict[str, dict[str, Any]] = {}
+# The operation the current handler thread is running, so the work inside it
+# can report progress (stage, estimate) that /api/operation-status hands back.
+_OPERATION_CONTEXT = threading.local()
+
+
+def operation_progress(**fields: Any) -> None:
+    """Merge progress fields into the running operation of this thread, if any."""
+    operation_id = getattr(_OPERATION_CONTEXT, "id", None)
+    if not operation_id:
+        return
+    with OPERATION_LOCK:
+        entry = OPERATION_REGISTRY.get(operation_id)
+        if entry is not None and entry["status"] == "running":
+            entry.setdefault("progress", {}).update(fields)
+
+
+def _running_reply(operation_id: str, entry: dict[str, Any]) -> dict[str, Any]:
+    reply = {"operation_id": operation_id, "operation_status": "running"}
+    started = entry.get("started_at")
+    if started is not None:
+        reply["elapsed_s"] = round(time.monotonic() - started, 1)
+    progress = entry.get("progress")
+    if progress:
+        reply["progress"] = dict(progress)
+    return reply
 OPERATION_TTL_SECONDS = 60 * 60
 OPERATION_MAX_ENTRIES = 500
 
@@ -277,7 +307,7 @@ def _idempotent_operation(route):
             entry = OPERATION_REGISTRY.get(operation_id)
             if entry is not None:
                 if entry["status"] == "running":
-                    return {"operation_id": operation_id, "operation_status": "running"}
+                    return _running_reply(operation_id, entry)
                 if entry["status"] == "done":
                     return entry["result"]
                 # A stored failure re-raises in the same status class the first
@@ -289,7 +319,10 @@ def _idempotent_operation(route):
             OPERATION_REGISTRY[operation_id] = {
                 "status": "running", "result": None,
                 "error": None, "error_kind": None, "finished_at": time.time(),
+                "started_at": time.monotonic(),
             }
+        outer = getattr(_OPERATION_CONTEXT, "id", None)
+        _OPERATION_CONTEXT.id = operation_id
         try:
             result = route(payload)
         except Exception as error:
@@ -301,6 +334,8 @@ def _idempotent_operation(route):
                     "finished_at": time.time(),
                 }
             raise
+        finally:
+            _OPERATION_CONTEXT.id = outer
         with OPERATION_LOCK:
             OPERATION_REGISTRY[operation_id] = {
                 "status": "done", "result": result,
@@ -319,7 +354,7 @@ def operation_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if entry is None:
         return {"operation_id": operation_id, "operation_status": "unknown"}
     if entry["status"] == "running":
-        return {"operation_id": operation_id, "operation_status": "running"}
+        return _running_reply(operation_id, entry)
     if entry["status"] == "done":
         return {"operation_id": operation_id, "operation_status": "done", "result": entry["result"]}
     return {"operation_id": operation_id, "operation_status": "error", "error": entry["error"]}

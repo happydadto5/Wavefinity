@@ -6,13 +6,14 @@ import hashlib
 import numpy as np
 import trimesh
 from shapely.geometry import Polygon
-from organizer_geometry import translated
+from organizer_geometry import staged, translated
 
 from ._specs import BoxSpec, ConnectorSpec
 from ._wave import _sample_count
 from ._boxes import make_box, connector_bin_heights, _connector_corridor_polygon
 
 
+@staged("validation")
 def mesh_report(name: str, mesh: trimesh.Trimesh) -> dict[str, object]:
     report = {
         "name": name,

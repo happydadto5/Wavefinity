@@ -114,6 +114,11 @@ const state = {
   lastBoxSize: null,
   previewRequest: 0,
   previewSettledRequest: -1,
+  // The full preview build in flight: its request number and the geometry it
+  // is building, so leaving the bin can wait for it instead of starting the
+  // same build again from nothing.
+  previewInFlight: null,
+  previewEndedRequest: -1,
   draftRequest: 0,
   // Fix 103 (Section C): epoch for structural preview requests; stale
   // responses are dropped, latest request wins.
@@ -214,6 +219,13 @@ const state = {
 
 let previewWaitTimer = null;
 let previewSlowTimer = null;
+// Counts the slow-preview notice up each second once a rebuild passes ~2 s.
+let previewTickTimer = null;
+// This session's own pace for slow rebuilds, ms per mm² of footprint, kept
+// apart for bins with and without a lid (a lid costs far more). It is what the
+// "about N seconds" range in the preview notice is judged from - no history,
+// no range.
+const previewPace = { plain: 0, lid: 0 };
 let nestCornerPointer = null;
 let nestCornerHoldTimer = null;
 

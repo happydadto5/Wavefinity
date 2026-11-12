@@ -177,7 +177,7 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false,
         saved = true;
         return saved;
       }
-      if (previewShowsCurrentGeometry()) {
+      if (previewShowsCurrentGeometry() || await awaitInFlightPreviewFor(state.design)) {
         if (state.previewDesignKey !== JSON.stringify(state.design)) state.previewDesignKey = JSON.stringify(state.design);
       } else await refreshPreview();
       if (!state.preview?.fits || state.preview.feature_errors?.length || state.preview.draft_error ||

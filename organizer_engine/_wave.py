@@ -548,6 +548,24 @@ def wavy_cavity_polygon(spec: BoxSpec) -> Polygon:
     return wavy_rect_cavity(spec.half_x, spec.half_y, spec.wall_depth, spec.corner_fillet, spec.wall)
 
 
+# The last cavity whose outline was read, with its vertex array. A bin's lock
+# bumps all sample the same cavity (hundreds of calls on a big bin), and
+# turning a fine wavy outline into an array each time cost more than the
+# sampling itself. Identity-keyed: a different polygon object is re-read.
+_CAVITY_VERTICES: tuple[Polygon, np.ndarray] | None = None
+
+
+def _cavity_vertices(cavity: Polygon) -> np.ndarray:
+    global _CAVITY_VERTICES
+    cached = _CAVITY_VERTICES
+    if cached is not None and cached[0] is cavity:
+        return cached[1]
+    vertices = np.asarray(cavity.exterior.coords)
+    vertices.flags.writeable = False
+    _CAVITY_VERTICES = (cavity, vertices)
+    return vertices
+
+
 def _wall_face_values(
     cavity: Polygon, coordinates, run_axis: str, side: float,
 ) -> np.ndarray:
@@ -556,15 +574,26 @@ def _wall_face_values(
     ``side`` selects the positive or negative wall. Intersecting the actual
     polygon edges makes this the shared face definition for every attachment.
     """
-    vertices = np.asarray(cavity.exterior.coords)
+    vertices = _cavity_vertices(cavity)
     along = 1 if run_axis == "y" else 0
     across = 1 - along
     starts, ends = vertices[:-1], vertices[1:]
     delta = ends[:, along] - starts[:, along]
+    low = np.minimum(starts[:, along], ends[:, along])
+    high = np.maximum(starts[:, along], ends[:, along])
+    span = np.asarray(coordinates, dtype=float)
+    if span.size:
+        # Only edges overlapping the sampled span can be hit by any sample, so
+        # keep those once (in order) instead of re-testing every edge of the
+        # whole outline for every sample. Same edges, same arithmetic: the
+        # result is identical, but the cost no longer grows with the bin's
+        # whole perimeter per sample.
+        keep = (low <= span.max()) & (high >= span.min()) & (np.abs(delta) > 1e-12)
+        starts, ends, delta, low, high = starts[keep], ends[keep], delta[keep], low[keep], high[keep]
     values = []
     for coordinate in coordinates:
-        mask = ((np.minimum(starts[:, along], ends[:, along]) <= coordinate)
-                & (np.maximum(starts[:, along], ends[:, along]) >= coordinate)
+        mask = ((low <= coordinate)
+                & (high >= coordinate)
                 & (np.abs(delta) > 1e-12))
         if not np.any(mask):
             raise ValueError("wall attachment extends beyond the built cavity")
@@ -578,7 +607,7 @@ def _wall_face_path(cavity: Polygon, coordinates, run_axis: str, side: float):
     """A face path with every polygon breakpoint retained between its ends."""
     coordinates = np.asarray(coordinates, dtype=float)
     along = 1 if run_axis == "y" else 0
-    vertices = np.asarray(cavity.exterior.coords)[:, along]
+    vertices = _cavity_vertices(cavity)[:, along]
     inside = vertices[(vertices > coordinates[0]) & (vertices < coordinates[-1])]
     samples = np.unique(np.concatenate((coordinates, inside)))
     # Opposite faces can contribute numerically coincident breakpoints. Avoid

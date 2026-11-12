@@ -32,13 +32,19 @@ class BuildAbandoned(BaseException):
 
 
 class _Build:
-    __slots__ = ("totals", "stack", "mark", "started", "superseded")
+    __slots__ = ("totals", "stack", "mark", "started", "superseded", "preview", "listener")
 
-    def __init__(self, superseded: Callable[[], bool] | None) -> None:
+    def __init__(self, superseded: Callable[[], bool] | None, preview: bool = True,
+                 listener: Callable[[str], None] | None = None) -> None:
         self.totals: dict[str, float] = {}
         self.stack: list[str] = []
         self.started = self.mark = _clock()
         self.superseded = superseded
+        # A print/export build is timed too, but is never a preview: it must
+        # not take the preview-only fast routes (see in_preview_build).
+        self.preview = preview
+        # Told the name of each top-level stage as it opens (export progress).
+        self.listener = listener
 
     def _charge(self, now: float) -> None:
         name = self.stack[-1] if self.stack else "other"
@@ -69,16 +75,22 @@ class BuildTimings:
 
 
 @contextmanager
-def build_scope(superseded: Callable[[], bool] | None = None) -> Iterator[BuildTimings]:
+def build_scope(superseded: Callable[[], bool] | None = None, *, preview: bool = True,
+                listener: Callable[[str], None] | None = None) -> Iterator[BuildTimings]:
     """Open (or join) this thread's build. A nested scope reuses the outer
-    build's clock, so its stages roll into the same report."""
+    build's clock, so its stages roll into the same report.
+
+    ``preview=False`` marks a print/export build: it is timed the same way but
+    :func:`in_preview_build` stays false inside it, so the written files are
+    exactly what they were before timing existed. ``listener`` is called with
+    each top-level stage name as it opens."""
     outer = _current()
     if outer is not None:
         if superseded is not None and outer.superseded is None:
             outer.superseded = superseded
         yield BuildTimings(outer)
         return
-    build = _Build(superseded)
+    build = _Build(superseded, preview, listener)
     _STATE.build = build
     handle = BuildTimings(build)
     try:
@@ -96,6 +108,11 @@ def stage(name: str) -> Iterator[None]:
         yield
         return
     build._charge(_clock())
+    if build.listener is not None and not build.stack:
+        try:
+            build.listener(name)
+        except Exception:
+            pass
     build.stack.append(name)
     try:
         yield
@@ -104,11 +121,38 @@ def stage(name: str) -> Iterator[None]:
         build.stack.pop()
 
 
+def phase(name: str) -> None:
+    """Move straight-line build code into its next top-level stage.
+
+    For a long sequential routine (print/export) where wrapping each part in a
+    ``with stage(...)`` block would re-indent it: the time since the last
+    phase is charged to it, and ``name`` becomes the stage that later time
+    (outside any nested :func:`stage`) is charged to. No-op with no open build.
+    """
+    build = _current()
+    if build is None:
+        return
+    build._charge(_clock())
+    if not build.stack:
+        build.stack.append(name)
+    elif len(build.stack) == 1:
+        build.stack[0] = name
+    else:
+        return
+    if build.listener is not None:
+        try:
+            build.listener(name)
+        except Exception:
+            pass
+
+
 def in_preview_build() -> bool:
     """True while this thread is inside a preview build scope. Print and export
-    never open one, so code that offers a faster-but-not-bit-identical route
-    for the preview (same shape to ~1e-13 mm) takes it only when this is true."""
-    return _current() is not None
+    open only a ``preview=False`` scope, so code that offers a
+    faster-but-not-bit-identical route for the preview (same shape to ~1e-13
+    mm) takes it only when this is true."""
+    build = _current()
+    return build is not None and build.preview
 
 
 def checkpoint() -> None:

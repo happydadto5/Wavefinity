@@ -6,6 +6,33 @@ function setGenerationPrinterWarning(message) {
   node.hidden = !message;
 }
 
+// The parts dialog opens docked in a corner and NOT modal while files are
+// made, so the tree, the views and the previews stay usable behind it (a
+// 350 x 350 bin with a lid takes over a minute). Its own status line and the
+// row's status line both show progress.
+function openGenerationDialog(dialog) {
+  if (!dialog || dialog.open) return;
+  dialog.classList.add("is-docked");
+  try {
+    dialog.show();
+  } catch (_err) {
+    // Already open
+  }
+}
+
+// An Export already running for the bin being exported again: the second
+// click joins it (no second request, no second file set) and says so in place.
+function joinRunningExport() {
+  const entry = currentOutputReport;
+  if (!entry?.busy || entry.action !== "export" || entry.owner !== "bin") return false;
+  if (String(entry.rowIds?.[0] || "") !== String(state.designInventoryId || "")) return false;
+  const note = " · Your second Export click joined this one - nothing extra is made.";
+  entry.joined = true;
+  if (!entry.text.endsWith(note)) entry.text += note;
+  renderOutputReport();
+  return true;
+}
+
 // Use the existing item status area for Print and inventory batches as well as Export.
 function beginGenerationReport(working, rows = [{ id: "bin", title: "Bin" }], batch = false) {
   const place = beginOutputReport(working, batch ? "batch" : "bin",
@@ -26,7 +53,7 @@ function beginGenerationReport(working, rows = [{ id: "bin", title: "Bin" }], ba
   setGenerationPrinterWarning(batch ? "" : binPrinterWarning());
   $("#generation-error").hidden = true;
   $("#generation-actions").hidden = true;
-  if (!dialog.open) dialog.showModal();
+  openGenerationDialog(dialog);
   let settled = false;
   const report = (message, error = false) => {
     settled = true;
@@ -42,6 +69,11 @@ function beginGenerationReport(working, rows = [{ id: "bin", title: "Bin" }], ba
     if (typeof DP !== "undefined" && DP.built) DP.renderInventory(true);
     for (const one of items) setItemStatus(one.id, "generating", message);
   };
+  report.progress = message => {
+    place.progress(message);
+    for (const one of items) setItemStatus(one.id, "generating", message);
+  };
+  report.entry = place.entry;
   report.batchResult = (result, printing, folder) => {
     const files = outputResultFiles(result);
     const message = result.partial ? result.error || "Some files could not be prepared."
@@ -63,6 +95,7 @@ function beginGenerationReport(working, rows = [{ id: "bin", title: "Bin" }], ba
 }
 
 async function generateParts(target) {
+  if (joinRunningExport()) return;
   if (state.designMutationBusy || isGenerating || currentOutputReport?.busy) return;
   const report = beginOutputReport("Exporting…");
   try {
@@ -147,13 +180,7 @@ async function generatePartsWithReport(target, report) {
   setMutationSurfacesInert(true);
   updateGenerateAvailability();
 
-  if (dialog && typeof dialog.showModal === "function") {
-    try {
-      if (!dialog.open) dialog.showModal();
-    } catch (_err) {
-      // Ignore if already open
-    }
-  }
+  openGenerationDialog(dialog);
 
   const allFiles = [];
   let connectorPlan = null;
@@ -199,10 +226,20 @@ async function generatePartsWithReport(target, report) {
     if (target === "all" || target === "bin") {
       saveStage = "bin";
       setItemStatus("bin", "generating", "Exporting…");
-      const binResult = await apiSideEffect("/api/generate", payload, { onStillFinishing: () => {
-        report.working("Still working…");
-        setItemStatus("bin", "generating", "Still working…");
-      } });
+      // Elapsed time from the click, the server's stage and estimate every
+      // 2 s, in the row's status line and the dialog's bin line.
+      const progress = startOutputProgress("Exporting…", text => {
+        report.progress?.(text);
+        setItemStatus("bin", "generating", text);
+      }, report.entry);
+      let binResult;
+      try {
+        binResult = await apiSideEffect("/api/generate", payload, {
+          onStillFinishing: () => {}, onProgress: progress.update,
+        });
+      } finally {
+        progress.stop();
+      }
       if (designSpaceContext) DL.requireSpaceContext(designSpaceContext);
       saveOutput = binResult.output || saveOutput;
       const binFiles = await saveGeneratedFiles(binResult, { ownedStale: staleFileNamesForRow(designRowId) });
@@ -424,10 +461,16 @@ async function printModelWithReport(target, initiatingButton, report) {
         throw new Error(`The current design could not be saved to this Space, so nothing was sent: ${error.message}`);
       }
     }
-    const result = await apiSideEffect("/api/print", payload, { onStillFinishing: () => {
-      button.textContent = "Still working…";
-      report.working("Still working…");
-    } });
+    const progress = startOutputProgress("Printing…", text => report.progress?.(text), report.entry);
+    let result;
+    try {
+      result = await apiSideEffect("/api/print", payload, {
+        onStillFinishing: () => { if (button) button.textContent = "Still working…"; },
+        onProgress: progress.update,
+      });
+    } finally {
+      progress.stop();
+    }
     if (result.partial) {
       // Bin/design files are a real side effect even though connectors or
       // the slicer step failed after them: never mark this row Printed, and
@@ -536,6 +579,7 @@ function chooseIndividualBinPrint(button) {
   const dialog = $("#individual-bin-print-dialog");
   if (dialog.open) return;
   const exporting = button.dataset.output === "export";
+  if (exporting && joinRunningExport()) return;
   // Nothing to choose when connectors cannot apply: print the bin directly.
   if (!exporting && connectorsUnavailable()) {
     printModel("bin", button);

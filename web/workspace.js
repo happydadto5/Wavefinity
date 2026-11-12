@@ -315,9 +315,34 @@ WS.showSwitching = text => {
     box.className = "ws-switching";
     box.setAttribute("role", "status");
     host.appendChild(box);
+    WS.wireSwitchingDrops(box);
   }
   box.textContent = text;
   box.hidden = false;
+};
+
+// A bin dragged from the tree and let go over the switching cover is refused
+// right there, in words, and stays exactly as it was (unplaced, unchanged).
+// Drops are never held or queued for after the switch, and none vanishes
+// silently: the cover takes every dragover/drop for as long as it shows.
+WS.SWITCHING_DROP_REFUSAL = "The layout is still switching — drop again once it appears.";
+WS.wireSwitchingDrops = box => {
+  const showing = () => !box.hidden;
+  const accept = event => {
+    if (!showing()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  };
+  box.addEventListener("dragenter", accept);
+  box.addEventListener("dragover", accept);
+  box.addEventListener("drop", event => {
+    if (!showing()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof DV !== "undefined") DV.drop = null;
+    toastAt(WS.SWITCHING_DROP_REFUSAL, event.clientX, event.clientY, true, 5000);
+  });
 };
 
 // Story 2735: switching between items (bin / container / space layout) inside an open Space.
@@ -533,6 +558,7 @@ WS.arrive = () => {
     if (DL.isStorageDrawers()) DV.setView(DV.PRESETS.overhead);
     WS.task = "landing";
     WS.settle(0);
+    WS.warmSpaces();
   } else if (state.folderMode !== "space") {
     WS.task = "bin";
   }
@@ -766,7 +792,7 @@ WS.rowOutputs = (one, picked) => {
     && (one.kind === "container" ? currentOutputReport.owner === "container"
       : one.kind === "bin" && (currentOutputReport.rowIds.includes(one.id)
         || currentOutputReport.owner === "bin" && one.id === (state.designInventoryId || "")));
-  const label = mode => running && currentOutputReport.action === mode ? wsEsc(currentOutputReport.text)
+  const label = mode => running && currentOutputReport.action === mode ? wsEsc(currentOutputReport.short ?? currentOutputReport.text)
     : one.kind === "bin" && hosted ? "Save file" : mode === "print" ? "Print" : "Export";
   // Story 2815: the space line has no Print button; clicking the line opens the space details screen.
   // Story 2829: the space line has no Export button either; the details screen exports the space's files.
@@ -831,10 +857,14 @@ WS.syncOutput = () => { if (WS.entered) WS.render(); };
 // Story 2720: once the space list is showing, ask the server (once) to quietly pre-build the
 // listed spaces' previews so the first click is fast. Fire-and-forget: it opens, selects and
 // changes nothing, and a failure is ignored.
-WS.warmed = false;
+// Also asked once per opened Space, so its layout and bins are pre-built
+// before the first switch to them (the server skips anything already warm).
+WS.warmedFor = null;
 WS.warmSpaces = () => {
-  if (WS.warmed || state.runtime.hosted) return;
-  WS.warmed = true;
+  if (state.runtime.hosted) return;
+  const key = WS.task === "picker" ? "picker" : WS.placeKey();
+  if (WS.warmedFor === key) return;
+  WS.warmedFor = key;
   setTimeout(() => { api("/api/space/warm", {}).catch(() => {}); }, 1500);
 };
 

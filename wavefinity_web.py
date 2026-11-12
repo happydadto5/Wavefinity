@@ -369,6 +369,8 @@ from wavefinity_web_impl._runtime import (
     _prune_operations,
     _idempotent_operation,
     operation_status_payload,
+    operation_progress,
+    OUTPUT_LOCK,
     default_design,
     _stack_base_min_by_wall,
     _read_preferences_file,
@@ -1718,6 +1720,118 @@ def generate_payload(
     *,
     suppress_local_inventory: bool = False,
 ) -> dict[str, Any]:
+    # Timed like a preview (build_timings_ms per stage: wait, checks, shell,
+    # features, booleans, extras, lid, validation, export, promote, other,
+    # total), but never a preview build: preview=False keeps the written files
+    # exactly what they were. Each stage it enters is reported to the running
+    # operation, with an honest estimate, for the Export status line.
+    progress = _GenerateProgress(payload.get("design"))
+    with build_scope(preview=False, listener=progress.stage) as timings:
+        reply = _generate_payload(payload, suppress_local_inventory=suppress_local_inventory,
+                                  progress=progress)
+    report = timings.report()
+    progress.finished(report)
+    reply["build_timings_ms"] = report
+    return reply
+
+
+# Stages of an ordinary bin's Export that build geometry and so hold
+# GEOMETRY_LOCK. Writing/validating the already-built meshes ("export") and
+# installing the staged set ("promote") run with it released, so editor
+# actions that need it wait only for the build itself (OUTPUT_LOCK still keeps
+# two Exports from interleaving their file work).
+_GEOMETRY_STAGES = frozenset({"checks", "shell", "features", "extras", "lid"})
+_FILE_STAGES = frozenset({"export", "promote"})
+
+# Export time model for an ordinary bin, from the README profile (2026-11-11):
+# seconds = BASE + PER_MM2 * footprint; a lid multiplies it. _GENERATE_SPEED
+# learns this computer's ratio to the model from each finished Export, so the
+# estimate follows the machine it runs on.
+_GENERATE_BASE_S = 3.0
+_GENERATE_PER_MM2_S = 0.00013
+_GENERATE_LID_FACTOR = 3.0
+_GENERATE_SPEED = [1.0]
+# Share of the total already spent when each stage starts (plain bin / lid).
+_GENERATE_STAGE_SHARE = {"features": 0.25, "export": 0.45, "extras": 0.98, "promote": 0.99}
+_GENERATE_LID_STAGE_SHARE = {"features": 0.09, "export": 0.16, "extras": 0.27, "lid": 0.27, "promote": 0.99}
+
+
+class _GenerateProgress:
+    """Stage, elapsed time and a plain estimate for one Export, reported to
+    its running operation (read back through /api/operation-status). Also
+    takes GEOMETRY_LOCK for the build stages only."""
+
+    _WORDS = {
+        "wait": "Waiting for the export before it", "checks": "Checking the design", "shell": "Building the bin walls",
+        "features": "Adding the inside parts", "extras": "Adding the extra parts",
+        "lid": "Building the lid", "export": "Checking and writing the file",
+        "promote": "Saving the files",
+    }
+
+    def __init__(self, design: Any) -> None:
+        self.started = time.monotonic()
+        self.lid = False
+        self.model_s: float | None = None
+        try:
+            box = (design or {}).get("box") or {}
+            area = float(box["x"]) * float(box["y"])
+            self.lid = bool((box.get("lid") or {}).get("enabled"))
+            self.model_s = (_GENERATE_BASE_S + _GENERATE_PER_MM2_S * area) * (
+                _GENERATE_LID_FACTOR if self.lid else 1.0)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            self.model_s = None
+        self.estimate_s = self.model_s * _GENERATE_SPEED[0] if self.model_s else None
+        # None: the caller owns GEOMETRY_LOCK already; leave it alone.
+        self.lock_held: bool | None = False
+        self._seen: set[str] = set()
+        self._publish(None)
+
+    def _publish(self, name: str | None) -> None:
+        fields: dict[str, Any] = {}
+        if name is not None:
+            fields["stage"] = name
+            fields["stage_text"] = self._WORDS.get(name, "Working")
+        if self.estimate_s:
+            fields["estimate_s"] = [round(self.estimate_s * 0.8, 1), round(self.estimate_s * 1.25, 1)]
+        operation_progress(**fields)
+
+    def stage(self, name: str) -> None:
+        elapsed = time.monotonic() - self.started
+        share = (_GENERATE_LID_STAGE_SHARE if self.lid else _GENERATE_STAGE_SHARE).get(name)
+        if self.estimate_s and share and name not in self._seen and elapsed > 0.5:
+            # A stage boundary with a known share of the whole: move the
+            # estimate halfway toward what this pace implies.
+            self.estimate_s = 0.5 * self.estimate_s + 0.5 * (elapsed / share)
+        self._seen.add(name)
+        self._publish(name)
+        if self.lock_held is None:
+            return
+        if name in _GEOMETRY_STAGES and not self.lock_held:
+            with stage("wait"):
+                GEOMETRY_LOCK.acquire()
+            self.lock_held = True
+        elif name in _FILE_STAGES and self.lock_held:
+            GEOMETRY_LOCK.release()
+            self.lock_held = False
+
+    def release(self) -> None:
+        if self.lock_held:
+            GEOMETRY_LOCK.release()
+            self.lock_held = False
+
+    def finished(self, report: dict[str, float]) -> None:
+        total = report.get("total")
+        if self.model_s and total and total > 1000.0:
+            ratio = (total / 1000.0) / self.model_s
+            _GENERATE_SPEED[0] = 0.5 * _GENERATE_SPEED[0] + 0.5 * max(0.1, min(10.0, ratio))
+
+
+def _generate_payload(
+    payload: dict[str, Any],
+    *,
+    suppress_local_inventory: bool = False,
+    progress: _GenerateProgress | None = None,
+) -> dict[str, Any]:
     raw_design = payload["design"]
     if _is_base_trim_design(raw_design):
         spec = base_trim_from_design(raw_design)
@@ -1744,7 +1858,20 @@ def generate_payload(
         keep_log = False
     else:
         keep_log = requested_inventory and inventory_enabled(output, load_preferences())
-    with GEOMETRY_LOCK:
+    # One Export's file work runs whole under OUTPUT_LOCK; GEOMETRY_LOCK is
+    # held for the build stages only (see _GenerateProgress.stage). A caller
+    # that already holds GEOMETRY_LOCK keeps it throughout, as before.
+    narrow = progress is not None and not GEOMETRY_LOCK._is_owned()
+    if progress is not None and not narrow:
+        progress.lock_held = None
+    with stage("wait"):
+        if narrow:
+            OUTPUT_LOCK.acquire()
+            GEOMETRY_LOCK.acquire()
+            progress.lock_held = True
+        else:
+            GEOMETRY_LOCK.acquire()
+    try:
         serial = "" if box.b4b.enabled else _bin_serial_for(
             payload, output,
             will_log=requested_inventory and not HOSTED and (
@@ -1761,6 +1888,12 @@ def generate_payload(
             pegboard_thickness_mm=(payload.get("space") or {}).get("pegboard_thickness_mm", 3.2),
             serial=serial,
         )
+    finally:
+        if narrow:
+            progress.release()
+            OUTPUT_LOCK.release()
+        else:
+            GEOMETRY_LOCK.release()
     reply = _generation_reply(
         result=result, output=output,
         extra={"bin_serial": serial} if serial and not HOSTED else None,

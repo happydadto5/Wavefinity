@@ -417,8 +417,34 @@ function renderPlaced() {
 function clearPreviewWaitTimers() {
   if (previewWaitTimer !== null) clearTimeout(previewWaitTimer);
   if (previewSlowTimer !== null) clearTimeout(previewSlowTimer);
+  if (previewTickTimer !== null) clearInterval(previewTickTimer);
   previewWaitTimer = null;
   previewSlowTimer = null;
+  previewTickTimer = null;
+}
+
+function previewPaceKey(design) {
+  return design?.box?.lid?.enabled ? "lid" : "plain";
+}
+
+function previewFootprint(design) {
+  const x = Number(design?.box?.x), y = Number(design?.box?.y);
+  return x > 0 && y > 0 ? x * y : 0;
+}
+
+// Learn from a finished rebuild that was slow enough to need a notice.
+function notePreviewPace(design, timings) {
+  const total = Number(timings?.total), area = previewFootprint(design);
+  if (!(total >= 1000) || !area) return;
+  const key = previewPaceKey(design), rate = total / area;
+  previewPace[key] = previewPace[key] ? 0.5 * previewPace[key] + 0.5 * rate : rate;
+}
+
+function previewEstimate(design) {
+  const rate = previewPace[previewPaceKey(design)], area = previewFootprint(design);
+  if (!rate || !area) return null;
+  const seconds = rate * area / 1000;
+  return seconds >= 2 ? [seconds * 0.75, seconds * 1.35] : null;
 }
 
 // Explicit invalidation of the visible "recalculating" state, for when the
@@ -462,16 +488,40 @@ function beginPreviewWait(requestId) {
     wrapper.classList.add("preview-recalculating");
     previewWaitTimer = null;
   }, 175);
+  // Past ~2 s the notice counts up and, once this session has seen a slow
+  // rebuild, gives a plain range. The current preview stays underneath.
+  const started = Date.now();
+  const estimate = previewEstimate(state.design);
+  const tick = () => {
+    if (requestId !== state.previewRequest || switching()) return;
+    text.textContent = waitLine("Rebuilding geometry…", (Date.now() - started) / 1000,
+      estimate ? { estimate_s: estimate } : null);
+  };
   previewSlowTimer = setTimeout(() => {
     if (requestId !== state.previewRequest) return;
     notice.hidden = false;
     wrapper.classList.add("preview-recalculating");
-    if (!switching()) text.textContent = "Rebuilding geometry…";
+    tick();
+    previewTickTimer = setInterval(tick, 1000);
     previewSlowTimer = null;
-  }, 1500);
+  }, 2000);
+}
+
+// Leaving a bin (e.g. switching to the space layout) needs its preview
+// current. When the build already running is for exactly this geometry, wait
+// for it to land rather than throwing it away and starting it again.
+async function awaitInFlightPreviewFor(design) {
+  const flight = state.previewInFlight;
+  if (!flight || state.draft || flight.draft || flight.request !== state.previewRequest ||
+      flight.key !== previewGeometryKey(design)) return false;
+  while (state.previewEndedRequest < flight.request && state.previewRequest === flight.request) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  return previewShowsCurrentGeometry();
 }
 
 function endPreviewWait(requestId) {
+  if (requestId === state.previewInFlight?.request) state.previewEndedRequest = requestId;
   if (requestId !== state.previewRequest) return;
   clearPreviewWaitTimers();
   const wrapper = $('[data-canvas="3d"]');
@@ -667,6 +717,7 @@ async function refreshPreview({ persistResume = true, recovery = false } = {}) {
   if (typeof designTargetIsStructural === "function" && designTargetIsStructural()) return;
   fullPreviewStarts += 1;
   const request = ++state.previewRequest;
+  state.previewInFlight = { request, key: previewGeometryKey(state.design), draft: Boolean(state.draft) };
   const lidEpochAtRequest = state.lidThicknessEpoch;
   if (state.folderMode !== "space" || !["drawer", "portable", "box"].includes(state.activeSpace?.kind)) {
     updateBoreCeilingWarning(null);
@@ -701,6 +752,7 @@ async function refreshPreview({ persistResume = true, recovery = false } = {}) {
       if (Number.isInteger(draftIndex)) payload.selected = draftIndex;
     }
     const result = await api("/api/preview", payload);
+    if (!result?.superseded) notePreviewPace(payload.design, result?.build_timings_ms);
     if (request !== state.previewRequest) return;
     if (result.superseded) throw new Error("Current preview was unexpectedly superseded. Try again.");
     endPreviewWait(request);

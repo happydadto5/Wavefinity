@@ -8,7 +8,7 @@ import manifold3d
 from trimesh.iteration import reduce_cascade
 from shapely.geometry import Polygon
 
-from ._stages import BuildAbandoned, build_scope, checkpoint, in_preview_build, stage, staged
+from ._stages import BuildAbandoned, build_scope, checkpoint, in_preview_build, phase, stage, staged
 from ._nearest import closest_points_on_line
 
 

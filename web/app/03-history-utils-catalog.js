@@ -305,8 +305,10 @@ let currentOutputReport = null;
 function beginOutputReport(working, owner = "bin", rowIds = [state.designInventoryId].filter(Boolean)) {
   const context = typeof DL !== "undefined" ? DL.spaceContext() : null;
   const origin = state.activeSpace?.name || "this folder";
+  // `text` is the full status line; `short` is what the row's own button shows
+  // while it runs (the line can carry elapsed time and an estimate).
   const entry = { context, origin, owner, rowIds, action: /^Print/i.test(working) ? "print" : "export",
-    text: working, busy: true, error: false, lateAt: null };
+    text: working, short: working, busy: true, error: false, lateAt: null, startedAt: Date.now(), joined: false };
   currentOutputReport = entry;
   const report = (message, error = false) => {
     entry.text = friendlyError(message);
@@ -319,9 +321,17 @@ function beginOutputReport(working, owner = "bin", rowIds = [state.designInvento
   };
   report.working = message => {
     entry.text = message;
+    entry.short = message;
     renderOutputReport();
     if (typeof WS !== "undefined") WS.syncOutput();
   };
+  // Elapsed/estimate ticks: the status line only, not the row buttons.
+  report.progress = message => {
+    if (!entry.busy) return;
+    entry.text = message;
+    renderOutputReport();
+  };
+  report.entry = entry;
   report.options = { onStillFinishing: () => report.working("Still working…") };
   report.finish = () => { if (entry.busy) report("Action stopped before files were sent or saved.", true); };
   renderOutputReport();
@@ -410,6 +420,74 @@ async function api(path, payload = null, { timeoutMs = 60000, onStillFinishing =
   } finally {
     clearTimeout(abortTimer);
   }
+}
+
+// Plain waiting words: "12 s" so far, and an honest range for the whole job.
+function waitSeconds(seconds) {
+  return `${Math.max(0, Math.floor(seconds))} s`;
+}
+
+function waitRange(low, high) {
+  if (!(low > 0) || !(high > 0)) return "";
+  if (high >= 90) {
+    const lo = Math.max(1, Math.round(low / 30) / 2), hi = Math.max(lo + 0.5, Math.round(high / 30) / 2);
+    return `about ${fmt(lo)}–${fmt(hi)} minutes`;
+  }
+  const step = high >= 20 ? 5 : 1;
+  const lo = Math.max(1, Math.round(low / step) * step), hi = Math.max(lo + step, Math.round(high / step) * step);
+  return `about ${lo}–${hi} seconds`;
+}
+
+// One line for a long build: what it is doing, how long so far, and (once the
+// server can judge it) roughly how long in all. No percentage: the stages are
+// not evenly sized, so a bar would be a guess dressed up as a measurement.
+function waitLine(base, elapsed, progress = null) {
+  const parts = [`${base} ${waitSeconds(elapsed)}`];
+  if (progress?.stage_text) parts.push(progress.stage_text);
+  const estimate = progress?.estimate_s;
+  if (Array.isArray(estimate) && estimate.length === 2) {
+    const [low, high] = estimate;
+    if (elapsed > high + 5) parts.push(`taking longer than the usual ${waitRange(low, high).replace(/^about /, "")}`);
+    else if (waitRange(low, high)) parts.push(`${waitRange(low, high)} in all`);
+  }
+  return parts.join(" · ");
+}
+
+// Ask the read-only status endpoint about one operation every 2 s, from the
+// moment it starts, and hand each "running" answer to onRunning. Purely
+// informational: "unknown" (not registered yet) and failed checks are ignored
+// - the request itself, and pollOperationResult(), own the outcome.
+function watchOperationProgress(operationId, onRunning) {
+  let stopped = false;
+  let timer = null;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const status = await api("/api/operation-status", { operation_id: operationId, __noPoll: true }, { timeoutMs: 10000 });
+      if (!stopped && status?.operation_status === "running") onRunning(status);
+    } catch (_ignored) { /* the next tick tries again */ }
+    if (!stopped) timer = setTimeout(tick, 2000);
+  };
+  timer = setTimeout(tick, 0);
+  return () => { stopped = true; clearTimeout(timer); };
+}
+
+// Elapsed time counting up each second on a running output, with the server's
+// stage and estimate folded in as they arrive. show(text) paints it.
+function startOutputProgress(base, show, entry = null) {
+  const started = entry?.startedAt || Date.now();
+  let latest = null;
+  const paint = () => {
+    let text = waitLine(base, (Date.now() - started) / 1000, latest);
+    if (entry?.joined) text += " · Your second Export click joined this one - nothing extra is made.";
+    show(text);
+  };
+  const timer = setInterval(paint, 1000);
+  paint();
+  return {
+    update(status) { latest = status?.progress || latest; paint(); },
+    stop() { clearInterval(timer); },
+  };
 }
 
 // (Fix 096 A5) Default "still finishing" UI for side-effecting calls that do
@@ -506,7 +584,7 @@ function mintOperationId() {
 // first establish whether the first request completed, and only an explicit
 // apiSideEffectStartOver() (separately confirmed in the UI as potentially
 // duplicating) may proceed.
-async function apiSideEffect(path, payload, { timeoutMs = 60000, operationId = null, onStillFinishing = null } = {}) {
+async function apiSideEffect(path, payload, { timeoutMs = 60000, operationId = null, onStillFinishing = null, onProgress = null } = {}) {
   const label = outputLabel(path, payload);
   const fingerprint = operationId ? null : operationFingerprint(path, payload);
   let id = operationId || inFlightOperationIds.get(fingerprint);
@@ -524,6 +602,16 @@ async function apiSideEffect(path, payload, { timeoutMs = 60000, operationId = n
     throw error;
   }
   const forget = () => { if (fingerprint) inFlightOperationIds.delete(fingerprint); };
+  // Progress is polled from the start, not only once the wait has timed out.
+  const stopWatching = typeof onProgress === "function" ? watchOperationProgress(id, onProgress) : () => {};
+  try {
+    return await apiSideEffectRun(path, payload, id, label, forget, { timeoutMs, onStillFinishing });
+  } finally {
+    stopWatching();
+  }
+}
+
+async function apiSideEffectRun(path, payload, id, label, forget, { timeoutMs, onStillFinishing }) {
   let data;
   try {
     data = await api(path, { ...(payload || {}), operation_id: id }, { timeoutMs, onStillFinishing });

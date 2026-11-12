@@ -1130,9 +1130,9 @@ carries `nosniff` and same-origin resource policy, the static page also gets
 `no-referrer` and a same-origin-only content-security-policy; request bodies
 are capped at 25 MB; no cookies, accounts, credentials or telemetry. The
 output-folder field intentionally lets the local user pick any writable
-path — that is application function, not a sandbox escape. Mesh boolean
-operations run behind a process-wide lock, serializing geometry work rather
-than risking concurrent calls into the mesh backend. Hosted exports use isolated
+path — that is application function, not a sandbox escape. Print/export geometry
+builds run behind a process-wide lock (`GEOMETRY_LOCK`, build stages only;
+see the 2026-11-11 note below); previews use per-view locks. Hosted exports use isolated
 temporary folders and never expose the server filesystem; the browser owns its
 chosen save folder and supplies inventory text to the same Python inventory
 engine used locally.
@@ -2311,6 +2311,67 @@ work in a separate checkout/worktree; never leave the normal launch folder on
 an old branch. The normal BAT updates this folder from GitHub before starting;
 it stops with a message if it cannot update safely. Preserve old audit work on
 its branch.
+
+### Export progress, the geometry lock and the switch cover (2026-11-11)
+
+**Profile** (this PC, in-process, ms; `build_timings_ms` now comes back from
+`/api/generate` as well as `/api/preview`). Height 40 mm for every case.
+"Editor wait" is an editor call that takes `GEOMETRY_LOCK`
+(`/api/design/inventory-preview`) made 1 s into a running Export.
+
+| Bin | Export before | Export after | Shell before → after | Mesh checks | Editor wait before → after | Preview cold / during Export, "wait" |
+|---|---|---|---|---|---|---|
+| 98×98 | 6,837 | 4,094 | 2,408 → 807 | 2,313 → 1,710 | 6,138 → 635 | 452 / 40, wait 0 |
+| 203×147 | 14,683 | 8,244 | 7,234 → 1,771 | 3,943 → 3,487 | 13,884 → 2,482 | 987 / 45, wait 0 |
+| 350×350 | 46,155 | 18,434 | 29,708 → 5,026 | 8,732 → 7,041 | 39,435 → 7,829 | 3,669 / 74, wait 0 |
+| 350×350 + lid | 72,702 | 55,331 | 30,716 → 9,743 | 11,267 → 11,192 | 77,887 → 13,986 | 17,222 / 16,048, wait 0 |
+
+Findings:
+
+- Previews never waited on `GEOMETRY_LOCK` (Story 2731 already took them
+  off it): preview "wait" was 0 in every case, before and after. What waited
+  the whole Export were editor calls still on the lock (feature fit/apply,
+  expand layout, inventory preview, cabinet preview meshes).
+- **Lock narrowed:** an ordinary-bin Export holds `GEOMETRY_LOCK` only for its
+  build stages (checks, shell, features, extras, lid). Writing/validating the
+  built meshes and the staged promote run with it released. A new
+  `OUTPUT_LOCK` keeps two Exports' file work (serial reservation, staging,
+  promote, inventory logging) from interleaving, exactly as before. Order is
+  `OUTPUT_LOCK` before `GEOMETRY_LOCK`; a caller already holding
+  `GEOMETRY_LOCK` keeps it throughout. An editor call during the file-writing
+  stage now waits 0 ms (was the rest of the Export). The per-request
+  supersede discipline was not needed, because previews were not waiting.
+- **Hotspot fixed (one):** the wall lock bumps re-scanned every edge of the
+  whole cavity outline for every sample of every bump (`_wall_face_values`),
+  so shell time grew with perimeter squared. Each bump now keeps only the
+  edges overlapping its own span, and the outline's vertex array is read once.
+  Same edges, same arithmetic: lock paths and every benchmark 3MF are
+  bit-identical to before.
+- **Noted, not fixed:** each finished mesh is validated twice
+  (`export_mesh` calls `mesh_report`, then the result calls it again), and
+  its component count uses networkx (scipy is not installed) - about a third
+  of a plain bin's Export. Lid bins spend most of their time in lid
+  booleans, and a lid bin's preview rebuilds the lid every time (14-22 s).
+
+**Progress.** `/api/operation-status` answers a running operation with
+`elapsed_s` and `progress` (`stage`, `stage_text`, `estimate_s` low/high).
+Export and single-bin Print poll it every 2 s from the click
+(`apiSideEffect(..., { onProgress })`); the status line counts seconds and
+shows a plain range, revised at stage boundaries and learned per machine from
+finished Exports. No percentage bar. The parts dialog opens docked in a corner
+and not modal; the left editing column stays locked during an Export, as
+before, so the file set cannot change under it. A second Export click for the
+same bin joins the running one and says so in place. The preview notice
+counts up after 2 s and shows a range learned from this session's own slow
+rebuilds; the old preview stays underneath. Inventory batch Save/Print does
+not show this progress yet.
+
+**Layout switch.** The `#ws-switching` cover takes every dragover/drop while
+it shows and refuses a drop in place with "The layout is still switching —
+drop again once it appears."; nothing is held or queued, the bin is
+unchanged. Leaving a bin whose preview is still building for the same
+geometry waits for that build instead of starting it again. Opening a Space
+asks `/api/space/warm` (the server skips anything already warm).
 
 ## Local temp space
 
