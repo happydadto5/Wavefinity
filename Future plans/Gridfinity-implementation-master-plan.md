@@ -4,7 +4,7 @@
 **Repository owner:** Andrew; **reviewers:** GPT and Velexa  
 **Authority:** This document consolidates Andrew's latest instructions and the concluded reviewer agreement. It supersedes conflicting *implementation scope* in the historical [Gridfinity.md](Gridfinity.md) (November 4). It does **not** erase those historical rulings.  
 **Stage 1:** 12 Poller stories already submitted, numbered 2967–2978. Do not file duplicates.  
-**Stage 2:** final reviewer-agreed filing plan below; **NOT submitted**. File only after the recorded Stage 1 physical sign-off and Andrew's submission direction; optional screw holes and load-rating claims remain owner decisions.  
+**Stage 2:** final reviewer-agreed filing plan below; **NOT submitted**. File only after the recorded Stage 1 physical sign-off and Andrew's submission direction; screw holes are declined, and load capacity is intentionally not discussed, tested, or published.  
 **Collaboration result:** Velexa answered Q1–Q8 on 2026-11-12; GPT agrees with the proposed technical changes, which are incorporated into the authoritative Stage 2 story descriptions and filing ledger. The unedited responses remain preserved below. Do not reopen settled Stage 1 scope; record any newly demonstrated Stage 1 defect as a risk to its already-filed Story, not a duplicate.
 
 The full original Stage 1 story submission record follows unchanged, including the exact IDs and dependencies.
@@ -97,7 +97,7 @@ Each row below has the actual Poller Story ID returned after successful submissi
 
 ## Stage 2 — explicitly deferred; no stories created
 
-- Magnet holes in 42 mm bin feet; optional screw holes, only if Andrew approves.
+- Magnet holes in 42 mm bin feet; screw holes were expressly declined by Andrew (2026-11-12) and are out of scope.
 - Storage Box-on-Storage Box stacking with lid grid + box feet, preserving rebuilt lid/latch/closure hardware.
 - Other Gridfinity lids, hinges and Side Openings.
 - Baseplate-retaining spacers for plain drawers (not bin-to-bin spacers).
@@ -122,7 +122,7 @@ Stories are filed through Poller with unique `submission_id` values, `applicatio
 
 **Blocking prerequisite for filing:** Poller Story **2978** must contain Andrew's documented **physical-fit acceptance** for *both* 42 mm and 21 mm, including independent third-party plate/bin mating and both stack directions. A numeric `start_after: [2978]` gate is not a substitute for that recorded human sign-off. If the sign-off is absent or ambiguous, **do not file any Stage 2 story**; first obtain or record the acceptance through the appropriate existing Stage 1 workflow. Do not assume `done` alone proves a successful physical print test. If a prerequisite fails or is cancelled, stop and request instructions rather than routing around it.
 
-**Authority and scope:** The owner has approved Stage 1 and jointly agreed *what belongs in* Stage 2, but this document is not a claim that any Stage 2 story was submitted. A future filing agent should use this signed-off plan when asked to submit the remaining stories, after the Stage 1 physical gate is met. No screw-hole story without separate explicit Andrew approval. No promise of Storage Box stacking load rating; **omit all numeric/qualitative capacity claims by default**. If Andrew later wants a load rating, use independently tested evidence and obtain his separate approval to publish it. Lack of a load rating is **not** a blocker for ordinary box stacking.
+**Authority and scope:** The owner has approved Stage 1 and jointly agreed *what belongs in* Stage 2, but this document is not a claim that any Stage 2 story was submitted. A future filing agent should use this signed-off plan when asked to submit the remaining stories, after the Stage 1 physical gate is met. Andrew has **declined screw holes**; there is no screw-hole story. Per his recorded response, **weight is not discussed** in this project: do not claim, test, propose, estimate, or document a stacking weight capacity. Continue geometric fit/functional closure checks without turning them into a weight-rating exercise.
 
 **Common constraints for all Stage 2 stories:** Both Gridfinity pitches 21 mm and 42 mm continue to work except the explicitly 42 mm-only magnet-hole option. Preserve the one-grid-per-Space rule, single editor/layout and existing Wavefinity geometry, file compatibility and printed outputs. Stage 1 already implements open-top rim, receiving-grid lid, Plain Drawer, both printed-container floor options and proper height semantics; do not recreate or regress those. Change AI Design feature declarations in the same story as each new user-visible option; update README/features, run save/load/print/export regression and 1×1 and 2×3 geometry tests. All fit claims require actual test prints or are explicitly marked unverified. Automatic printer-bed splitting, separately generated baseplates, Edge Mount, container magnet/screw holes and 21 mm magnet holes remain excluded.
 
@@ -138,7 +138,7 @@ Stories are filed through Poller with unique `submission_id` values, `applicatio
 | 6 | S2-06 | Third-party bin placeholders, inventory/layout only | comprehensive · high · medium | `[2978]` | — | NOT FILED |
 | 7* | S2-02 | Storage Box-on-Box stacking, both pitches, preservation of closures | comprehensive · high · high | `[2978, actual S2-00 ID]` | — | NOT FILED |
 | 8 | S2-04 | Side Openings that preserve foot/rim and cell envelope | standard · high · medium | `[2978, actual S2-01 ID]` | — | NOT FILED |
-| — | S2-07? | Optional 42 mm foot screw holes | **NO OWNER APPROVAL** | **do not file** | — | NOT AUTHORIZED |
+| — | S2-07 | Screw holes — declined by Andrew 2026-11-12 | OUT OF SCOPE | **do not file** | — | DECLINED |
 
 *Do **not** file S2-02 just because S2-00 was entered: wait for the S2-00 contract to be **completed, reviewed, and accepted**, then incorporate its actual resolved eligibility and clearance map in the S2-02 description/design. For S2-04, use the actual returned numeric S2-01 ID. The parallel stories are independent only after checking live changed-file ownership; if code paths would collide, file a safe additional numeric `start_after` gate before work starts and record the reason. Filing order is not necessarily work order.
 
@@ -146,15 +146,15 @@ The exact `submission_id` values proposed for idempotent filing are `gridfinity-
 
 ### S2-00 — Storage Box stacking contract, specification only
 
-**Problem:** Adding Gridfinity feet under a Storage Box and a receiving grid over its closed lid may collide with the newly completed hinge, latch and headroom geometry or create unsupported load-bearing assertions. It is unsafe to select lid eligibility or clearance by guesswork while coding the build.
+**Problem:** Adding Gridfinity feet under a Storage Box and a receiving grid over its closed lid may collide with the newly completed hinge, latch and headroom geometry. It is unsafe to select lid eligibility or clearance by guesswork while coding the build.
 
-**Deliverable:** A checked-in, versioned contract at `Future plans/Gridfinity-Storage-Box-Stacking-Contract.md` derived from current source, with no production geometry/UI changes. Trace `organizer_b4b` and verified construction Stories 2956–2959; document the latched 2.4 mm lid skin, selectable lid headroom 0.5/1.0/2.0 mm, latch detent 0.35/0.40/0.45 mm, two-latch threshold over 96 mm and screw-hinge geometry; independently confirm in live code, not just notes. Record for both 21/42 pitches: which *existing* box lid types may safely carry a top grid; top-label location prohibited while grid stacking is enabled (front labeling remains usable); lid grid must not alter skin/headroom underside measurement; hinge-and-grid sweep envelope, hinge screw bite, latch reach/clearance and foot landing; assembled exterior/stack heights, effective load path, and detailed 1×1/multi-cell physical fit/load test protocol. If hinge/grid coexistence cannot be established from geometry, list the specific unsupported configurations and test required; do not invent a workaround or capacity rating. No load-rating claim without later Andrew approval.
+**Deliverable:** A checked-in, versioned contract at `Future plans/Gridfinity-Storage-Box-Stacking-Contract.md` derived from current source, with no production geometry/UI changes. Trace `organizer_b4b` and verified construction Stories 2956–2959; document the latched 2.4 mm lid skin, selectable lid headroom 0.5/1.0/2.0 mm, latch detent 0.35/0.40/0.45 mm, two-latch threshold over 96 mm and screw-hinge geometry; independently confirm in live code, not just notes. Record for both 21/42 pitches: which *existing* box lid types may safely carry a top grid; top-label location prohibited while grid stacking is enabled (front labeling remains usable); lid grid must not alter skin/headroom underside measurement; hinge-and-grid sweep envelope, hinge screw bite, latch reach/clearance and foot landing; assembled exterior/stack heights, and detailed 1×1/multi-cell **physical mating and functional closure** test protocol. If hinge/grid coexistence cannot be established from geometry, list the specific unsupported configurations and further *fit* tests required; do not invent a workaround. Do not discuss or test weight capacity.
 
 **Likely code to inspect (verify paths before writing spec):** `organizer_b4b/_geometry/_body.py`, `organizer_b4b/_geometry/_hinges.py`, `organizer_b4b/_geometry/_cutters.py`, `organizer_b4b/_plans.py`, `organizer_b4b/_constants.py`, `organizer_b4b/_outputs.py`, storage box settings/UI and lid assembly tests.
 
 **Acceptance:** Contract includes explicit allowed/forbidden combinations, geometry and interference diagram or table, testable elevations and tolerances, preserving the construction-system latch and closure operation, plus a reviewed acceptance sign-off. The S2-02 build story remains unfiled until the resulting contract is accepted. **No production feature here.**
 
-**Filing fields:** `type=task`; `review_depth=slim`; `tier=medium`; `thinking=high`; `tier_reason="A bounded source and geometry audit must settle lid, hinge and load-path compatibility before the large Storage Box stacking implementation."`
+**Filing fields:** `type=task`; `review_depth=slim`; `tier=medium`; `thinking=high`; `tier_reason="A bounded source and geometry audit must settle lid, hinge and closure-clearance compatibility before the large Storage Box stacking implementation."`
 
 ### S2-01 — 42 mm-only optional magnet pockets in bin feet
 
@@ -172,13 +172,13 @@ The exact `submission_id` values proposed for idempotent filing are `gridfinity-
 
 **Problem:** Stage 1 stacks ordinary bins, but a complete Storage Box cannot yet seat on a standard Gridfinity plate or another closed box.
 
-**Deliverable:** Follow the **accepted S2-00 contract exactly** on which box lid types are eligible for stacking; do not assume every hinged or latched lid is safe. For allowed 21 and 42 mm Gridfinity Storage Boxes, add feet under the body and a compatible receiving grid to the top of a closed lid. Keep the confirmed **2.4 mm latched lid skin** and 0.5/1.0/2.0 mm headroom semantics unchanged; neither upper grid nor bottom feet may interfere with hinge sweep, screw engagement, latch detents/reach, two-latch configuration or box closure. Disable/refuse a lid-top label in stacking configuration, retaining supported front label. Use proper foot/socket positioning, collision/height model and tests. No advertised weight capacity unless Andrew later explicitly permits publication based on real load tests.
+**Deliverable:** Follow the **accepted S2-00 contract exactly** on which box lid types are eligible for stacking; do not assume every hinged or latched lid is safe. For allowed 21 and 42 mm Gridfinity Storage Boxes, add feet under the body and a compatible receiving grid to the top of a closed lid. Keep the confirmed **2.4 mm latched lid skin** and 0.5/1.0/2.0 mm headroom semantics unchanged; neither upper grid nor bottom feet may interfere with hinge sweep, screw engagement, latch detents/reach, two-latch configuration or box closure. Disable/refuse a lid-top label in stacking configuration, retaining supported front label. Use proper foot/socket positioning, collision/height model and geometric fit tests. Do not discuss, test or publish a weight capacity.
 
 **Likely touch points:** `organizer_b4b/_geometry/_body.py`, verified lid and hinge builders, `organizer_b4b/_plans.py`, storage-box form, lid/box outputs, shared grid helpers, tests. Verify file existence; do not assume a `_lid.py` module exists.
 
-**Acceptance:** Both pitches, 1×1 and multi-cell box; box on bought plate, stacked closed boxes and loose bin atop box; opening and closing without latches/hinges fouling; accurate exterior and assembled height; strength/fit physical protocol; watertight export; existing Wavefinity box latch/hinge/headroom/regression remains unchanged. If physical proof is missing, mark stack fit/load as unverified and do not claim accepted.
+**Acceptance:** Both pitches, 1×1 and multi-cell box; box on bought plate, stacked closed boxes and loose bin atop box; opening and closing without latches/hinges fouling; accurate exterior and assembled height; physical fit and closure checks; watertight export; existing Wavefinity box latch/hinge/headroom/regression remains unchanged. If physical fit/closure proof is missing, mark the feature unverified and do not claim accepted.
 
-**Filing fields:** `type=feature`; `review_depth=comprehensive`; `tier=high`; `thinking=high`; `tier_reason="Storage Box stacking alters integrated shell/lid/hinge/latch algorithms and load paths, requiring coordinated architectural review and physical acceptance."`
+**Filing fields:** `type=feature`; `review_depth=comprehensive`; `tier=high`; `thinking=high`; `tier_reason="Storage Box stacking alters integrated shell/lid/hinge/latch algorithms and geometric clearances, requiring coordinated architectural review and physical fit acceptance."`
 
 ### S2-03a — Plain lids for 21 and 42 mm Gridfinity bins
 
@@ -240,9 +240,9 @@ The exact `submission_id` values proposed for idempotent filing are `gridfinity-
 
 **Filing fields:** `type=feature`; `review_depth=comprehensive`; `tier=high`; `thinking=medium`; `tier_reason="A distinct persisted inventory kind affects shared data structures, import/save boundaries, layout collision and downstream print eligibility."`
 
-### S2-07? — Screw holes: not filed, not approved
+### S2-07 — Screw holes: expressly declined
 
-The November owner decision deferred screw holes, **not** authorized them. This optional future story needs a new **explicit** Andrew approval. If he requests it, verify the 42 mm standard screw-hole geometry, compatibility with S2-01 magnet patterns, material strength and supported fastener, and file a distinct story with appropriate numeric gate. **No new screw holes in container floors; no 21 mm screw holes by default.**
+Andrew's latest in-repository ruling dated 2026-11-12 **declined screw holes in 42 mm feet**. S2-07 is **not** a proposed story and must **not** be filed. No screw holes in Gridfinity bins or container floors are within this plan.
 
 ### Filing protocol for the next LLM (operational checklist)
 
@@ -250,14 +250,14 @@ The November owner decision deferred screw holes, **not** authorized them. This 
 2. If Andrew has requested Stage 2 submission and the sign-off is present, read the current Poller Story list to detect already-submitted Stage 2 work; do not duplicate any story. Verify repository file paths and that new Stage 1 code actually provides the claimed prerequisites. Record any changed file/API names in each submitted description without changing approved behavior.
 3. File in the ledger's sequence. Use `application_id="wavefinity"`, `target_repo="Wavefinity"`, the ledger's `type`, `review_depth`, `tier`, `thinking`, and exact one-sentence `tier_reason`; `description` must include the *complete* problem, deliverable, constraints, file paths (verified), acceptance, physical-test requirement, and owner authority. Do **not** pass `andrew_instruction` on standard/comprehensive/slim filings (the Poller endpoint rejects it); that field is for direct or debate. For `start_after`, pass the numeric IDs exactly; do not pass textual keys or future guessed IDs.
 4. Use the listed stable `submission_id` per key, and do not reuse the same ID for different descriptions. On success, record Poller's actual returned ID, stage, numeric `start_after`, submission date, and `SUBMITTED` in this table **immediately**. On error, leave `NOT FILED` and write the error alongside the key. If a Story must be changed after filing, use Poller's proper review/contract workflow rather than filing a duplicate.
-5. S2-02 is **special**: S2-00 must be submitted, completed, and its contract reviewed/accepted before filing S2-02. Copy the accepted contract's eligible lid types, forbidden cases and clearance map into S2-02; only then use `start_after: [2978, S2-00 numeric ID]`. S2-04 must use `start_after: [2978, S2-01 numeric ID]`. Optional S2-07 is excluded unless new owner permission exists.
+5. S2-02 is **special**: S2-00 must be submitted, completed, and its contract reviewed/accepted before filing S2-02. Copy the accepted contract's eligible lid types, forbidden cases and clearance map into S2-02; only then use `start_after: [2978, S2-00 numeric ID]`. S2-04 must use `start_after: [2978, S2-01 numeric ID]`. S2-07 is declined and must never be filed from this plan.
 6. Each completed geometry Story must show reproducible mesh tests, both-pitch compatibility (where applicable), no Wavefinity regression, and physical print acceptance. If tests are not yet performed, label that part unverified and do not claim release-ready fit. The agent should not claim an entire Stage is released merely because every Poller story is `done`.
 
 ### Stage 2 non-goals and owner-only decisions
 
 - **Not in the agreed Stage 2:** automatic printer-bed split/join, standalone baseplate creation, Gridfinity Edge Mount, 21 mm magnets, container floor magnets or screws, any redesign of settled Stage 1 dimension entry.
-- **Andrew approval required for:** (1) optional 42 mm bin-foot screw holes; (2) publishing a validated Storage Box stacking capacity figure. Neither approval is needed to file S2-00..S2-06 using their **no-screw/no-load-claim** defaults.
-- Velexa's complete answers remain below as the historical review record. Their technical recommendations are incorporated above. If a future answer conflicts with this accepted section, record and resolve the difference before creating conflicting stories.
+- **Decisions closed by Andrew (2026-11-12):** screw holes are declined and out of scope; weight capacity is never discussed, tested or documented. No further decision is needed to prepare S2-00..S2-06 with those exclusions.
+- Velexa's complete answers remain below as the historical review record. Andrew's later Q8 response **supersedes earlier Q2 suggestions to discuss or test weight capacity**. Its no-screw and no-weight decisions are integrated above. If a future answer conflicts with this accepted section, record and resolve the difference before creating conflicting stories.
 
 ---
 
