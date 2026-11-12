@@ -495,7 +495,31 @@ def make_fused_box(
     parts = build_features(box, features, box.base_thickness)
     if not parts:
         return box_mesh
-    return union([box_mesh, *parts])
+    return _without_slivers(union([box_mesh, *parts]))
+
+
+# A fragment this thin and small is a boolean leftover, never printable
+# material: it has no volume and fits inside a 2 mm cube.
+_SLIVER_VOLUME_MM3 = 0.01
+_SLIVER_SIZE_MM = 2.0
+
+
+def _without_slivers(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Drop zero-volume leftover fragments the union can leave where a divider
+    meets the wavy wall at the floor line (they are separate "pieces" that make
+    an otherwise sound bin fail the one-solid check). Only tiny, volumeless
+    fragments go, and only while a real body remains; any other extra piece is
+    kept so validation still reports it."""
+    pieces = mesh.split(only_watertight=False)
+    if len(pieces) < 2:
+        return mesh
+    keep = [one for one in pieces
+            if abs(float(one.volume)) > _SLIVER_VOLUME_MM3
+            or float(max(one.extents)) > _SLIVER_SIZE_MM]
+    if not keep or len(keep) == len(pieces):
+        return mesh
+    cleaned = keep[0] if len(keep) == 1 else trimesh.util.concatenate(keep)
+    return cleaned if cleaned.is_watertight or not mesh.is_watertight else mesh
 
 
 def apply_texts(
