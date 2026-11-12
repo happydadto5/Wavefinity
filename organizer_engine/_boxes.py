@@ -76,7 +76,7 @@ def flat_cavity_polygon(spec: BoxSpec) -> Polygon:
     ).intersection(wavy_cavity_polygon(spec))
 
 
-def make_box(spec: BoxSpec) -> trimesh.Trimesh:
+def make_box(spec: BoxSpec, grid: str = "wavefinity") -> trimesh.Trimesh:
     # Architecture guard: a B4B has its own body builder (organizer_b4b.
     # make_b4b_body).  If a B4B spec reaches the ordinary path a route was
     # missed - fail loudly rather than silently print a plain box.
@@ -84,6 +84,18 @@ def make_box(spec: BoxSpec) -> trimesh.Trimesh:
         raise ValueError(
             "Storage Box BoxSpec must use the dedicated Storage Box builder, not make_box()"
         )
+    if grid != "wavefinity":
+        # Imported here for the same reason as the stack import below.
+        from organizer_features.gridfinity import gridfinity_body
+
+        # Flat walls on Gridfinity feet. The wave-mating lock bumps and the
+        # stack / lid hardware are wavy-body parts with no flat-wall meaning.
+        body = gridfinity_body(spec, grid)
+        grabbers = make_lift_grabbers(spec)
+        result = union([body, *grabbers]) if grabbers else body
+        result.remove_unreferenced_vertices()
+        result.merge_vertices()
+        return result
     envelope = _extrude_polygon(wavy_outer_polygon(spec), spec.z)
     if spec.flat_inside > 0.0:
         # The cavity is two stacked prisms: a straight-sided one sitting on the

@@ -35,6 +35,7 @@ from organizer_engine import (
 from organizer_features.side_openings import SIDE_OPENING_TOP_BRIDGE_MM, validate_side_openings
 from organizer_features.pegboard import normalise_mount_spec, receiver_layout
 from organizer_b4b import b4b_effective_box, b4b_summary, validate_b4b_design
+from organizer_features.gridfinity import normalize_gridfinity_settings
 from organizer_features.stack import (
     normalize_stack_settings,
     stack_closed_height,
@@ -607,6 +608,7 @@ def design_to_dict(
             box, layout.features, base_z=base_height(box, layout.mode), mode=layout.mode,
         ))
     box = normalize_stack_settings(box)
+    box = normalize_gridfinity_settings(box, validate_grid(layout.design_grid))
     if box.pegboard.enabled:
         if box.b4b.enabled:
             raise ValueError("Pegboard mounting is available only for ordinary bins")
@@ -1007,6 +1009,7 @@ def design_from_dict(
         pegboard=pegboard,
     )
     box = normalize_stack_settings(box)
+    box = normalize_gridfinity_settings(box, grid)
     if box.pegboard.enabled:
         if box.b4b.enabled:
             raise ValueError("Pegboard mounting is available only for ordinary bins")

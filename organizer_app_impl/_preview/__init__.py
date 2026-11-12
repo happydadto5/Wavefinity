@@ -253,7 +253,9 @@ def _preview_geometry(
         except Exception:
             continue
 
-    if (direct_stack_enabled(box) or lid_has_flip(box) or box.edge_mount.active or box.side_openings.enabled
+    grid = layout.design_grid if layout is not None else "wavefinity"
+    if (grid != "wavefinity" or direct_stack_enabled(box) or lid_has_flip(box) or box.edge_mount.active
+            or box.side_openings.enabled
             or box.pegboard.enabled or (layout is not None and layout.surface_lightweight_base)):
         # Hinged lids need the actual shell: its alternating bin knuckles,
         # beveled roots, swing clearances and pin bore are built by make_box().
@@ -263,7 +265,7 @@ def _preview_geometry(
         # last, so the real cut body - not a synthesized wall - is what
         # shows in preview here.
         with stage("outline_wave"):
-            shell_body = make_box(box)
+            shell_body = make_box(box, grid=grid)
         with stage("shell"):
             if box.edge_mount.active:
                 shell_body = apply_edge_mount_structure(box, shell_body)
@@ -340,7 +342,8 @@ def _preview_geometry(
     # make_box() already bakes lift grabbers into the shell it returns, so
     # only draw them separately when the Edge Mount/Side Openings shell above
     # did not already include them.
-    if (box.lift_grabbers.enabled and not direct_stack_enabled(box) and not lid_has_flip(box)
+    if (box.lift_grabbers.enabled and grid == "wavefinity" and not direct_stack_enabled(box)
+            and not lid_has_flip(box)
             and not box.edge_mount.active and not box.side_openings.enabled):
         for grabber_mesh in make_lift_grabbers(box):
             geometry.extend(_mesh_preview_geometry(grabber_mesh, "lift_grabber"))
