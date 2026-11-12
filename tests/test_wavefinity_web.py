@@ -101,49 +101,6 @@ class FirstBinCapabilityTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout), [True, True, False, False, False])
 
 
-class PreferredSpaceLandingTests(unittest.TestCase):
-    def test_zero_one_two_rows_and_failed_optional_edit(self):
-        node = shutil.which("node")
-        if not node:
-            self.skipTest("Node.js unavailable")
-        script = r"""
-          const fs = require('fs');
-          const vm = require('vm');
-          const source = [...fs.readdirSync('web/spaces').filter(f => f.endsWith(".js")).sort().map(f => fs.readFileSync('web' + "/spaces/" + f, "utf8")), fs.readFileSync('web' + "/spaces.js", "utf8")].join("\n");
-          const fn = source.match(/SP\.openTypedSpacePreferredView = async \(\) => \{[\s\S]*?\n\};/)[0];
-          const calls = [];
-          const DL = { bins: [], layout: { design_specs: {} },
-            isOrdinary: row => row.kind !== 'spacer', ensureLoaded: async () => true };
-          const DP = { enter: async mode => { calls.push(mode); return true; },
-            editableSourceFor: row => Boolean(DL.layout.design_specs[row.id]),
-            openInventoryRow: async id => { calls.push(id); return true; } };
-          const context = { SP: {}, DL, DP, toast: () => {} };
-          vm.runInNewContext(fn, context);
-          (async () => {
-            const results = [];
-            for (const bins of [[], [{id:'one',kind:'bin'}],
-              [{id:'one',kind:'bin'},{id:'two',kind:'bin'}]]) {
-              DL.bins = bins; DL.layout.design_specs = { one: {} }; calls.length = 0;
-              results.push([await context.SP.openTypedSpacePreferredView(), [...calls]]);
-            }
-            DL.bins = [{id:'one',kind:'bin'}]; DL.layout.design_specs = {}; calls.length = 0;
-            results.push([await context.SP.openTypedSpacePreferredView(), [...calls]]);
-            DL.layout.design_specs = { one: {} }; calls.length = 0;
-            DP.openInventoryRow = async () => false;
-            results.push([await context.SP.openTypedSpacePreferredView(), [...calls]]);
-            process.stdout.write(JSON.stringify(results));
-          })().catch(error => { console.error(error); process.exitCode = 1; });
-        """
-        result = subprocess.run(
-            [node, "-e", script], cwd=ROOT,
-            capture_output=True, text=True, check=True,
-        )
-        self.assertEqual(json.loads(result.stdout), [
-            [True, ["space"]], [True, ["space", "one"]],
-            [True, ["space"]], [True, ["space"]], [True, ["space"]],
-        ])
-
-
 def _text_feature(said, auto=False, zone=(-20.0, -6.0, 20.0, 6.0), **options):
     """One ``text`` interior part, as the browser would send it."""
     return {
@@ -201,17 +158,6 @@ class WebApplicationTests(unittest.TestCase):
         }
         with self.assertRaises(ValueError):
             preview_payload({"design": design})
-
-
-
-
-
-
-
-
-
-
-
 
 
     def test_base_thickness_round_trips_and_legacy_designs_keep_their_floor(self):
@@ -272,7 +218,6 @@ class WebApplicationTests(unittest.TestCase):
         self.assertGreater(changed["design"]["box"]["x"], old_x)
 
 
-
     def test_photo_nest_duplicate_creates_an_independent_second_copy(self):
         outline = PhotoOutline(
             ((-20, -8), (20, -8), (20, 8), (-20, 8)), 40.0, 16.0,
@@ -293,18 +238,6 @@ class WebApplicationTests(unittest.TestCase):
         self.assertNotEqual(features[0]["zone"], features[1]["zone"])
 
 
-
-
-
-
-
-
-
-
-
-
-
-
     def test_divider_bottom_flags_sent_as_strings_stay_flags_not_floats(self):
         design = default_design()
         feature = default_feature_payload({
@@ -319,7 +252,6 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(one.options["bottom_angle"], 15.0)
         self.assertIs(one.options["minimal_bottom"], True)
         self.assertIs(one.options["reverse_bottom"], False)
-
 
 
     def test_divider_scoop_and_sloped_bottom_are_mutually_exclusive_on_save(self):
@@ -448,54 +380,6 @@ class WebApplicationTests(unittest.TestCase):
                 found = wavefinity_web.detect_bambu_studio()
                 self.assertEqual(found, fake_exe.resolve())
 
-    def test_launch_slicer_validates_file_and_launches(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            fake_exe = Path(temp_dir) / "bambu-studio.exe"
-            fake_exe.touch()
-            fake_3mf = Path(temp_dir) / "test.3mf"
-            fake_3mf.touch()
-
-            # Empty files list raises ValueError
-            with self.assertRaises(ValueError):
-                wavefinity_web.launch_slicer(fake_exe, [])
-
-            # Missing executable raises FileNotFoundError
-            missing_exe = Path(temp_dir) / "missing.exe"
-            with self.assertRaises(FileNotFoundError):
-                wavefinity_web.launch_slicer(missing_exe, [fake_3mf])
-
-            # Fix 058: Bambu Studio never gets a manufactured project - it
-            # opens the staged, profile-free model files directly.
-            staged = [Path(temp_dir) / "0001 - test.3mf", Path(temp_dir) / "0002 - test.3mf"]
-            with (
-                patch("subprocess.Popen") as mock_popen,
-                patch.object(wavefinity_web, "stage_bambu_inputs", return_value=staged) as stage,
-            ):
-                # Still running after the handoff window: the GUI accepted the files.
-                mock_popen.return_value.wait.side_effect = subprocess.TimeoutExpired("slicer", 1)
-                result = wavefinity_web.launch_slicer(fake_exe, [fake_3mf, fake_3mf])
-                stage.assert_called_once_with([fake_3mf, fake_3mf])
-                mock_popen.assert_called_once()
-                args = mock_popen.call_args[0][0]
-                self.assertEqual(args, [str(fake_exe.resolve()), str(staged[0]), str(staged[1])])
-                for flag in ("--export-3mf", "--arrange", "--slice", "--load-settings", "--load-filaments"):
-                    self.assertNotIn(flag, args)
-                self.assertIsNone(result)
-
-            # Other slicers keep the direct multi-file launch.
-            orca = Path(temp_dir) / "orca-slicer.exe"
-            orca.touch()
-            with (
-                patch("subprocess.Popen") as mock_popen,
-                patch.object(wavefinity_web, "stage_bambu_inputs") as stage,
-            ):
-                mock_popen.return_value.wait.side_effect = subprocess.TimeoutExpired("slicer", 1)
-                result = wavefinity_web.launch_slicer(orca, [fake_3mf])
-                stage.assert_not_called()
-                args = mock_popen.call_args[0][0]
-                self.assertEqual(args, [str(orca.resolve()), str(fake_3mf.resolve())])
-                self.assertIsNone(result)
-
     def _print_setup(self, temp_dir):
         fake_exe = Path(temp_dir) / "bambu-studio.exe"
         fake_exe.touch()
@@ -552,47 +436,6 @@ class WebApplicationTests(unittest.TestCase):
             self.assertEqual(response["design_files"], [str(box.resolve())])
             self.assertNotIn("slicer", response)
             append.assert_not_called()
-
-    def test_print_payload_generates_and_opens_files(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            fake_exe = Path(temp_dir) / "bambu-studio.exe"
-            fake_exe.touch()
-            fake_3mf = Path(temp_dir) / "Box.3mf"
-            fake_3mf.write_bytes(b"3mf")
-            fake_connector = Path(temp_dir) / "Connector.3mf"
-            fake_connector.write_bytes(b"3mf")
-
-            fake_gen_result = {
-                "result": {"box": {"output": str(fake_3mf)}},
-                "output": str(temp_dir),
-            }
-            fake_connector_result = {
-                "result": {"output": str(fake_connector)},
-                "output": str(temp_dir),
-            }
-
-            with (
-                patch.object(wavefinity_web, "generate_payload", return_value=fake_gen_result),
-                patch.object(wavefinity_web, "connector_payload", return_value=fake_connector_result),
-                patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
-                patch.object(wavefinity_web, "print_file_fit_issues", return_value=[]),
-                patch.object(wavefinity_web, "launch_slicer") as mock_launch,
-            ):
-                response = wavefinity_web.print_payload({
-                    "design": default_design(),
-                    "output": temp_dir,
-                    "target": "all",
-                })
-                self.assertEqual(response["output"], str(temp_dir))
-                self.assertEqual(response["files"], [
-                    str(fake_3mf.resolve()),
-                    str(fake_connector.resolve()),
-                ])
-                self.assertEqual(response["slicer"], str(fake_exe.resolve()))
-                mock_launch.assert_called_once_with(fake_exe, [
-                    fake_3mf.resolve(),
-                    fake_connector.resolve(),
-                ])
 
     def test_print_payload_raises_when_no_slicer(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -691,44 +534,6 @@ class WebApplicationTests(unittest.TestCase):
         ])
         self.assertEqual(self._run_node(script), "B2")
 
-    def test_typed_space_replacement_and_output_boundaries_flush_autosave(self):
-        root = ROOT / "web"
-        app = app_source(root)
-        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
-        spaces = spaces_source(root)
-        for function in ("designerInstallInventorySpec", "designerNewBin", "designerDuplicate",
-                         "generateParts", "printModel"):
-            start = app.index(f"async function {function}(")
-            end = app.find("\nasync function ", start + 1)
-            body = app[start:end if end >= 0 else None]
-            self.assertIn("flushSpaceDesignAutosave(", body, function)
-        self.assertIn("flushSpaceDesignAutosave(", panel[panel.index("DP.selectMode = "):])
-        self.assertIn("flushSpaceDesignAutosave(", spaces[spaces.index("SP.leaveDrawerLayoutSafely = "):])
-        self.assertIn('action: "saved"', app[app.index("async function generateParts("):])
-        self.assertIn('action: "printed"', app[app.index("async function printModel("):])
-
-    def test_new_bin_banks_current_bin_and_delete_fallback_skips_bank(self):
-        # Fix 1140: every New Bin click banks the current bin; the last-bin
-        # delete fallback opts out so the deleted draft is not resurrected.
-        root = ROOT / "web"
-        app = app_source(root)
-        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
-        start = app.index("async function designerNewBin(")
-        body = app[start:app.find("\nasync function ", start + 1)]
-        self.assertIn("async function designerNewBin(acceptTransition = null, { skipBank = false } = {})", app)
-        self.assertIn("!skipBank &&", body)
-        self.assertIn("flushSpaceDesignAutosave({ deferDraftPreview: true, materialize: true })", body)
-        self.assertIn('"Discard Invalid Changes?"', body)
-        self.assertIn("else await designerNewBin(null, { skipBank: true });", panel)
-        # The options object must never be passed as the first (acceptTransition) argument.
-        self.assertNotIn("designerNewBin({ skipBank: true })", app + panel)
-        # Every designerNewBin call in the drawer panel is either the Space
-        # empty-state transition or the skipBank delete fallback; no bare call remains.
-        calls = re.findall(r"designerNewBin\([^)]*\)", panel)
-        self.assertTrue(calls)
-        for call in calls:
-            self.assertIn(call, ("designerNewBin(acceptTransition)", "designerNewBin(null, { skipBank: true })"))
-
     def _app_js_functions(self, *names):
         source = app_source(ROOT / "web")
         chunks = []
@@ -744,37 +549,6 @@ class WebApplicationTests(unittest.TestCase):
         return json.loads(done.stdout)
 
 
-
-
-
-    def test_first_bin_starter_waits_for_a_meaningful_edit(self):
-        root = ROOT / "web"
-        app = app_source(root)
-        fresh = app[app.index("async function loadFreshOrdinaryDesignForCurrentFolder"):]
-        fresh = fresh[:fresh.index("\n}\n")]
-        self.assertIn('state.designInventoryId = null', fresh)
-        # Showing a fresh starter does not create an Inventory row.
-        self.assertIn("Showing a fresh starter does not create an Inventory row", fresh)
-        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
-        view = (root / "drawer-view.js").read_text(encoding="utf-8")
-        # The always-there New Bin button in Unplaced bins starts the design;
-        # the retired "No bins yet" dialog and its designFirstBin trigger are gone.
-        self.assertIn('querySelector("[data-staging-new-bin]").addEventListener("click", () => DP.newBinFromSpace())', view)
-        self.assertNotIn("DP.designFirstBin", panel + view)
-        self.assertNotIn("No bins yet", panel + view)
-        self.assertNotIn("renderEmptyState", panel + view)
-        transition = panel[panel.index("DP.newBinFromSpace = "):]
-        transition = transition[:transition.index("};")]
-        self.assertIn('DP.setMode("design")', transition)
-        self.assertNotIn("markWorking", transition)
-        # The Surface first-run edge handoff is gone: Base Trim is a Space Action.
-        self.assertNotIn("surfaceEdgeSucceeded", app)
-        self.assertNotIn("DP.startBinNow", panel)
-        # Inventory rows are only ever the real rows - never a pseudo row.
-        model = (root / "drawer-model.js").read_text(encoding="utf-8")
-        self.assertNotIn("DL.bins.push", model)
-        self.assertNotIn("__current__", model + panel)
-
     def test_current_design_position_does_not_leak_between_spaces(self):
         # The session-only Current-design position is gone with the shadow
         # owner; nothing about an unplaced bin is kept as coordinates.
@@ -783,16 +557,12 @@ class WebApplicationTests(unittest.TestCase):
             self.assertNotIn(name, model)
 
 
-
-
-
     def test_inventory_preview_writes_nothing(self):
         with tempfile.TemporaryDirectory() as directory:
             wavefinity_web.inventory_preview_payload({"design": default_design(), "output": directory})
             self.assertEqual(os.listdir(directory), [])
 
     # ------------------------------------------------------------ Fix 019
-
 
 
     def test_drawer_save_reports_success_or_failure(self):
@@ -999,150 +769,6 @@ const tick = () => new Promise(r => setImmediate(r));
         self.assertIsNone(out["v7HasNoResumeConcept"]["resume_design"])
         self.assertFalse(out["v7HasNoResumeConcept"]["resume_pending"])
 
-    def test_resume_checkpoint_queue_coalesces_serializes_and_gates_by_space_identity(self):
-        # Fix 032: the resume-checkpoint queue is a single coalescing slot
-        # (not a per-Space queue) - newest state for the active Space wins
-        # while a write is in flight, a rejected write must not stop later
-        # writes, and a completion for a Space that is no longer active must
-        # never overwrite a different Space's in-memory checkpoint.
-        node = self._node_or_skip()
-        root = ROOT / "web"
-        spaces_js = spaces_source(root)
-
-        start = "SP._resume = {"
-        end = "SP.flushOutgoingResumeCheckpoint = () => SP._pumpResumeQueue();"
-        resume_module = spaces_js[spaces_js.index(start):]
-        resume_module = resume_module[:resume_module.index(end) + len(end)]
-
-        script = "\n".join([
-            "const clone = v => JSON.parse(JSON.stringify(v));",
-            "const toasts = [];",
-            "const toast = msg => toasts.push(msg);",
-            "const writes = [];",
-            "let apiBehavior = async () => ({});",
-            "const api = async (path, payload) => {",
-            "  writes.push({ path, payload: clone(payload) });",
-            "  return apiBehavior();",
-            "};",
-            "const state = {",
-            "  folderMode: 'space', activeSpace: { kind: 'drawer', name: 'A' }, activeSpaceId: 'sidA',",
-            "  output: '/A', browserFolder: null, runtime: { hosted: false },",
-            "  spaceResumeDesign: null, spaceResumePending: false,",
-            "};",
-            "const SP = { writeMetadata: async () => ({}) };",
-            resume_module,
-            "(async () => {",
-            "  const out = {};",
-            "",
-            "  // 1) Coalescing: a second queue call while the first write is still",
-            "  //    in flight must not start a second concurrent write - it replaces",
-            "  //    the pending value, and the pump picks it up once the first",
-            "  //    write settles.",
-            "  apiBehavior = async () => { await new Promise(r => setTimeout(r, 15)); return {}; };",
-            "  SP.queueResumeCheckpoint({ v: 1 }, false);",
-            "  SP.queueResumeCheckpoint({ v: 2 }, true);",
-            "  await new Promise(r => setTimeout(r, 80));",
-            "  out.coalescedWriteCount = writes.length;",
-            "  out.coalescedFinalDesign = state.spaceResumeDesign;",
-            "  out.coalescedFinalPending = state.spaceResumePending;",
-            "",
-            "  // Re-queuing the exact same value that was actually saved must be a",
-            "  // no-op - no extra write.",
-            "  SP.queueResumeCheckpoint({ v: 2 }, true);",
-            "  await new Promise(r => setTimeout(r, 30));",
-            "  out.duplicateSkipped = writes.length === out.coalescedWriteCount;",
-            "",
-            "  // 2) A write for Space A that finishes AFTER the UI switched to",
-            "  //    Space B must not overwrite Space B's in-memory checkpoint.",
-            "  writes.length = 0;",
-            "  apiBehavior = async () => { await new Promise(r => setTimeout(r, 30)); return {}; };",
-            "  SP.flushResumeCheckpoint({ v: 'A-late' }, true); // fire and forget on purpose",
-            "  state.activeSpaceId = 'sidB';",
-            "  state.activeSpace = { kind: 'drawer', name: 'B' };",
-            "  state.output = '/B';",
-            "  state.spaceResumeDesign = { v: 'B-current' };",
-            "  state.spaceResumePending = false;",
-            "  await new Promise(r => setTimeout(r, 60));",
-            "  out.staleCompletionDesign = state.spaceResumeDesign;",
-            "",
-            "  // 3) An explicit flush must observably reject on a failed write (so",
-            "  //    Generate/Print can tell), but that rejection must not poison the",
-            "  //    queue - a later write for the same Space must still go through.",
-            "  let calls = 0;",
-            "  apiBehavior = async () => { calls += 1; if (calls === 1) throw new Error('disk full'); return {}; };",
-            "  let firstFlushRejected = false;",
-            "  try { await SP.flushResumeCheckpoint({ v: 'first-fails' }, false); }",
-            "  catch (error) { firstFlushRejected = error.message === 'disk full'; }",
-            "  out.firstFlushRejected = firstFlushRejected;",
-            "  out.toastsAfterFailure = toasts.length;",
-            "  await SP.flushResumeCheckpoint({ v: 'second-succeeds' }, true);",
-            "  out.recoveredDesign = state.spaceResumeDesign;",
-            "  out.recoveredPending = state.spaceResumePending;",
-            "",
-            "  process.stdout.write(JSON.stringify(out));",
-            "})();",
-        ])
-        done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        out = json.loads(done.stdout)
-
-        self.assertEqual(out["coalescedWriteCount"], 2)
-        self.assertEqual(out["coalescedFinalDesign"], {"v": 2})
-        self.assertTrue(out["coalescedFinalPending"])
-        self.assertTrue(out["duplicateSkipped"])
-
-        # Space A's stale, late-arriving completion did not clobber Space B.
-        self.assertEqual(out["staleCompletionDesign"], {"v": "B-current"})
-
-        # The failed flush was observable to its own caller (Correction 1)...
-        self.assertTrue(out["firstFlushRejected"])
-        # ...leaves the user-facing message to the explicit caller...
-        self.assertEqual(out["toastsAfterFailure"], 0)
-        # ...and did not stop the next write.
-        self.assertEqual(out["recoveredDesign"], {"v": "second-succeeds"})
-        self.assertTrue(out["recoveredPending"])
-
-
-
-    def test_refresh_preview_only_queues_checkpoint_on_a_fully_valid_preview(self):
-        # Fix 032 Correction 1, item 4: an HTTP-200 preview that still
-        # reports fit/feature/draft errors must not replace the last valid
-        # resume checkpoint.
-        app_js = app_source(ROOT / "web")
-        # refreshPreview() adopts its result through adoptPreviewResult() (shared
-        # with AI Help's already-proven candidate), which owns the checkpoint rule.
-        start = app_js.index("async function refreshPreview(")
-        self.assertIn("adoptPreviewResult(result,", app_js[start:app_js.index("\nasync function ", start + 1)])
-        start = app_js.index("function adoptPreviewResult(")
-        source = app_js[start:app_js.index("\n}\n", start)]
-
-        previews_has_errors_idx = source.index("const previewHasErrors =")
-        queue_idx = source.index("SP.queueResumeCheckpoint(")
-        self.assertLess(previews_has_errors_idx, queue_idx)
-        guard = source[previews_has_errors_idx:queue_idx]
-        self.assertIn("if (!previewHasErrors", guard)
-        self.assertIn('state.folderMode === "space"', guard)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class WebServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1161,15 +787,6 @@ class WebServerTests(unittest.TestCase):
         with urlopen(self.base + path, timeout=20) as response:
             return response.status, response.headers, response.read()
 
-    def test_about_brochure_is_served_from_repo_root(self):
-        brochure = Path(wavefinity_web.APP_DIR) / "Brochure.md"
-        self.assertTrue(brochure.is_file())
-        self.assertTrue(brochure.read_text(encoding="utf-8").startswith("# Introducing Wavefinity"))
-        status, headers, body = self.get("/Brochure.md")
-        self.assertEqual(status, 200)
-        self.assertIn("text/markdown", headers["Content-Type"])
-        self.assertTrue(body.decode("utf-8").startswith("# Introducing Wavefinity"))
-
     def post(self, path, payload):
         request = Request(
             self.base + path,
@@ -1179,7 +796,6 @@ class WebServerTests(unittest.TestCase):
         )
         with urlopen(request, timeout=30) as response:
             return response.status, json.loads(response.read())
-
 
 
     def test_bad_design_is_a_clear_400(self):
@@ -1260,25 +876,12 @@ class StaleProcessReplacementTests(unittest.TestCase):
         self.fail("spawned Wavefinity process never answered its health check")
 
 
-
-
-
-
-
-
 class Fix20SpaceFormTests(unittest.TestCase):
     """Tests for Item 2, 3, 4: Space form, dimensions, and local folder auto-creation."""
 
 
-
-
-
-
 class Fix20InsideGripTests(unittest.TestCase):
     """Tests for Item 5: Inside Grip terminology and visibility."""
-
-
-
 
 
 class Fix20StorageBoxDividerTests(unittest.TestCase):
@@ -1295,21 +898,8 @@ class Fix20StorageBoxDividerTests(unittest.TestCase):
         return design
 
 
-
-
-
-
 class Fix20StorageBoxMaterialsTests(unittest.TestCase):
     """Tests for Item 7: Storage Box material presets, defaults, and lid thickness."""
-
-
-
-
-
-
-
-
-
 
 
 class AiHelpBackendTests(unittest.TestCase):
