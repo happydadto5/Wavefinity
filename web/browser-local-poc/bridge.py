@@ -1,7 +1,6 @@
-"""Run unmodified pinned ordinary-bin sources in Pyodide, fail at Mesh64.
+"""Run the pinned ordinary-bin engine using a double-precision WASM bridge.
 
-Only unrelated eager exports (labels/3MF) are bypassed with namespace packages.
-Neither the geometry implementation nor its precision rule is replaced.
+Unrelated eager exports (labels/3MF) are bypassed with namespace packages.
 """
 import json
 import sys
@@ -29,23 +28,35 @@ earcut_module = types.ModuleType('mapbox_earcut')
 earcut_module.triangulate_float64 = triangulate_float64
 sys.modules['mapbox_earcut'] = earcut_module
 
-BOOLEAN_ERROR = (
-    'FLOAT64_BOOLEAN_UNAVAILABLE: canonical organizer_geometry._boolean requires '
-    'manifold3d.Mesh64 and to_mesh64(); Pyodide 0.28.3 has no manifold3d package; '
-    'manifold-3d@3.5.0 exposes Float32Array Mesh, not Mesh64. '
-    'No float32 fallback was used.'
-)
+from js import pocSolid, pocMesh
 
+class Mesh64:
+    def __init__(self, vert_properties, tri_verts):
+        self.vert_properties = vert_properties
+        self.tri_verts = tri_verts
 
-def missing_mesh64(*args, **kwargs):
-    raise RuntimeError(BOOLEAN_ERROR)
+class Manifold:
+    def __init__(self, mesh=None, solid=None):
+        self.solid = solid if solid is not None else pocSolid(
+            json.dumps(mesh.vert_properties.ravel().tolist()),
+            json.dumps(mesh.tri_verts.ravel().tolist()))
+    def __add__(self, other):
+        return Manifold(solid=self.solid.add(other.solid))
+    def __sub__(self, other):
+        return Manifold(solid=self.solid.sub(other.solid))
+    def __xor__(self, other):
+        return Manifold(solid=self.solid.intersect(other.solid))
+    def to_mesh64(self):
+        data = json.loads(pocMesh(self.solid))
+        return Mesh64(np.asarray(data['vertices'], dtype=np.float64).reshape(-1, 3),
+                      np.asarray(data['faces'], dtype=np.uint64).reshape(-1, 3))
+    def __del__(self):
+        if hasattr(self, 'solid'):
+            self.solid.delete()
 
-
-# Import sentinel, not a substitute geometry engine. The first real boolean
-# fails at the exact unavailable constructor in the authoritative source.
 manifold_module = types.ModuleType('manifold3d')
-manifold_module.Mesh64 = missing_mesh64
-manifold_module.Manifold = missing_mesh64
+manifold_module.Mesh64 = Mesh64
+manifold_module.Manifold = Manifold
 sys.modules['manifold3d'] = manifold_module
 
 from organizer_engine._specs import BoxSpec
@@ -66,9 +77,7 @@ def poc_versions():
 
 
 def poc_build():
-    result = {'poc_success': False, 'stl_generated': False,
-              'full_mesh_comparison': 'Unavailable: first float64 boolean cannot run.',
-              'connector': 'Not investigated: ordinary bin has not succeeded.'}
+    result = {'poc_success': False, 'stl_generated': False}
     try:
         spec = BoxSpec(**reference['spec'])
         outer, cavity = wavy_outer_polygon(spec), wavy_cavity_polygon(spec)
@@ -97,9 +106,21 @@ def poc_build():
             'normal_clearance_lower_bound_mm': nested_clearance(),
             'note': 'Profiles and separate prisms only. These do not prove a finished shell or lock-bump parity.',
         }
-        make_box(spec)  # Actual canonical path, not a precomputed mesh replay.
-        raise RuntimeError('Unexpected Mesh64 availability: requalify bridge before claiming parity')
+        mesh = make_box(spec)
+        result['mesh'] = {'watertight': bool(mesh.is_watertight), 'winding': bool(mesh.is_winding_consistent),
+                          'volume': float(mesh.volume), 'bounds': mesh.bounds.tolist(),
+                          'components': len(mesh.split()), 'triangles': len(mesh.faces)}
+        result['poc_success'] = bool(mesh.is_volume and result['partial_geometry']['profiles_match'] and
+             result['partial_geometry']['seam_matches'] and result['mesh']['components'] == 1 and
+             np.max(np.abs(mesh.bounds - np.asarray(reference['bounds_mm']))) <= reference['tolerances']['bounds_mm'] and
+             abs(mesh.volume / reference['volume_mm3'] - 1) <= reference['tolerances']['relative_volume'])
+        if result['poc_success']:
+            import base64
+            result['stl_base64'] = base64.b64encode(mesh.export(file_type='stl')).decode()
+            result['stl_generated'] = True
+
     except Exception as error:
+        result['poc_success'] = False
         result['failure'] = str(error)
         result['traceback'] = traceback.format_exc()
     return json.dumps(result)

@@ -1,3 +1,6 @@
+> Historical 2979 feasibility results below predate the MeshGL64 browser bridge.
+> See [the bridge validation notes](../web/browser-local-poc/manifold64/README.md) for the current result.
+
 # Story 2979: browser-only geometry feasibility
 
 **Result: unsuccessful POC.** The available pinned browser dependencies cannot

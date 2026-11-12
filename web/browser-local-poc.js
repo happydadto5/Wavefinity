@@ -41,7 +41,7 @@ $('load').onclick = () => {
       $('build').disabled = false; $('offline').disabled = false;
       $('status').textContent = 'Tools loaded. Ready for the ordinary bin.';
     } else if (data.type === 'result') {
-      $('status').textContent = report.poc_success ? 'Bin passed all comparisons.' : 'Full bin failed. See exact component below.';
+      $('status').textContent = report.poc_success ? 'Bin passed its reference checks.' : 'Full bin failed. See exact component below.';
       if (report.poc_success && data.stl) {
         stlURL = URL.createObjectURL(new Blob([data.stl], {type: 'model/stl'}));
         $('stl').href = stlURL; $('stl').hidden = false;
@@ -61,3 +61,4 @@ $('download').onclick = () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 addEventListener('pagehide', stop);
+$('load').click();

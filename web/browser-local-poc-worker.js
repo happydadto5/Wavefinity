@@ -1,6 +1,6 @@
 // Isolated worker. No production APIs, state, storage, or geometry service calls.
 const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v0.28.3/full/';
-const MANIFOLD = 'https://cdn.jsdelivr.net/npm/manifold-3d@3.5.0/';
+const MANIFOLD = './browser-local-poc/manifold64/';
 const EARClIP = 'https://cdn.jsdelivr.net/npm/earcut@3.0.2/+esm';
 const TRIMESH = 'https://files.pythonhosted.org/packages/37/82/19a03ba344ecb66ea8caab697b3059e0fbea576420f99945944c479caa78/trimesh-5.0.0-py3-none-any.whl';
 const TRIMESH_SHA = '51ec67d7f9f74b918f2a695da5fd511b9c084e96307648ae83f45b58f13f8009';
@@ -45,20 +45,16 @@ async function load() {
     const vertices = JSON.parse(verticesJSON), ends = JSON.parse(endsJSON);
     return JSON.stringify(earcut(vertices.flat(), ends.slice(0, -1), 2));
   };
-  progress('Checking the browser boolean interface…');
-  const factory = (await import(`${MANIFOLD}manifold.js`)).default;
+  progress('Loading double-precision geometry engine…');
+  const factory = (await import(`${MANIFOLD}bridge64.mjs`)).default;
   manifold = await factory({locateFile: name => `${MANIFOLD}${name}`});
-  manifold.setup();
-  // A Mesh constructor existing is not evidence that Mesh64 exists.
-  const probe = new manifold.Mesh({numProp: 3,
-    vertProperties: new Float32Array([0.123456789012345, 0, 0]), triVerts: new Uint32Array()});
-  const capabilities = {
-    release: 'manifold-3d@3.5.0', mesh64_export: typeof manifold.Mesh64,
-    mesh_vertex_array: probe.vertProperties.constructor.name,
-    input_coordinate: 0.123456789012345, roundtrip_coordinate: probe.vertProperties[0],
-    float64_supported: false,
+  self.pocSolid = (vertices, faces) => manifold.make(
+    new Float64Array(JSON.parse(vertices)), new Uint32Array(JSON.parse(faces)));
+  self.pocMesh = solid => {
+    const mesh = solid.mesh();
+    return JSON.stringify({vertices: Array.from(mesh.vertices), faces: Array.from(mesh.faces)});
   };
-  // This pinned release has no Mesh64 bridge. Never route through Mesh/float32.
+  const capabilities = {release: 'manifold 3.5.0 custom MeshGL64', float64_supported: true};
   py.globals.set('poc_reference_json', JSON.stringify(reference));
   const bridge = await bytes('browser-local-poc/bridge.py');
   py.runPython(new TextDecoder().decode(bridge));
@@ -69,7 +65,7 @@ async function load() {
     manifold: capabilities,
     dependencies: {
       pyodide: '0.28.3', trimesh: '5.0.0', earcut: '3.0.2 (JS number/float64 coordinates)',
-      native_manifold3d: 'Not in this Pyodide distribution; no compatible wheel provided.',
+      native_manifold3d: 'MeshGL64 WASM bridge',
       lib3mf: 'Not loaded or required for STL; native library/WASM wrapper needed for future 3MF.',
     },
     poc_success: false,
@@ -96,9 +92,10 @@ function build(message) {
         resource_entries_added: performance.getEntriesByType('resource').length - before},
       rough_memory: {python_wasm_heap_bytes: py._module?.HEAPU8?.buffer.byteLength ?? null,
         manifold_wasm_heap_bytes: manifold.HEAPU8?.buffer.byteLength ?? null,
-        note: 'Allocated linear memory only; excludes JS heap, browser and GPU. Null means unavailable.'},
-      next_story: 'Provide a pinned browser float64 Manifold Mesh64 input/output bridge (or a compatible Pyodide manifold3d wheel), then repeat this same ordinary-bin comparison before connectors.'};
-    postMessage({type: 'result', id: message.id, report});
+        note: 'Allocated linear memory only; excludes JS heap, browser and GPU. Null means unavailable.'}};
+    const stl = result.stl_base64 ? Uint8Array.from(atob(result.stl_base64), c => c.charCodeAt(0)) : null;
+    delete report.stl_base64;
+    postMessage({type: 'result', id: message.id, report, stl}, stl ? [stl.buffer] : []);
   } finally {
     Object.assign(self, original);
   }
