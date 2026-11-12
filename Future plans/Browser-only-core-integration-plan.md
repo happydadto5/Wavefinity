@@ -5,7 +5,7 @@
 
 **Development policy: WAVEFINITY IS USER-TESTED. CODERS DO NOT TEST.** Coders reason through logic, read source and callers, inspect their changes, and implement. They do not write, modify, repair or run automated tests; they do not manually operate the app; and they do not create user test plans, checklists or QA instructions. The owner tests the actual application when they decide. Code-level input validation, error handling, geometry invariants, integrity checks and other real production protections remain required.
 
-**Implementation authority:** [Browser-only-core-detailed-build-contracts.md](Browser-only-core-detailed-build-contracts.md) contains the exact B00–B16 work packages, source files, created production modules, route ownership, change instructions and dependencies. This overview does not supersede it. The old Render/Python method is preserved in [docs/legacy-python-server-hosting.md](../docs/legacy-python-server-hosting.md) without exposing any private Porkbun credentials.
+**Implementation authority:** [Browser-only-core-detailed-build-contracts.md](Browser-only-core-detailed-build-contracts.md) contains the B00–B16 packages. The [diff-level implementation map](Browser-only-core-diff-map.md) gives source-function anchors, pseudo-diffs, static output layout and exact host cutover. The [source-route index](Browser-only-core-source-route-index.md) lists 91 currently registered routes/major callers. **Token-efficient coder reading:** only assigned Bxx, matching diff-map entry and relevant route rows/current source—not every plan, past debate or full README. This overview does not supersede the detailed contract. The old Render/Python method is preserved in [docs/legacy-python-server-hosting.md](../docs/legacy-python-server-hosting.md) without exposing any private Porkbun credentials.
 
 ## Destination architecture
 
@@ -16,7 +16,7 @@
 - Preserve genuine 3MF packaging (parts, arrangement, labels, material/filament metadata) and STL generation. Produce the actual printer-ready outputs in browser memory.
 - **Print remains separate from Export.** Every Print button prepares selected parts, validates printer/Space rules, generates or reuses slicer-ready 3MF, saves/downloads it, and gives a clear "Open in Bambu Studio" handoff. Preserve truthful inventory state. Browser security prevents automatic execution of an arbitrary Windows slicer .exe; do not silently delete Print or pretend that saving a file proves the slicer opened.
 - Optional AI that requires a provider may be disclosed as separate; never put private service API keys into the static site or require cloud geometry processing.
-- Keep `wavefinity.org` on Porkbun and point DNS to a free/near-free static host only after the full implementation is complete. Retain the old server deployment documentation and Git source history for recovery.
+- Keep `wavefinity.org` registered at Porkbun. **Default final host is a NEW Render Static Site (free tier within allowances), not the old Render Free Python Web Service.** It uses a CDN, no server-side geometry and no sleeping web-service ~60-second cold start. Browser Pyodide/WASM first-load initialization may still take time. The current Render Web Service cannot be converted in place. Add apex and www to the new Static Site at the authorized cutover; current apex A `216.24.57.1` may remain if Render still requires it, and www CNAME must change to the new Static Site's REAL hostname. Preserve existing TLS and redirect. Cloudflare Pages is fallback if Render costs/limits do not work; its apex custom domain requires Cloudflare nameservers. **Tell Andrew the exact steps/price and request explicit permission before changing DNS, detaching old Render domains or retiring the old service.** Retain old hosting docs and source for recovery.
 
 ## Implementation policy: one final migration, no halfway functionality
 
@@ -42,7 +42,7 @@ The detailed specification defines 17 work packages with concrete files and patc
 12. **B11:** Complete structural Space calculations for Storage Box, Storage Drawers, Drawer, Surface and Pegboard.
 13. **B12:** Complete advanced features (text, dividers, bores, photo nest, openings, lids, etc.).
 14. **B13:** Replace browser-incompatible desktop/AI-specific operations honestly, without breaking core Print.
-15. **B14:** Build the full static site, configure the static host and prepare the one-time cutover after code completion.
+15. **B14:** Build full `dist/` (copy `web/*` to root, `images/*` to `/images/`, repo `Brochure.md` to root); specify free Render Static Site setup, source/branch/build/publish settings, real domain cutover steps, and **notify Andrew for authorization**. No early hosting/DNS changes.
 16. **B15:** Retire the live Python HTTP service while retaining written legacy recovery and old source history.
 17. **B16:** Delete temporary experiment page and superseded experiment/test scaffolding; keep the production MeshGL64 assets and license.
 
@@ -50,7 +50,7 @@ The detailed specification defines 17 work packages with concrete files and patc
 
 ## Coder completion handoff
 
-The coder reports only: the behavior implemented, files modified, important code decisions, identified limitations and pushed commit SHA. **No "Tests run", "Testing needed", "How to test", "QA checklist", or owner testing instructions.** A code change is treated as logically implemented and handed back for natural owner use, without claiming it has been empirically proven to work.
+The coder reports only: the behavior implemented, files modified, important code decisions, identified limitations and pushed commit SHA. The coordinator alone notifies Andrew when the full build is ready for the free/static hosting action and domain move. **No "Tests run", "Testing needed", "How to test", "QA checklist", or owner testing instructions.** A code change is treated as logically implemented and handed back for natural owner use, without claiming it has been empirically proven to work.
 
 Historical context: Story #2979's initial feasibility runner required float64; direct implementation at `f25fee144d556a819a80eec6a89313603ce0460b` supplied custom MeshGL64 WASM and successfully generated ordinary bin STLs. The owner previously confirmed its browser result in Windows Chrome/Edge. That proof of concept is an implementation reference, **not a requirement to add tests**. Earlier nine failing web tests were removed in `acc74c1af7c34defe4865a842e62c5987076d609` and are not to be rebuilt.
 
