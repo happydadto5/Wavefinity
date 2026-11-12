@@ -1,4 +1,4 @@
-# Wavefinity browser-only core integration and experiment retirement
+> **AUTHORITATIVE IMPLEMENTATION DETAIL (2026-11-12):** This file is the overview. Implement the numbered B00–B16 work contracts in [Browser-only-core-detailed-build-contracts.md](Browser-only-core-detailed-build-contracts.md). The companion contains exact existing/new file paths, route groups, adapter/worker protocol, dependencies, acceptance tests, static-host cutover, and retirement gates. Preserve the former Python/Render method in [docs/legacy-python-server-hosting.md](../docs/legacy-python-server-hosting.md), which now exists. Do not treat the high-level phases in this overview as sufficient coder instructions.\n\n# Wavefinity browser-only core integration and experiment retirement
 
 **Status:** Implementation plan; NOT yet implemented.  
 **Owner direction:** No installation for site visitors. Desktop Chrome and Edge on Windows are the target. Do not create a separate application or new hosting service while integrating. No feature branches/worktrees; land safely on `main` with fresh remote checks.  
