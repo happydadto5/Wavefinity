@@ -1,6 +1,11 @@
 {
   "archive": "canonical.zip",
-  "bytes": 664540,
+  "bytes": 693182,
+  "catalog": {
+    "schema": "wavefinity-browser-catalog/1",
+    "sha256": "15340559f91aade38825f78fcdfb4f4b6056a85359f931f37171d75b3224ffb8",
+    "source_sha256": "9a462d328ddad254d4567a686aee7772df081de670eb0c36af6b141c222fff92"
+  },
   "external_imports": [
     "PIL",
     "cv2",
@@ -22,7 +27,7 @@
     "photo_nest": "B12 integrates the bundled cv2/Pillow browser packages"
   },
   "schema": "wavefinity-browser-engine/1",
-  "sha256": "52d25493806bef637204a9b012a2862c29b922cecb8fdff7f82bdb9289bee3a6",
+  "sha256": "988af36f74be123f1ddfaa61ff8e0de3528c60c03af84f46137bb007eed6087b",
   "size_accounting": {
     "assets": {
       "earcut/LICENSE": {
@@ -34,8 +39,8 @@
         "gzip_bytes": 5821
       },
       "engine/canonical.zip": {
-        "bytes": 664540,
-        "gzip_bytes": 656826
+        "bytes": 693182,
+        "gzip_bytes": 685005
       },
       "manifold64/LICENSE": {
         "bytes": 11558,
@@ -172,8 +177,8 @@
     },
     "planning_target_bytes": 67108864,
     "scope": "Entire B02 vendor tree and canonical.zip; excludes future UI/worker assets and manifest JSON. gzip totals are build encoding sizes, not observed network transfer. Hosting compression/traffic allowance is not established here.",
-    "total_bytes": 58674539,
-    "total_gzip_bytes": 50989364,
+    "total_bytes": 58703181,
+    "total_gzip_bytes": 51017543,
     "within_planning_target": true
   },
   "source_hash_mode": "UTF-8 without BOM, LF line endings",
@@ -184,8 +189,8 @@
       "source": "bambu_handoff.py"
     },
     "organizer_app.py": {
-      "bytes": 37281,
-      "sha256": "51c02097ad0630a8d82353e85d7e93b12bbedfdfd3bfb975e5cc496eb9caf087",
+      "bytes": 38446,
+      "sha256": "eea3cbb2b6b67e603d11c1be96a85ca7869ce48700d03ca2bf08c3d8448c086f",
       "source": "organizer_app.py"
     },
     "organizer_app_impl/__init__.py": {
@@ -204,8 +209,8 @@
       "source": "organizer_app_impl/_common.py"
     },
     "organizer_app_impl/_design_io.py": {
-      "bytes": 57520,
-      "sha256": "baa2099823262547bf0384b64a207113536d2c97e549741c5d091a86b4756d90",
+      "bytes": 57707,
+      "sha256": "ff2428a7b4b679643239824a3bcbe2ef79acbdec5d5a94d5a9f2beb5f2216489",
       "source": "organizer_app_impl/_design_io.py"
     },
     "organizer_app_impl/_filenames.py": {
@@ -214,8 +219,8 @@
       "source": "organizer_app_impl/_filenames.py"
     },
     "organizer_app_impl/_generation.py": {
-      "bytes": 12178,
-      "sha256": "94dab78a93a6dc8febfc3b64647ef7ee7289a873c506ed19df535e28e44b7233",
+      "bytes": 12383,
+      "sha256": "a4ff9c43b2b01a6b01b164bf191cb140cc8dfaf7a93ac851b3fec796fdcd7260",
       "source": "organizer_app_impl/_generation.py"
     },
     "organizer_app_impl/_preview/__init__.py": {
@@ -344,8 +349,8 @@
       "source": "organizer_engine/_boxes.py"
     },
     "organizer_engine/_export.py": {
-      "bytes": 27237,
-      "sha256": "a678696b06087316dd32add24813598bd365876dddd4b12d78b6dcb9b6185831",
+      "bytes": 30097,
+      "sha256": "b233a0958ac3df935e6a67dc229fe6d7cd2587ffe0b97d061f452131e62a1d17",
       "source": "organizer_engine/_export.py"
     },
     "organizer_engine/_fit.py": {
@@ -364,8 +369,8 @@
       "source": "organizer_engine/_lift_grabbers.py"
     },
     "organizer_engine/_specs.py": {
-      "bytes": 50140,
-      "sha256": "5b571a73234ca63631d0646838207e137dcdceb70b36307bc0281402598fa98c",
+      "bytes": 50561,
+      "sha256": "d7c4b579e19dae900ddcf357ea94911cd723dab81bce85bf65db80e32202b8ba",
       "source": "organizer_engine/_specs.py"
     },
     "organizer_engine/_wave.py": {
@@ -694,9 +699,14 @@
       "source": "wavefinity_web_impl/__init__.py"
     },
     "wavefinity_web_impl/_ai.py": {
-      "bytes": 41871,
-      "sha256": "de29f1e9fdf6728457ca89d6682ee7354ed4be4cd7935d952f3dc0e53b0560fd",
+      "bytes": 42482,
+      "sha256": "c689e28cf671fbd053fabbe7d9d4994f28dc0256caecf16fbe938ee30c4f5d03",
       "source": "wavefinity_web_impl/_ai.py"
+    },
+    "wavefinity_web_impl/_catalog.py": {
+      "bytes": 20991,
+      "sha256": "9aeb80ac68c3bc2a1b20580502a04c89b4a7445da4197e634f50dea854deb327",
+      "source": "wavefinity_web_impl/_catalog.py"
     },
     "wavefinity_web_impl/_designs/__init__.py": {
       "bytes": 3088,
@@ -709,8 +719,8 @@
       "source": "wavefinity_web_impl/_designs/_features.py"
     },
     "wavefinity_web_impl/_designs/_layout.py": {
-      "bytes": 19991,
-      "sha256": "f58666e2788f65ef6713f2619c1b7f6fc25b1243479e5f688ae1f8315e67f430",
+      "bytes": 21137,
+      "sha256": "528ecf22b905007cb67918b303aa621879a8e00102408b8dbcf53c66020878c9",
       "source": "wavefinity_web_impl/_designs/_layout.py"
     },
     "wavefinity_web_impl/_designs/_preview.py": {
@@ -718,9 +728,14 @@
       "sha256": "1fee2373964d4b6d7364b6d60fed34ea1e1ed89e95e56058a030138d2af99d03",
       "source": "wavefinity_web_impl/_designs/_preview.py"
     },
+    "wavefinity_web_impl/_entry.py": {
+      "bytes": 6527,
+      "sha256": "1996d664a0ae37afd1af69f997ef7e4a90fd63c50cb5b5bb8ddb39e46b5fc7c1",
+      "source": "wavefinity_web_impl/_entry.py"
+    },
     "wavefinity_web_impl/_nest.py": {
-      "bytes": 24462,
-      "sha256": "7a5f55e0387a284bb7ee6ee37402ce31dbd3ad745d74e6ef48de8e04b99f85c7",
+      "bytes": 24466,
+      "sha256": "b585fe27b22b67128699148d57dde711fcc539ce50763d2722079e29cf98661d",
       "source": "wavefinity_web_impl/_nest.py"
     },
     "wavefinity_web_impl/_outputs.py": {
@@ -738,10 +753,30 @@
       "sha256": "abc8590100e17b95d5d3689a42d2e8940f7caa97a68e7ad95456d61901311b43",
       "source": "web/browser-core/engine/__init__.py"
     },
+    "wf_browser_core/catalog.json": {
+      "bytes": 69746,
+      "sha256": "15340559f91aade38825f78fcdfb4f4b6056a85359f931f37171d75b3224ffb8",
+      "source": "web/browser-core/engine/catalog.json"
+    },
+    "wf_browser_core/catalog_manifest.json": {
+      "bytes": 12217,
+      "sha256": "ca09c1d8b569530b4d5904f1c99e963a7da1aae7e45e699850d77a5516a23e6f",
+      "source": "web/browser-core/engine/catalog_manifest.json"
+    },
+    "wf_browser_core/editor_routes.py": {
+      "bytes": 2835,
+      "sha256": "4ade03fd34b2f6d2558599064a51300dbf38bce4b84f2646b82de0c50e95e299",
+      "source": "web/browser-core/engine/editor_routes.py"
+    },
     "wf_browser_core/manifold_bridge.py": {
       "bytes": 5290,
       "sha256": "d3f1c4235515886ca83386b38f49c1b22aa2b00f4073f791231fdd8204c1dd6a",
       "source": "web/browser-core/engine/manifold_bridge.py"
+    },
+    "wf_browser_core/route_dispatch.py": {
+      "bytes": 3103,
+      "sha256": "e9b3a187ff9e47970381912bea641aa48231b69282a26646bc7620d00e29dbf1",
+      "source": "web/browser-core/engine/route_dispatch.py"
     },
     "wf_browser_core/route_manifest.json": {
       "bytes": 101744,

@@ -1,0 +1,2804 @@
+{
+  "api_compat": 2,
+  "b4b_rules": {
+    "base_choices": [
+      {
+        "label": "Very thin",
+        "value": 0.8
+      },
+      {
+        "label": "Thin",
+        "value": 1.2
+      },
+      {
+        "label": "Default",
+        "value": 1.6
+      },
+      {
+        "label": "Strong",
+        "value": 2.0
+      },
+      {
+        "label": "Very strong",
+        "value": 2.4
+      },
+      {
+        "label": "Heavy duty",
+        "value": 3.0
+      }
+    ],
+    "default_base_mm": 1.6,
+    "default_wall_mm": 1.6,
+    "front_label_styles": [
+      "flat",
+      "wavy"
+    ],
+    "grid_pitch_mm": 7.0,
+    "handle_min_grip_mm": 36.0,
+    "label_locations": [
+      "none",
+      "top",
+      "front"
+    ],
+    "latch_counts": [
+      "0",
+      "1",
+      "2"
+    ],
+    "latch_strengths": [
+      "lightweight",
+      "standard"
+    ],
+    "lid_headroom_choices_mm": [
+      0.5,
+      1.0,
+      2.0
+    ],
+    "min_field_mm": 48.0,
+    "min_secure_height_mm": 16.0,
+    "min_wall_mm": 0.8,
+    "schema_version": 2,
+    "stack_min_base_mm": 3.3,
+    "wall_choices": [
+      {
+        "label": "Very thin",
+        "value": 0.8
+      },
+      {
+        "label": "Thin",
+        "value": 1.2
+      },
+      {
+        "label": "Default",
+        "value": 1.6
+      },
+      {
+        "label": "Strong",
+        "value": 2.0
+      },
+      {
+        "label": "Very strong",
+        "value": 2.4
+      },
+      {
+        "label": "Heavy duty",
+        "value": 3.0
+      }
+    ]
+  },
+  "base_rules": {
+    "choices": [
+      {
+        "label": "Extremely thin (experimental)",
+        "value": 0.4
+      },
+      {
+        "label": "Very thin",
+        "value": 0.6
+      },
+      {
+        "label": "Default",
+        "value": 0.8
+      },
+      {
+        "label": "Sturdy",
+        "value": 1.0
+      },
+      {
+        "label": "Strong",
+        "value": 1.2
+      }
+    ],
+    "default_mm": 0.8
+  },
+  "base_trim_rules": {
+    "bed_edge_margin_mm": 10.0,
+    "default_bed_x_mm": 256.0,
+    "default_bed_y_mm": 256.0,
+    "default_height_mm": 7.5,
+    "default_width_mm": 7.5,
+    "join_types": [
+      {
+        "label": "Drop-in dovetail",
+        "value": "drop_in"
+      }
+    ],
+    "mating_gap_mm": 0.25,
+    "max_field_mm": 1200.0,
+    "max_height_mm": 20.0,
+    "max_width_mm": 20.0,
+    "min_height_mm": 4.0,
+    "min_width_mm": 4.0,
+    "outer_taper_mm": 1.0,
+    "size_presets": [
+      {
+        "key": "small",
+        "label": "Small",
+        "value_mm": 6.5
+      },
+      {
+        "key": "medium",
+        "label": "Medium",
+        "value_mm": 7.5
+      },
+      {
+        "key": "large",
+        "label": "Large",
+        "value_mm": 10.0
+      },
+      {
+        "key": "xl",
+        "label": "XL",
+        "value_mm": 15.0
+      },
+      {
+        "key": "xxl",
+        "label": "XXL",
+        "value_mm": 20.0
+      }
+    ],
+    "unit_mm": 7.0
+  },
+  "base_unit": 7.0,
+  "build": "9a462d328ddad254d4567a686aee7772df081de670eb0c36af6b141c222fff92",
+  "connector_rules": {
+    "arm_thickness_floor_mm": 0.77,
+    "arm_thickness_mm": 1.0,
+    "base_height_mm": 9.6,
+    "full_drop_mm": 30.0,
+    "length_gain": 0.5,
+    "mating_gap_mm": 0.25,
+    "min_drop_mm": 2.0,
+    "wall_depth_factor": 1.5283797729618165,
+    "web_run_clearance_mm": 0.15,
+    "web_thickness_mm": 3.0
+  },
+  "defaults": {
+    "connector": {
+      "arm_thickness": 1.0,
+      "axis": "y",
+      "bin_a_height": 40.0,
+      "bin_b_height": 40.0,
+      "different_heights": false,
+      "height": 9.6,
+      "length": 12.0,
+      "position": 0.0,
+      "quantity": 1,
+      "tolerance": 0.02,
+      "type": "side"
+    },
+    "design": {
+      "box": {
+        "accent_band": false,
+        "accent_color": "blue",
+        "base_thickness": 0.8,
+        "corner_fillet": 0.6,
+        "flat_inside": 0.0,
+        "magnet_holes": "none",
+        "standard_base": true,
+        "standard_walls": true,
+        "wall": 0.8,
+        "x": 14.0,
+        "y": 42.0,
+        "z": 40.0
+      },
+      "grid": "wavefinity",
+      "label": "",
+      "label_position": "bottom",
+      "layout": {
+        "features": [],
+        "mode": "fused",
+        "object_height_mm": null,
+        "snap": 1.0,
+        "surface_base_mode": "custom",
+        "surface_lightweight_base": false,
+        "version": 1
+      },
+      "module_mm": 7,
+      "part_name": "",
+      "scoop": false,
+      "version": 8
+    },
+    "output": "",
+    "sampler_boxes": "2x6,4x6,6x6"
+  },
+  "drawer_rules": {
+    "hard_wall_clearance_mm": 0.55,
+    "min_usable_drawer_height_mm": 6,
+    "ordinary_bin_min_height_mm": 6
+  },
+  "edge_mount": {
+    "defaults": {
+      "access_diameter_mm": null,
+      "hole_count": 2,
+      "hole_orientation": "horizontal",
+      "hole_spacing_mm": null,
+      "holes_enabled": false,
+      "label_enabled": false,
+      "label_flip": false,
+      "label_length_mode": "full",
+      "label_projection_mm": 50.0,
+      "label_raised": false,
+      "label_text": "",
+      "label_text_depth_mm": 0.6,
+      "label_thickness_mm": 2.0,
+      "screw_diameter_mm": 4.0,
+      "side": "front",
+      "top_offset_mm": 12.7
+    },
+    "max_access_diameter_mm": 20.0,
+    "max_hole_count": 4,
+    "max_projection_mm": 200.0,
+    "max_screw_diameter_mm": 12.0,
+    "max_text_depth_mm": 2.0,
+    "max_thickness_mm": 6.0,
+    "min_access_diameter_mm": 2.0,
+    "min_hole_count": 1,
+    "min_projection_mm": 5.0,
+    "min_screw_diameter_mm": 1.0,
+    "min_text_depth_mm": 0.2,
+    "min_thickness_mm": 0.8,
+    "sides": [
+      {
+        "label": "Front",
+        "value": "front"
+      },
+      {
+        "label": "Back",
+        "value": "back"
+      },
+      {
+        "label": "Left",
+        "value": "left"
+      },
+      {
+        "label": "Right",
+        "value": "right"
+      }
+    ],
+    "thickness_choices": [
+      {
+        "label": "1.2 mm \u2014 Thin",
+        "value": 1.2
+      },
+      {
+        "label": "2 mm \u2014 Medium",
+        "value": 2.0
+      },
+      {
+        "label": "3 mm \u2014 Thick",
+        "value": 3.0
+      }
+    ]
+  },
+  "grids": [
+    {
+      "container_floor_build_mm": 0,
+      "container_floor_choices": null,
+      "container_floor_pocket_depth_mm": 0,
+      "container_floor_stacking_build_mm": 0,
+      "edge_mount": true,
+      "height_unit_mm": null,
+      "hinged_lid_refusal": null,
+      "label": "Wavefinity 7 mm",
+      "lid_choices": null,
+      "lid_stack_seat_descent_mm": null,
+      "minimum_base_mm": 0,
+      "perimeter_gap_mm": 0,
+      "pitch_mm": 7.0,
+      "rim_depth_mm": 0,
+      "side_connectors": true,
+      "side_opening_corner_radius_mm": 0,
+      "side_opening_foot_height_mm": 0,
+      "side_openings": true,
+      "stack_seat_descent_mm": null,
+      "value": "wavefinity"
+    },
+    {
+      "container_floor_build_mm": 5.8,
+      "container_floor_choices": [
+        {
+          "label": "Floor (raised socket grid)",
+          "value": "floor"
+        },
+        {
+          "label": "None (plain cavity for your own baseplate)",
+          "value": "none"
+        }
+      ],
+      "container_floor_pocket_depth_mm": 5.0,
+      "container_floor_stacking_build_mm": 8.3,
+      "edge_mount": false,
+      "height_unit_mm": 7.0,
+      "hinged_lid_refusal": "A Hinged lid is not available on Gridfinity half 21 mm bins: its open swing reaches 2.4 mm behind the 20.5 mm bin, and only 0.25 mm is clear before the next bin. Use Lid or Lid for stacking.",
+      "label": "Gridfinity half 21 mm",
+      "lid_choices": [
+        {
+          "label": "No lid",
+          "value": "none"
+        },
+        {
+          "label": "Gridfinity Lid",
+          "value": "resting"
+        },
+        {
+          "label": "Gridfinity Lid for stacking",
+          "value": "stacking"
+        }
+      ],
+      "lid_stack_seat_descent_mm": 4.75,
+      "minimum_base_mm": 5.75,
+      "perimeter_gap_mm": 0.5,
+      "pitch_mm": 21.0,
+      "rim_depth_mm": 4.75,
+      "side_connectors": false,
+      "side_opening_corner_radius_mm": 3.75,
+      "side_opening_foot_height_mm": 4.75,
+      "side_openings": true,
+      "stack_seat_descent_mm": 0.25,
+      "value": "gridfinity_half"
+    },
+    {
+      "container_floor_build_mm": 5.8,
+      "container_floor_choices": [
+        {
+          "label": "Floor (raised socket grid)",
+          "value": "floor"
+        },
+        {
+          "label": "None (plain cavity for your own baseplate)",
+          "value": "none"
+        }
+      ],
+      "container_floor_pocket_depth_mm": 5.0,
+      "container_floor_stacking_build_mm": 8.3,
+      "edge_mount": false,
+      "height_unit_mm": 7.0,
+      "hinged_lid_refusal": "A Hinged lid is not available on Gridfinity 42 mm bins: its open swing reaches 2.4 mm behind the 41.5 mm bin, and only 0.25 mm is clear before the next bin. Use Lid or Lid for stacking.",
+      "label": "Gridfinity 42 mm",
+      "lid_choices": [
+        {
+          "label": "No lid",
+          "value": "none"
+        },
+        {
+          "label": "Gridfinity Lid",
+          "value": "resting"
+        },
+        {
+          "label": "Gridfinity Lid for stacking",
+          "value": "stacking"
+        }
+      ],
+      "lid_stack_seat_descent_mm": 3.8,
+      "minimum_base_mm": 5.75,
+      "perimeter_gap_mm": 0.5,
+      "pitch_mm": 42.0,
+      "rim_depth_mm": 3.8,
+      "side_connectors": false,
+      "side_opening_corner_radius_mm": 3.75,
+      "side_opening_foot_height_mm": 4.75,
+      "side_openings": true,
+      "stack_seat_descent_mm": 0.35,
+      "value": "gridfinity"
+    }
+  ],
+  "instance": "browser",
+  "item_rules": {
+    "bore_clearance_mm": 0.25,
+    "default_clearance_mm": 0.4,
+    "hex_bit": {
+      "hex_bit_long": {
+        "clearance_mm": 0.25,
+        "diameter_mm": 6.35,
+        "hole_depth_mm": 16.0,
+        "length_mm": 38.0
+      },
+      "hex_bit_short": {
+        "clearance_mm": 0.25,
+        "diameter_mm": 6.35,
+        "hole_depth_mm": 12.0,
+        "length_mm": 25.0
+      }
+    },
+    "profiles": [
+      {
+        "label": "Round",
+        "value": "round"
+      },
+      {
+        "label": "Hex",
+        "value": "hex"
+      },
+      {
+        "label": "Diamond",
+        "value": "square"
+      },
+      {
+        "label": "Square",
+        "value": "square_axis"
+      },
+      {
+        "label": "Hex bit \u2013 short",
+        "value": "hex_bit_short"
+      },
+      {
+        "label": "Hex bit \u2013 long",
+        "value": "hex_bit_long"
+      }
+    ]
+  },
+  "lid_rules": {
+    "alignments": [
+      {
+        "label": "Off",
+        "mm": 0.0,
+        "value": "off"
+      },
+      {
+        "label": "Thin \u2014 1.0 mm",
+        "mm": 1.0,
+        "value": "thin"
+      },
+      {
+        "label": "Standard \u2014 2.0 mm",
+        "mm": 2.0,
+        "value": "standard"
+      },
+      {
+        "label": "Thick \u2014 3.0 mm",
+        "mm": 3.0,
+        "value": "thick"
+      }
+    ],
+    "default_alignment": "off",
+    "default_fit": "standard",
+    "default_label_relief_mm": 0.4,
+    "default_thickness": "1.2",
+    "fits": [
+      {
+        "label": "Tight \u2014 0.15 mm per side",
+        "mm": 0.15,
+        "value": "tight"
+      },
+      {
+        "label": "Standard \u2014 0.25 mm per side",
+        "mm": 0.25,
+        "value": "standard"
+      },
+      {
+        "label": "Loose \u2014 0.35 mm per side",
+        "mm": 0.35,
+        "value": "loose"
+      }
+    ],
+    "handle_default_enabled": false,
+    "handle_positions": [
+      "left",
+      "right",
+      "front",
+      "back",
+      "middle"
+    ],
+    "handle_sizes": [
+      "small",
+      "medium",
+      "large"
+    ],
+    "handle_types": [
+      "knob"
+    ],
+    "label_orientations": [
+      "horizontal",
+      "vertical"
+    ],
+    "label_reliefs": [
+      {
+        "label": "Thin 0.2 mm",
+        "name": "Thin",
+        "value": 0.2
+      },
+      {
+        "label": "Default 0.4 mm",
+        "name": "Default",
+        "value": 0.4
+      },
+      {
+        "label": "Thick 0.6 mm",
+        "name": "Thick",
+        "value": 0.6
+      },
+      {
+        "label": "Thickest 0.8 mm",
+        "name": "Thickest",
+        "value": 0.8
+      }
+    ],
+    "label_styles": [
+      "flush",
+      "raised"
+    ],
+    "legacy_raised_label_relief_mm": 0.6,
+    "thicknesses": [
+      {
+        "mm": 0.8,
+        "name": "",
+        "value": "0.8"
+      },
+      {
+        "mm": 1.0,
+        "name": "",
+        "value": "1.0"
+      },
+      {
+        "mm": 1.2,
+        "name": "Default",
+        "value": "1.2"
+      },
+      {
+        "mm": 1.4,
+        "name": "",
+        "value": "1.4"
+      },
+      {
+        "mm": 1.6,
+        "name": "",
+        "value": "1.6"
+      }
+    ]
+  },
+  "lift_grabbers": {
+    "default_location": "sides",
+    "default_size": "medium",
+    "locations": [
+      {
+        "label": "Sides (left/right)",
+        "value": "sides"
+      },
+      {
+        "label": "Front/back",
+        "value": "front_back"
+      },
+      {
+        "label": "Both",
+        "value": "both"
+      }
+    ],
+    "min_wall_mm": 0.687,
+    "rim_clearance_mm": 8.0,
+    "sizes": [
+      {
+        "height_mm": 5.0,
+        "label": "Small",
+        "value": "small"
+      },
+      {
+        "height_mm": 7.0,
+        "label": "Medium",
+        "value": "medium"
+      },
+      {
+        "height_mm": 9.0,
+        "label": "Large",
+        "value": "large"
+      },
+      {
+        "height_mm": 11.0,
+        "label": "XL",
+        "value": "xl"
+      }
+    ]
+  },
+  "max_box_size": 350.0,
+  "min_height_above_base_mm": 5.0,
+  "modes": [
+    {
+      "label": "Printed into the bin",
+      "value": "fused"
+    },
+    {
+      "label": "Separate insert (lifts out)",
+      "value": "separate"
+    }
+  ],
+  "parts": [
+    {
+      "capabilities": [
+        "qty",
+        "along",
+        "item",
+        "alternate"
+      ],
+      "description": "A half-circle notch that holds a tool on its side.",
+      "display": "Cradle \u2014 tools laid down",
+      "fields": [
+        {
+          "default": "0",
+          "key": "spacing",
+          "label": "Spacing",
+          "type": "number"
+        },
+        {
+          "default": "10",
+          "key": "end_margin",
+          "label": "% from ends",
+          "type": "number"
+        }
+      ],
+      "flags": {
+        "along": true,
+        "alternate": true,
+        "item": true,
+        "lean": false,
+        "photo": false,
+        "qty": true,
+        "size": false,
+        "text": false
+      },
+      "icon": "cradle",
+      "item_profiles": [
+        {
+          "label": "Round",
+          "value": "round"
+        }
+      ],
+      "kind": "cradle",
+      "max_instances": null,
+      "options": [
+        {
+          "key": "spacing",
+          "minimum": 0.0,
+          "note": "mm of clear air between neighbouring troughs; 0 = touching",
+          "type": "number"
+        },
+        {
+          "key": "floor_gap",
+          "legacy": true,
+          "minimum": 0.4,
+          "note": "always the fixed floor gap; not a current control",
+          "type": "number"
+        },
+        {
+          "key": "end_margin",
+          "maximum": 45.0,
+          "minimum": 0.0,
+          "note": "percent of the run kept clear at each end (used with alternate ends)",
+          "type": "number"
+        },
+        {
+          "key": "run_offset",
+          "maximum": 100.0,
+          "minimum": -100.0,
+          "note": "percent shift of the row along its run",
+          "type": "number"
+        },
+        {
+          "key": "rib_thickness",
+          "legacy": true,
+          "maximum": 6.0,
+          "note": "always worked out from the held item; not a current control",
+          "type": "number"
+        }
+      ],
+      "palette_visible": true,
+      "title": "Cradle"
+    },
+    {
+      "capabilities": [
+        "photo"
+      ],
+      "description": "A custom holder built from your photo.",
+      "display": "Photo Nest \u2014 a custom holder built from your photo",
+      "fields": [
+        {
+          "default": "0.6",
+          "key": "clearance",
+          "label": "Fit clearance",
+          "type": "number"
+        },
+        {
+          "default": "0",
+          "key": "smoothing",
+          "label": "Soften outline",
+          "type": "number"
+        }
+      ],
+      "flags": {
+        "along": false,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": true,
+        "qty": false,
+        "size": false,
+        "text": false
+      },
+      "icon": "nest",
+      "item_profiles": [],
+      "kind": "nest",
+      "max_instances": null,
+      "options": [
+        {
+          "key": "clearance",
+          "type": "number"
+        },
+        {
+          "key": "smoothing",
+          "type": "number"
+        },
+        {
+          "key": "tool_thickness",
+          "type": "number"
+        },
+        {
+          "key": "rim",
+          "type": "number"
+        },
+        {
+          "key": "holder_style",
+          "type": "enum"
+        },
+        {
+          "key": "cavity_depth",
+          "type": "number"
+        },
+        {
+          "key": "cavity_depth_mode",
+          "type": "enum"
+        },
+        {
+          "key": "auto_size",
+          "type": "boolean"
+        },
+        {
+          "key": "repeat_spacing_percent",
+          "type": "integer"
+        },
+        {
+          "key": "lift_assist",
+          "type": "enum"
+        },
+        {
+          "key": "finger_position",
+          "type": "enum"
+        },
+        {
+          "key": "finger_width",
+          "type": "number"
+        },
+        {
+          "key": "push_position",
+          "type": "enum"
+        },
+        {
+          "key": "push_area",
+          "type": "number"
+        },
+        {
+          "key": "push_depth",
+          "type": "number"
+        },
+        {
+          "key": "photo",
+          "type": "boolean"
+        }
+      ],
+      "palette_visible": true,
+      "title": "Photo Nest"
+    },
+    {
+      "capabilities": [
+        "size",
+        "along",
+        "item"
+      ],
+      "description": "Small pockets for your stuff of various sizes/shapes.",
+      "display": "Bore \u2014 upright tools",
+      "fields": [
+        {
+          "default": "base_straight",
+          "key": "bore_style",
+          "label": "Style",
+          "type": "enum"
+        },
+        {
+          "default": "",
+          "key": "height",
+          "label": "Height",
+          "type": "number"
+        },
+        {
+          "default": "",
+          "key": "depth",
+          "label": "Hole depth",
+          "type": "number"
+        },
+        {
+          "default": "",
+          "key": "walls_depth",
+          "label": "Depth",
+          "type": "number"
+        },
+        {
+          "default": "1.6",
+          "key": "wall",
+          "label": "Wall",
+          "type": "number"
+        },
+        {
+          "default": "",
+          "key": "columns",
+          "label": "X quantity",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "key": "rows",
+          "label": "Y quantity",
+          "type": "integer"
+        },
+        {
+          "default": "0",
+          "key": "angle",
+          "label": "Angle \u00b0",
+          "type": "number"
+        }
+      ],
+      "flags": {
+        "along": true,
+        "alternate": false,
+        "item": true,
+        "lean": false,
+        "photo": false,
+        "qty": false,
+        "size": true,
+        "text": false
+      },
+      "icon": "bore",
+      "item_profiles": [
+        {
+          "label": "Round",
+          "value": "round"
+        },
+        {
+          "label": "Hex",
+          "value": "hex"
+        },
+        {
+          "label": "Diamond",
+          "value": "square"
+        },
+        {
+          "label": "Square",
+          "value": "square_axis"
+        },
+        {
+          "label": "Hex bit \u2013 short",
+          "value": "hex_bit_short"
+        },
+        {
+          "label": "Hex bit \u2013 long",
+          "value": "hex_bit_long"
+        }
+      ],
+      "kind": "bore",
+      "max_instances": null,
+      "options": [
+        {
+          "choices": [
+            {
+              "label": "Base - Straight",
+              "value": "base_straight"
+            },
+            {
+              "label": "Base - Wavy Walls",
+              "value": "base_wavy"
+            },
+            {
+              "label": "Walls Only - Straight",
+              "value": "walls_straight"
+            },
+            {
+              "label": "Walls Only - Wavy",
+              "value": "walls_wavy"
+            }
+          ],
+          "key": "bore_style",
+          "note": "Walls Only and Base - Wavy Walls stand upright, so their angle must be 0",
+          "type": "enum"
+        },
+        {
+          "key": "height",
+          "minimum": 0.1,
+          "note": "mm; blank = worked out from the bin",
+          "type": "number"
+        },
+        {
+          "key": "depth",
+          "minimum": 0.1,
+          "note": "mm; Base styles only; no more than the height",
+          "type": "number"
+        },
+        {
+          "key": "walls_depth",
+          "minimum": 0.1,
+          "note": "mm; Walls Only styles only - how far the held object inserts from the Bore mouth before its stop; blank = through to the normal bin floor (legacy Walls Only default), never more than the height",
+          "type": "number"
+        },
+        {
+          "key": "wall",
+          "minimum": 0.1,
+          "note": "mm wall around each hole",
+          "type": "number"
+        },
+        {
+          "key": "columns",
+          "minimum": 1,
+          "note": "whole number; blank = as many as fit",
+          "type": "integer"
+        },
+        {
+          "key": "rows",
+          "minimum": 1,
+          "note": "whole number; blank = as many as fit",
+          "type": "integer"
+        },
+        {
+          "key": "angle",
+          "maximum": 65.0,
+          "minimum": 0.0,
+          "note": "degrees off vertical (0 = upright); the Designer's \"Bore angle\" field shows 90 minus this value (so displayed 90 = upright = 0 here, displayed 25 = the steepest lean = 65 here); only Base - Straight may lean",
+          "type": "number"
+        },
+        {
+          "choices": [
+            {
+              "label": "Front",
+              "value": "front"
+            },
+            {
+              "label": "Back",
+              "value": "back"
+            },
+            {
+              "label": "Left",
+              "value": "left"
+            },
+            {
+              "label": "Right",
+              "value": "right"
+            }
+          ],
+          "key": "angle_towards",
+          "note": "direction of a new lean; defaults Back or opposite the one rim Text; old saved Bores without this key retain their Feature.along fallback",
+          "type": "enum"
+        },
+        {
+          "choices": [
+            {
+              "label": "Manual",
+              "value": "manual"
+            },
+            {
+              "label": "Bore to bin",
+              "value": "bore_to_bin"
+            },
+            {
+              "label": "Bin to bore",
+              "value": "bin_to_bore"
+            }
+          ],
+          "key": "xy_size_mode",
+          "note": "Walls Only styles allow only manual or bin_to_bore",
+          "type": "enum"
+        },
+        {
+          "choices": [
+            {
+              "label": "Manual",
+              "value": "manual"
+            },
+            {
+              "label": "Bore to bin",
+              "value": "bore_to_bin"
+            },
+            {
+              "label": "Bin to bore",
+              "value": "bin_to_bore"
+            }
+          ],
+          "key": "height_size_mode",
+          "type": "enum"
+        }
+      ],
+      "palette_visible": true,
+      "title": "Bore"
+    },
+    {
+      "capabilities": [
+        "qty",
+        "along"
+      ],
+      "description": "A peg for tape rolls, spools, sockets and rings; add taper to hold contents snugly.",
+      "display": "Center post \u2014 rolls and rings",
+      "fields": [
+        {
+          "default": "16",
+          "key": "height",
+          "label": "Height",
+          "type": "number"
+        },
+        {
+          "default": "12",
+          "key": "diameter",
+          "label": "Diameter",
+          "type": "number"
+        },
+        {
+          "default": "0",
+          "key": "taper",
+          "label": "Taper",
+          "type": "number"
+        },
+        {
+          "default": "4",
+          "key": "spacing",
+          "label": "Spacing",
+          "type": "number"
+        }
+      ],
+      "flags": {
+        "along": true,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": true,
+        "size": false,
+        "text": false
+      },
+      "icon": "post",
+      "item_profiles": [],
+      "kind": "post",
+      "max_instances": null,
+      "options": [
+        {
+          "key": "height",
+          "minimum": 0.1,
+          "note": "mm; must fit inside the bin above the base",
+          "type": "number"
+        },
+        {
+          "key": "diameter",
+          "minimum": 0.1,
+          "note": "mm at the base; must fit the zone",
+          "type": "number"
+        },
+        {
+          "key": "taper",
+          "minimum": 0.0,
+          "note": "mm the peg narrows over its height; must be smaller than the diameter",
+          "type": "number"
+        },
+        {
+          "key": "spacing",
+          "minimum": 0.0,
+          "note": "mm between neighbouring posts",
+          "type": "number"
+        },
+        {
+          "key": "count_x",
+          "maximum": 200,
+          "minimum": 0,
+          "note": "posts across X; 0 = none",
+          "type": "integer"
+        },
+        {
+          "key": "count_y",
+          "maximum": 200,
+          "minimum": 0,
+          "note": "posts across Y; 0 = none",
+          "type": "integer"
+        }
+      ],
+      "palette_visible": true,
+      "title": "Post"
+    },
+    {
+      "capabilities": [
+        "size"
+      ],
+      "description": "A raised open tray for loose small parts.",
+      "display": "Pocket \u2014 loose small parts",
+      "fields": [
+        {
+          "default": "12",
+          "key": "height",
+          "label": "Height",
+          "type": "number"
+        },
+        {
+          "default": "1.6",
+          "key": "wall",
+          "label": "Wall",
+          "type": "number"
+        },
+        {
+          "default": "straight",
+          "key": "wall_style",
+          "label": "Walls",
+          "type": "enum"
+        },
+        {
+          "default": "",
+          "key": "depth",
+          "label": "Recess",
+          "type": "number"
+        }
+      ],
+      "flags": {
+        "along": false,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": false,
+        "size": true,
+        "text": false
+      },
+      "icon": "pocket",
+      "item_profiles": [],
+      "kind": "pocket",
+      "max_instances": null,
+      "options": [
+        {
+          "key": "height",
+          "type": "number"
+        },
+        {
+          "key": "wall",
+          "type": "number"
+        },
+        {
+          "choices": [
+            {
+              "label": "Straight",
+              "value": "straight"
+            },
+            {
+              "label": "Wavy",
+              "value": "wavy"
+            }
+          ],
+          "key": "wall_style",
+          "type": "enum"
+        },
+        {
+          "key": "depth",
+          "type": "number"
+        },
+        {
+          "key": "rounding",
+          "type": "number"
+        }
+      ],
+      "palette_visible": false,
+      "title": "Pocket"
+    },
+    {
+      "capabilities": [
+        "qty",
+        "along"
+      ],
+      "description": "Interior walls that split the bin into compartments.",
+      "display": "Dividers \u2014 split the bin",
+      "fields": [
+        {
+          "default": "1.6",
+          "key": "thickness",
+          "label": "Width",
+          "type": "number"
+        },
+        {
+          "default": "straight",
+          "key": "wall_style",
+          "label": "Walls",
+          "type": "enum"
+        },
+        {
+          "default": "90",
+          "key": "height_percent",
+          "label": "Height",
+          "type": "enum"
+        },
+        {
+          "default": "",
+          "key": "spacing",
+          "label": "Spacing",
+          "type": "number"
+        },
+        {
+          "default": "0",
+          "key": "bottom_angle",
+          "label": "Degree \u00b0",
+          "type": "number"
+        },
+        {
+          "default": "3",
+          "key": "bottom_supports",
+          "label": "Number of crossbars",
+          "type": "integer"
+        }
+      ],
+      "flags": {
+        "along": true,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": true,
+        "size": false,
+        "text": false
+      },
+      "icon": "divider",
+      "item_profiles": [],
+      "kind": "divider",
+      "max_instances": null,
+      "options": [
+        {
+          "key": "thickness",
+          "minimum": 0.4,
+          "note": "mm thickness of each divider wall; must fit inside the bin",
+          "type": "number"
+        },
+        {
+          "choices": [
+            {
+              "label": "Straight",
+              "value": "straight"
+            },
+            {
+              "label": "Wavy",
+              "value": "wavy"
+            }
+          ],
+          "key": "wall_style",
+          "type": "enum"
+        },
+        {
+          "choices": [
+            {
+              "label": "90%",
+              "value": "90"
+            },
+            {
+              "label": "75% - Partial",
+              "value": "75"
+            },
+            {
+              "label": "50% - Half way",
+              "value": "50"
+            },
+            {
+              "label": "25% - Short",
+              "value": "25"
+            }
+          ],
+          "key": "height_percent",
+          "note": "divider wall height as a percentage of the bin's inside height; follows the bin when its height changes",
+          "type": "enum"
+        },
+        {
+          "key": "height",
+          "legacy": true,
+          "minimum": 0.1,
+          "note": "older millimetre height; a saved value opens on the closest height_percent pick and is otherwise ignored",
+          "type": "number"
+        },
+        {
+          "key": "spacing",
+          "minimum": 0.1,
+          "note": "mm between dividers; blank = even split of the count",
+          "type": "number"
+        },
+        {
+          "key": "bottom_angle",
+          "maximum": 80.0,
+          "minimum": -80.0,
+          "note": "degrees of bottom slope either way; any non-zero value gives the divider a sloped bottom",
+          "type": "number"
+        },
+        {
+          "key": "bottom_supports",
+          "minimum": 1,
+          "note": "whole number of bottom crossbars",
+          "type": "integer"
+        },
+        {
+          "key": "count_x",
+          "maximum": 200,
+          "minimum": 0,
+          "note": "dividers running across X; 0 = none",
+          "type": "integer"
+        },
+        {
+          "key": "count_y",
+          "maximum": 200,
+          "minimum": 0,
+          "note": "dividers running across Y; 0 = none",
+          "type": "integer"
+        },
+        {
+          "key": "angle",
+          "legacy": true,
+          "maximum": 45.0,
+          "minimum": -45.0,
+          "note": "the current Designer only builds upright grid dividers; leaning walls are not a current control",
+          "type": "number"
+        },
+        {
+          "key": "slope_base",
+          "note": "older checkbox: true with bottom_angle 0 means the default 20 degree slope; prefer setting bottom_angle",
+          "type": "boolean"
+        },
+        {
+          "key": "reverse_bottom",
+          "legacy": true,
+          "note": "the current Designer reverses slope direction with a negative bottom_angle instead; not a current control",
+          "type": "boolean"
+        },
+        {
+          "key": "alternate_bottom",
+          "note": "true alternates the slope direction between neighbouring compartments",
+          "type": "boolean"
+        },
+        {
+          "key": "minimal_bottom",
+          "note": "true keeps only the supports the slope needs",
+          "type": "boolean"
+        },
+        {
+          "key": "label_divisions",
+          "note": "true adds a label to each compartment (see division_labels, division_level, division_side)",
+          "type": "boolean"
+        },
+        {
+          "choices": [
+            {
+              "label": "Base",
+              "value": "base"
+            },
+            {
+              "label": "Rim",
+              "value": "rim"
+            }
+          ],
+          "key": "division_level",
+          "note": "where division labels sit",
+          "type": "enum"
+        },
+        {
+          "choices": [
+            {
+              "label": "Front",
+              "value": "front"
+            },
+            {
+              "label": "Back",
+              "value": "back"
+            },
+            {
+              "label": "Left",
+              "value": "left"
+            },
+            {
+              "label": "Right",
+              "value": "right"
+            }
+          ],
+          "key": "division_side",
+          "note": "rim side that carries division labels (division_level = rim)",
+          "type": "enum"
+        },
+        {
+          "key": "division_labels",
+          "note": "list of label texts, one per compartment, when label_divisions is true",
+          "type": "json"
+        },
+        {
+          "choices": [
+            {
+              "label": "Side to side",
+              "value": "side_to_side"
+            },
+            {
+              "label": "Front to back",
+              "value": "front_to_back"
+            }
+          ],
+          "key": "division_label_orientation",
+          "note": "lettering direction of base-level division labels; front_to_back rotates the text 90 degrees so it reads front to back",
+          "type": "enum"
+        },
+        {
+          "key": "compartment_spans",
+          "note": "optional list describing merged compartments; leave empty unless merging",
+          "type": "json"
+        },
+        {
+          "key": "scoop",
+          "note": "optional object {depth, side, ...} adding a scoop to every compartment; leave empty for none",
+          "type": "json"
+        }
+      ],
+      "palette_visible": true,
+      "title": "Dividers"
+    },
+    {
+      "capabilities": [
+        "qty",
+        "size",
+        "along"
+      ],
+      "description": "Angled slots for driver bits, cards, and small tools.",
+      "display": "Slot Rack \u2014 tilted tools",
+      "fields": [
+        {
+          "default": "",
+          "key": "height",
+          "label": "Height",
+          "type": "number"
+        },
+        {
+          "default": "",
+          "key": "depth",
+          "label": "Depth",
+          "type": "number"
+        },
+        {
+          "default": "4",
+          "key": "thickness",
+          "label": "Thickness",
+          "type": "number"
+        },
+        {
+          "default": "20",
+          "key": "angle",
+          "label": "Angle \u00b0",
+          "type": "number"
+        },
+        {
+          "default": "1.6",
+          "key": "wall",
+          "label": "Wall",
+          "type": "number"
+        },
+        {
+          "default": "straight",
+          "key": "wall_style",
+          "label": "Walls",
+          "type": "enum"
+        }
+      ],
+      "flags": {
+        "along": true,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": true,
+        "size": true,
+        "text": false
+      },
+      "icon": "slot",
+      "item_profiles": [],
+      "kind": "slot",
+      "max_instances": null,
+      "options": [
+        {
+          "key": "height",
+          "minimum": 0.1,
+          "note": "mm; blank = worked out from the bin",
+          "type": "number"
+        },
+        {
+          "key": "depth",
+          "minimum": 0.1,
+          "note": "mm; must be less than the height",
+          "type": "number"
+        },
+        {
+          "key": "thickness",
+          "minimum": 0.1,
+          "note": "mm width of each slot",
+          "type": "number"
+        },
+        {
+          "key": "angle",
+          "maximum": 45.0,
+          "minimum": 0.0,
+          "note": "degrees the slots lean",
+          "type": "number"
+        },
+        {
+          "key": "wall",
+          "minimum": 0.1,
+          "note": "mm wall around the slots",
+          "type": "number"
+        },
+        {
+          "choices": [
+            {
+              "label": "Straight",
+              "value": "straight"
+            },
+            {
+              "label": "Wavy",
+              "value": "wavy"
+            }
+          ],
+          "key": "wall_style",
+          "type": "enum"
+        }
+      ],
+      "palette_visible": true,
+      "title": "Slot Rack"
+    },
+    {
+      "capabilities": [
+        "qty",
+        "size",
+        "along"
+      ],
+      "description": "Stepped shelves rising from front to back.",
+      "display": "Steps \u2014 tiered riser",
+      "fields": [
+        {
+          "default": "",
+          "key": "height",
+          "label": "Step height",
+          "type": "number"
+        }
+      ],
+      "flags": {
+        "along": true,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": true,
+        "size": true,
+        "text": false
+      },
+      "icon": "steps",
+      "item_profiles": [],
+      "kind": "steps",
+      "max_instances": null,
+      "options": [
+        {
+          "key": "height",
+          "minimum": 0.1,
+          "note": "mm of the tallest step; blank = half the bin height",
+          "type": "number"
+        },
+        {
+          "key": "count",
+          "minimum": 1,
+          "note": "number of steps",
+          "type": "integer"
+        }
+      ],
+      "palette_visible": true,
+      "title": "Steps"
+    },
+    {
+      "capabilities": [],
+      "description": "A curved retrieval ramp for easy access to small parts.",
+      "display": "Scoop \u2014 retrieval ramp",
+      "fields": [
+        {
+          "default": "60",
+          "key": "depth",
+          "label": "Depth",
+          "type": "number"
+        }
+      ],
+      "flags": {
+        "along": false,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": false,
+        "size": false,
+        "text": false
+      },
+      "icon": "scoop",
+      "item_profiles": [],
+      "kind": "scoop",
+      "max_instances": null,
+      "options": [
+        {
+          "key": "depth",
+          "maximum": 100.0,
+          "minimum": 1.0,
+          "note": "percent of the usable bin height the scoop rises",
+          "type": "number"
+        }
+      ],
+      "palette_visible": true,
+      "title": "Scoop"
+    },
+    {
+      "capabilities": [
+        "text"
+      ],
+      "description": "Centered lettering on the base or rim, Inlaid or Raised.",
+      "display": "Label \u2014 centered lettering",
+      "fields": [
+        {
+          "default": "",
+          "key": "cap_height",
+          "label": "Letter height",
+          "type": "number"
+        },
+        {
+          "default": "0.4",
+          "key": "depth",
+          "label": "Inlay depth / Raised height",
+          "type": "number"
+        }
+      ],
+      "flags": {
+        "along": false,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": false,
+        "size": false,
+        "text": true
+      },
+      "icon": "text",
+      "item_profiles": [],
+      "kind": "text",
+      "max_instances": null,
+      "options": [
+        {
+          "key": "cap_height",
+          "note": "positive finite mm; blank = biggest whole-mm height up to 15 mm that fits (set text_v2 = true when giving a value)",
+          "type": "number"
+        },
+        {
+          "choices": [
+            {
+              "label": "0.2 mm",
+              "value": "0.2"
+            },
+            {
+              "label": "0.4 mm",
+              "value": "0.4"
+            },
+            {
+              "label": "0.6 mm",
+              "value": "0.6"
+            },
+            {
+              "label": "0.8 mm",
+              "value": "0.8"
+            }
+          ],
+          "key": "depth",
+          "note": "mm; recessed depth or raised height of the lettering",
+          "type": "number"
+        },
+        {
+          "key": "text",
+          "note": "the words to print; required",
+          "type": "string"
+        },
+        {
+          "key": "font",
+          "legacy": true,
+          "note": "not a current Designer control; every Text part uses the one built-in font",
+          "type": "string"
+        },
+        {
+          "key": "raised",
+          "note": "true = raised lettering, false = recessed inlay",
+          "type": "boolean"
+        },
+        {
+          "key": "quarter_turns",
+          "maximum": 3,
+          "minimum": 0,
+          "note": "90-degree turns of the lettering (base text only)",
+          "type": "integer"
+        },
+        {
+          "choices": [
+            {
+              "label": "On the base",
+              "value": "base"
+            },
+            {
+              "label": "On the rim ledge",
+              "value": "rim"
+            }
+          ],
+          "key": "level",
+          "type": "enum"
+        },
+        {
+          "internal": true,
+          "key": "retarget",
+          "note": "internal editor helper consumed by the app; never set it",
+          "type": "string"
+        },
+        {
+          "choices": [
+            {
+              "label": "Front",
+              "value": "front"
+            },
+            {
+              "label": "Back",
+              "value": "back"
+            },
+            {
+              "label": "Left",
+              "value": "left"
+            },
+            {
+              "label": "Right",
+              "value": "right"
+            }
+          ],
+          "key": "rim_side",
+          "note": "only when level = rim",
+          "type": "enum"
+        }
+      ],
+      "palette_visible": true,
+      "title": "Label"
+    },
+    {
+      "capabilities": [
+        "box_modifier"
+      ],
+      "description": "Add a lid or make matching bins stack together.",
+      "display": "Lid & Stacking",
+      "fields": [],
+      "flags": {
+        "along": false,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": false,
+        "size": false,
+        "text": false
+      },
+      "icon": "lid_stacking",
+      "kind": "lid_stacking",
+      "max_instances": 1,
+      "options": [],
+      "palette_visible": true,
+      "title": "Lid & Stacking"
+    },
+    {
+      "capabilities": [
+        "box_modifier"
+      ],
+      "description": "A finger grip inside the bin so it is easier to lift.",
+      "display": "Inside Grip",
+      "fields": [],
+      "flags": {
+        "along": false,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": false,
+        "size": false,
+        "text": false
+      },
+      "icon": "inside_handles",
+      "kind": "inside_handles",
+      "max_instances": 1,
+      "options": [],
+      "palette_visible": true,
+      "title": "Inside Grip"
+    },
+    {
+      "capabilities": [
+        "box_modifier"
+      ],
+      "description": "Finger-access cutouts through selected bin walls.",
+      "display": "Side Openings",
+      "fields": [],
+      "flags": {
+        "along": false,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": false,
+        "size": false,
+        "text": false
+      },
+      "icon": "side_openings",
+      "kind": "side_openings",
+      "max_instances": 1,
+      "options": [],
+      "palette_visible": true,
+      "title": "Side Openings"
+    },
+    {
+      "capabilities": [
+        "box_modifier"
+      ],
+      "description": "Add a label and/or screw mounting for an outside edge.",
+      "display": "Edge Mount",
+      "fields": [],
+      "flags": {
+        "along": false,
+        "alternate": false,
+        "item": false,
+        "lean": false,
+        "photo": false,
+        "qty": false,
+        "size": false,
+        "text": false
+      },
+      "icon": "edge_mount",
+      "kind": "edge_mount",
+      "max_instances": 1,
+      "options": [],
+      "palette_visible": true,
+      "title": "Edge Mount"
+    }
+  ],
+  "pegboard_rules": {
+    "cleat_x": {
+      "max": 5,
+      "min": 1
+    },
+    "cleat_y": {
+      "max": 3,
+      "min": 1
+    },
+    "receiver": {
+      "edge_inset_mm": 2.0,
+      "height_mm": 35.4,
+      "max_unsupported_gap_mm": 40.0,
+      "projection_mm": 5.5,
+      "width_mm": 14.0
+    },
+    "size_modes": [
+      "physical",
+      "holes"
+    ],
+    "standards": [
+      {
+        "adapter_strategy": "straight_and_hooked_pegs",
+        "board_holes_per_adapter": 2,
+        "first_seat_row": 1,
+        "id": "standard",
+        "minimum_heights_mm": [
+          47.1,
+          97.9,
+          148.7
+        ],
+        "minimum_widths_mm": [
+          21.7,
+          47.1,
+          72.5,
+          97.9,
+          123.3
+        ],
+        "name": "Standard Pegboard",
+        "opening_height_mm": 6.35,
+        "opening_shape": "round",
+        "opening_width_mm": 6.35,
+        "pitch_x_mm": 25.4,
+        "pitch_y_mm": 25.4,
+        "seat_row_stride": 2,
+        "stagger_x_mm": 0.0
+      },
+      {
+        "adapter_strategy": "skadis_slots",
+        "board_holes_per_adapter": 1,
+        "first_seat_row": 1,
+        "id": "skadis",
+        "minimum_heights_mm": [
+          39.0,
+          59.0,
+          79.0
+        ],
+        "minimum_widths_mm": [
+          49.0,
+          89.0,
+          129.0,
+          169.0,
+          209.0
+        ],
+        "name": "IKEA SK\u00c5DIS",
+        "opening_height_mm": 15.0,
+        "opening_shape": "rounded_slot",
+        "opening_width_mm": 5.0,
+        "pitch_x_mm": 40.0,
+        "pitch_y_mm": 20.0,
+        "seat_row_stride": 1,
+        "stagger_x_mm": 20.0
+      }
+    ]
+  },
+  "platform": "browser",
+  "preferences": {},
+  "runtime": {
+    "filesystem": "browser",
+    "hosted": true
+  },
+  "scoop_rules": {
+    "height_fraction": 0.6
+  },
+  "setting_interactions": [
+    {
+      "effect": "auto-adjust",
+      "feature": "cradle",
+      "owner": "cradle-sizing",
+      "reason": "Tool length grows the run; a hand-sized run is never shrunk.",
+      "source": "item.length",
+      "target": "zone.run"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "cradle",
+      "owner": "cradle-sizing",
+      "reason": "Tool diameter and generated wall grow the Cradle width.",
+      "source": "item.diameter",
+      "target": "zone.across"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "cradle",
+      "owner": "cradle-sizing",
+      "reason": "Quantity grows the cross-axis footprint for all troughs.",
+      "source": "count",
+      "target": "zone.across"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "cradle",
+      "owner": "cradle-sizing",
+      "reason": "Spacing grows the footprint without shrinking manual size.",
+      "source": "spacing",
+      "target": "zone.across"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "cradle",
+      "owner": "cradle-editor",
+      "reason": "Alternate ends shows end clearance and uses it for sizing.",
+      "source": "alternate_ends",
+      "target": "end_margin"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "cradle",
+      "owner": "cradle-editor",
+      "reason": "Run offset applies only while Alternate ends is off.",
+      "source": "alternate_ends",
+      "target": "run_offset"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "cradle",
+      "owner": "cradle-sizing",
+      "reason": "Alternate-end clearance can grow the required run length.",
+      "source": "end_margin",
+      "target": "zone.run"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "nest",
+      "owner": "nest-repeat",
+      "reason": "The repeated group footprint is recalculated.",
+      "source": "count",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "nest",
+      "owner": "nest-repeat",
+      "reason": "The repeated group footprint is recalculated.",
+      "source": "rotation",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "nest",
+      "owner": "nest-repeat",
+      "reason": "The repeated group footprint is recalculated.",
+      "source": "alternate_ends",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "nest",
+      "owner": "nest-repeat",
+      "reason": "The repeated group footprint is recalculated.",
+      "source": "repeat_spacing_percent",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "nest",
+      "owner": "nest",
+      "reason": "Switching to Recessed Cavity turns off Push Out and resolves Automatic finger access instead.",
+      "source": "holder_style",
+      "target": "lift_assist"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "nest",
+      "owner": "nest-editor",
+      "reason": "Finger locations are active only for Custom finger access.",
+      "source": "lift_assist",
+      "target": "finger_position"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "nest",
+      "owner": "nest-editor",
+      "reason": "Finger width is active only for Custom finger access.",
+      "source": "lift_assist",
+      "target": "finger_width"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "nest",
+      "owner": "nest-editor",
+      "reason": "Push position is active only for Push Out.",
+      "source": "lift_assist",
+      "target": "push_position"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "nest",
+      "owner": "nest-editor",
+      "reason": "Push area is active only for Push Out.",
+      "source": "lift_assist",
+      "target": "push_area"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "nest",
+      "owner": "nest-editor",
+      "reason": "Push depth is active only for Push Out.",
+      "source": "lift_assist",
+      "target": "push_depth"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "nest",
+      "owner": "nest",
+      "reason": "Cavity depth recalculates to 60% of tool thickness while it is set to Auto.",
+      "source": "tool_thickness",
+      "target": "cavity_depth"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "nest",
+      "owner": "nest-sizing",
+      "reason": "Fit clearance grows the contour footprint without shrinking the bin.",
+      "source": "clearance",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "nest",
+      "owner": "nest-sizing",
+      "reason": "Outline wall grows the contour footprint.",
+      "source": "rim",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "nest",
+      "owner": "nest-sizing",
+      "reason": "Outline smoothing recalculates the fitted contour bounds.",
+      "source": "smoothing",
+      "target": "zone"
+    },
+    {
+      "effect": "constraint",
+      "feature": "nest",
+      "owner": "nest",
+      "reason": "Push Out adds its deck depth to the required wall height.",
+      "source": "push_depth",
+      "target": "height"
+    },
+    {
+      "effect": "constraint",
+      "feature": "nest",
+      "owner": "nest",
+      "reason": "Recessed Cavity's deck depth must fit above the printable floor.",
+      "source": "cavity_depth",
+      "target": "height"
+    },
+    {
+      "effect": "constraint",
+      "feature": "bore",
+      "owner": "bore-shell",
+      "reason": "A user-edited Hole depth wins and raises Height to at least that depth.",
+      "source": "depth",
+      "target": "height"
+    },
+    {
+      "effect": "constraint",
+      "feature": "bore",
+      "owner": "bore-shell",
+      "reason": "A user-edited Height wins and lowers Hole depth to no more than that height.",
+      "source": "height",
+      "target": "depth"
+    },
+    {
+      "effect": "default",
+      "feature": "bore",
+      "owner": "bore",
+      "reason": "A leaned Bore uses a thicker wall unless Wall is explicitly set.",
+      "source": "angle",
+      "target": "wall"
+    },
+    {
+      "effect": "reset",
+      "feature": "bore",
+      "owner": "bore-editor",
+      "reason": "Base - Wavy Walls and both Walls Only styles stand upright, so choosing one removes a stored lean.",
+      "source": "bore_style",
+      "target": "angle"
+    },
+    {
+      "effect": "default",
+      "feature": "bore",
+      "owner": "bore",
+      "reason": "Base - Wavy Walls and Walls Only take the bin wall; Base - Straight Walls keeps its own internal wall.",
+      "source": "bore_style",
+      "target": "wall"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "bore",
+      "owner": "bore-sizing",
+      "reason": "Walls Only sizes to the sleeves' outer envelope; Wavy walls reach further than straight walls.",
+      "source": "bore_style",
+      "target": "zone"
+    },
+    {
+      "effect": "default",
+      "feature": "bore",
+      "owner": "bore-editor",
+      "reason": "Switching from Walls Only to a Base style keeps a floor-reaching cavity by taking the Bore's Height as Hole depth.",
+      "source": "bore_style",
+      "target": "depth"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "bore",
+      "owner": "bore-sizing",
+      "reason": "Auto size bore to bin fills the usable bin; Auto size bin to bore fits the bin around the Bore's minimum footprint.",
+      "source": "xy_size_mode",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "bore",
+      "owner": "bore-sizing",
+      "reason": "Auto size bore to bin derives Height from the bin, connector keep-out and Edge Mount screwdriver access; Auto size bin to bore keeps Height and resizes the bin.",
+      "source": "height_size_mode",
+      "target": "height"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "bore",
+      "owner": "bore-editor",
+      "reason": "Direction is shown only for a Bore that is actually leaned.",
+      "source": "angle",
+      "target": "angle_towards"
+    },
+    {
+      "effect": "reset",
+      "feature": "bore",
+      "owner": "bore-editor",
+      "reason": "Hex-bit presets stand upright and remove a stored lean.",
+      "source": "item.profile",
+      "target": "angle"
+    },
+    {
+      "effect": "default",
+      "feature": "bore",
+      "owner": "bore",
+      "reason": "Hex-bit presets own their fixed across-flats diameter.",
+      "source": "item.profile",
+      "target": "item.diameter"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "bore",
+      "owner": "bore-sizing",
+      "reason": "X quantity grows the Bore Base to its minimum printable width.",
+      "source": "columns",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "bore",
+      "owner": "bore-sizing",
+      "reason": "Y quantity grows the Bore Base to its minimum printable length.",
+      "source": "rows",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "bore",
+      "owner": "bore-sizing",
+      "reason": "Hole diameter grows the Base footprint.",
+      "source": "item.diameter",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "bore",
+      "owner": "bore-sizing",
+      "reason": "Wall thickness grows the Base footprint.",
+      "source": "wall",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "bore",
+      "owner": "bore-sizing",
+      "reason": "Lean grows the Base along the selected direction.",
+      "source": "angle",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "bore",
+      "owner": "bore-sizing",
+      "reason": "Lean direction determines which Base axis receives the extra reach.",
+      "source": "angle_towards",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "post",
+      "owner": "post-sizing",
+      "reason": "Quantity grows the Post row on its run axis.",
+      "source": "count",
+      "target": "zone.run"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "post",
+      "owner": "post-sizing",
+      "reason": "Post diameter grows the footprint needed by each peg.",
+      "source": "diameter",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "post",
+      "owner": "post-sizing",
+      "reason": "Spacing grows the row without shrinking a manual Base size.",
+      "source": "spacing",
+      "target": "zone.run"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "post",
+      "owner": "post-sizing",
+      "reason": "Changing orientation swaps which footprint axis the row uses.",
+      "source": "along",
+      "target": "zone"
+    },
+    {
+      "effect": "constraint",
+      "feature": "pocket",
+      "owner": "pocket-shell",
+      "reason": "A user-edited Recess wins and raises Height to keep a 2 mm floor.",
+      "source": "depth",
+      "target": "height"
+    },
+    {
+      "effect": "constraint",
+      "feature": "pocket",
+      "owner": "pocket-shell",
+      "reason": "A user-edited Height wins and lowers Recess to keep a 2 mm floor.",
+      "source": "height",
+      "target": "depth"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "pocket",
+      "owner": "pocket-sizing",
+      "reason": "Wall changes preserve entered inside size by resizing the outside zone.",
+      "source": "wall",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "pocket",
+      "owner": "pocket-sizing",
+      "reason": "Wall style changes shell reach while preserving inside Width/Length.",
+      "source": "wall_style",
+      "target": "zone"
+    },
+    {
+      "effect": "default",
+      "feature": "pocket",
+      "owner": "pocket",
+      "reason": "Automatic rounding follows the smaller pocket side and wall.",
+      "source": "zone",
+      "target": "rounding"
+    },
+    {
+      "effect": "derived",
+      "feature": "divider",
+      "owner": "divider",
+      "reason": "Legacy single-direction wall count determines logical compartments.",
+      "source": "count",
+      "target": "cells"
+    },
+    {
+      "effect": "derived",
+      "feature": "divider",
+      "owner": "divider",
+      "reason": "Legacy wall spacing determines logical compartment boundaries.",
+      "source": "spacing",
+      "target": "cells"
+    },
+    {
+      "effect": "derived",
+      "feature": "divider",
+      "owner": "divider",
+      "reason": "Grid X wall count determines logical compartment columns.",
+      "source": "count_x",
+      "target": "cells"
+    },
+    {
+      "effect": "derived",
+      "feature": "divider",
+      "owner": "divider",
+      "reason": "Grid Y wall count determines logical compartment rows.",
+      "source": "count_y",
+      "target": "cells"
+    },
+    {
+      "effect": "constraint",
+      "feature": "divider",
+      "owner": "divider",
+      "reason": "Wall thickness reduces each compartment's usable floor region.",
+      "source": "thickness",
+      "target": "cells"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "divider",
+      "owner": "divider",
+      "reason": "An enabled Divider Scoop builds one shared Scoop in every compartment.",
+      "source": "scoop.enabled",
+      "target": "scoop.geometry"
+    },
+    {
+      "effect": "derived",
+      "feature": "divider",
+      "owner": "divider",
+      "reason": "Each Divider compartment receives one Scoop while the setting is enabled.",
+      "source": "cells",
+      "target": "scoop.geometry"
+    },
+    {
+      "effect": "derived",
+      "feature": "divider",
+      "owner": "scoop",
+      "reason": "Divider Scoops use the same depth-to-height rule as standalone Scoops.",
+      "source": "scoop.depth",
+      "target": "scoop.height"
+    },
+    {
+      "effect": "reset",
+      "feature": "divider",
+      "owner": "divider-editor",
+      "reason": "A Scoop and a sloped bottom cannot own the same compartment floor.",
+      "source": "scoop.enabled",
+      "target": "slope_base"
+    },
+    {
+      "effect": "reset",
+      "feature": "divider",
+      "owner": "divider-editor",
+      "reason": "Selecting a sloped bottom removes the mutually exclusive Scoop.",
+      "source": "slope_base",
+      "target": "scoop.enabled"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "divider",
+      "owner": "divider",
+      "reason": "Base-level division labels move to the high-Y band left clear by the Scoop.",
+      "source": "scoop.enabled",
+      "target": "division_labels.region"
+    },
+    {
+      "effect": "reset",
+      "feature": "divider",
+      "owner": "divider-editor",
+      "reason": "Entering either grid quantity retires the legacy single-axis count.",
+      "source": "count_x",
+      "target": "count"
+    },
+    {
+      "effect": "reset",
+      "feature": "divider",
+      "owner": "divider-editor",
+      "reason": "Entering either grid quantity retires the legacy single-axis count.",
+      "source": "count_y",
+      "target": "count"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "divider",
+      "owner": "divider-sizing",
+      "reason": "Wall width grows the Divider footprint when required.",
+      "source": "thickness",
+      "target": "zone"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "divider",
+      "owner": "divider-editor",
+      "reason": "Bottom angle is active only while sloped bottoms are enabled.",
+      "source": "slope_base",
+      "target": "bottom_angle"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "divider",
+      "owner": "divider-editor",
+      "reason": "Crossbar controls are active only for sloped bottoms.",
+      "source": "slope_base",
+      "target": "bottom_supports"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "divider",
+      "owner": "divider-editor",
+      "reason": "Crossbar count is shown only when support crossbars are selected.",
+      "source": "minimal_bottom",
+      "target": "bottom_supports"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "divider",
+      "owner": "divider-editor",
+      "reason": "Division label text is active only when compartment labels are enabled.",
+      "source": "label_divisions",
+      "target": "division_labels"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "divider",
+      "owner": "divider",
+      "reason": "Rim-level Divider labels use the Text part's selected-side shelf profile.",
+      "source": "division_level",
+      "target": "division_labels.shelf"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "divider",
+      "owner": "divider",
+      "reason": "Wall style changes wall path/thickness compensation while preserving logical compartments.",
+      "source": "wall_style",
+      "target": "wall_geometry"
+    },
+    {
+      "effect": "constraint",
+      "feature": "slot",
+      "owner": "slot-shell",
+      "reason": "A user-edited Depth wins and raises Height to keep a 2 mm floor.",
+      "source": "depth",
+      "target": "height"
+    },
+    {
+      "effect": "constraint",
+      "feature": "slot",
+      "owner": "slot-shell",
+      "reason": "A user-edited Height wins and lowers Depth to keep a 2 mm floor.",
+      "source": "height",
+      "target": "depth"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "slot",
+      "owner": "slot-sizing",
+      "reason": "Quantity grows the Slot Rack run on its selected axis.",
+      "source": "count",
+      "target": "zone.run"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "slot",
+      "owner": "slot-sizing",
+      "reason": "Slot thickness changes the pitch and required run length.",
+      "source": "thickness",
+      "target": "zone.run"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "slot",
+      "owner": "slot-sizing",
+      "reason": "Wall thickness changes the bank footprint.",
+      "source": "wall",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "slot",
+      "owner": "slot-sizing",
+      "reason": "Wall style changes the required bank footprint.",
+      "source": "wall_style",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "slot",
+      "owner": "slot-sizing",
+      "reason": "Slot angle changes the projected pitch and required run length.",
+      "source": "angle",
+      "target": "zone.run"
+    },
+    {
+      "effect": "derived",
+      "feature": "scoop",
+      "owner": "scoop",
+      "reason": "Depth percent determines the Scoop rise within the available bin height.",
+      "source": "depth",
+      "target": "height"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "scoop",
+      "owner": "scoop",
+      "reason": "Depth percent determines the floor run while the container owns placement.",
+      "source": "depth",
+      "target": "region"
+    },
+    {
+      "effect": "derived",
+      "feature": "text",
+      "owner": "text-fit",
+      "reason": "Letter height derives the glyph outline and its interaction bounds.",
+      "source": "cap_height",
+      "target": "zone"
+    },
+    {
+      "effect": "derived",
+      "feature": "text",
+      "owner": "text-fit",
+      "reason": "Changing the lettering re-derives the glyph outline and its bounds.",
+      "source": "text",
+      "target": "zone"
+    },
+    {
+      "effect": "derived",
+      "feature": "text",
+      "owner": "text-fit",
+      "reason": "Turning base Text re-derives its bounds around the same centre.",
+      "source": "quarter_turns",
+      "target": "zone"
+    },
+    {
+      "effect": "auto-adjust",
+      "feature": "text",
+      "owner": "text-editor",
+      "reason": "Changing Style recenters the Text in its new base or rim destination.",
+      "source": "level",
+      "target": "zone"
+    },
+    {
+      "effect": "enable/disable",
+      "feature": "text",
+      "owner": "text-editor",
+      "reason": "Rim Text follows its rim side's readable orientation and has no Rotate control.",
+      "source": "level",
+      "target": "quarter_turns"
+    }
+  ],
+  "side_openings": {
+    "arch_curve": 0.5,
+    "corner_margin_mm": 3.5,
+    "default_from_bottom_percent": 0,
+    "default_from_top_percent": 0,
+    "default_shape": "curved",
+    "default_size": "medium",
+    "min_side_mm": 14.0,
+    "shapes": [
+      {
+        "label": "Curved",
+        "value": "curved"
+      },
+      {
+        "label": "Square",
+        "value": "square"
+      }
+    ],
+    "sides": [
+      {
+        "label": "Front",
+        "value": "front"
+      },
+      {
+        "label": "Back",
+        "value": "back"
+      },
+      {
+        "label": "Left",
+        "value": "left"
+      },
+      {
+        "label": "Right",
+        "value": "right"
+      }
+    ],
+    "sizes": [
+      {
+        "label": "Small \u2014 8 mm",
+        "value": "small",
+        "width_mm": 8.0
+      },
+      {
+        "label": "Medium \u2014 10 mm",
+        "value": "medium",
+        "width_mm": 10.0
+      },
+      {
+        "label": "Large \u2014 15 mm",
+        "value": "large",
+        "width_mm": 15.0
+      },
+      {
+        "label": "XL \u2014 20 mm",
+        "value": "xl",
+        "width_mm": 20.0
+      }
+    ],
+    "top_bridge_mm": 4.0
+  },
+  "slicer": {
+    "available": false,
+    "name": "Bambu Studio",
+    "path": null
+  },
+  "stack_rules": {
+    "base_min_by_wall_mm": {
+      "direct": {
+        "0.2": 2.8,
+        "0.4": 2.8,
+        "0.6": 2.8,
+        "0.8": 2.8,
+        "1": 2.8,
+        "1.2": 2.8,
+        "1.4": 2.8,
+        "1.6": 2.8,
+        "1.8": 2.8,
+        "2": 2.8,
+        "2.2": 2.8,
+        "2.4": 2.8
+      }
+    },
+    "default_base_mm": 0.8,
+    "default_wall_mm": 0.8,
+    "min_wall_mm": 1.2
+  },
+  "storage_drawers_rules": {
+    "default_drawer_fit_mm": 0.4,
+    "default_field_mm": [
+      210.0,
+      119.0
+    ],
+    "default_frame_width_mm": 14.0,
+    "default_printer_build_mm": [
+      256.0,
+      256.0,
+      256.0
+    ],
+    "default_usable_height_mm": 40.0,
+    "drawer_fit_choices_mm": [
+      0.3,
+      0.4,
+      0.6
+    ],
+    "frame_width_choices_mm": [
+      10.0,
+      14.0,
+      18.0
+    ],
+    "label_limit": 80,
+    "max_drawers": 32,
+    "max_units": 250,
+    "max_usable_height_mm": 2000.0,
+    "min_drawers": 1,
+    "min_units": 6
+  },
+  "text_depth_rules": {
+    "min_backing_mm": 0.2,
+    "removable_base_plate_mm": 0.6
+  },
+  "version": "1",
+  "wall_rules": {
+    "choices": [
+      {
+        "label": "Extremely thin (experimental)",
+        "value": 0.4
+      },
+      {
+        "label": "Very thin (experimental)",
+        "value": 0.5
+      },
+      {
+        "label": "Default",
+        "value": 0.8
+      },
+      {
+        "label": "Sturdy",
+        "value": 1.0
+      },
+      {
+        "label": "Strong",
+        "value": 1.2
+      },
+      {
+        "label": "Heavy",
+        "value": 1.6
+      },
+      {
+        "label": "Extra heavy",
+        "value": 2.0
+      },
+      {
+        "label": "Maximum",
+        "value": 2.4
+      }
+    ],
+    "default_mm": 0.8,
+    "mating_gap_mm": 0.25,
+    "max_mm": 2.4,
+    "min_mm": 0.2,
+    "step_mm": 0.2,
+    "wall_depth_factor": 1.5283797729618165,
+    "wave_amplitude_mm": 0.4
+  }
+}

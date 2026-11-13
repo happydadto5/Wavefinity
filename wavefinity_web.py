@@ -731,381 +731,18 @@ def nest_trace_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def catalog_payload() -> dict[str, Any]:
-    from wavefinity_web_impl._ai import grid_editor_catalog
-    parts = [
-        {
-            "kind": definition.kind,
-            "title": definition.title,
-            "display": definition.display,
-            "description": definition.description,
-            "icon": definition.icon,
-            "flags": definition.flags,
-            "fields": [
-                {
-                    "label": option.label,
-                    "key": option.key,
-                    "default": option.default,
-                    "type": option.value_type,
-                }
-                for option in definition.options if option.editor
-            ],
-            "options": [_option_payload(option) for option in definition.options],
-            "item_profiles": [
-                {"value": value, "label": dict(ITEM_PROFILES)[value]}
-                for value in definition.item_profiles
-            ],
-            "capabilities": list(definition.capabilities),
-            "max_instances": definition.max_instances,
-            "palette_visible": definition.palette_visible,
-        }
-        for definition in feature_definitions()
-    ]
-    empty_flags = {
-        "qty": False, "size": False, "along": False, "item": False,
-        "lean": False, "alternate": False, "photo": False, "text": False,
-    }
-    for kind, title, description in (
-        ("lid_stacking", "Lid & Stacking",
-         "Add a lid or make matching bins stack together."),
-        ("inside_handles", "Inside Grip",
-         "A finger grip inside the bin so it is easier to lift."),
-        ("side_openings", "Side Openings",
-         "Finger-access cutouts through selected bin walls."),
-        ("edge_mount", "Edge Mount",
-         "Add a label and/or screw mounting for an outside edge."),
-    ):
-        parts.append({
-            "kind": kind,
-            "title": title,
-            "display": title,
-            "description": description,
-            "icon": kind,
-            "flags": dict(empty_flags),
-            "fields": [],
-            "options": [],
-            "capabilities": ["box_modifier"],
-            "max_instances": 1,
-            "palette_visible": True,
-        })
+    from wavefinity_web_impl._catalog import catalog_payload as canonical_catalog
     import sys
-    return {
-        "platform": sys.platform,
-        "version": SERVER_VERSION,
-        "instance": SERVER_INSTANCE,
-        "api_compat": API_COMPAT_VERSION,
-        "build": SERVER_BUILD,
-        "base_unit": BASE_UNIT,
-        "grids": grid_editor_catalog(),
-        "max_box_size": MAX_BOX_SIZE,
-        "min_height_above_base_mm": MIN_HEIGHT_ABOVE_BASE,
-        "drawer_rules": {
-            "hard_wall_clearance_mm": DRAWER_HARD_CLEARANCE_MM,
-            "ordinary_bin_min_height_mm": ORDINARY_BIN_MIN_HEIGHT_MM,
-            "min_usable_drawer_height_mm": STORAGE_DRAWERS_MIN_USABLE_HEIGHT_MM,
-        },
-        "pegboard_rules": pegboard_catalog(),
-        "item_rules": {
-            "profiles": [{"value": value, "label": label} for value, label in ITEM_PROFILES],
-            "default_clearance_mm": ITEM_CLEARANCE,
-            "bore_clearance_mm": BORE_CLEARANCE,
-            "hex_bit": HEX_BIT_FIXED,
-        },
-        "text_depth_rules": {
-            "min_backing_mm": TEXT_MIN_BACKING,
-            "removable_base_plate_mm": BASE_PLATE,
-        },
-        "modes": [
-            {"value": "fused", "label": "Printed into the bin"},
-            {"value": "separate", "label": "Separate insert (lifts out)"},
-        ],
-        "parts": parts,
-        "wall_rules": {
-            "default_mm": DEFAULT_WALL,
-            "min_mm": MIN_WALL,
-            "max_mm": MAX_WALL,
-            "step_mm": WALL_STEP,
-            # What a *new* design may be given.  MIN_WALL/WALL_STEP stay as
-            # the validation floor and quantum, so a saved design carrying a
-            # non-preset wall still loads and regenerates unchanged.
-            "choices": [
-                {"value": value, "label": label} for value, label in WALL_PRESETS
-            ],
-            "wall_depth_factor": math.sqrt(1.0 + max_wave_slope() ** 2),
-            "wave_amplitude_mm": WAVE_AMPLITUDE,
-            "mating_gap_mm": WAVE_MATING_GAP,
-        },
-        "base_rules": {
-            "default_mm": DEFAULT_BASE_THICKNESS,
-            # What a *new* design may be given.  A saved design carrying a
-            # non-preset value still loads and regenerates unchanged; the UI
-            # shows it as a legacy value until the user picks a current preset.
-            "choices": [
-                {"value": value, "label": label} for value, label in BASE_PRESETS
-            ],
-        },
-        "stack_rules": {
-            "min_wall_mm": STACK_MIN_WALL,
-            "default_wall_mm": DEFAULT_WALL,
-            "default_base_mm": DEFAULT_BASE_THICKNESS,
-            "base_min_by_wall_mm": _stack_base_min_by_wall(),
-        },
-        "lid_rules": {
-            "thicknesses": [
-                {"value": name, "mm": float(name), "name": LID_THICKNESS_NAMES.get(name, "")}
-                for name in LID_THICKNESSES
-            ],
-            "default_thickness": "1.2",
-            # A handle is opt-in: handle_enabled defaults to false and a
-            # stackable lid never has one. There is one handle: the knob.
-            "handle_default_enabled": False,
-            "handle_types": ["knob"],
-            "handle_sizes": ["small", "medium", "large"],
-            "handle_positions": ["left", "right", "front", "back", "middle"],
-            "label_styles": ["flush", "raised"],
-            "label_orientations": ["horizontal", "vertical"],
-            # Backend-owned: the browser builds its choices from these, it
-            # carries no mm table of its own.
-            "fits": [
-                {"value": name, "mm": LID_FIT_MM[name],
-                 "label": f"{LID_FIT_NAMES[name]} — {LID_FIT_MM[name]:g} mm per side"}
-                for name in LID_FITS
-            ],
-            "default_fit": "standard",
-            "alignments": [
-                {"value": name, "mm": LID_ALIGNMENT_MM[name],
-                 "label": (LID_ALIGNMENT_NAMES[name] if name == "off"
-                           else f"{LID_ALIGNMENT_NAMES[name]} — {LID_ALIGNMENT_MM[name]:.1f} mm")}
-                for name in LID_ALIGNMENTS
-            ],
-            "default_alignment": "off",
-            "label_reliefs": [
-                {"value": value, "name": LID_LABEL_RELIEF_NAMES[value],
-                 "label": f"{LID_LABEL_RELIEF_NAMES[value]} {value:g} mm"}
-                for value in LID_LABEL_RELIEFS
-            ],
-            "default_label_relief_mm": 0.4,
-            "legacy_raised_label_relief_mm": LID_LABEL_LEGACY_RAISED_MM,
-        },
-        "storage_drawers_rules": {
-            "default_usable_height_mm": STORAGE_DRAWERS_DEFAULT_USABLE_HEIGHT_MM,
-            "default_field_mm": list(STORAGE_DRAWERS_DEFAULT_FIELD_MM),
-            "min_units": STORAGE_DRAWERS_MIN_UNITS,
-            "max_units": STORAGE_DRAWERS_MAX_UNITS,
-            "min_drawers": STORAGE_DRAWERS_MIN_DRAWERS,
-            "max_drawers": STORAGE_DRAWERS_MAX_DRAWERS,
-            "drawer_fit_choices_mm": list(STORAGE_DRAWER_FIT_CHOICES),
-            "default_drawer_fit_mm": STORAGE_DRAWER_FIT_DEFAULT,
-            "frame_width_choices_mm": list(STORAGE_DRAWER_FRAME_WIDTH_CHOICES),
-            "default_frame_width_mm": STORAGE_DRAWER_FRAME_WIDTH_DEFAULT,
-            "label_limit": STORAGE_DRAWER_LABEL_LIMIT,
-            "max_usable_height_mm": STORAGE_DRAWER_MAX_USABLE_HEIGHT_MM,
-            "default_printer_build_mm": list(DEFAULT_PRINTER_BUILD_MM),
-        },
-        "b4b_rules": {
-            "grid_pitch_mm": GRID_PITCH,
-            "lid_headroom_choices_mm": list(B4B_LID_HEADROOM_CHOICES),
-            # Latch count and strength are derived from the case; both lists
-            # remain only so an older saved design still parses.
-            "latch_counts": list(B4B_LATCH_COUNTS),
-            "latch_strengths": list(B4B_LATCH_STRENGTHS),
-            "label_locations": list(B4B_LABEL_LOCATIONS),
-            "front_label_styles": list(B4B_FRONT_LABEL_STYLES),
-            "schema_version": B4B_SCHEMA_VERSION,
-            "min_field_mm": B4B_MIN_FIELD_XY,
-            "min_secure_height_mm": B4B_LATCHED_MIN_HEIGHT,
-            "min_wall_mm": B4B_MIN_WALL,
-            "default_wall_mm": B4B_DEFAULT_WALL,
-            "wall_choices": [
-                {"value": value, "label": label} for value, label in B4B_WALL_PRESETS
-            ],
-            "default_base_mm": B4B_DEFAULT_BASE,
-            "base_choices": [
-                {"value": value, "label": label} for value, label in B4B_BASE_PRESETS
-            ],
-            "handle_min_grip_mm": B4B_HANDLE_GRIP_ABS_MIN,
-            "stack_min_base_mm": B4B_STACK_MIN_BASE,
-        },
-        "base_trim_rules": {
-            "unit_mm": BASE_UNIT,
-            "mating_gap_mm": WAVE_MATING_GAP,
-            "max_field_mm": BASE_TRIM_MAX_FIELD,
-            "default_width_mm": BASE_TRIM_DEFAULT_WIDTH,
-            "default_height_mm": BASE_TRIM_DEFAULT_HEIGHT,
-            "min_width_mm": BASE_TRIM_MIN_WIDTH,
-            "max_width_mm": BASE_TRIM_MAX_WIDTH,
-            "min_height_mm": BASE_TRIM_MIN_HEIGHT,
-            "max_height_mm": BASE_TRIM_MAX_HEIGHT,
-            "outer_taper_mm": BASE_TRIM_OUTER_TAPER,
-            "default_bed_x_mm": BASE_TRIM_DEFAULT_BED_X,
-            "default_bed_y_mm": BASE_TRIM_DEFAULT_BED_Y,
-            "bed_edge_margin_mm": BASE_TRIM_BED_EDGE_MARGIN,
-            "join_types": [
-                {"value": value, "label": BASE_TRIM_JOIN_LABELS[value]}
-                for value in BASE_TRIM_JOIN_TYPES
-            ],
-            "size_presets": [
-                {"key": key, "value_mm": value, "label": label}
-                for key, value, label in BASE_TRIM_SIZE_PRESETS
-            ],
-        },
-        "lift_grabbers": {
-            "default_size": "medium",
-            "default_location": "sides",
-            "min_wall_mm": round(lift_grabber_min_wall(), 3),
-            "rim_clearance_mm": LIFT_GRABBER_RIM_CLEARANCE,
-            "sizes": [
-                {
-                    "value": value,
-                    "label": label,
-                    "height_mm": LIFT_GRABBER_DIMENSIONS[value].height,
-                }
-                for value, label in (
-                    ("small", "Small"),
-                    ("medium", "Medium"),
-                    ("large", "Large"),
-                    ("xl", "XL"),
-                )
-            ],
-            "locations": [
-                {"value": "sides", "label": "Sides (left/right)"},
-                {"value": "front_back", "label": "Front/back"},
-                {"value": "both", "label": "Both"},
-            ],
-        },
-        "scoop_rules": {
-            "height_fraction": SCOOP_HEIGHT_FRACTION,
-        },
-        "edge_mount": {
-            "sides": [
-                {"value": "front", "label": "Front"},
-                {"value": "back", "label": "Back"},
-                {"value": "left", "label": "Left"},
-                {"value": "right", "label": "Right"},
-            ],
-            "thickness_choices": [
-                {"value": value, "label": f"{value:g} mm — {name}"}
-                for value, name in EDGE_LABEL_THICKNESS_PRESETS
-            ],
-            "defaults": {
-                "side": "front",
-                "label_enabled": False,
-                "label_text": "",
-                "label_projection_mm": EDGE_LABEL_DEFAULT_PROJECTION,
-                "label_length_mode": "full",
-                "label_thickness_mm": EDGE_LABEL_DEFAULT_THICKNESS,
-                "label_raised": False,
-                "label_text_depth_mm": EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM,
-                "label_flip": False,
-                "holes_enabled": False,
-                "hole_count": 2,
-                "hole_orientation": "horizontal",
-                "screw_diameter_mm": EDGE_HOLE_DEFAULT_SCREW_DIAMETER,
-                "access_diameter_mm": None,
-                "top_offset_mm": EDGE_HOLE_DEFAULT_TOP_OFFSET,
-                "hole_spacing_mm": None,
-            },
-            "min_projection_mm": EDGE_LABEL_MIN_PROJECTION,
-            "max_projection_mm": EDGE_LABEL_MAX_PROJECTION,
-            "min_thickness_mm": EDGE_LABEL_MIN_THICKNESS,
-            "max_thickness_mm": EDGE_LABEL_MAX_THICKNESS,
-            "min_text_depth_mm": EDGE_LABEL_MIN_TEXT_DEPTH,
-            "max_text_depth_mm": EDGE_LABEL_MAX_TEXT_DEPTH,
-            "min_screw_diameter_mm": EDGE_HOLE_MIN_SCREW_DIAMETER,
-            "max_screw_diameter_mm": EDGE_HOLE_MAX_SCREW_DIAMETER,
-            "min_access_diameter_mm": EDGE_HOLE_MIN_ACCESS_DIAMETER,
-            "max_access_diameter_mm": EDGE_HOLE_MAX_ACCESS_DIAMETER,
-            "min_hole_count": EDGE_HOLE_MIN_COUNT,
-            "max_hole_count": EDGE_HOLE_MAX_COUNT,
-        },
-        "side_openings": {
-            "min_side_mm": SIDE_OPENING_MIN_SIDE_MM,
-            "corner_margin_mm": SIDE_OPENING_CORNER_MARGIN_MM,
-            "top_bridge_mm": SIDE_OPENING_TOP_BRIDGE_MM,
-            "arch_curve": SIDE_OPENING_ARCH_CURVE,
-            "default_shape": "curved",
-            "default_size": "medium",
-            "default_from_bottom_percent": 0,
-            "default_from_top_percent": 0,
-            "sides": [
-                {"value": "front", "label": "Front"},
-                {"value": "back", "label": "Back"},
-                {"value": "left", "label": "Left"},
-                {"value": "right", "label": "Right"},
-            ],
-            "shapes": [
-                {"value": "curved", "label": "Curved"},
-                {"value": "square", "label": "Square"},
-            ],
-            "sizes": [
-                {"value": key, "label": label, "width_mm": SIDE_OPENING_WIDTHS[key]}
-                for key, label in (
-                    ("small", "Small — 8 mm"),
-                    ("medium", "Medium — 10 mm"),
-                    ("large", "Large — 15 mm"),
-                    ("xl", "XL — 20 mm"),
-                )
-            ],
-        },
-        "setting_interactions": [
-            {
-                "feature": definition.kind,
-                "source": rule.source,
-                "target": rule.target,
-                "effect": rule.effect,
-                "owner": rule.owner,
-                "reason": rule.reason,
-            }
-            for definition in feature_definitions()
-            for rule in setting_interactions(definition.kind)
-        ],
-        "runtime": {
-            "hosted": HOSTED,
-            "filesystem": "browser" if HOSTED else "server",
-        },
-        "defaults": {
-            "design": default_design(),
-            # A Render path is implementation detail, never a user's folder.
-            "output": "" if HOSTED else str(DEFAULT_OUTPUT),
-            "connector": {
-                "tolerance": LOCKED_TOLERANCE,
-                "height": LOCKED_CONNECTOR_HEIGHT,
-                "length": LOCKED_CONNECTOR_LENGTH,
-                "arm_thickness": DEFAULT_ARM_THICKNESS,
-                "axis": "y",
-                "position": 0.0,
-                "bin_a_height": 40.0,
-                "bin_b_height": 40.0,
-                "different_heights": False,
-                "type": "side",
-                "quantity": 1,
-            },
-            "sampler_boxes": DEFAULT_SAMPLE_BOXES,
-        },
-        # The differing-clip rules, so the UI can show the self-adjusting
-        # length / web thickness / printed height live without a round-trip.
-        "connector_rules": {
-            "min_drop_mm": DIFFERING_MIN_DROP,
-            "full_drop_mm": DIFFERING_FULL_DROP,
-            "web_thickness_mm": DIFFERING_WEB_THICKNESS,
-            "length_gain": DIFFERING_LENGTH_GAIN,
-            "arm_thickness_mm": DEFAULT_ARM_THICKNESS,
-            "base_height_mm": LOCKED_CONNECTOR_HEIGHT,
-            # The web's fixed inward reach is not a fraction of the drop, so
-            # the browser cannot get it from the ramp alone. These are its
-            # inputs, served rather than hard-coded so the live readout and
-            # the generated part can never disagree.
-            "mating_gap_mm": WAVE_MATING_GAP,
-            "web_run_clearance_mm": DIFFERING_WEB_RUN_CLEARANCE,
-            "wall_depth_factor": math.sqrt(1.0 + max_wave_slope() ** 2),
-            "arm_thickness_floor_mm": connector_arm_thickness_floor(),
-        },
+    slicer_exe = None if HOSTED else detect_bambu_studio()
+    return canonical_catalog(environment={
+        "platform": sys.platform, "version": SERVER_VERSION,
+        "instance": SERVER_INSTANCE, "api_compat": API_COMPAT_VERSION,
+        "build": SERVER_BUILD, "hosted": HOSTED, "output": str(DEFAULT_OUTPUT),
         "preferences": {} if HOSTED else served_preferences(),
-        "slicer": {
-            "available": False if HOSTED else (slicer_exe := detect_bambu_studio()) is not None,
-            "path": None if HOSTED else str(slicer_exe) if slicer_exe else None,
-            "name": "Bambu Studio" if HOSTED else slicer_name(slicer_exe),
-        },
-    }
+        "slicer": {"available": slicer_exe is not None,
+                   "path": str(slicer_exe) if slicer_exe else None,
+                   "name": "Bambu Studio" if HOSTED else slicer_name(slicer_exe)},
+    })
 
 
 def detect_bambu_studio(custom_path: str | None = None) -> Path | None:
@@ -1925,25 +1562,7 @@ def _generate_payload(
     return reply
 
 
-def division_label_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Which of one divider's labels are too long for their compartment.
-
-    Read-only and light (no geometry is built beyond the lettering outlines).
-    The editor shows "Text doesn't fit" over each listed label; the file still
-    builds, with that label cut short to what fits (``kept`` is what is built).
-    """
-    box, layout, *_ = design_from_dict(payload["design"], validate_layout=False)
-    raw = payload.get("feature")
-    if not isinstance(raw, dict) or raw.get("kind") != "divider":
-        return {"labels": []}
-    from organizer_inserts._divider._shelf import label_fit_report
-    feature = _feature_from_json(raw, layout.mode)
-    with label_fit_report() as found:
-        try:
-            divider_division_texts(_interior_work_box(box), feature, box.base_thickness)
-        except Exception:
-            pass   # a divider that cannot build says so through the preview
-    return {"labels": [{"index": index, "kept": kept} for _one, index, kept in found]}
+from wavefinity_web_impl._designs._layout import division_label_fit_payload
 
 
 def base_trim_joint_test_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3360,11 +2979,7 @@ def _ai_space_cap_violation(design: dict[str, Any], raw_space: Any) -> str | Non
     return None
 
 
-OLD_MODULE_NOTICE = (
-    "This design was built on the retired 8 mm module; the current app uses the "
-    "7 mm module. It will not be changed. Close it and start a new design on the "
-    "current standard."
-)
+from wavefinity_web_impl._entry import OLD_MODULE_NOTICE
 
 
 def _grid_inventory(payload: dict[str, Any], *, source: bool = False) -> tuple[dict, dict | None]:
@@ -3432,54 +3047,8 @@ def _ai_grid_space(payload: dict, current: dict, space: dict | None) -> dict | N
 
 
 def _checked_entry_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    from organizer_inventory._rows import checked_design_entry, design_specs
-    if "source_space" in payload:
-        raise ValueError("Name the saved source records instead of claiming a source Space.")
-    current, destination = _grid_inventory(payload)
-    if isinstance(payload.get("space"), dict) and payload["space"].get("kind") and destination is None:
-        raise ValueError("The destination Space's saved records are missing.")
-    source = None
-    row_id = str(payload.get("source_row_id") or "") or None
-    if any(key in payload for key in ("source_output", "source_inventory_text", "source_space_id")):
-        source, _source_space = _grid_inventory(payload, source=True)
-        if not row_id:
-            raise ValueError("Name the saved source bin before copying it from a Space.")
-    elif row_id:
-        source = current
-    if source is not None and row_id:
-        standin = next((one for one in source.get("bins", []) if one.get("id") == row_id and one.get("kind") == "standin"), None)
-        if standin is not None:
-            # A stand-in has no design: only its own pitch's grid is held to the
-            # destination Space, by the same authority as a real bin's design.
-            checked_design_entry({"grid": standin["grid"]}, destination)
-            return dict(payload)
-        raw_source = design_specs(source.get("layout")).get(row_id)
-        if not isinstance(raw_source, dict):
-            raise ValueError("The saved source bin could not be verified.")
-        checked_design_entry(raw_source, destination, source=source, row_id=row_id)
-    request = dict(payload)
-    for key in ("design", "resume_design"):
-        raw = request.get(key)
-        if isinstance(raw, dict) and raw.get("design_kind") != "base_trim":
-            # Saved reads stamp verified ownership. Unowned files with no grid
-            # remain legacy Wavefinity designs at every entry boundary.
-            request[key] = checked_design_entry(raw, destination, source=source, row_id=row_id)
-    if "new_bin_specs" in request:
-        request["new_bin_specs"] = [
-            checked_design_entry(raw, destination, source=source, row_id=row_id)
-            if isinstance(raw, dict) else raw for raw in request["new_bin_specs"] or ()]
-    proposed = request.get("layout")
-    if isinstance(proposed, dict):
-        from organizer_engine._specs import retain_space_grid
-        proposed = copy.deepcopy(proposed)
-        if isinstance(destination, dict):
-            proposed["space"] = retain_space_grid(proposed.get("space") or destination, destination)
-        existing = design_specs(current.get("layout"))
-        for key, raw in design_specs(proposed).items():
-            if key not in existing and isinstance(raw, dict):
-                proposed["design_specs"][key] = checked_design_entry(raw, destination, source=source, row_id=row_id)
-        request["layout"] = proposed
-    return request
+    from wavefinity_web_impl._entry import checked_entry_payload
+    return checked_entry_payload(payload, read_inventory=_grid_inventory)
 
 
 def _printer_output_route(handler):
@@ -3503,24 +3072,8 @@ def _grid_entry_route(handler):
 
 
 def _validate_design_open_guard(payload: dict[str, Any]) -> dict[str, Any]:
-    """Every editor entry validates its raw saved design here (Story 2265).
-
-    A saved record (the shape design_to_dict writes) without the 7 mm marker is
-    refused with a notice and never handed to the editor or rewritten. Fresh
-    in-editor designs and non-record payloads pass through unchanged.
-    """
-    payload = _checked_entry_payload(payload)
-    raw = payload.get("design") if isinstance(payload, dict) else None
-    if (
-        isinstance(raw, dict)
-        and raw.get("design_kind") != "base_trim"
-        and isinstance(raw.get("version"), int)
-        and isinstance(raw.get("box"), dict)
-        and isinstance(raw.get("layout"), dict)
-        and raw.get(MODULE_MARKER_KEY) != MODULE_MARKER_MM
-    ):
-        raise ValueError(OLD_MODULE_NOTICE)
-    return validate_design_payload(payload)
+    from wavefinity_web_impl._entry import validate_design_open_guard
+    return validate_design_open_guard(payload, read_inventory=_grid_inventory)
 
 
 POST_ROUTES = {

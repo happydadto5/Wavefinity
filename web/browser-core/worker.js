@@ -19,7 +19,8 @@ async function initialize() {
   if (digest !== identity.sha256) throw new Error('Browser engine bundle integrity check failed.');
   const { loadPyodide } = await import(local('vendor/pyodide/pyodide.mjs'));
   py = await loadPyodide({ indexURL: local('vendor/pyodide/') });
-  await py.loadPackage(['numpy', 'shapely', 'networkx']);
+  // Canonical editor/text helpers import matplotlib; all wheels are vendored.
+  await py.loadPackage(['numpy', 'shapely', 'networkx', 'matplotlib']);
   const wheel = await fetch(local('vendor/trimesh/trimesh-5.0.0-py3-none-any.whl'));
   if (!wheel.ok) throw new Error('Browser mesh package unavailable.');
   py.unpackArchive(await wheel.arrayBuffer(), 'zip', { extractDir: '/wavefinity' });

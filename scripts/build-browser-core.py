@@ -3,6 +3,8 @@
 
 Normal builds are offline. --fetch-vendor restores missing pinned downloads only,
 verifying the committed manifest before accepting any bytes. No Emscripten runs.
+--refresh-catalog compiles canonical catalog data on a dependency-equipped
+maintainer machine; ordinary/static-host builds only read its hashed JSON.
 """
 from __future__ import annotations
 
@@ -152,9 +154,51 @@ def source_inputs() -> tuple[dict[str, bytes], dict[str, dict], list[str]]:
     return archive, hashes, sorted(external)
 
 
-def build(fetch: bool) -> None:
+def catalog_inputs(archive: dict, hashes: dict, refresh: bool) -> dict:
+    # Conservatively bind the catalog to all canonical Python inputs. Adapter
+    # changes do not invalidate it; any canonical change requires regeneration.
+    inputs = {name: entry['sha256'] for name, entry in hashes.items()
+              if not name.startswith('wf_browser_core/')}
+    source_sha = digest(json.dumps(inputs, sort_keys=True, separators=(',', ':')).encode('utf-8'))
+    catalog_path = ENGINE / 'catalog.json'
+    manifest_path = ENGINE / 'catalog_manifest.json'
+    if refresh:
+        # Explicit production asset compilation only. Render's normal build
+        # never takes this branch or imports canonical/native geometry.
+        sys.path.insert(0, str(ROOT))
+        from wavefinity_web_impl._catalog import catalog_payload
+        from wavefinity_web_impl._runtime import SERVER_VERSION, API_COMPAT_VERSION
+        catalog = catalog_payload(environment={
+            'platform': 'browser', 'version': SERVER_VERSION, 'instance': 'browser',
+            'api_compat': API_COMPAT_VERSION, 'build': source_sha, 'hosted': True,
+            'output': '', 'preferences': {},
+            'slicer': {'available': False, 'path': None, 'name': 'Bambu Studio'},
+        })
+        write_json(catalog_path, catalog)
+        write_json(manifest_path, {
+            'schema': 'wavefinity-browser-catalog/1',
+            'sha256': digest(catalog_path.read_bytes()), 'source_sha256': source_sha,
+            'source_hashes': inputs,
+        })
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    data = catalog_path.read_bytes()
+    if (manifest['schema'] != 'wavefinity-browser-catalog/1'
+            or manifest['source_sha256'] != source_sha or manifest['source_hashes'] != inputs
+            or manifest['sha256'] != digest(data)):
+        raise ValueError('Catalog inputs changed; regenerate shipping assets with --refresh-catalog on a dependency-equipped maintainer machine')
+    for path in (catalog_path, manifest_path):
+        name = 'wf_browser_core/' + path.name
+        data = path.read_bytes()
+        archive[name] = data
+        hashes[name] = {'source': path.relative_to(ROOT).as_posix(),
+                        'sha256': digest(data), 'bytes': len(data)}
+    return {key: manifest[key] for key in ('schema', 'sha256', 'source_sha256')}
+
+
+def build(fetch: bool, refresh_catalog: bool = False) -> None:
     vendor, assets = vendor_inputs(fetch)
     archive, hashes, imports = source_inputs()
+    catalog = catalog_inputs(archive, hashes, refresh_catalog)
     for module in imports:
         package = IMPORT_PACKAGES[module]
         if package and package not in vendor['packages']:
@@ -182,6 +226,7 @@ def build(fetch: bool) -> None:
         'schema': 'wavefinity-browser-engine/1',
         'archive': 'canonical.zip', 'sha256': digest(data), 'bytes': len(data),
         'source_hash_mode': 'UTF-8 without BOM, LF line endings', 'sources': hashes,
+        'catalog': catalog,
         'vendor_manifest_sha256': digest((VENDOR / 'manifest.json').read_bytes()),
         'external_imports': imports, 'pending_adapters': vendor['pending_adapters'],
         'size_accounting': {'assets': sizes, 'total_bytes': raw,
@@ -208,8 +253,9 @@ def build(fetch: bool) -> None:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--fetch-vendor', action='store_true', help='Restore missing HTTPS assets using committed hashes (build-time network only)')
+    parser.add_argument('--refresh-catalog', action='store_true', help='Compile canonical catalog JSON using locally installed production dependencies')
     args = parser.parse_args()
     try:
-        build(args.fetch_vendor)
+        build(args.fetch_vendor, args.refresh_catalog)
     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
         raise SystemExit(f'Browser core build failed: {error}') from None

@@ -35,6 +35,13 @@ regenerate bins and side clips made with that profile as a set.
 
 ## Status
 
+The browser migration has a Python dispatcher and bundled catalog/editor routes
+for validation, feature edits, layout fitting and pegboard layout choices.
+They share the existing Python rules and saved Space grid checks. Final worker
+and UI assembly remains a later migration step; these modules alone do not
+establish a complete browser edition. See
+[`browser-editor-routes.md`](docs/reference/browser-editor-routes.md).
+
 An isolated browser geometry experiment is available directly at
 `/browser-local-poc.html`. It downloads tools into browser memory
 without installation and leaves designs untouched. The full-bin feasibility

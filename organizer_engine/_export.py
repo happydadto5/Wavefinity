@@ -7,7 +7,6 @@ import zipfile
 from pathlib import Path
 from typing import Iterable
 from xml.etree import ElementTree
-import lib3mf
 import numpy as np
 import trimesh
 
@@ -69,6 +68,7 @@ def export_bambu_compatible_3mf(scene: trimesh.Scene, output: Path) -> None:
     generic = scene.export(file_type="3mf")
     if not isinstance(generic, bytes):
         raise RuntimeError("intermediate 3MF export did not return binary data")
+    import lib3mf
     wrapper = lib3mf.Wrapper()
     model = wrapper.CreateModel()
     reader = model.QueryReader("3mf")
@@ -297,6 +297,7 @@ def export_text_body_3mf(
     generic = scene.export(file_type="3mf")
     if not isinstance(generic, bytes):
         raise RuntimeError("intermediate 3MF export did not return binary data")
+    import lib3mf
     wrapper = lib3mf.Wrapper()
     model = wrapper.CreateModel()
     reader = model.QueryReader("3mf")
@@ -388,6 +389,7 @@ def export_assembly_3mf(
     generic = scene.export(file_type="3mf")
     if not isinstance(generic, bytes):
         raise RuntimeError("intermediate 3MF export did not return binary data")
+    import lib3mf
     wrapper = lib3mf.Wrapper()
     model = wrapper.CreateModel()
     reader = model.QueryReader("3mf")
@@ -472,6 +474,7 @@ def export_object_groups_3mf(
     generic = scene.export(file_type="3mf")
     if not isinstance(generic, bytes):
         raise RuntimeError("intermediate 3MF export did not return binary data")
+    import lib3mf
     wrapper = lib3mf.Wrapper()
     model = wrapper.CreateModel()
     reader = model.QueryReader("3mf")
@@ -583,6 +586,7 @@ def validate_3mf(
             label_mesh_report(name, geometry)
         else:
             mesh_report(name, geometry)
+    import lib3mf
     wrapper = lib3mf.Wrapper()
     model = wrapper.CreateModel()
     reader = model.QueryReader("3mf")
@@ -629,6 +633,7 @@ def validate_object_groups_3mf(
     expected_leaves = sum(len(parts) for _name, parts in groups)
     expected_components = sum(len(parts) > 1 for _name, parts in groups)
 
+    import lib3mf
     wrapper = lib3mf.Wrapper()
     model = wrapper.CreateModel()
     reader = model.QueryReader("3mf")

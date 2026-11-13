@@ -31,7 +31,6 @@ from organizer_inserts import (
     option_value,
     scoop_zone,
 )
-from photo_nest import retrace_outline_from_rectified
 from organizer_app import (
     _customization_zones,
     base_height,
@@ -351,6 +350,7 @@ def nest_retrace_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Re-tune an already-rectified reference sheet without repeating paper
     detection or perspective correction. Purely informational: the caller
     decides whether/when to accept the candidate outline it returns."""
+    from photo_nest import retrace_outline_from_rectified
     outline = retrace_outline_from_rectified(
         str(payload.get("rectified_image", "")), str(payload.get("mime_type", "image/jpeg")),
         float(payload.get("sensitivity", 50.0)), float(payload.get("cleanup", 50.0)),
