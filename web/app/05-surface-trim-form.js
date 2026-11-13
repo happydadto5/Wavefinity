@@ -244,10 +244,9 @@ function baseTrimEnabled(design = state.design) {
 }
 
 // R76: connector settings are system-wide (desktop preferences file, or
-// browser localStorage when hosted). Only these six fields are remembered.
+// the browser's origin-local preference store). Only these six fields are remembered.
 // Matches STACK_SKIRT_DEPTH in organizer_features/stack.py; only a pre-preview fallback.
 const STACK_SKIRT_DEPTH_MM = 3;
-const CONNECTOR_SETTINGS_KEY = "wavefinity-connector-settings-v1";
 
 // One shared step for restoring and saving: each field must be legal (the same
 // ranges as the connector form) or it falls back to `fallback`.
@@ -293,9 +292,7 @@ function readConnectorSettingsFields() {
 function restoreConnectorSettings() {
   let raw = null;
   try {
-    raw = state.runtime.hosted
-      ? JSON.parse(localStorage.getItem(CONNECTOR_SETTINGS_KEY) || "null")
-      : state.catalog?.preferences?.connector_settings;
+    raw = state.catalog?.preferences?.connector_settings;
   } catch (_error) { raw = null; }
   if (!raw || typeof raw !== "object") return;
   Object.assign(state.connector, normalizeConnectorSettings(raw, state.connector));
@@ -311,11 +308,6 @@ function persistConnectorSettings() {
   if (!settings) return;
   const text = JSON.stringify(settings);
   if (text === lastSavedConnectorSettings) return;
-  if (state.runtime.hosted) {
-    try { localStorage.setItem(CONNECTOR_SETTINGS_KEY, text); lastSavedConnectorSettings = text; }
-    catch (_error) { toast("Connector settings could not be remembered in this browser.", true); }
-    return;
-  }
   connectorSettingsQueue = connectorSettingsQueue.then(() =>
     api("/api/preferences", { connector_settings: settings })
       .then(() => {

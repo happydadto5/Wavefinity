@@ -282,6 +282,7 @@ SP.startMemoryOnly = () => SP.run(async () => {
   state.previewRequest += 1;
   cancelPreviewWait();
   await SP.flushOutgoingResumeCheckpoint();
+  await WFFileSystem.flushFolderWrites();
   SP.close();
   // Coherent teardown to "no persisted folder identity". browserFolder,
   // output, activeSpaceId, cabinetRecovery, and folderSelected are the
@@ -290,6 +291,8 @@ SP.startMemoryOnly = () => SP.run(async () => {
   // designInventoryId/designTarget) and disables the folder-inventory toggle
   // (it keys off folderSelected).
   state.browserFolder = null;
+  window.WFLocalAPI?.advanceDesign();
+  SP._folderEpoch = (SP._folderEpoch || 0) + 1;
   state.output = "";
   state.activeSpaceId = null;
   state.cabinetRecovery = null;
@@ -615,44 +618,53 @@ SP.create = async () => {
   if (!okToLeave) return;
 
   let info;
+  const requireCreateOwner = SP.spaceOwnerGuard();
   if (state.runtime.hosted) {
     // Read/write the *selected target's* inventory filename, never the
     // previously-active folder's - see Fix 004 Correction 7.A.
-    const inventoryText = await SP.readInventoryFor(folder, { migrate: true });
-    const result = await api(migrating ? "/api/space/configure-text" : "/api/space/create-text", {
-      inventory_text: inventoryText, inventory_title: name,
-      name, kind, x, y, z, ...extra, ...(trimSize ? { trim_size: trimSize } : {}),
-    });
-    // Fix 096 A3: the inventory write and the metadata write are one logical
-    // commit - if the metadata write fails, put the previous Inventory text
-    // back rather than leave a half-applied new Space.
-    const inventoryName = SP.inventoryFilenameFor(folder);
-    await WFFileSystem.writeText(folder.handle, inventoryName, result.inventory_text);
-    const space = result.layout.space;
-    // This call owns the new Space definition, but not the bin/part
-    // defaults - on Create there is nothing yet to preserve (the writer's
-    // own under-lock defaults already match), and on Configure Existing/
-    // migrate, leaving them unset lets the writer preserve the newest
-    // under-lock value instead of a copy captured here before its own
-    // read/lock (Fix 032 Correction 4, C4.1 - this mirrors the previous
-    // pre-lock SP.readMetadata() capture that used to run only when
-    // `migrating`, now removed).
-    let metadata;
-    try {
-      metadata = await SP.writeMetadata(folder.handle, "space", space, true, {});
-    } catch (error) {
+    const { space, metadata } = await WFFileSystem.queueFolderWrite(folder.handle, async () => {
+      requireCreateOwner();
+      const inventoryText = await SP.readInventoryFor(folder, { migrate: true });
+      const inventoryName = SP.inventoryFilenameFor(folder);
+      const priorInventory = await WFFileSystem.readText(folder.handle, inventoryName);
+      const { current } = await SP.readMetadata(folder.handle);
+      const expectedSpaceId = SP.classifyMetadata(current).space_id || null;
+      const result = await api(migrating ? "/api/space/configure-text" : "/api/space/create-text", {
+        inventory_text: inventoryText, inventory_title: name,
+        name, kind, x, y, z, ...extra, ...(trimSize ? { trim_size: trimSize } : {}),
+      });
+      // Fix 096 A3: the inventory write and the metadata write are one logical
+      // commit - if the metadata write fails, put the previous Inventory text
+      // back rather than leave a half-applied new Space.
+      requireCreateOwner();
+      await WFFileSystem.writeText(folder.handle, inventoryName, result.inventory_text);
+      const space = result.layout.space;
+      // This call owns the new Space definition, but not the bin/part
+      // defaults - on Create there is nothing yet to preserve (the writer's
+      // own under-lock defaults already match), and on Configure Existing/
+      // migrate, leaving them unset lets the writer preserve the newest
+      // under-lock value instead of a copy captured here before its own
+      // read/lock (Fix 032 Correction 4, C4.1 - this mirrors the previous
+      // pre-lock SP.readMetadata() capture that used to run only when
+      // `migrating`, now removed).
+      let metadata;
       try {
-        await WFFileSystem.writeText(folder.handle, inventoryName, inventoryText);
-      } catch (_restore) {
-        // Fix 096 A3: a failed restore is a partial commit, not a clean
-        // failure - say so explicitly instead of reporting the original
-        // error while the new Inventory may still be durable.
-        console.error(error, _restore);
-        toast("The Space could not be saved and the previous Inventory could not be restored. Open the folder and check its Inventory before continuing.", true, 7000);
-        return;
+        metadata = await SP._writeMetadataNow(folder.handle, "space", space, true, {}, { expectedSpaceId });
+      } catch (error) {
+        try {
+          if (priorInventory === null) await WFFileSystem.removeFile(folder.handle, inventoryName);
+          else await WFFileSystem.writeText(folder.handle, inventoryName, priorInventory);
+        } catch (_restore) {
+          // Fix 096 A3: a failed restore is a partial commit, not a clean
+          // failure - say so explicitly instead of reporting the original
+          // error while the new Inventory may still be durable.
+          throw new Error("The Space could not be saved and the previous Inventory could not be restored. Open the folder and check its Inventory before continuing.");
+        }
+        throw error;
       }
-      throw error;
-    }
+      return { space, metadata };
+    });
+    requireCreateOwner();
     // Activate the selected target folder itself, not whatever folder was
     // previously active - see Fix 004 Correction 7.A. state.browserFolder
     // itself is set inside SP.applyFolder() below, never here (Fix 032
@@ -662,13 +674,17 @@ SP.create = async () => {
     // truthfully, and continue activation instead of reporting a failed
     // create/update.
     try {
-      await WFFileSystem.save("active", { handle: folder.handle, space_id: metadata.space_id, ...(folder.home_name ? { home_name: folder.home_name } : {}) });
+      await WFFileSystem.queueFolderWrite(folder.handle, () => {
+        requireCreateOwner();
+        return WFFileSystem.save("active", { handle: folder.handle, space_id: metadata.space_id, ...(folder.home_name ? { home_name: folder.home_name } : {}) });
+      });
       SP.pendingReconnect = null;
     } catch (_remember) {
       toast(migrating
         ? "The Space was updated, but it could not be remembered as the current Space. Open it again from the Space list."
         : "The Space was created, but it could not be remembered as the current Space. Open it again from the Space list.", true);
     }
+    requireCreateOwner();
     info = {
       folder: folder.name, folder_name: folder.name, folder_mode: "space", space,
       space_id: metadata.space_id,
@@ -800,6 +816,7 @@ SP.installSpaceStarterDesign = async () => {
 // opening/switching alone never creates an Inventory row.
 SP.initializeDesignForActiveSpace = async () => {
   if (state.folderMode !== "space" || !state.activeSpace || !state.catalog) return;
+  const requireOwner = SP.spaceOwnerGuard();
   SP.resetDesignSession();
 
   let restored = false;
@@ -814,6 +831,7 @@ SP.initializeDesignForActiveSpace = async () => {
       const result = await api("/api/design/validate", {
         design: clone(state.spaceResumeDesign),
       });
+      requireOwner();
       // A restored design bypasses SP.installSpaceStarterDesign() and
       // applySpaceSizingDefaults() entirely - it is the exact design the
       // user left, not a fresh starter seeded from remembered defaults.
@@ -822,10 +840,12 @@ SP.initializeDesignForActiveSpace = async () => {
       state.spaceStarterPreviewPending = false;
       restored = true;
     } catch (error) {
+      requireOwner();
       // The stored checkpoint itself is left untouched - a validation
       // failure here must never delete or rewrite recoverable user data.
       resumeValidationFailed = true;
       await SP.setAsideBin(SP.snapshotStoredBin(state.spaceResumeDesign));
+      requireOwner();
     }
   }
 
@@ -833,6 +853,7 @@ SP.initializeDesignForActiveSpace = async () => {
   // source when that exact canonical design is already present.
   if (restored && typeof DL !== "undefined" && DL.ensureLoaded) {
     await DL.ensureLoaded();
+    requireOwner();
     const key = JSON.stringify(state.design);
     const matches = Object.entries(DL.layout?.design_specs || {})
       .filter(([, design]) => JSON.stringify(design) === key);
@@ -853,7 +874,8 @@ SP.initializeDesignForActiveSpace = async () => {
       const untouched = JSON.stringify(freshDesignForCurrentFolder()) === key;
       if (!untouched) {
         try { await persistSpaceDesignSource(null, true); }
-        catch (_error) { await SP.setAsideBin(SP.snapshotStoredBin(state.spaceResumeDesign)); }
+        catch (_error) { requireOwner(); await SP.setAsideBin(SP.snapshotStoredBin(state.spaceResumeDesign)); }
+        requireOwner();
       }
     }
   }
@@ -878,7 +900,9 @@ SP.initializeDesignForActiveSpace = async () => {
     return;
   }
   await DL.ensureLoaded();
+  requireOwner();
   if (!restored) await SP.installSpaceStarterDesign();
+  requireOwner();
   // Fix 060 Correction 3: this is the one shared syncForm() call for every
   // way a typed Space activates/resumes a design (restored checkpoint or a
   // fresh starter), so this is the single place that needs to reseed/clear

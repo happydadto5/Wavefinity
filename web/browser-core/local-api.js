@@ -113,9 +113,12 @@ window.WFLocalAPI = (() => {
     }
     if (id) operation = WFRuntimeStatus.begin(id, path, signature);
     const execute = async () => {
-      await init();
       const handler = routes.get(path);
-      return handler ? handler(payload) : submit(path, payload, { signal: id ? null : signal, stale: path === '/api/preview', operation });
+      // A directory picker must run directly in its click's activation.
+      // Browser routes initialize the worker themselves only when needed.
+      if (handler) return handler(payload || {});
+      await init();
+      return submit(path, payload, { signal: id ? null : signal, stale: path === '/api/preview', operation });
     };
     const promise = execute().then(result => {
       if (operation) Object.assign(operation, { operation_status: 'done', result });
@@ -132,5 +135,11 @@ window.WFLocalAPI = (() => {
       promise.then(value => { signal.removeEventListener('abort', abort); resolve(value); }, error => { signal.removeEventListener('abort', abort); reject(error); });
     });
   }
-  return { init, request, advanceDesign() { epoch += 1; }, cancel() { restart(fail('Local job cancelled.', 'LOCAL_CANCELLED', 409)); } };
+  return { init, request,
+    async spaceValues(operation, payload) {
+      await init();
+      return submit('__space_values__', { operation, payload });
+    },
+    get designEpoch() { return epoch; },
+    advanceDesign() { epoch += 1; }, cancel() { restart(fail('Local job cancelled.', 'LOCAL_CANCELLED', 409)); } };
 })();

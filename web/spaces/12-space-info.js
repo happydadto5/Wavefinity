@@ -163,9 +163,12 @@ SP.runSpaceAction = async action => {
             if (copiedName.length > 80 || /[<>:"/\\|?*\x00-\x1f]/.test(copiedName) || /[. ]$/.test(copiedName))
               throw new Error("The copied name cannot be used as a folder name. Shorten or rename this Space first.");
             const handle = await parent.getDirectoryHandle(copiedName, { create: true });
+            const copiedFiles = [];
             try {
-              await WFFileSystem.copyDirectory(folder.handle, handle, [FOLDER_METADATA]);
+              await WFFileSystem.copyDirectory(folder.handle, handle, [FOLDER_METADATA], copiedFiles);
+              DL.requireSpaceContext(context);
               const { current } = await SP.readMetadata(folder.handle);
+              if (await WFFileSystem.fileExists(handle, FOLDER_METADATA)) throw new Error("Space metadata appeared in the copy destination. It was not overwritten.");
               await WFFileSystem.writeText(handle, FOLDER_METADATA, JSON.stringify({
                 ...current.data, space_id: crypto.randomUUID(),
               }));
@@ -176,9 +179,14 @@ SP.runSpaceAction = async action => {
               const inventory = await SP.readInventoryFor(copyFolder, { migrate: true });
               const updated = await api("/api/space/copy-text", { inventory_text: inventory, name: copiedName });
               await WFFileSystem.writeText(handle, SP.inventoryFilenameFor(copyFolder), updated.inventory_text);
-              await SP.rememberHostedRecent(copyFolder, { folder_mode: "space", space, space_id: metadata.space_id });
+              await SP.rememberHostedRecent(copyFolder, { folder_mode: "space", space, space_id: metadata.space_id }, () => DL.requireSpaceContext(context));
             } catch (error) {
-              await WFFileSystem.removeDirectory(parent, copiedName);
+              try {
+                await WFFileSystem.rollbackCopy(copiedFiles);
+                await parent.removeEntry(copiedName);
+              } catch (_cleanup) {
+                throw new Error(`Copy failed. An incomplete copy remains in “${copiedName}”; the original Space is unchanged.`);
+              }
               throw error;
             }
           } else {

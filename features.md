@@ -35,6 +35,15 @@ regenerate bins and side clips made with that profile as a set.
 
 ## Status
 
+Browser Space/folder and preference route modules now use selected browser
+directory handles, the existing `.wavefinity.json` identity, and queued folder
+writes. Explicit Space and preference backup/import APIs support recovery;
+imports without folder access are recovery data and do not enable autosave.
+Show Folder displays the selected folder in the app. A storage move retains
+the original folder as a reported recovery copy. Final route/UI assembly is
+still B14 work; these modules do not establish a complete browser edition.
+See [browser Space persistence](docs/reference/browser-space-persistence.md).
+
 The browser migration has a Python dispatcher and bundled catalog/editor routes
 for validation, feature edits, layout fitting and pegboard layout choices.
 They share the existing Python rules and saved Space grid checks. Final worker

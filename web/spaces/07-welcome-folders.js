@@ -203,7 +203,7 @@ SP.sameHostedHandle = async (a, b) => {
   catch (_error) { return false; }
 };
 
-SP.rememberHostedRecent = async (folder, info) => {
+SP.rememberHostedRecent = async (folder, info, requireCurrent = () => {}) => {
   if (!folder?.handle) return;
   const prior = await SP.loadHostedRecent();
   const kept = [];
@@ -224,8 +224,11 @@ SP.rememberHostedRecent = async (folder, info) => {
     max_y_mm: space?.max_y_mm,
     ...(folder.home_name ? { home_name: folder.home_name } : {}),
   };
-  SP.recent = [row, ...kept].slice(0, 10);
-  await SP.saveHostedRecent(SP.recent);
+  const rows = [row, ...kept].slice(0, 10);
+  requireCurrent();
+  await SP.saveHostedRecent(rows);
+  requireCurrent();
+  SP.recent = rows;
 };
 
 SP.welcomeOtherSpaces = () => {

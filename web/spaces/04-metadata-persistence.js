@@ -53,6 +53,11 @@ SP.validSpace = raw => {
     y: Number(raw.y),
     z: Number(raw.z),
   };
+  // These are distinct canonical measurements. In particular an unknown
+  // seated lift stays null, and an explicitly measured zero stays zero.
+  for (const key of ["grid", "built_in_grid", "floor_grid", "nominal_grid_mm", "physical_cavity_mm", "seated_lift_mm"]) {
+    if (Object.hasOwn(raw, key)) space[key] = clone(raw[key]);
+  }
   if (![space.x, space.y, space.z].every(value => Number.isFinite(value) && value > 0)) {
     return null;
   }
@@ -198,17 +203,12 @@ SP.metadataError = status => {
 };
 
 // Every SP.writeMetadata() call is a read/preserve/write transaction against
-// the same file. Serialized through one promise-chain queue so a resume
+// the same file. Serialized through a per-folder promise-chain queue so a resume
 // checkpoint save (from a background preview) can never race a rename/
 // defaults/version-upgrade write and read the same stale file - see Fix 032.
 // A rejected write must not poison the tail: the caller still gets its own
 // rejection, but later queued writes still run.
-SP._metadataWriteQueue = Promise.resolve();
-SP._serializeMetadataWrite = task => {
-  const result = SP._metadataWriteQueue.then(task, task);
-  SP._metadataWriteQueue = result.then(() => {}, () => {});
-  return result;
-};
+SP._serializeMetadataWrite = (handle, task) => WFFileSystem.queueFolderWrite(handle, task);
 
 // `options.preserveSpace`/`options.expectedSpaceId` (Fix 032 Correction 4,
 // C4.1): serialization alone does not stop a caller from writing back a
@@ -219,7 +219,7 @@ SP._serializeMetadataWrite = task => {
 // at all if that current Space's id no longer matches what the caller
 // captured - it must never create/recreate a Space under a new UUID.
 SP.writeMetadata = (handle, mode, space = null, inventory = true, changes = {}, options = {}) =>
-  SP._serializeMetadataWrite(() => SP._writeMetadataNow(handle, mode, space, inventory, changes, options));
+  SP._serializeMetadataWrite(handle, () => SP._writeMetadataNow(handle, mode, space, inventory, changes, options));
 
 SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, changes = {}, options = {}) => {
   const { preserveSpace = false, expectedSpaceId = null } = options;

@@ -1,6 +1,6 @@
 {
   "schema": "wavefinity-browser-catalog/1",
-  "sha256": "15340559f91aade38825f78fcdfb4f4b6056a85359f931f37171d75b3224ffb8",
+  "sha256": "275f3a95cbfb9075c622db59c62207e05bbf5daf2864b76eadc30563072df422",
   "source_hashes": {
     "bambu_handoff.py": "f2a6f6b77c9dafbff9cba4eebf115a78c55705845db69c69895b01470183679c",
     "organizer_app.py": "eea3cbb2b6b67e603d11c1be96a85ca7869ce48700d03ca2bf08c3d8448c086f",
@@ -105,7 +105,7 @@
     "plate_layout.py": "c516e0a1e8b97a0ff3de29180fe93e11300437a26d3677ecda70d24ae1ec4320",
     "space_source.py": "07c43ef70318340030839120f392a0334ab4979b7242c1aaab462176479d59a8",
     "wavefinity_web_impl/__init__.py": "5e38f5c13b418ebda12143006c6684e0a3972563a090f0f38816ae904bb35547",
-    "wavefinity_web_impl/_ai.py": "c689e28cf671fbd053fabbe7d9d4994f28dc0256caecf16fbe938ee30c4f5d03",
+    "wavefinity_web_impl/_ai.py": "0bd09de1fd9b6212f65fc185ee304289d0a09fa715bfb9dcb4d7c6caad928206",
     "wavefinity_web_impl/_catalog.py": "9aeb80ac68c3bc2a1b20580502a04c89b4a7445da4197e634f50dea854deb327",
     "wavefinity_web_impl/_designs/__init__.py": "c47817bf81d2666dd16befc833a3103649b2565e6503fcc94a8b0485bb7a26b0",
     "wavefinity_web_impl/_designs/_features.py": "cd4a284cc9533dd4a32af5b6ed62f25ec7e2c47432caa516f9ed0921472b5ef7",
@@ -116,5 +116,5 @@
     "wavefinity_web_impl/_outputs.py": "524fa41b5a4e123d7d8bd77e2ebffb3f68dfce600df62b032c6e0d9496e50777",
     "wavefinity_web_impl/_runtime.py": "19e1ce2dd9d8187871f4115886c328cbefbad19babe54c77c4447e22476d603e"
   },
-  "source_sha256": "9a462d328ddad254d4567a686aee7772df081de670eb0c36af6b141c222fff92"
+  "source_sha256": "298f51f39629c4c7d48c846567fa8ab6c2479042853738da1c7355596ff5cf84"
 }

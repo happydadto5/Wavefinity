@@ -98,7 +98,17 @@ SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
 // preview finishing during that window could otherwise capture its id/
 // design paired with the new Space's folder handle. Pass `browserFolder`
 // only from a hosted caller that has one to hand over.
+SP.spaceOwnerGuard = () => {
+  const id = state.activeSpaceId, folder = state.browserFolder, epoch = SP._folderEpoch || 0;
+  return () => {
+    if (id !== state.activeSpaceId || folder !== state.browserFolder || epoch !== (SP._folderEpoch || 0)) {
+      throw Object.assign(new Error("The Space changed before this action finished. Its result was not applied to the current Space."), { kind: "STALE_SPACE", status: 409 });
+    }
+  };
+};
+
 SP.applyFolder = async (info, options = {}) => {
+  const requireOwner = SP.spaceOwnerGuard();
   const { reset = true, initDesign = true } = options;
   // Fix 1019 (G2M-0217): the primary typed-Space DP preflight lives HERE -
   // before any reset or identity adoption. DP (drawer-panel.js) may be
@@ -140,11 +150,16 @@ SP.applyFolder = async (info, options = {}) => {
   // must never write into, or overwrite in memory, the new Space's
   // checkpoint.
   await SP.flushOutgoingResumeCheckpoint();
+  await WFFileSystem.flushFolderWrites();
+  requireOwner();
   // Everything from here through setFolderState() is one synchronous block
   // with no intervening await, so nothing can ever observe a half-migrated
   // identity (e.g. the new state.browserFolder paired with the old
   // state.activeSpaceId).
   if (Object.hasOwn(options, "browserFolder")) state.browserFolder = options.browserFolder;
+  else if (info.browser_folder) state.browserFolder = info.browser_folder;
+  window.WFLocalAPI?.advanceDesign();
+  SP._folderEpoch = (SP._folderEpoch || 0) + 1;
   state.output = info.folder;
   state.activeSpaceId = info.space_id || null;
   state.cabinetRecovery = info.cabinet_recovery || null;
@@ -166,7 +181,9 @@ SP.applyFolder = async (info, options = {}) => {
     resumePending,
   );
   SP.readBinRecoveryCheckpoint();
+  const requireAppliedOwner = SP.spaceOwnerGuard();
   if (initDesign && info.folder_mode === "space") await SP.initializeDesignForActiveSpace();
+  requireAppliedOwner();
   syncForm();
   if (SP.renderSpaceInfo) SP.renderSpaceInfo();
   return true;

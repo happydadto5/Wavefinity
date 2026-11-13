@@ -46,6 +46,20 @@ self.onmessage = async ({ data: job }) => {
   try {
     const bundle = await ready;
     if (job.path === '__init__') { send('result', { result: bundle }); return; }
+    if (job.path === '__space_values__') {
+      capacity();
+      py.globals.set('_wf_space_operation', job.payload.operation);
+      py.globals.set('_wf_space_payload', JSON.stringify(job.payload.payload));
+      try {
+        const reply = JSON.parse(py.runPython("from wf_browser_core.space_values import compute_json\ncompute_json(_wf_space_operation, _wf_space_payload)"));
+        capacity();
+        send(reply.error ? 'error' : 'result', reply);
+      } finally {
+        py.globals.delete('_wf_space_operation');
+        py.globals.delete('_wf_space_payload');
+      }
+      return;
+    }
     const handler = routes.get(job.path);
     if (!handler) { send('error', { error: unsupported, status: 404 }); return; }
     capacity();

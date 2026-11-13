@@ -6,6 +6,9 @@ async function init() {
   try {
     await WFBrowserCore.init();
     const catalog = await api("/api/catalog");
+    const savedPreferences = await api("/api/preferences", {});
+    catalog.preferences = savedPreferences.preferences;
+    if (catalog.preferences?.preference_warning) toast(catalog.preferences.preference_warning, true, 6000);
     state.catalog = catalog;
     if (typeof StorageDrawers !== "undefined") {
       // Missing catalog rules must not stop startup; Storage Drawers setup then

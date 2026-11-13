@@ -450,6 +450,7 @@ SP.assertExpectedHostedIdentity = (info, expectedSpaceId) => {
 };
 
 SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = false, openPreferredView = false } = {}) => {
+  const requireOwner = SP.spaceOwnerGuard();
   // A hosted Design session without a persistent folder is "no folder
   // selected", never a fabricated one. Opening a Wavefinity folder therefore
   // always needs a real handle.
@@ -458,6 +459,7 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   }
   // Read-only classification of the target folder only - no write yet.
   let info = await SP.inspectHosted(folder);
+  requireOwner();
   SP.assertExpectedHostedIdentity(info, expectedSpaceId);
 
   // Leave the old Drawer layout safely BEFORE any write to the target
@@ -479,6 +481,7 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   // classification says no setup is needed, adopt the canonical inventory
   // filename and give a configured v4 folder its v5 identity.
   if (!info.needs_setup) {
+    requireOwner();
     if (info.inventory) await SP.readInventoryFor(folder, { migrate: true });
     const upgradeSpace = info.folder_mode === "space" && (
       info.needs_identity_migration || (info.metadata_version || 0) < FOLDER_METADATA_VERSION
@@ -502,13 +505,20 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   // The safe-leave decision is already resolved above - clear the old
   // Drawer state exactly once, with no second prompt.
   if (!(await SP.resetDrawer({ skipSafeLeave: true }))) return null;
+  requireOwner();
   // This only writes the remembered-active record; it does not mutate the
   // live editor identity, so it may run before the atomic identity
   // transition below (Fix 032 Correction 2, item 7). state.browserFolder
   // itself is set inside SP.applyFolder(), never here.
-  await WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null, ...(folder.home_name ? { home_name: folder.home_name } : {}) });
+  await WFFileSystem.queueFolderWrite(folder.handle, () => {
+    requireOwner();
+    return WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null, ...(folder.home_name ? { home_name: folder.home_name } : {}) });
+  });
+  requireOwner();
   await SP.applyFolder(info, { reset: false, browserFolder: folder });
-  await SP.rememberHostedRecent(folder, info);
+  const requireAppliedOwner = SP.spaceOwnerGuard();
+  await SP.rememberHostedRecent(folder, info, requireAppliedOwner);
+  requireAppliedOwner();
   SP.close();
   if (openPreferredView && info.folder_mode === "space") {
     if (!(await SP.openTypedSpacePreferredView())) return null;

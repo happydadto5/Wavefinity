@@ -14,15 +14,43 @@ window.WFFileSystem = (() => {
     request.onerror = () => reject(request.error);
   });
 
-  const save = async (key, value) => {
+  const saveRecords = async records => {
     const database = await db();
-    await new Promise((resolve, reject) => {
-      const request = database.transaction(STORE, "readwrite").objectStore(STORE).put(value, key);
-      request.onsuccess = resolve;
-      request.onerror = () => reject(request.error);
-    });
-    database.close();
+    try {
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction(STORE, "readwrite");
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error || new Error("Browser storage was not saved."));
+        const store = transaction.objectStore(STORE);
+        try {
+          for (const [key, value] of Object.entries(records)) store.put(value, key);
+        } catch (error) { transaction.abort(); reject(error); }
+      });
+    } finally { database.close(); }
   };
+  const save = (key, value) => saveRecords({ [key]: value });
+
+  // Handles restored from IndexedDB are different JS objects for the same
+  // directory. Resolve their identity before reserving a write slot.
+  const folderQueues = [];
+  let reservation = Promise.resolve();
+  const queueFolderWrite = (handle, task) => {
+    const reserve = reservation.then(async () => {
+      requireDirectoryHandle(handle);
+      let row;
+      for (const candidate of folderQueues) {
+        if (candidate.handle === handle || await candidate.handle.isSameEntry(handle)) { row = candidate; break; }
+      }
+      if (!row) { row = { handle, tail: Promise.resolve() }; folderQueues.push(row); }
+      const result = row.tail.then(task, task);
+      row.tail = result.then(() => {}, () => {});
+      return { result };
+    });
+    reservation = reserve.then(() => {}, () => {});
+    return reserve.then(slot => slot.result);
+  };
+  const flushFolderWrites = () => reservation.then(() => Promise.all(folderQueues.map(row => row.tail)));
 
   const load = async key => {
     const database = await db();
@@ -130,8 +158,13 @@ window.WFFileSystem = (() => {
     if (!(await requestReadWritePermission(handle))) throw new Error("Wavefinity needs permission to save in that folder.");
     const file = await handle.getFileHandle(filename, { create: true });
     const writable = await file.createWritable();
-    await writable.write(blob);
-    await writable.close();
+    try {
+      await writable.write(blob);
+      await writable.close();
+    } catch (error) {
+      try { await writable.abort(); } catch (_abort) { /* Preserve the original failure. */ }
+      throw error;
+    }
   };
 
   const writeText = async (handle, filename, text) => {
@@ -180,17 +213,44 @@ window.WFFileSystem = (() => {
     await handle.removeEntry(filename);
   };
 
-  const copyDirectory = async (source, destination, skipFiles = []) => {
+  const copyDirectory = async (source, destination, skipFiles = [], journal = []) => {
     await requireWritableFolder(source);
     await requireWritableFolder(destination);
+    for await (const _entry of destination.entries()) {
+      throw new Error("The destination folder is not empty. Choose a new folder; existing files were not overwritten.");
+    }
     for await (const [name, entry] of source.entries()) {
       if (skipFiles.includes(name)) continue;
       if (entry.kind === "directory") {
-        await copyDirectory(entry, await destination.getDirectoryHandle(name, { create: true }));
+        const child = await destination.getDirectoryHandle(name, { create: true });
+        journal.push({ parent: destination, name, kind: "directory" });
+        await copyDirectory(entry, child, [], journal);
       } else {
-        await writeBlob(destination, name, await readBlob(source, name));
+        const blob = await readBlob(source, name);
+        if (await fileExists(destination, name)) throw new Error("A file appeared in the copy destination. It was not overwritten.");
+        journal.push({ parent: destination, name, kind: "file", sha256: await sha256Blob(blob) });
+        await writeBlob(destination, name, blob);
       }
     }
+    return journal;
+  };
+
+  // Delete only our recorded bytes and empty directories during rollback.
+  // A file another program changed, or an unexpected extra file, stays put.
+  const rollbackCopy = async journal => {
+    const empty = await sha256Blob(new Blob([]));
+    let incomplete = false;
+    for (const row of [...journal].reverse()) {
+      try {
+        if (row.kind === "file") {
+          const actual = await sha256(row.parent, row.name);
+          if (actual === null) continue;
+          if (actual !== row.sha256 && actual !== empty) { incomplete = true; continue; }
+        }
+        await row.parent.removeEntry(row.name);
+      } catch (error) { if (error.name !== "NotFoundError") incomplete = true; }
+    }
+    if (incomplete) throw new Error("Some copied files changed or could not be removed. The incomplete copy was retained for recovery.");
   };
 
   const removeDirectory = async (parent, name) => {
@@ -225,7 +285,7 @@ window.WFFileSystem = (() => {
     queryReadWritePermission, requestReadWritePermission,
     writeBlob, writeText, readText, fileExists, listFilenames, removeFile,
     readBlob, sha256, sha256Blob,
-    copyDirectory, removeDirectory,
-    save, load,
+    copyDirectory, rollbackCopy, removeDirectory,
+    save, saveRecords, load, queueFolderWrite, flushFolderWrites,
   };
 })();

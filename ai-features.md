@@ -39,6 +39,11 @@ regenerate bins and side clips made with that profile as a set.
 
 AI Design designs **one ordinary Wavefinity Bin**.
 
+In the browser edition, the person selects the writable folder. AI responses
+must not supply local paths, folder handles or preferences, or promise that a
+design has been saved. Folderless design and imported recovery data require an
+explicit export to keep a portable copy; autosave requires granted folder access.
+
 It does **not** design these Space-owned structural outputs:
 
 - Storage Box case.

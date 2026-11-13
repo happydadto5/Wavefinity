@@ -396,11 +396,16 @@ SP._captureResumeTarget = () => {
     output: state.output,
     browserFolder: state.browserFolder,
     hosted: Boolean(state.runtime.hosted),
+    designEpoch: window.WFLocalAPI?.designEpoch,
+    previewRequest: state.previewRequest,
   };
 };
 
 SP._resumeMatchesActive = target =>
-  state.folderMode === "space" && state.activeSpaceId === target.spaceId;
+  state.folderMode === "space" && state.activeSpaceId === target.spaceId &&
+  target.browserFolder === state.browserFolder &&
+  target.designEpoch === window.WFLocalAPI?.designEpoch &&
+  target.previewRequest === state.previewRequest;
 
 SP._writeResumeCheckpointNow = async (target, design, pending) => {
   // Recovery entries share the existing raw, identity-checked checkpoint
