@@ -1,0 +1,6 @@
+# Keep pinned vendor bytes identical on Windows and Unix checkouts.
+web/browser-core/vendor/** -text
+web/browser-core/engine/canonical.zip -text
+web/browser-core/engine/manifest.json text eol=lf
+scripts/build-browser-core.py text eol=lf
+web/browser-core/engine/*.py text eol=lf

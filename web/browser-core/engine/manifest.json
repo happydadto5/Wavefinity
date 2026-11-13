@@ -1,0 +1,753 @@
+{
+  "archive": "canonical.zip",
+  "bytes": 664540,
+  "external_imports": [
+    "PIL",
+    "cv2",
+    "lib3mf",
+    "manifold3d",
+    "matplotlib",
+    "numpy",
+    "shapely",
+    "trimesh"
+  ],
+  "memory_planning": {
+    "combined_wasm_heap_target_bytes": 1610612736,
+    "compressed_first_load_target_bytes": 67108864,
+    "measured_peak_heap_bytes": null,
+    "note": "Planning targets, not measured guarantees. B03 owns combined allocated heap checks and capacity errors; large-job peak is unknown."
+  },
+  "pending_adapters": {
+    "lib3mf": "B07 browser-native 3MF serializer; no native lib3mf binary is packaged",
+    "photo_nest": "B12 integrates the bundled cv2/Pillow browser packages"
+  },
+  "schema": "wavefinity-browser-engine/1",
+  "sha256": "52d25493806bef637204a9b012a2862c29b922cecb8fdff7f82bdb9289bee3a6",
+  "size_accounting": {
+    "assets": {
+      "earcut/LICENSE": {
+        "bytes": 738,
+        "gzip_bytes": 479
+      },
+      "earcut/earcut.mjs": {
+        "bytes": 21256,
+        "gzip_bytes": 5821
+      },
+      "engine/canonical.zip": {
+        "bytes": 664540,
+        "gzip_bytes": 656826
+      },
+      "manifold64/LICENSE": {
+        "bytes": 11558,
+        "gzip_bytes": 3982
+      },
+      "manifold64/bridge64.cpp": {
+        "bytes": 1339,
+        "gzip_bytes": 592
+      },
+      "manifold64/bridge64.mjs": {
+        "bytes": 52637,
+        "gzip_bytes": 13640
+      },
+      "manifold64/bridge64.wasm": {
+        "bytes": 310928,
+        "gzip_bytes": 105696
+      },
+      "manifold64/build.sh": {
+        "bytes": 1066,
+        "gzip_bytes": 608
+      },
+      "pyodide/LICENSE": {
+        "bytes": 16725,
+        "gzip_bytes": 5311
+      },
+      "pyodide/contourpy-1.3.1-cp313-cp313-pyodide_2025_0_wasm32.whl": {
+        "bytes": 132421,
+        "gzip_bytes": 130655
+      },
+      "pyodide/cycler-0.12.1-py3-none-any.whl": {
+        "bytes": 8321,
+        "gzip_bytes": 7792
+      },
+      "pyodide/decorator-5.2.1-py3-none-any.whl": {
+        "bytes": 9167,
+        "gzip_bytes": 8589
+      },
+      "pyodide/fonttools-4.56.0-py3-none-any.whl": {
+        "bytes": 1089800,
+        "gzip_bytes": 1063951
+      },
+      "pyodide/kiwisolver-1.4.8-cp313-cp313-pyodide_2025_0_wasm32.whl": {
+        "bytes": 36920,
+        "gzip_bytes": 36209
+      },
+      "pyodide/libopenblas-0.3.26.zip": {
+        "bytes": 1916561,
+        "gzip_bytes": 1913550
+      },
+      "pyodide/lxml-6.0.0-cp313-cp313-pyodide_2025_0_wasm32.whl": {
+        "bytes": 1778068,
+        "gzip_bytes": 1769338
+      },
+      "pyodide/matplotlib-3.8.4-cp313-cp313-pyodide_2025_0_wasm32.whl": {
+        "bytes": 6722016,
+        "gzip_bytes": 6604414
+      },
+      "pyodide/networkx-3.4.2-py3-none-any.whl": {
+        "bytes": 1028953,
+        "gzip_bytes": 1003580
+      },
+      "pyodide/numpy-2.2.5-cp313-cp313-pyodide_2025_0_wasm32.whl": {
+        "bytes": 3109648,
+        "gzip_bytes": 3074758
+      },
+      "pyodide/opencv_python-4.11.0.86-cp313-cp313-pyodide_2025_0_wasm32.whl": {
+        "bytes": 11700243,
+        "gzip_bytes": 11650106
+      },
+      "pyodide/packaging-24.2-py3-none-any.whl": {
+        "bytes": 71930,
+        "gzip_bytes": 70100
+      },
+      "pyodide/pillow-11.3.0-cp313-cp313-pyodide_2025_0_wasm32.whl": {
+        "bytes": 1058399,
+        "gzip_bytes": 1049644
+      },
+      "pyodide/pyodide-lock.json": {
+        "bytes": 109732,
+        "gzip_bytes": 25442
+      },
+      "pyodide/pyodide.asm.js": {
+        "bytes": 1073033,
+        "gzip_bytes": 220360
+      },
+      "pyodide/pyodide.asm.wasm": {
+        "bytes": 8645967,
+        "gzip_bytes": 2817221
+      },
+      "pyodide/pyodide.js": {
+        "bytes": 17331,
+        "gzip_bytes": 6883
+      },
+      "pyodide/pyodide.mjs": {
+        "bytes": 16347,
+        "gzip_bytes": 6570
+      },
+      "pyodide/pyparsing-3.2.1-py3-none-any.whl": {
+        "bytes": 107717,
+        "gzip_bytes": 106791
+      },
+      "pyodide/python_dateutil-2.9.0.post0-py2.py3-none-any.whl": {
+        "bytes": 229892,
+        "gzip_bytes": 228235
+      },
+      "pyodide/python_stdlib.zip": {
+        "bytes": 2416866,
+        "gzip_bytes": 2377637
+      },
+      "pyodide/pytz-2025.2-py2.py3-none-any.whl": {
+        "bytes": 509225,
+        "gzip_bytes": 376651
+      },
+      "pyodide/scipy-1.14.1-cp313-cp313-pyodide_2025_0_wasm32.whl": {
+        "bytes": 13258838,
+        "gzip_bytes": 13161833
+      },
+      "pyodide/setuptools-76.0.0-py3-none-any.whl": {
+        "bytes": 953457,
+        "gzip_bytes": 907272
+      },
+      "pyodide/shapely-2.0.7-cp313-cp313-pyodide_2025_0_wasm32.whl": {
+        "bytes": 836356,
+        "gzip_bytes": 832478
+      },
+      "pyodide/six-1.17.0-py2.py3-none-any.whl": {
+        "bytes": 11050,
+        "gzip_bytes": 10640
+      },
+      "trimesh/trimesh-5.0.0-py3-none-any.whl": {
+        "bytes": 745494,
+        "gzip_bytes": 735710
+      }
+    },
+    "planning_target_bytes": 67108864,
+    "scope": "Entire B02 vendor tree and canonical.zip; excludes future UI/worker assets and manifest JSON. gzip totals are build encoding sizes, not observed network transfer. Hosting compression/traffic allowance is not established here.",
+    "total_bytes": 58674539,
+    "total_gzip_bytes": 50989364,
+    "within_planning_target": true
+  },
+  "source_hash_mode": "UTF-8 without BOM, LF line endings",
+  "sources": {
+    "bambu_handoff.py": {
+      "bytes": 7920,
+      "sha256": "f2a6f6b77c9dafbff9cba4eebf115a78c55705845db69c69895b01470183679c",
+      "source": "bambu_handoff.py"
+    },
+    "organizer_app.py": {
+      "bytes": 37281,
+      "sha256": "51c02097ad0630a8d82353e85d7e93b12bbedfdfd3bfb975e5cc496eb9caf087",
+      "source": "organizer_app.py"
+    },
+    "organizer_app_impl/__init__.py": {
+      "bytes": 76,
+      "sha256": "d205d83938e0c4531eeebe352e607fda112cf1f4604086e5821b72f30fe6a018",
+      "source": "organizer_app_impl/__init__.py"
+    },
+    "organizer_app_impl/_cli.py": {
+      "bytes": 6645,
+      "sha256": "65c00771c167b8c77b4970c26844da9e9f8ce461213bb9970c788aeb4b4da4bd",
+      "source": "organizer_app_impl/_cli.py"
+    },
+    "organizer_app_impl/_common.py": {
+      "bytes": 7384,
+      "sha256": "d22ffb35f284bffae96aeed5f07bc79d4ab73d3d9f4c4d2b573be6bfb16716f4",
+      "source": "organizer_app_impl/_common.py"
+    },
+    "organizer_app_impl/_design_io.py": {
+      "bytes": 57520,
+      "sha256": "baa2099823262547bf0384b64a207113536d2c97e549741c5d091a86b4756d90",
+      "source": "organizer_app_impl/_design_io.py"
+    },
+    "organizer_app_impl/_filenames.py": {
+      "bytes": 9362,
+      "sha256": "5a80a9dab52ba0a45d18af2ddb34882e294d88cbbe9282abff6cdbd088177a6c",
+      "source": "organizer_app_impl/_filenames.py"
+    },
+    "organizer_app_impl/_generation.py": {
+      "bytes": 12178,
+      "sha256": "94dab78a93a6dc8febfc3b64647ef7ee7289a873c506ed19df535e28e44b7233",
+      "source": "organizer_app_impl/_generation.py"
+    },
+    "organizer_app_impl/_preview/__init__.py": {
+      "bytes": 42652,
+      "sha256": "5678b871f6473b8b3cd12e2f1fa80624282d735d4779aaeb3f30071d2997997e",
+      "source": "organizer_app_impl/_preview/__init__.py"
+    },
+    "organizer_app_impl/_preview/_helpers.py": {
+      "bytes": 25510,
+      "sha256": "d59ed993763ac9db07be97534cd9ec23fa2fe1e037a6c2757f772f879c96eb94",
+      "source": "organizer_app_impl/_preview/_helpers.py"
+    },
+    "organizer_b4b/__init__.py": {
+      "bytes": 7763,
+      "sha256": "191607feca046a860ecb8c15d28b6162e7d197834795e6c9e5dc1f4850c3fcb3",
+      "source": "organizer_b4b/__init__.py"
+    },
+    "organizer_b4b/_compose.py": {
+      "bytes": 9417,
+      "sha256": "f24b76f24742e1128aa6261275e074e7659605957f4669618a75d78e100d704a",
+      "source": "organizer_b4b/_compose.py"
+    },
+    "organizer_b4b/_constants.py": {
+      "bytes": 19430,
+      "sha256": "e1c1d5b4c97ec53828e77f7b6746a3503561a1f7b74b52268cc3edb616113221",
+      "source": "organizer_b4b/_constants.py"
+    },
+    "organizer_b4b/_geometry/__init__.py": {
+      "bytes": 2872,
+      "sha256": "1fbad3538f45c6dc814587b228bc69ea12b9b965420ac5d521241a182b456990",
+      "source": "organizer_b4b/_geometry/__init__.py"
+    },
+    "organizer_b4b/_geometry/_body.py": {
+      "bytes": 19083,
+      "sha256": "d3fd4114faec77fbc9e7786ee595c3bfb42c660ca3b3d00ea8fafc9c89d20400",
+      "source": "organizer_b4b/_geometry/_body.py"
+    },
+    "organizer_b4b/_geometry/_cutters.py": {
+      "bytes": 13348,
+      "sha256": "8e3297ea446286e1b1602dd9d9bb14d50bd591547eec581d509c89694989067a",
+      "source": "organizer_b4b/_geometry/_cutters.py"
+    },
+    "organizer_b4b/_geometry/_handle.py": {
+      "bytes": 20609,
+      "sha256": "4867ba66abcbce0c026a60718859e2844c433daadec9e01bcfda2244a5c6614a",
+      "source": "organizer_b4b/_geometry/_handle.py"
+    },
+    "organizer_b4b/_geometry/_hinges.py": {
+      "bytes": 20999,
+      "sha256": "1b71bbeb3f430533a1ae878e360532723639b6ae7d06121c9af5ad349b27f921",
+      "source": "organizer_b4b/_geometry/_hinges.py"
+    },
+    "organizer_b4b/_labels.py": {
+      "bytes": 35212,
+      "sha256": "f4b8e31189485503699f1d37663fe334828cb22f07c291444f6be73dcdd6cff3",
+      "source": "organizer_b4b/_labels.py"
+    },
+    "organizer_b4b/_layout.py": {
+      "bytes": 24178,
+      "sha256": "c2a210fbd1a1c89a05ae63d2f48d325c531b205c9b9c8c23c508ecc8ef90ecb7",
+      "source": "organizer_b4b/_layout.py"
+    },
+    "organizer_b4b/_note.py": {
+      "bytes": 4635,
+      "sha256": "815a0f64fb94bbc7670c857444d158612b58ade16d3e26033772dfc81f26df4d",
+      "source": "organizer_b4b/_note.py"
+    },
+    "organizer_b4b/_outputs.py": {
+      "bytes": 21597,
+      "sha256": "bf34bcdf18ab9bd20114a7f18d13d5457c4cda41ac562ec0b837d39d120e5d75",
+      "source": "organizer_b4b/_outputs.py"
+    },
+    "organizer_b4b/_plans.py": {
+      "bytes": 34873,
+      "sha256": "664e4f59c2280d51709a55885ae7888aa916fd4b9d371261534587a09de8e560",
+      "source": "organizer_b4b/_plans.py"
+    },
+    "organizer_b4b/_validation.py": {
+      "bytes": 37733,
+      "sha256": "caf49e5af25ba9ee6c80432306e2b18b7e46a4e886f58fa558fb1c186d3e9be8",
+      "source": "organizer_b4b/_validation.py"
+    },
+    "organizer_base_trim/__init__.py": {
+      "bytes": 34232,
+      "sha256": "6ea2a08081349fd9a4a7a4a32bb11da7f713f6375a253c781e0e9bcf0ef8e209",
+      "source": "organizer_base_trim/__init__.py"
+    },
+    "organizer_base_trim/outputs.py": {
+      "bytes": 13920,
+      "sha256": "f238c0698908d161aa1c93776f45796440b30935efb4ae7ea36747f9b2b4e284",
+      "source": "organizer_base_trim/outputs.py"
+    },
+    "organizer_drawer/__init__.py": {
+      "bytes": 57354,
+      "sha256": "83a462ebfe9da4a8cf3883e6be26e710a1e1769a8fd84c7fcfa16c5f546e61a2",
+      "source": "organizer_drawer/__init__.py"
+    },
+    "organizer_drawer/_core.py": {
+      "bytes": 44743,
+      "sha256": "1227856a310439edd5f0aedda4f7f2dbccab62a4c715e777745e5a860d64ec75",
+      "source": "organizer_drawer/_core.py"
+    },
+    "organizer_drawer/_inventory.py": {
+      "bytes": 15281,
+      "sha256": "fdecdf7b03cc597d4a6e0e4a18fe1d0dfa9e9fe5e1ff2597a0d2e1a8d4064c7c",
+      "source": "organizer_drawer/_inventory.py"
+    },
+    "organizer_drawer/_report.py": {
+      "bytes": 35905,
+      "sha256": "5e56cc5cb2d44f4e50d5f33d7404cfc7d9de4a26392cc804d8910c825a11efcf",
+      "source": "organizer_drawer/_report.py"
+    },
+    "organizer_drawer/_spacers.py": {
+      "bytes": 36894,
+      "sha256": "040aa6d7f76f7ef8a9ca15d273e098240940540bff41a3621e39550a92bd04f2",
+      "source": "organizer_drawer/_spacers.py"
+    },
+    "organizer_engine/__init__.py": {
+      "bytes": 13186,
+      "sha256": "bc7ab580da2090263f02d5819d470c73ca70184a545c2a37f381c9fa6fb6b827",
+      "source": "organizer_engine/__init__.py"
+    },
+    "organizer_engine/_boxes.py": {
+      "bytes": 26251,
+      "sha256": "c937c7fce7ac100e1137fe36799091d326a4bc1382b5ba97a557e9064ee11b67",
+      "source": "organizer_engine/_boxes.py"
+    },
+    "organizer_engine/_export.py": {
+      "bytes": 27237,
+      "sha256": "a678696b06087316dd32add24813598bd365876dddd4b12d78b6dcb9b6185831",
+      "source": "organizer_engine/_export.py"
+    },
+    "organizer_engine/_fit.py": {
+      "bytes": 4385,
+      "sha256": "246a0d99af2e79f9727a4120607b5ca35ad8b7c7dba3eaf24d6485b7f7851d56",
+      "source": "organizer_engine/_fit.py"
+    },
+    "organizer_engine/_labels.py": {
+      "bytes": 28877,
+      "sha256": "b9fa8bc1e9987cc1c990664133a902ebe186dece28d752b7f01afd8066b125fc",
+      "source": "organizer_engine/_labels.py"
+    },
+    "organizer_engine/_lift_grabbers.py": {
+      "bytes": 13551,
+      "sha256": "74470c90cf8336aa77d2bfe75cdcec0a5cd09f7fba06f58f90e19ed082eb5900",
+      "source": "organizer_engine/_lift_grabbers.py"
+    },
+    "organizer_engine/_specs.py": {
+      "bytes": 50140,
+      "sha256": "5b571a73234ca63631d0646838207e137dcdceb70b36307bc0281402598fa98c",
+      "source": "organizer_engine/_specs.py"
+    },
+    "organizer_engine/_wave.py": {
+      "bytes": 38471,
+      "sha256": "5931d6060aeafe05bcab55a36c4c4f58629320007526228dc49c2d1d78f440e8",
+      "source": "organizer_engine/_wave.py"
+    },
+    "organizer_engine/product_rules.py": {
+      "bytes": 4487,
+      "sha256": "62d6a1b0f61ec78d0bb3b5ba93be2a4129ec75a2ec1dd72eb8035e6662110482",
+      "source": "organizer_engine/product_rules.py"
+    },
+    "organizer_features/__init__.py": {
+      "bytes": 65,
+      "sha256": "1913fc786ff873ac72535a59bf4b691f363813c8dd5ac07ad7614a9c06fffc67",
+      "source": "organizer_features/__init__.py"
+    },
+    "organizer_features/edge_mount.py": {
+      "bytes": 43457,
+      "sha256": "97583a44013c6c4e2408cf867bb7eba689f46a5dfc1d6e915e2bec270523ae49",
+      "source": "organizer_features/edge_mount.py"
+    },
+    "organizer_features/gridfinity.py": {
+      "bytes": 25300,
+      "sha256": "d78702680d5463aabc2e0db23bbd875d3c3186c3ee56372ed28ea745ef156506",
+      "source": "organizer_features/gridfinity.py"
+    },
+    "organizer_features/lid_handle.py": {
+      "bytes": 6888,
+      "sha256": "9334780322ca34f27c98ae69f3ab55bbfe2e83ec78e5f071c9b262f2830ecd0f",
+      "source": "organizer_features/lid_handle.py"
+    },
+    "organizer_features/lid_hinge.py": {
+      "bytes": 22347,
+      "sha256": "0d751d1d350e85123e4ccbb982e0d8ba31ed71131795397b92d0ada249ea471c",
+      "source": "organizer_features/lid_hinge.py"
+    },
+    "organizer_features/pegboard.py": {
+      "bytes": 31299,
+      "sha256": "a6efd8730eabbd34b67b1967b13c474e8e6dc4bef0d2015d9bd92f13b4e9271d",
+      "source": "organizer_features/pegboard.py"
+    },
+    "organizer_features/side_openings.py": {
+      "bytes": 16740,
+      "sha256": "a43b18b9549d0a096a2a5fe20c1c00c0fb7dc2018291666979cc1ad5c6c2ca25",
+      "source": "organizer_features/side_openings.py"
+    },
+    "organizer_features/stack.py": {
+      "bytes": 43174,
+      "sha256": "cec73c4541dc55b4493b6038dcb3c64e71b3b2e311be218f99b900a349b6acc5",
+      "source": "organizer_features/stack.py"
+    },
+    "organizer_geometry/__init__.py": {
+      "bytes": 8149,
+      "sha256": "7095578d36fc8887629a13e12b1180824b1620c5d5a8d116ea9bc0429b34a30f",
+      "source": "organizer_geometry/__init__.py"
+    },
+    "organizer_geometry/_nearest.py": {
+      "bytes": 3016,
+      "sha256": "c5bd4b50ee8153333d1b2f3ab85764ad20b34eb8a9c6f57febb4684809f9f082",
+      "source": "organizer_geometry/_nearest.py"
+    },
+    "organizer_geometry/_stages.py": {
+      "bytes": 6723,
+      "sha256": "ac2d212e4004ef4a560ca72c698d77b41ba89da9557ce46307a9120b25493201",
+      "source": "organizer_geometry/_stages.py"
+    },
+    "organizer_inserts/__init__.py": {
+      "bytes": 5187,
+      "sha256": "58548671b67eab9c9059b4d321cde9a6564b576821011ea679fde7ff43cbee7a",
+      "source": "organizer_inserts/__init__.py"
+    },
+    "organizer_inserts/_assembly.py": {
+      "bytes": 23932,
+      "sha256": "c64ac3e78f23ae574783aa5d1f373800fa6929426441113da0f6b53d6f656ad6",
+      "source": "organizer_inserts/_assembly.py"
+    },
+    "organizer_inserts/_bore/__init__.py": {
+      "bytes": 6115,
+      "sha256": "9ccf8b78f63c7bc6c0495ad2582ae8e62da5b121468527fb37ea9389d2bb0de3",
+      "source": "organizer_inserts/_bore/__init__.py"
+    },
+    "organizer_inserts/_bore/_build.py": {
+      "bytes": 13364,
+      "sha256": "a56ac31d21ac9f3b10bee64217d2106e33866c65de240d99e2c13db5f75f2010",
+      "source": "organizer_inserts/_bore/_build.py"
+    },
+    "organizer_inserts/_bore/_consts.py": {
+      "bytes": 5785,
+      "sha256": "daa58de941c5bc8504b44815923993eb3f26f84e7adfafdd06d3342629a5a0b4",
+      "source": "organizer_inserts/_bore/_consts.py"
+    },
+    "organizer_inserts/_bore/_grid.py": {
+      "bytes": 7551,
+      "sha256": "c3efa3667d65b425d8717afd9c6721f80e69bf1334875dadf4022ece5a5bf622",
+      "source": "organizer_inserts/_bore/_grid.py"
+    },
+    "organizer_inserts/_bore/_settings.py": {
+      "bytes": 12627,
+      "sha256": "cb1d4b13f120674e8ea0c1d10e0ccd291d83084bc0906d3dae21b4d4550a0c39",
+      "source": "organizer_inserts/_bore/_settings.py"
+    },
+    "organizer_inserts/_bore/_shapes.py": {
+      "bytes": 8390,
+      "sha256": "9eff27d576d1a56341e02efc974eabc1fc288b3e3d0e11a3f35db965b6c8f3a7",
+      "source": "organizer_inserts/_bore/_shapes.py"
+    },
+    "organizer_inserts/_bore/_walls.py": {
+      "bytes": 8726,
+      "sha256": "39e2912141bfff3a27372bc194e1bb5614e3c64f3cc623f34172ed94cabc83e4",
+      "source": "organizer_inserts/_bore/_walls.py"
+    },
+    "organizer_inserts/_core.py": {
+      "bytes": 26214,
+      "sha256": "e54a811476bcd8bdcad945c99de3576597c179d13b17930ecc925604d3309e93",
+      "source": "organizer_inserts/_core.py"
+    },
+    "organizer_inserts/_cradle.py": {
+      "bytes": 20190,
+      "sha256": "c8aaa6183a6ead4c3974e205199a6e0d78dc693173fc841590126a2cf57f77cf",
+      "source": "organizer_inserts/_cradle.py"
+    },
+    "organizer_inserts/_divider/__init__.py": {
+      "bytes": 6453,
+      "sha256": "e07dcd57bc78f4e547d4f14785adeb87e787787137c232edb64a63996b636e83",
+      "source": "organizer_inserts/_divider/__init__.py"
+    },
+    "organizer_inserts/_divider/_bottoms.py": {
+      "bytes": 15538,
+      "sha256": "a7da11797589de4440da474c48344674725aa20e37e9f881c0985b4cbbe0a6ae",
+      "source": "organizer_inserts/_divider/_bottoms.py"
+    },
+    "organizer_inserts/_divider/_build.py": {
+      "bytes": 30716,
+      "sha256": "1230dd0a2554a3d6e5dbf670fbb1a49221a003727d2b4e35ad7b6bd2a8f46db0",
+      "source": "organizer_inserts/_divider/_build.py"
+    },
+    "organizer_inserts/_divider/_consts.py": {
+      "bytes": 1866,
+      "sha256": "b8b5cd0421dc2db9ccebc678f6e7eea894772120eb6e2b65bb264df7fb31d7d4",
+      "source": "organizer_inserts/_divider/_consts.py"
+    },
+    "organizer_inserts/_divider/_height.py": {
+      "bytes": 1572,
+      "sha256": "cf8455775381ec67ad62c95c8f39b347cf149cef3eb2f5da787b3d2c2b8fc55d",
+      "source": "organizer_inserts/_divider/_height.py"
+    },
+    "organizer_inserts/_divider/_shelf.py": {
+      "bytes": 28362,
+      "sha256": "0961457ec95b5509fca8a86a8e280be2ea323e60c031e07b23df9d19d8953fdf",
+      "source": "organizer_inserts/_divider/_shelf.py"
+    },
+    "organizer_inserts/_divider/_walls.py": {
+      "bytes": 15030,
+      "sha256": "405fb95c3a3ab5dbbc0c57f390f2c6467fa176311be55abc6ec3a8556fcdca3f",
+      "source": "organizer_inserts/_divider/_walls.py"
+    },
+    "organizer_inserts/_divider_cells.py": {
+      "bytes": 16743,
+      "sha256": "feb803aaea0c635d91bea9b4ccf81fa5650dfc2429ca7280aaa26e598f11dfde",
+      "source": "organizer_inserts/_divider_cells.py"
+    },
+    "organizer_inserts/_layout.py": {
+      "bytes": 31277,
+      "sha256": "0380a251158ee9ea70869dd2b4740aa1c0ccf5d68ca2abfc382ee79845d36ad6",
+      "source": "organizer_inserts/_layout.py"
+    },
+    "organizer_inserts/_nest/__init__.py": {
+      "bytes": 5457,
+      "sha256": "0c7916a418dd3695d989233d324cf4c32c84707748de15d4648ac513153417d3",
+      "source": "organizer_inserts/_nest/__init__.py"
+    },
+    "organizer_inserts/_nest/_access.py": {
+      "bytes": 12275,
+      "sha256": "fba82cad899007f56fb5db1c146327e75aab3ea8e6087279359b9db1bdfc55b0",
+      "source": "organizer_inserts/_nest/_access.py"
+    },
+    "organizer_inserts/_nest/_base.py": {
+      "bytes": 11503,
+      "sha256": "ed0809c3ff9b7ff4f1461505b4905e8873ed6fee10a86d6ec5184374dad03993",
+      "source": "organizer_inserts/_nest/_base.py"
+    },
+    "organizer_inserts/_nest/_build.py": {
+      "bytes": 24673,
+      "sha256": "afb2cb68a1349e58ea47e3dd2d8aca71a4ab92cc200001de283050b08361fbec",
+      "source": "organizer_inserts/_nest/_build.py"
+    },
+    "organizer_inserts/_nest/_settings.py": {
+      "bytes": 13330,
+      "sha256": "7cea7eb7879fd04cf2865cb1703060fbdcd7ae86344eb32d177855fbcefb86ea",
+      "source": "organizer_inserts/_nest/_settings.py"
+    },
+    "organizer_inserts/_pocket.py": {
+      "bytes": 8944,
+      "sha256": "ae1047d20376c82467fed44e50226c477f60f66d8836acf2440ba31088cb596b",
+      "source": "organizer_inserts/_pocket.py"
+    },
+    "organizer_inserts/_post.py": {
+      "bytes": 12376,
+      "sha256": "7a588530be35d94bd4518ef0bf79b6793cddb65866dfa64ef2ea3adf316f3257",
+      "source": "organizer_inserts/_post.py"
+    },
+    "organizer_inserts/_registry.py": {
+      "bytes": 11262,
+      "sha256": "5e1aad9b2bc3d788d8792d16408c13a5a5a36bbbe6610ab6a66a9160c9576390",
+      "source": "organizer_inserts/_registry.py"
+    },
+    "organizer_inserts/_scoop.py": {
+      "bytes": 6285,
+      "sha256": "e03955136dd68ae0bd22c1a22fb96fb67e2345f9dfa2bbd2cddf85c5c25a0cef",
+      "source": "organizer_inserts/_scoop.py"
+    },
+    "organizer_inserts/_slot.py": {
+      "bytes": 8250,
+      "sha256": "f287af33b9bf523f8a4bfdd836034d268818c17cbc6597e51e6dd7aaa5574dea",
+      "source": "organizer_inserts/_slot.py"
+    },
+    "organizer_inserts/_steps.py": {
+      "bytes": 3542,
+      "sha256": "6936d7ba911d52250ddf88a741f92002da7a637b37e4a9d668c9778fbb6a1122",
+      "source": "organizer_inserts/_steps.py"
+    },
+    "organizer_inserts/_text.py": {
+      "bytes": 19005,
+      "sha256": "014cb23fd0e41f065210eb34745e09c9da379d750e7e4468e141defb8b466ba9",
+      "source": "organizer_inserts/_text.py"
+    },
+    "organizer_inserts/_walljoin.py": {
+      "bytes": 16150,
+      "sha256": "b1f7c6d014240f62d8897908ac2b4d2ba13962c78eb8b356d6c6d4daa5cac197",
+      "source": "organizer_inserts/_walljoin.py"
+    },
+    "organizer_inventory/__init__.py": {
+      "bytes": 17638,
+      "sha256": "351ebaacdb3a4b52cdc4f43d85df58dce22584496d57c0db789beeff4e241b6c",
+      "source": "organizer_inventory/__init__.py"
+    },
+    "organizer_inventory/_merge.py": {
+      "bytes": 32184,
+      "sha256": "a9baeeb4f003f396ebc528575079d4737b9f853d7bdb4a5b6ea96813a9bd143b",
+      "source": "organizer_inventory/_merge.py"
+    },
+    "organizer_inventory/_rows.py": {
+      "bytes": 33774,
+      "sha256": "4f2bc7cb4ae411d3587e69279460764481d2bd5c9240581f7e3f431a458de050",
+      "source": "organizer_inventory/_rows.py"
+    },
+    "organizer_inventory/_space.py": {
+      "bytes": 28917,
+      "sha256": "cfdbda809e67cfe8bd85be2b80efc6865a718bafd985c15735b40abf518a7521",
+      "source": "organizer_inventory/_space.py"
+    },
+    "organizer_inventory/stacking.py": {
+      "bytes": 6276,
+      "sha256": "bcc16f05e84173514ddc4b35262cc6284a8eef5cc6ab79f73f3899d3738c940e",
+      "source": "organizer_inventory/stacking.py"
+    },
+    "organizer_outputs/__init__.py": {
+      "bytes": 55,
+      "sha256": "1e3904218874bdabccf5d57df45228f047b739694f4b4e8477bcbf27dc457a9d",
+      "source": "organizer_outputs/__init__.py"
+    },
+    "organizer_outputs/printer_profile.py": {
+      "bytes": 7854,
+      "sha256": "d0b4eb4b2e0089e71dc7a97ead0c89d1f7d836c3af4a271630b221c09c8071bb",
+      "source": "organizer_outputs/printer_profile.py"
+    },
+    "organizer_outputs/slicer.py": {
+      "bytes": 1083,
+      "sha256": "9321256b0e36776f86116cf159be692ff7702ebf1337eb18e9bb15d3cc4a1a07",
+      "source": "organizer_outputs/slicer.py"
+    },
+    "organizer_outputs/space.py": {
+      "bytes": 5747,
+      "sha256": "e0f2a2f773752712a9613328df57f9c7738c85a7d4f1c3ccf93e3dffd910eeef",
+      "source": "organizer_outputs/space.py"
+    },
+    "organizer_spaces/__init__.py": {
+      "bytes": 71856,
+      "sha256": "f6fdb120d235fb822c5ce3f3dcb9ea8ecf2bcf3eaa3fd3214cfdb10c1370b57b",
+      "source": "organizer_spaces/__init__.py"
+    },
+    "organizer_spaces/_core.py": {
+      "bytes": 30207,
+      "sha256": "f806b19192257a6ef66d326cea243904042410bd8b7677dff936d1e70a8b610c",
+      "source": "organizer_spaces/_core.py"
+    },
+    "organizer_storage/__init__.py": {
+      "bytes": 8891,
+      "sha256": "623b8ce8a0beefa931a0ce62805951ad56d62d666266c26d14d58da66bc198e5",
+      "source": "organizer_storage/__init__.py"
+    },
+    "organizer_storage/drawer_geometry.py": {
+      "bytes": 60217,
+      "sha256": "cc11ccc84ee5256f30e34bef0c803602c3e82bac79118caed0cdf9bd2cbd4d4a",
+      "source": "organizer_storage/drawer_geometry.py"
+    },
+    "organizer_storage/drawer_outputs.py": {
+      "bytes": 42125,
+      "sha256": "29f108c3eaab542600773cd59685033bf77a7f9f7b764cdea20d024aaaeb874e",
+      "source": "organizer_storage/drawer_outputs.py"
+    },
+    "organizer_storage/drawers.py": {
+      "bytes": 28814,
+      "sha256": "97da0cccf16d7abaacaf6813c2df86dc6df35853e8555bb4c76f29fcaf44dd36",
+      "source": "organizer_storage/drawers.py"
+    },
+    "photo_nest.py": {
+      "bytes": 20299,
+      "sha256": "4280f845cb08e45a73b85c7f30ba3b4bbaabc5df1b3f3b2d4991fdba5094a7a7",
+      "source": "photo_nest.py"
+    },
+    "plate_layout.py": {
+      "bytes": 13241,
+      "sha256": "c516e0a1e8b97a0ff3de29180fe93e11300437a26d3677ecda70d24ae1ec4320",
+      "source": "plate_layout.py"
+    },
+    "space_source.py": {
+      "bytes": 1115,
+      "sha256": "07c43ef70318340030839120f392a0334ab4979b7242c1aaab462176479d59a8",
+      "source": "space_source.py"
+    },
+    "wavefinity_web_impl/__init__.py": {
+      "bytes": 77,
+      "sha256": "5e38f5c13b418ebda12143006c6684e0a3972563a090f0f38816ae904bb35547",
+      "source": "wavefinity_web_impl/__init__.py"
+    },
+    "wavefinity_web_impl/_ai.py": {
+      "bytes": 41871,
+      "sha256": "de29f1e9fdf6728457ca89d6682ee7354ed4be4cd7935d952f3dc0e53b0560fd",
+      "source": "wavefinity_web_impl/_ai.py"
+    },
+    "wavefinity_web_impl/_designs/__init__.py": {
+      "bytes": 3088,
+      "sha256": "c47817bf81d2666dd16befc833a3103649b2565e6503fcc94a8b0485bb7a26b0",
+      "source": "wavefinity_web_impl/_designs/__init__.py"
+    },
+    "wavefinity_web_impl/_designs/_features.py": {
+      "bytes": 23099,
+      "sha256": "cd4a284cc9533dd4a32af5b6ed62f25ec7e2c47432caa516f9ed0921472b5ef7",
+      "source": "wavefinity_web_impl/_designs/_features.py"
+    },
+    "wavefinity_web_impl/_designs/_layout.py": {
+      "bytes": 19991,
+      "sha256": "f58666e2788f65ef6713f2619c1b7f6fc25b1243479e5f688ae1f8315e67f430",
+      "source": "wavefinity_web_impl/_designs/_layout.py"
+    },
+    "wavefinity_web_impl/_designs/_preview.py": {
+      "bytes": 11826,
+      "sha256": "1fee2373964d4b6d7364b6d60fed34ea1e1ed89e95e56058a030138d2af99d03",
+      "source": "wavefinity_web_impl/_designs/_preview.py"
+    },
+    "wavefinity_web_impl/_nest.py": {
+      "bytes": 24462,
+      "sha256": "7a5f55e0387a284bb7ee6ee37402ce31dbd3ad745d74e6ef48de8e04b99f85c7",
+      "source": "wavefinity_web_impl/_nest.py"
+    },
+    "wavefinity_web_impl/_outputs.py": {
+      "bytes": 17279,
+      "sha256": "524fa41b5a4e123d7d8bd77e2ebffb3f68dfce600df62b032c6e0d9496e50777",
+      "source": "wavefinity_web_impl/_outputs.py"
+    },
+    "wavefinity_web_impl/_runtime.py": {
+      "bytes": 18606,
+      "sha256": "19e1ce2dd9d8187871f4115886c328cbefbad19babe54c77c4447e22476d603e",
+      "source": "wavefinity_web_impl/_runtime.py"
+    },
+    "wf_browser_core/__init__.py": {
+      "bytes": 78,
+      "sha256": "abc8590100e17b95d5d3689a42d2e8940f7caa97a68e7ad95456d61901311b43",
+      "source": "web/browser-core/engine/__init__.py"
+    },
+    "wf_browser_core/manifold_bridge.py": {
+      "bytes": 5290,
+      "sha256": "d3f1c4235515886ca83386b38f49c1b22aa2b00f4073f791231fdd8204c1dd6a",
+      "source": "web/browser-core/engine/manifold_bridge.py"
+    },
+    "wf_browser_core/route_manifest.json": {
+      "bytes": 101744,
+      "sha256": "4faac725389d4ba61e950366a86eaf30da006e4c441f9422ce85497ff9199047",
+      "source": "web/browser-core/contracts/route-manifest.json"
+    }
+  },
+  "vendor_manifest_sha256": "8ba568549272c49eb8a7a37b10ac2b49b25972e0d41dfd1bd2bf8f5dae6e49e3"
+}
