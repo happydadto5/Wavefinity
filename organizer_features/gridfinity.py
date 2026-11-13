@@ -39,6 +39,7 @@ FOOT_HEIGHT = 4.75        # visible foot: z 0 to here, then the full-width shell
 FLOOR_SKIN = 1.0          # floor left above the foot's top
 MIN_GRID_BASE = FOOT_HEIGHT + FLOOR_SKIN   # 5.75
 BODY_CORNER_RADIUS = 3.75
+PERIMETER_GAP = 0.5
 # The foot's last section is repeated this far into the shell so the foot/shell
 # union is a positive-volume overlap, never a face-only contact. It is not an
 # exposed continuation of the foot.
@@ -159,7 +160,7 @@ def nominal_extent(spec: BoxSpec, grid: str) -> tuple[float, float]:
     """Whole-bin XY: one 0.5 mm perimeter gap in total, not per cell."""
     pitch = _profile(grid)["pitch"]
     nx, ny = cell_counts(spec, grid)
-    return pitch * nx - 0.5, pitch * ny - 0.5
+    return pitch * nx - PERIMETER_GAP, pitch * ny - PERIMETER_GAP
 
 
 def effective_base(spec: BoxSpec, grid: str) -> float:
@@ -167,6 +168,14 @@ def effective_base(spec: BoxSpec, grid: str) -> float:
     if grid == "wavefinity":
         return spec.base_thickness
     return max(spec.base_thickness, MIN_GRID_BASE)
+
+
+def side_opening_limits(spec: BoxSpec, grid: str) -> dict[str, float]:
+    """Protected zones from this pitch's actual foot, floor and rim profiles."""
+    profile = _profile(grid)
+    return {"floor_z": effective_base(spec, grid),
+            "corner_radius": profile["radii"][-1][1],
+            "rim_depth": rim_depth(grid)}
 
 
 def gridfinity_base_minimum(grid: str) -> float:
@@ -380,6 +389,10 @@ def _single_volume(mesh: trimesh.Trimesh, what: str) -> None:
 
 def gridfinity_body(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
     """The bin shell: flat walls from z 4.75 up, per-cell feet below, one solid."""
+    from organizer_features.side_openings import validate_side_openings
+    validate_side_openings(spec, grid)
+    if spec.edge_mount.active:
+        raise ValueError("Edge Mount is unavailable on Gridfinity: it projects beyond the cell envelope.")
     floor = effective_base(spec, grid)
     if spec.z < floor + MIN_HEIGHT_ABOVE_BASE:
         raise ValueError(

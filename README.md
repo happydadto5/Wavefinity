@@ -1568,9 +1568,21 @@ none of those are migrated or replaced.
 
 ### Side Openings
 
+Side Openings are available on ordinary flat 21 mm and 42 mm Gridfinity bins.
+The requested cut is refused before geometry is built if it enters the 4.75 mm
+foot plus its base, the optional open-bin stacking rim, the foot-carrying corner
+radii, or leaves a remaining wall strip thinner than the selected wall thickness.
+The largest existing opening size that meets those limits is supported; invalid
+choices are never clipped or shrunk. Cuts remove flat wall material only, keeping
+the outside envelope, rim support, feet and neighbour clearance by construction.
+Third-party baseplate and printed fit remain **unverified** until Andrew records
+his own fit prints. Edge Mount stays unavailable on both Gridfinity pitches:
+it projects beyond the cell; only Andrew may approve a separate inside-envelope
+replacement. Wavefinity Side Openings keep their existing behaviour.
+
 **Side Openings modifies an ordinary bin; it is not an interior part.**
 It is a normal **Options** palette option. It cuts centered finger-access
-notches through selected bin walls - built by making the normal Wavefinity
+notches through selected bin walls - built by making the normal selected-grid
 bin first, then subtracting negative cutter solids through the selected
 wall(s), so the ordinary shell, cavity, wave, lock and connector geometry
 never change. Default is off.
@@ -1588,7 +1600,7 @@ never change. Default is off.
   Saved designs keep their original `from_bottom_percent` and
   `from_top_percent` values.
 
-A wall needs to be at least **2 Wavefinity units (14 mm)** long to take a
+On Wavefinity, a wall needs to be at least **2 Wavefinity units (14 mm)** long to take a
 Side Opening at all, with a 4 mm solid corner shoulder kept at each end of
 the opening. That modular rule means a 2-unit wall only offers Small, a
 3-unit wall offers up to Large, and a 4-unit-or-larger wall offers every

@@ -102,6 +102,8 @@ def make_box(spec: BoxSpec, grid: str = "wavefinity") -> trimesh.Trimesh:
             # Stackable: the standard receiving rim. Not Stackable keeps the plain top.
             result = difference([result, rim_cutter(spec, grid)])
             _single_volume(result, "the Gridfinity body with its stacking rim")
+        from organizer_features.side_openings import apply_side_openings
+        result = apply_side_openings(spec, result, grid)
         result.remove_unreferenced_vertices()
         result.merge_vertices()
         return result

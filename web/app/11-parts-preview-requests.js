@@ -213,7 +213,7 @@ function updateSelectionButtons() {
   $$(".support-choice").forEach(button => {
     const info = partInfo(button.dataset.kind);
     const isModifier = info?.capabilities?.includes("box_modifier");
-    button.hidden = button.dataset.kind === "side_openings" && (state.design?.grid || "wavefinity") !== "wavefinity";
+    button.hidden = button.dataset.kind === "edge_mount" && (state.design?.grid || "wavefinity") !== "wavefinity";
     const count = partInstanceCount(button.dataset.kind);
     const alreadyAdded = count > 0;
     const active = button.classList.contains("active");

@@ -81,7 +81,10 @@ function clearDraftSelection(resetLocks = true) {
 }
 
 function pickKind(kind) {
-  if (kind === "side_openings" && (state.design?.grid || "wavefinity") !== "wavefinity") return;
+  if (kind === "edge_mount" && (state.design?.grid || "wavefinity") !== "wavefinity") {
+    toast("Edge Mount projects beyond the Gridfinity cell envelope and is unavailable.", true, 5000);
+    return;
+  }
   const info = partInfo(kind);
   const isModifier = info?.capabilities?.includes("box_modifier");
   if (!isModifier && state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour)) {
@@ -664,6 +667,7 @@ function sideOpeningRangeLegal(design, pair) {
 }
 
 function normalizeSideOpeningPair(design, pair, changed = "lower") {
+  if ((design?.grid || "wavefinity") !== "wavefinity") return pair;
   const maximum = sideOpeningLidStackForced(design) ? 100 - sideOpeningMinFromTop(design) : 100;
   const trial = { lower: Math.max(0, Math.min(99.9, pair.lower)),
     upper: Math.max(0.1, Math.min(maximum, pair.upper)) };
@@ -695,10 +699,12 @@ function syncSideOpeningRange(spec) {
   lower.value = String(pair.lower);
   upper.value = String(pair.upper);
   const box = state.design?.box || {};
-  const floorZ = number(box.base_thickness);
-  const usable = number(box.z) - floorZ;
+  const gridGeometry = (state.design?.grid || "wavefinity") !== "wavefinity" ? gridSideOpeningGeometry() : null;
+  const floorZ = gridGeometry ? gridGeometry.floor : number(box.base_thickness);
+  const rimZ = gridGeometry ? gridGeometry.rim : number(box.z);
+  const usable = rimZ - floorZ;
   const lowerMm = floorZ + usable * (number(spec.from_bottom_percent, 0) / 100);
-  const upperMm = number(box.z) - usable * (number(spec.from_top_percent, 0) / 100);
+  const upperMm = rimZ - usable * (number(spec.from_top_percent, 0) / 100);
   $("#side-opening-upper-mm").textContent = `${fmt(upperMm)} mm`;
   $("#side-opening-lower-mm").textContent = `${fmt(lowerMm)} mm`;
   lower.setAttribute("aria-valuetext", `${fmt(pair.lower)}% from bottom`);

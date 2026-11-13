@@ -87,7 +87,7 @@ unverified), so it is not a Gridfinity Lid choice and each grid row carries a
 `hinged_lid_refusal` message. A hinged lid is never also a Lid for stacking. The capability manifest filters lid choices by the
 selected grid, using the same catalog as the editor.
 Physical grid-lid fit is not yet printed (S1-13 gate).
-Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Gridfinity side openings are unavailable; the Wavefinity Side Openings modifier is omitted from the grid manifest and palette. No additional Gridfinity features are exposed.
+Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Gridfinity Side Openings are available on both pitches subject to the protected zones below. Edge Mount is excluded because it projects beyond the cell envelope; only Andrew may approve a separate inside-envelope replacement.
 A Space's grid is fixed when created. Bins cannot enter a Space
 with a different grid. An external older design without a grid means Wavefinity;
 a saved bin inside a Space inherits that verified source Space's grid.
@@ -400,8 +400,8 @@ The Wavefinity bin Specification area has Stackable (Not Stackable / Stackable)
 and Lid (No lid / Lid / Lid for stacking / Hinged lid). Width and Depth use the
 selected pitch on commit and display millimetres and unit count. Gridfinity
 Height uses independent 7 mm units; Wavefinity Height stays in millimetres.
-The options below describe Wavefinity; Gridfinity exposes only the rim and
-Gridfinity Lid choices described above (no Hinged lid).
+The options below describe Wavefinity; Gridfinity also exposes Side Openings with the protected zones below, magnet holes on ordinary 42 mm bins, and the rim and
+Gridfinity Lid choices described above (no Hinged lid or Edge Mount).
 
 Choosing Lid, Lid for stacking, or Hinged lid includes a lid and shows the lid options. A hinged lid also has Alignment (Off by default, saved as `box.lid.alignment`: off / thin 1 mm / standard 2 mm / thick 3 mm): L-shaped tabs under the two front corners. A hinged lid with Alignment on needs support for these tabs; that is expected and fine. Lid thickness, an optional Knob (the only handle), and label text are available. Older saved Pull handles open as a Knob. Editing non-empty label text enables its options; clearing it disables the label. A saved off label stays off until its text is edited, and division labels retain their editor.
 
@@ -433,6 +433,25 @@ General rules:
 ## Side Openings
 
 Finger-access cutouts through selected bin walls.
+Gridfinity percentages span the effective cavity floor to the body rim (shortened
+for a lid). A zero lower inset reaches the floor; any positive strip left above
+that floor must be at least the selected wall thickness. A supported opening
+leaves at least that thickness below the protected stacking rim, or below the
+plain top when no open-bin rim is present. At each end the shoulder must cover
+both the corner-radius region and the selected wall thickness. Use the active
+grid's catalog dimensions; invalid choices are refused, never resized.
+
+Side Openings are available on ordinary flat 21 mm and 42 mm Gridfinity bins.
+The requested cut is refused before geometry is built if it enters the 4.75 mm
+foot plus its base, the optional open-bin stacking rim, the foot-carrying corner
+radii, or leaves a remaining wall strip thinner than the selected wall thickness.
+The largest existing opening size that meets those limits is supported; invalid
+choices are never clipped or shrunk. Cuts remove flat wall material only, keeping
+the outside envelope, rim support, feet and neighbour clearance by construction.
+Third-party baseplate and printed fit remain **unverified** until Andrew records
+his own fit prints. Edge Mount stays unavailable on both Gridfinity pitches:
+it projects beyond the cell; only Andrew may approve a separate inside-envelope
+replacement. Wavefinity Side Openings keep their existing behaviour.
 
 Typical controls:
 

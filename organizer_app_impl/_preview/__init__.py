@@ -199,7 +199,8 @@ def _preview_geometry(
     active_rim = tuple(one for one in effective_features if is_text(one) and one.options.get("level") == "rim")
     validate_inside_handles_mode(box, mode)
     validate_scoop_lift_grabbers(box, scoop)
-    validate_side_openings(box)
+    grid = layout.design_grid if layout is not None else "wavefinity"
+    validate_side_openings(box, grid)
     for rim_text in active_rim:
         side = str(rim_text.options.get("rim_side") or "back")
         validate_side_opening_label(box, text_of(rim_text), side)
@@ -253,7 +254,6 @@ def _preview_geometry(
         except Exception:
             continue
 
-    grid = layout.design_grid if layout is not None else "wavefinity"
     if (grid != "wavefinity" or direct_stack_enabled(box) or lid_has_flip(box) or box.edge_mount.active
             or box.side_openings.enabled
             or box.pegboard.enabled or (layout is not None and layout.surface_lightweight_base)):
@@ -280,7 +280,7 @@ def _preview_geometry(
             if layout is not None:
                 shell_body = apply_surface_lightweight_base(shell_body, box, layout)
             if box.side_openings.enabled:
-                shell_body = apply_side_openings(box, shell_body)
+                shell_body = apply_side_openings(box, shell_body, grid)
         geometry.extend(_mesh_preview_geometry(shell_body, "outside"))
     else:
         with stage("outline_wave"):
@@ -320,7 +320,7 @@ def _preview_geometry(
         if cut_fused_pieces:
             ledge_mesh = apply_edge_mount_hole_cuts(box, ledge_mesh, geometry_owner="rim-label ledge")
         if cut_side_opening_pieces:
-            ledge_mesh = apply_side_openings(box, ledge_mesh)
+            ledge_mesh = apply_side_openings(box, ledge_mesh, grid)
         geometry.extend(_mesh_preview_geometry(ledge_mesh, "top_label_ledge"))
     if scoop:
         scoop_mesh = (
@@ -337,7 +337,7 @@ def _preview_geometry(
         if cut_fused_pieces:
             scoop_mesh = apply_edge_mount_hole_cuts(box, scoop_mesh, geometry_owner="fused scoop")
         if cut_side_opening_pieces:
-            scoop_mesh = apply_side_openings(box, scoop_mesh)
+            scoop_mesh = apply_side_openings(box, scoop_mesh, grid)
         geometry.extend(_mesh_preview_geometry(scoop_mesh, "scoop"))
     # make_box() already bakes lift grabbers into the shell it returns, so
     # only draw them separately when the Edge Mount/Side Openings shell above
@@ -550,7 +550,7 @@ def _preview_geometry(
                     solid = apply_edge_mount_hole_cuts(
                         box, solid, geometry_owner="recessed Photo Nest group")
                 if cut_side_opening_pieces:
-                    solid = apply_side_openings(box, solid)
+                    solid = apply_side_openings(box, solid, grid)
                 geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_nest"))
         except Exception as error:
             for index in represented_recessed:
@@ -661,7 +661,7 @@ def _preview_geometry(
                     solid = apply_edge_mount_hole_cuts(
                         box, solid, geometry_owner=f"{one.kind} feature")
                 if cut_side_opening_pieces and not is_text(one):
-                    solid = apply_side_openings(box, solid)
+                    solid = apply_side_openings(box, solid, grid)
                 if layer:
                     solid.metadata["wavefinity_preview_layer"] = layer
                 start = len(geometry)
@@ -727,7 +727,7 @@ def _preview_geometry(
                         solid = apply_edge_mount_hole_cuts(
                             box, solid, geometry_owner=f"{draft.kind} draft")
                     if cut_draft_side_opening:
-                        solid = apply_side_openings(box, solid)
+                        solid = apply_side_openings(box, solid, grid)
                     if layer:
                         solid.metadata["wavefinity_preview_layer"] = layer
                     start = len(geometry)
@@ -784,7 +784,7 @@ def _preview_geometry(
                         solid = apply_edge_mount_hole_cuts(
                             box, solid, geometry_owner=f"{draft.kind} draft")
                     if cut_draft_side_opening:
-                        solid = apply_side_openings(box, solid)
+                        solid = apply_side_openings(box, solid, grid)
                     if layer:
                         solid.metadata["wavefinity_preview_layer"] = layer
                     start = len(geometry)
@@ -851,7 +851,7 @@ def _preview_geometry(
             _edge_label, edge_mesh, _edge_raised = edge_text
             geometry.extend(_mesh_preview_geometry(edge_mesh, "label"))
 
-    side_openings_meta = side_opening_summary(box) if box.side_openings.enabled else None
+    side_openings_meta = side_opening_summary(box, grid) if box.side_openings.enabled else None
     pegboard_meta = receiver_layout(box, height=stack_seated_height(box)) if box.pegboard.enabled else None
 
     # The effective list has already replaced a selected saved part with its

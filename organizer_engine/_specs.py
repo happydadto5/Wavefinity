@@ -878,6 +878,20 @@ class SideOpeningSpec:
         return SIDE_OPENING_WIDTHS[self.size]
 
 
+def validate_bin_side_openings(box: "BoxSpec", grid: str) -> None:
+    """Entry boundary uses the same shortened body as preview/export."""
+    from organizer_features.side_openings import validate_side_openings
+    from organizer_features.stack import stack_effective_box
+    from organizer_inserts._walljoin import build_grid
+    if grid != "wavefinity" and box.edge_mount.active:
+        raise ValueError("Edge Mount is unavailable on Gridfinity: it projects beyond the cell envelope.")
+    if grid == "wavefinity":
+        validate_side_openings(box, grid)
+        return
+    with build_grid(grid):
+        validate_side_openings(stack_effective_box(box), grid)
+
+
 def validate_bin_magnets(box: "BoxSpec", grid: str) -> None:
     if box.magnet_holes != "none" and (grid != "gridfinity" or box.b4b.enabled):
         raise ValueError("Magnet holes are only available on ordinary 42 mm Gridfinity bins")

@@ -23,7 +23,7 @@ def grid_editor_catalog() -> list[dict[str, Any]]:
     from organizer_engine._specs import BoxSpec
     from organizer_features.gridfinity import (
         HEIGHT_UNIT, MIN_GRID_BASE, assembled_lid_stack_height, assembled_stack_height, minimum_floor_build, floor_pocket_depth,
-        rim_depth,
+        rim_depth, BODY_CORNER_RADIUS, FOOT_HEIGHT, PERIMETER_GAP,
     )
     from organizer_b4b._constants import B4B_STACK_RECESS_DEPTH
     labels = {"wavefinity": "Wavefinity 7 mm", "gridfinity_half": "Gridfinity half 21 mm",
@@ -54,6 +54,11 @@ def grid_editor_catalog() -> list[dict[str, Any]]:
                  if grid != "wavefinity" else None),
              "rim_depth_mm": 0 if grid == "wavefinity" else rim_depth(grid),
              "side_connectors": grid == "wavefinity",
+             "side_openings": True,
+             "perimeter_gap_mm": 0 if grid == "wavefinity" else PERIMETER_GAP,
+             "side_opening_corner_radius_mm": 0 if grid == "wavefinity" else BODY_CORNER_RADIUS,
+             "side_opening_foot_height_mm": 0 if grid == "wavefinity" else FOOT_HEIGHT,
+             "edge_mount": grid == "wavefinity",
              # Story 3009: the hinged lid is listed only on a pitch whose envelope
              # assessment supports it; otherwise ``hinged_lid_refusal`` says why.
              "lid_choices": ([{"value": "none", "label": "No lid"},
@@ -122,7 +127,9 @@ AI_MODIFIER_BLOCKS = (
     ("inside_handles", "Inside Grip",
      "A finger grip inside the bin (box.lift_grabbers).", ("box.lift_grabbers",)),
     ("side_openings", "Side Openings",
-     "Finger-access cutouts through selected walls (box.side_openings).",
+     "Finger-access cutouts through selected walls (box.side_openings), on all three grids. "
+     "Gridfinity refuses cuts into the foot/base, open-bin stacking rim or corner-radius regions, "
+     "or leaving a strip thinner than the chosen wall; never clips or shrinks. Physical fit unverified.",
      ("box.side_openings",)),
     ("edge_mount", "Edge Mount",
      "A label and/or screw mounting on one outside edge (box.edge_mount). "
@@ -491,7 +498,7 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "- Design exactly ONE object. If the request describes several, ask the person to narrow it to one BEFORE giving the final answer.",
         "- If any critical measurement is missing, ambiguous, suspicious or has conflicting units, ASK the person first. Do not guess it and do not reinterpret the units they gave.",
         "- Width and depth must be whole cells of the selected grid pitch in the catalog-built CAPABILITY MANIFEST (7, 21 or 42 mm). Gridfinity height uses independent 7 mm units; Wavefinity height stays plain millimetres. The standalone editor offers these three grids; choose the grid there before requesting an AI design, then keep the context grid.",
-        "- Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Space Grid is immutable. Storage Box and Storage Drawers also choose immutable Floor or None; Floor builds the raised socket floor, None leaves room for an owner-supplied baseplate. Nominal cells describe the field, not the printed cavity. Measured seated lift is the added seated height, not total plate thickness; zero is measured, missing lift is unverified. Container settings stay in the Space, never BoxSpec. Side openings are unavailable for Gridfinity and omitted from its manifest and palette. On ordinary 42 mm Gridfinity bins only, box.magnet_holes may be none (default) or 6x2 when requested; never use it on 21 mm, Wavefinity, or container floors.",
+        "- Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Space Grid is immutable. Storage Box and Storage Drawers also choose immutable Floor or None; Floor builds the raised socket floor, None leaves room for an owner-supplied baseplate. Nominal cells describe the field, not the printed cavity. Measured seated lift is the added seated height, not total plate thickness; zero is measured, missing lift is unverified. Container settings stay in the Space, never BoxSpec. Side Openings are available on both Gridfinity pitches, with the foot/base, stacking rim, corner radii and selected minimum wall protected; illegal openings are refused without clipping or shrinking. Edge Mount is excluded on Gridfinity because it projects beyond the cell envelope. Physical fit is unverified. On ordinary 42 mm Gridfinity bins only, box.magnet_holes may be none (default) or 6x2 when requested; never use it on 21 mm, Wavefinity, or container floors.",
         "- All values in the design are millimetres. Convert nothing silently; ask if unsure.",
         "- You may use any legal part, option or modifier in the CAPABILITY MANIFEST that best solves the request.",
         "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",

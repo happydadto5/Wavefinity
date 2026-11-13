@@ -606,7 +606,7 @@ def _generate_organizer_files(
 
     if layout.mode == "fused":
         _phase("shell")
-        shell = make_box(box)
+        shell = make_box(box, grid=layout.design_grid)
         _phase("features")
         body = make_fused_box(box, layout.features, shell)
         if scoop:
@@ -658,7 +658,7 @@ def _generate_organizer_files(
     else:
         box_output = _resolve_file(box_filename, stack_request, part_name)
         _phase("shell")
-        plain_box = make_box(box)
+        plain_box = make_box(box, grid=layout.design_grid)
         _phase("features")
         insert_features = tuple(one for one in layout.features
                                 if not (is_text(one) and one.options.get("level") == "rim"))

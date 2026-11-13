@@ -217,9 +217,52 @@ function applyPendingLiveFormWithModifierConflictGuard() {
 // Wall span a Side Opening's width is measured against - Front/Back run
 // along X, Left/Right run along Y. Mirrors organizer_features.side_openings.
 // side_opening_side_span() so the UI can filter eligibility client-side.
+function gridSideOpeningGeometry(design = state.design) {
+  const box = design?.box || {};
+  const rules = binGridRules(design);
+  const floor = Math.max(number(box.base_thickness), number(rules.minimum_base_mm));
+  const lid = box.lid || {};
+  const thickness = ({ thin: 1.2, medium: 1.4, thick: 1.6 })[lid.thickness] || number(lid.thickness, 1.2);
+  const rise = lid.enabled ? thickness + (lid.stack_rim ? number(rules.rim_depth_mm) : 0) : 0;
+  return { floor, rim: number(box.z) - rise, rules };
+}
+
+function gridSideOpeningRefusal(design = state.design) {
+  if ((design?.grid || "wavefinity") === "wavefinity") return "";
+  const box = design.box || {}, so = sideOpeningState(design);
+  if (!so.enabled) return "";
+  const { floor, rim, rules } = gridSideOpeningGeometry(design);
+  const bottom = floor + (rim - floor) * number(so.from_bottom_percent) / 100;
+  const top = rim - (rim - floor) * number(so.from_top_percent) / 100;
+  const wall = number(box.wall);
+  if (box.edge_mount?.label_enabled || box.edge_mount?.holes_enabled)
+    return "Edge Mount projects beyond the Gridfinity cell envelope and is unavailable.";
+  if (bottom < floor - 1e-9)
+    return "Side Opening enters the Gridfinity foot zone (4.75 mm) or its base; raise the lower edge.";
+  const rimDepth = !box.lid?.enabled && box.stack?.mode === "direct" ? number(rules.rim_depth_mm) : 0;
+  if (rimDepth && top > rim - rimDepth + 1e-9)
+    return "Side Opening enters the Gridfinity stacking rim zone; lower the upper edge.";
+  const bottomStrip = bottom - floor, topStrip = rim - rimDepth - top;
+  if ((bottomStrip > 1e-9 && bottomStrip < wall - 1e-9) ||
+      ((number(so.from_top_percent) > 1e-9 || rimDepth) && topStrip < wall - 1e-9))
+    return "Side Opening leaves a wall segment thinner than the selected wall thickness; move the opening edge.";
+  const width = (state.catalog?.side_openings?.sizes || []).find(entry => entry.value === so.size)?.width_mm;
+  for (const side of so.sides || []) {
+    const shoulder = (sideOpeningSideSpan(side, design) - width) / 2;
+    if (shoulder < number(rules.side_opening_corner_radius_mm) - 1e-9)
+      return `Side Opening enters the ${side} wall's foot-carrying corner-radius region; choose a smaller opening.`;
+    if (shoulder < wall - 1e-9)
+      return `Side Opening leaves the ${side} wall segment thinner than the selected wall thickness.`;
+  }
+  if (!sideOpeningVerticalFits(design, so, width))
+    return "The selected range leaves too little height for this opening; increase the span or choose a smaller opening.";
+  return "";
+}
+
 function sideOpeningSideSpan(side, design = state.design) {
   const box = design?.box || {};
-  return side === "front" || side === "back" ? number(box.x) : number(box.y);
+  const span = side === "front" || side === "back" ? number(box.x) : number(box.y);
+  return (design?.grid || "wavefinity") === "wavefinity" ? span : span - number(binGridRules(design).perimeter_gap_mm);
 }
 
 // Shared conditional-state explanation rule: a choice disabled by
@@ -261,6 +304,7 @@ function reconcileSideOpeningSelection(selectedSides, eligibleSides) {
 
 function reconcileSideOpeningsAfterResize(design) {
   sideOpeningAdjustmentNote = "";
+  if ((design?.grid || "wavefinity") !== "wavefinity") return;
   const current = sideOpeningState(design);
   if (!current.enabled) return;
 
@@ -293,8 +337,9 @@ function reconcileSideOpeningsAfterResize(design) {
 // filtering while typing.
 function sideOpeningVerticalFits(design, spec, widthMm) {
   const box = design?.box || {};
-  const floorZ = number(box.base_thickness);
-  const rimZ = number(box.z);
+  const gridGeometry = (design?.grid || "wavefinity") !== "wavefinity" ? gridSideOpeningGeometry(design) : null;
+  const floorZ = gridGeometry ? gridGeometry.floor : number(box.base_thickness);
+  const rimZ = gridGeometry ? gridGeometry.rim : number(box.z);
   const usable = rimZ - floorZ;
   const bottomZ = floorZ + usable * (number(spec.from_bottom_percent, 0) / 100);
   const topZ = rimZ - usable * (number(spec.from_top_percent, 0) / 100);
@@ -320,13 +365,17 @@ function sideOpeningAllowedSizes(design = state.design) {
   const so = sideOpeningState(design);
   const spans = (so.sides || []).map(side => sideOpeningSideSpan(side, design));
   return sizes.filter(entry => {
+    if ((design?.grid || "wavefinity") !== "wavefinity") {
+      return !gridSideOpeningRefusal({ ...design,
+        box: { ...design.box, side_openings: { ...so, size: entry.value } } });
+    }
     if (spans.some(span => entry.width_mm > span - 2 * margin + 1e-9)) return false;
     return sideOpeningVerticalFits(design, so, entry.width_mm);
   }).map(entry => entry.value);
 }
 
 function sideOpeningLidStackForced(design = state.design) {
-  return lidPartActive(design);
+  return (design?.grid || "wavefinity") === "wavefinity" && lidPartActive(design);
 }
 
 // Fix 034 H: renamed from the old MaxFromTop - with inset_v2 semantics the
@@ -398,7 +447,7 @@ function readSideOpeningForm(design, changed = "lower") {
     } },
   });
   let size = $("#side-opening-size")?.value || current.size;
-  if (allowed.length && !allowed.includes(size)) size = allowed[allowed.length - 1];
+  if ((design?.grid || "wavefinity") === "wavefinity" && allowed.length && !allowed.includes(size)) size = allowed[allowed.length - 1];
   design.box.side_openings = {
     enabled: true,
     shape,
@@ -438,8 +487,10 @@ function syncSideOpeningControls() {
   const allowed = sideOpeningAllowedSizes();
   const sizeSelect = $("#side-opening-size");
   if (sizeSelect) {
-    for (const option of sizeSelect.options) option.disabled = !allowed.includes(option.value);
-    if (allowed.length && !allowed.includes(sizeSelect.value)) {
+    const gridOpening = (state.design?.grid || "wavefinity") !== "wavefinity";
+    for (const option of sizeSelect.options)
+      option.disabled = !allowed.includes(option.value) && !(gridOpening && option.value === so.size);
+    if (!gridOpening && allowed.length && !allowed.includes(sizeSelect.value)) {
       sizeSelect.value = allowed[allowed.length - 1];
       flashField(sizeSelect);
     } else {
@@ -448,7 +499,11 @@ function syncSideOpeningControls() {
   }
   const note = $("#side-opening-note");
   if (note) {
-    if (!anyEligible) {
+    const refusal = gridSideOpeningRefusal();
+    note.classList.toggle("error", Boolean(refusal));
+    if (refusal) {
+      note.textContent = refusal;
+    } else if (!anyEligible) {
       const rules = state.catalog?.side_openings || {};
       note.textContent = `Side openings require at least one bin side to be ${fmt(number(rules.min_side_mm, 16))} mm or longer.`;
     } else if (sideOpeningAdjustmentNote) {

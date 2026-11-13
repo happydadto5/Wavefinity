@@ -3085,7 +3085,12 @@ def ai_capability_manifest(grid: str = "wavefinity") -> dict[str, Any]:
         for kind, title, description, paths in AI_MODIFIER_BLOCKS
     ]
     if grid != "wavefinity":
-        modifiers = [row for row in modifiers if row["kind"] != "side_openings"]
+        modifiers = [row for row in modifiers if row["kind"] != "edge_mount"]
+        openings = next(row for row in modifiers if row["kind"] == "side_openings")
+        openings["rules"] = {"side_openings": catalog["side_openings"], "grid": grid_rules}
+        openings["example"] = {"side_openings": {"enabled": True, "shape": "square",
+                              "sides": ["front"], "size": "small", "percent_mode": "inset_v2",
+                              "from_bottom_percent": 0, "from_top_percent": 0}}
         stacking = next(row for row in modifiers if row["kind"] == "lid_stacking")
         stacking.update(
             description="Stackable rim: box.stack.mode=direct without a lid; or Gridfinity Lid, optionally with stack_rim=true. No hinged, handle or label variants; no side connectors. All heights use whole 7 mm units.",

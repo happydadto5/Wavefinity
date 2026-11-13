@@ -619,6 +619,9 @@ def design_to_dict(
     b4b = box.b4b.normalised()
     from organizer_engine._specs import validate_bin_magnets
     validate_bin_magnets(box, layout.design_grid)
+    if not box.b4b.enabled and layout.design_grid != "wavefinity":
+        from organizer_engine._specs import validate_bin_side_openings
+        validate_bin_side_openings(box, layout.design_grid)
     box_block = {
         "magnet_holes": box.magnet_holes,
         "x": box.x,
@@ -889,7 +892,8 @@ def design_from_dict(
         raw_sides = side_openings_raw.get("sides", ())
         if not isinstance(raw_sides, (list, tuple)):
             raise ValueError("side opening sides must be a list")
-        if side_openings_raw.get("percent_mode") == "inset_v2":
+        # Gridfinity has no legacy opening saves; its input always uses insets.
+        if grid != "wavefinity" or side_openings_raw.get("percent_mode") == "inset_v2":
             from_bottom = float(side_openings_raw.get("from_bottom_percent", 0.0))
             from_top = float(side_openings_raw.get("from_top_percent", 0.0))
         else:
@@ -1025,8 +1029,6 @@ def design_from_dict(
     )
     from organizer_engine._specs import validate_bin_magnets
     validate_bin_magnets(box, grid)
-    if grid != "wavefinity" and box.side_openings.enabled:
-        raise ValueError("Side openings are unavailable for Gridfinity Stage 1.")
     box = normalize_stack_settings(box)
     if not box.b4b.enabled:
         box = normalize_gridfinity_settings(box, grid)
@@ -1046,7 +1048,8 @@ def design_from_dict(
         # Authoritative even for saved/imported JSON: an impossible Side
         # Opening combination must fail loudly at load time, never load
         # silently as something else.
-        validate_side_openings(box)
+        from organizer_engine._specs import validate_bin_side_openings
+        validate_bin_side_openings(box, grid)
     if b4b.enabled:
         if box.standard_walls:
             box = replace(

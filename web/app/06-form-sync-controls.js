@@ -824,6 +824,9 @@ function wireControls() {
   [["#side-opening-lower", "lower"], ["#side-opening-upper", "upper"]].forEach(([selector, changed]) =>
     $(selector)?.addEventListener("input", () => {
       const previous = clone(state.design);
+      // Gridfinity keeps the requested edges: show any refusal in place,
+      // and let the spec boundary reject it before geometry is built.
+      sideOpeningAdjustmentNote = "";
       const pair = normalizeSideOpeningPair(state.design, sideOpeningPairFromControls(), changed);
       $("#side-opening-lower").value = String(pair.lower);
       $("#side-opening-upper").value = String(pair.upper);
