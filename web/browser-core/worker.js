@@ -20,7 +20,7 @@ async function initialize() {
   const { loadPyodide } = await import(local('vendor/pyodide/pyodide.mjs'));
   py = await loadPyodide({ indexURL: local('vendor/pyodide/') });
   // Canonical editor/text helpers import matplotlib; all wheels are vendored.
-  await py.loadPackage(['numpy', 'shapely', 'networkx', 'matplotlib']);
+  await py.loadPackage(['numpy', 'shapely', 'networkx', 'matplotlib', 'opencv-python', 'pillow']);
   const wheel = await fetch(local('vendor/trimesh/trimesh-5.0.0-py3-none-any.whl'));
   if (!wheel.ok) throw new Error('Browser mesh package unavailable.');
   py.unpackArchive(await wheel.arrayBuffer(), 'zip', { extractDir: '/wavefinity' });
