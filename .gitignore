@@ -25,3 +25,6 @@ wavefinity_server.log
 
 # Local temp space (defined in Help-Code, REVIEWER-CHAT.md): never backed up to the cloud repo
 local-temp/
+
+# static site build output (B14), regenerable by scripts/build-static-site.py
+dist/

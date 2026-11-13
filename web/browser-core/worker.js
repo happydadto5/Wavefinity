@@ -37,8 +37,9 @@ async function initialize() {
   return { sha256: identity.sha256, runtime: 'browser', version: '0.28.3' };
 }
 const ready = initialize();
-// B04/B14 attach the Python registry here; an absent registration is never HTTP.
-const routes = new Map();
+// B14: every Python route is dispatched through wf_browser_core.route_dispatch
+// (the flat declaration); an unknown path fails closed there and is never HTTP.
+let dispatchRoute;
 const unsupported = { kind: 'UNSUPPORTED_LOCAL_OPERATION', message: 'This feature is unavailable in the browser edition.' };
 self.onmessage = async ({ data: job }) => {
   if (!job || job.v !== 1 || typeof job.job_id !== 'string') return;
@@ -60,19 +61,23 @@ self.onmessage = async ({ data: job }) => {
       }
       return;
     }
-    const handler = routes.get(job.path);
-    if (!handler) { send('error', { error: unsupported, status: 404 }); return; }
+    if (typeof job.path !== 'string' || !job.path.startsWith('/api/')) { send('error', { error: unsupported, status: 404 }); return; }
+    dispatchRoute ??= py.runPython("from wf_browser_core.route_dispatch import dispatch_worker_json
+dispatch_worker_json");
     capacity();
-    const result = await handler(job.payload, {
-      progress: progress => send('progress', { progress }),
-      file: (bytes, name, mime) => {
-        const buffer = bytes instanceof ArrayBuffer ? bytes : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-        const file_id = crypto.randomUUID();
-        send('file', { file_id, name, mime, bytes: buffer }, [buffer]);
-        return file_id;
-      },
-    });
+    const file = (bytes, name, mime) => {
+      const buffer = bytes instanceof ArrayBuffer ? bytes : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      const file_id = crypto.randomUUID();
+      send('file', { file_id, name, mime, bytes: buffer }, [buffer]);
+      return file_id;
+    };
+    const reply = JSON.parse(dispatchRoute(job.path, JSON.stringify(job.payload ?? {}), file, progress => send('progress', { progress })));
     capacity();
+    if (reply.error) {
+      send('error', { error: reply.error, status: reply.status || 500, fatal: /memory|allocation|heap capacity/i.test(String(reply.error.message || '')) });
+      return;
+    }
+    const result = reply.result;
     const transfers = new Set();
     const collect = value => {
       if (value instanceof ArrayBuffer) transfers.add(value);

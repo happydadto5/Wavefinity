@@ -7,7 +7,8 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from .editor_routes import ROUTES
+from . import (ai_routes, build_outputs, drawer_routes, editor_routes, nest_routes,
+               preview_routes, print_routes, structural_routes)
 
 
 class LocalRouteError(Exception):
@@ -30,15 +31,20 @@ class UnsupportedLocalOperation(LocalRouteError):
 
 _handlers = {}
 _registered_maps = []
-# Retired/JavaScript paths cannot become Python handlers by accident. This is
-# runtime registration integrity; B14 owns the complete manifest assembly.
-_manifest = json.loads((Path(__file__).parent / "route_manifest.json").read_text(encoding="utf-8"))
-_python_paths = {row["path"] for row in _manifest["routes"]
-                 if row["disposition"] == "local" and row["runtime"] == "python"}
+# The flat final declaration (contracts/route-declaration.json, packaged beside
+# this file) is what this runtime dispatches from. Retired and JavaScript paths
+# are absent from it, so they can never become Python handlers by accident.
+_declaration = json.loads((Path(__file__).parent / "route_declaration.json").read_text(encoding="utf-8"))
+_declared = {row["path"]: row for row in _declaration["routes"] if row["runtime"] == "python"}
+_python_paths = set(_declared)
 
 
-def register_routes(routes):
-    """Register a module's ROUTES once; reject collisions without partial writes."""
+def register_routes(routes, module=None):
+    """Register a module's ROUTES once; reject collisions without partial writes.
+
+    With `module` (its file stem) every path must also be declared for that
+    exact module, so ownership drift is refused at load rather than served.
+    """
     if any(routes is registered for registered in _registered_maps):
         return
     if not isinstance(routes, Mapping):
@@ -49,6 +55,8 @@ def register_routes(routes):
             raise TypeError("Python routes require /api/ paths and callable handlers.")
         if path not in _python_paths:
             raise UnsupportedLocalOperation(path)
+        if module is not None and _declared[path]["module"] != f"web/browser-core/engine/{module}.py":
+            raise LocalRouteError(f"Route {path} is declared for {_declared[path]['module']}, not {module}.py")
         if path in _handlers:
             raise DuplicateLocalRoute(f"Duplicate local route: {path}")
     _handlers.update(pending)
@@ -83,4 +91,21 @@ def dispatch_json(path, payload_json="{}"):
         }})
 
 
-register_routes(ROUTES)
+# B14 final assembly: each package's Python ROUTES, registered exactly once.
+# JavaScript maps (B09, B13 browser part) are attached in local-api.js instead.
+for _name, _module in (
+    ("editor_routes", editor_routes), ("preview_routes", preview_routes),
+    ("build_outputs", build_outputs), ("structural_routes", structural_routes),
+    ("print_routes", print_routes), ("drawer_routes", drawer_routes),
+    ("nest_routes", nest_routes), ("ai_routes", ai_routes),
+):
+    register_routes(_module.ROUTES, _name)
+
+_missing = sorted(_python_paths - set(_handlers))
+if _missing:
+    raise LocalRouteError(f"Declared Python routes have no handler: {_missing}")
+
+
+def dispatch_worker_json(path, payload_json, emit_file, progress):
+    """Worker entry point: every route, with the active job's file/progress delivery."""
+    return build_outputs.dispatch_output_json(path, payload_json, emit_file, progress, dispatch=dispatch)

@@ -1,9 +1,36 @@
 window.WFLocalAPI = (() => {
   let worker, initialization, active = null, epoch = 0;
   const queue = [], jobs = new Map();
-  const routes = new Map(); // B14 attaches browser-side route registrations here.
+  const routes = new Map(); // Browser (JavaScript) routes, attached once from the flat declaration.
+  const pythonPaths = new Set(); // Declared Python routes, dispatched in the worker.
   const instance = crypto.randomUUID();
   const fail = (message, kind, status = 500) => Object.assign(new Error(message), { kind, type: kind, status });
+  // B14 final assembly. JavaScript ROUTES (B09, B13 browser part) are attached here and Python ROUTES
+  // in engine/route_dispatch.py; both runtimes dispatch only what contracts/route-declaration.json lists.
+  const builtins = ['/api/health', '/api/operation-status'];
+  const modules = ['space-store', 'preferences', 'capabilities'];
+  let routesLoaded = false;
+  const routesReady = (async () => {
+    const response = await fetch('/browser-core/contracts/route-declaration.json', { cache: 'no-cache' });
+    if (!response.ok) throw new Error('Route declaration unavailable.');
+    const declared = new Map((await response.json()).routes.map(row => [row.path, row]));
+    const javascript = new Set();
+    for (const name of modules) {
+      const file = `web/browser-core/${name}.js`;
+      for (const [path, handler] of (await import(`/browser-core/${name}.js`)).ROUTES) {
+        const row = declared.get(path);
+        if (!row || row.runtime !== 'javascript' || row.module !== file) throw new Error(`Route ${path} is not declared for ${file}.`);
+        if (routes.has(path) || typeof handler !== 'function') throw new Error(`Route ${path} is duplicated or invalid.`);
+        routes.set(path, handler); javascript.add(path);
+      }
+    }
+    for (const row of declared.values()) {
+      if (row.runtime === 'python') pythonPaths.add(row.path);
+      else if (!javascript.has(row.path) && !builtins.includes(row.path)) throw new Error(`Declared route has no handler: ${row.path}`);
+    }
+    routesLoaded = true;
+  })();
+  routesReady.catch(() => {}); // Reported to each caller below.
   function startWorker() {
     const current = worker = new Worker('/browser-core/worker.js', { type: 'module' });
     current.onmessage = event => {
@@ -113,10 +140,15 @@ window.WFLocalAPI = (() => {
     }
     if (id) operation = WFRuntimeStatus.begin(id, path, signature);
     const execute = async () => {
+      // Routes are attached long before any click; awaiting only when not yet loaded keeps
+      // a directory picker running directly inside its click's activation.
+      if (!routesLoaded) {
+        try { await routesReady; } catch (error) { throw fail(error.message, 'LOCAL_ROUTE_DECLARATION_ERROR', 500); }
+      }
       const handler = routes.get(path);
-      // A directory picker must run directly in its click's activation.
       // Browser routes initialize the worker themselves only when needed.
       if (handler) return handler(payload || {});
+      if (!pythonPaths.has(path)) throw fail('This feature is unavailable in the browser edition.', 'UNSUPPORTED_LOCAL_OPERATION', 404);
       await init();
       return submit(path, payload, { signal: id ? null : signal, stale: path === '/api/preview', operation });
     };

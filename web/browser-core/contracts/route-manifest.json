@@ -297,7 +297,7 @@
         "Local mode also reads saved preferences and detects the slicer executable; HOSTED mode returns empty preferences and no slicer."
       ],
       "source": "wavefinity_web.py:733",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": [
         "web/app.js:7"
@@ -359,7 +359,7 @@
         "Pure: reports which of one divider's labels are too long for their compartment."
       ],
       "source": "wavefinity_web.py:1928",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": [
         "web/app/08-draft-fields-render.js:1026"
@@ -383,7 +383,7 @@
         "Pure: builds the planning record Space shows for the design being edited."
       ],
       "source": "wavefinity_web_impl/_designs/_layout.py:327",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": []
     },
@@ -417,7 +417,7 @@
         "Never rewrites an Inventory or folder."
       ],
       "source": "wavefinity_web.py:3497",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [
         "grid_entry_guard"
       ],
@@ -1229,7 +1229,7 @@
         "Pure: inserts/updates a feature in the returned design, with selected index and warnings."
       ],
       "source": "wavefinity_web_impl/_designs/_features.py:297",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": [
         "web/app/06-form-sync-controls.js:295",
@@ -1262,7 +1262,7 @@
         "Pure: builds the default feature for a kind/item with resolved options and divider cells."
       ],
       "source": "wavefinity_web_impl/_designs/_features.py:67",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": [
         "web/app/07-kind-pickers-bore-math.js:489"
@@ -1287,7 +1287,7 @@
         "Pure: removes one feature from the returned design."
       ],
       "source": "wavefinity_web_impl/_designs/_features.py:500",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": [
         "web/app/11-parts-preview-requests.js:97"
@@ -1320,7 +1320,7 @@
         "Pure: normalizes a draft feature against the design; may return {superseded:true} when a newer client_id/generation request replaced it."
       ],
       "source": "wavefinity_web_impl/_designs/_features.py:185",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": [
         "web/app/10-draft-update-commit.js:675",
@@ -1347,7 +1347,7 @@
         "Pure: duplicates a feature (a completed Photo Nest to another spot) in the returned design."
       ],
       "source": "wavefinity_web_impl/_designs/_features.py:428",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": [
         "web/app/09-draft-sizing-helpers.js:543"
@@ -1372,7 +1372,7 @@
         "Pure: fits a feature to the design (size/position correction)."
       ],
       "source": "wavefinity_web_impl/_designs/_features.py:270",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": [
         "web/app/11-parts-preview-requests.js:846"
@@ -1624,7 +1624,7 @@
         "Entry-guarded: _checked_entry_payload verifies destination grid ownership before the handler runs."
       ],
       "source": "wavefinity_web_impl/_designs/_layout.py:43",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [
         "grid_entry_guard"
       ],
@@ -1654,7 +1654,7 @@
         "Pure: switches the design's layout mode and returns the design."
       ],
       "source": "wavefinity_web_impl/_designs/_features.py:527",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": [
         "web/app/03-history-utils-catalog.js:876"
@@ -1839,7 +1839,7 @@
         "Pure: per-bin pegboard layout for standard/bins; a failing bin yields {error, compatible:false} under its id."
       ],
       "source": "wavefinity_web_impl/_designs/_layout.py:350",
-      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "browser_module": "web/browser-core/engine/editor_routes.py",
       "wrappers": [],
       "callers": [
         "web/drawer-model.js:1169"

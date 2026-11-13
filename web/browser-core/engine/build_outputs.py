@@ -38,8 +38,11 @@ def configure_delivery(emit_file, progress=None):
     _emit_file, _progress = emit_file, progress
 
 
-def dispatch_output_json(path, payload_json, emit_file, progress):
+def dispatch_output_json(path, payload_json, emit_file, progress, dispatch=None):
     """B14 worker binding: callbacks are its existing ctx.file/ctx.progress.
+
+    `dispatch` is the central route_dispatch.dispatch; without it only this
+    module's own ROUTES are reachable.
 
     Transfers use Uint8Array through Pyodide FFI, never JSON/base64 file data.
     This binding does not register routes or mutate the central dispatcher.
@@ -58,6 +61,8 @@ def dispatch_output_json(path, payload_json, emit_file, progress):
         payload = json.loads(payload_json)
         if not isinstance(payload, dict):
             raise TypeError("Local route payload must be a JSON object.")
+        if dispatch is not None:
+            return json.dumps({"result": dispatch(path, payload)}, allow_nan=False)
         if path not in ROUTES:
             raise ValueError("Unsupported local output route")
         return json.dumps({"result": ROUTES[path](payload)}, allow_nan=False)

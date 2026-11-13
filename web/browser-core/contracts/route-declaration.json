@@ -1,0 +1,552 @@
+{
+  "schema": "wavefinity-route-declaration/1",
+  "description": "Single flat final route declaration (B14). Both local runtimes dispatch only the routes listed here; scripts/build-static-site.py compares it with route-manifest.json and the source-route index and aborts the shipping build on any difference. Retired routes are intentionally absent.",
+  "routes": [
+    {
+      "path": "/api/ai/ask",
+      "owner": "B13",
+      "runtime": "javascript",
+      "module": "web/browser-core/capabilities.js"
+    },
+    {
+      "path": "/api/ai/candidate",
+      "owner": "B13",
+      "runtime": "python",
+      "module": "web/browser-core/engine/ai_routes.py"
+    },
+    {
+      "path": "/api/ai/connection",
+      "owner": "B13",
+      "runtime": "javascript",
+      "module": "web/browser-core/capabilities.js"
+    },
+    {
+      "path": "/api/ai/prompt",
+      "owner": "B13",
+      "runtime": "python",
+      "module": "web/browser-core/engine/ai_routes.py"
+    },
+    {
+      "path": "/api/ai/repair-prompt",
+      "owner": "B13",
+      "runtime": "python",
+      "module": "web/browser-core/engine/ai_routes.py"
+    },
+    {
+      "path": "/api/browse-output-folder",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/browse-slicer-path",
+      "owner": "B13",
+      "runtime": "javascript",
+      "module": "web/browser-core/capabilities.js"
+    },
+    {
+      "path": "/api/catalog",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/connector",
+      "owner": "B06",
+      "runtime": "python",
+      "module": "web/browser-core/engine/build_outputs.py"
+    },
+    {
+      "path": "/api/design/division-label-fit",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/design/inventory-preview",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/design/validate",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/drawer/connectors",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/design-source/duplicate",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/design-source/save",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/design-source/status",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/generate-bin",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/load",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/print-bins",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/print-complete",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/print-spacers",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/report",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/save",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/save-bins",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/spacers",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/spacers/generate",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/spacers/refresh",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/surface-fill",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/drawer/surface-fill/create",
+      "owner": "B10",
+      "runtime": "python",
+      "module": "web/browser-core/engine/drawer_routes.py"
+    },
+    {
+      "path": "/api/feature/apply",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/feature/default",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/feature/delete",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/feature/draft",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/feature/duplicate",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/feature/fit",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/folder/inventory",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/folder/no-defined-space",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/folder/use",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/generate",
+      "owner": "B06",
+      "runtime": "python",
+      "module": "web/browser-core/engine/build_outputs.py"
+    },
+    {
+      "path": "/api/health",
+      "owner": "B03",
+      "runtime": "javascript",
+      "module": "web/browser-core/local-api.js"
+    },
+    {
+      "path": "/api/layout/expand",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/layout/mode",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/nest/photo",
+      "owner": "B12",
+      "runtime": "python",
+      "module": "web/browser-core/engine/nest_routes.py"
+    },
+    {
+      "path": "/api/nest/retrace",
+      "owner": "B12",
+      "runtime": "python",
+      "module": "web/browser-core/engine/nest_routes.py"
+    },
+    {
+      "path": "/api/nest/trace",
+      "owner": "B12",
+      "runtime": "python",
+      "module": "web/browser-core/engine/nest_routes.py"
+    },
+    {
+      "path": "/api/operation-status",
+      "owner": "B03",
+      "runtime": "javascript",
+      "module": "web/browser-core/local-api.js"
+    },
+    {
+      "path": "/api/pegboard/hooks",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/pegboard/layouts",
+      "owner": "B04",
+      "runtime": "python",
+      "module": "web/browser-core/engine/editor_routes.py"
+    },
+    {
+      "path": "/api/preferences",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/preferences.js"
+    },
+    {
+      "path": "/api/preview",
+      "owner": "B05",
+      "runtime": "python",
+      "module": "web/browser-core/engine/preview_routes.py"
+    },
+    {
+      "path": "/api/print",
+      "owner": "B08",
+      "runtime": "python",
+      "module": "web/browser-core/engine/print_routes.py"
+    },
+    {
+      "path": "/api/sampler",
+      "owner": "B06",
+      "runtime": "python",
+      "module": "web/browser-core/engine/build_outputs.py"
+    },
+    {
+      "path": "/api/show-log",
+      "owner": "B13",
+      "runtime": "javascript",
+      "module": "web/browser-core/capabilities.js"
+    },
+    {
+      "path": "/api/space/browse-storage-parent",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/configure",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/configure-text",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/copy",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/copy-name",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/copy-text",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/create",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/create-text",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/defaults",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/delete",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/forget",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/inspect",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/no-inventory",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/open",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/other-spaces",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/printer-profile",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/preferences.js"
+    },
+    {
+      "path": "/api/space/resume",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/show-folder",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/startup",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/storage-box-print",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/storage-change",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/storage-drawers-mutate",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/storage-drawers-mutate-text",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/storage-drawers-reset",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/storage-drawers-summary",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/storage-drawers-validate",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/storage-parent",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/storage-plan",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/storage-state",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/structural-design",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/structural-generate",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/structural-print",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/structural-print-combined",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/surface-print",
+      "owner": "B11",
+      "runtime": "python",
+      "module": "web/browser-core/engine/structural_routes.py"
+    },
+    {
+      "path": "/api/space/update",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/use-untyped",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/space/warm",
+      "owner": "B09",
+      "runtime": "javascript",
+      "module": "web/browser-core/space-store.js"
+    },
+    {
+      "path": "/api/suggestions",
+      "owner": "B13",
+      "runtime": "javascript",
+      "module": "web/browser-core/capabilities.js"
+    }
+  ]
+}

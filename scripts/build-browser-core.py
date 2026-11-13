@@ -151,6 +151,14 @@ def source_inputs() -> tuple[dict[str, bytes], dict[str, dict], list[str]]:
         'sha256': digest(archive['wf_browser_core/route_manifest.json']),
         'bytes': len(archive['wf_browser_core/route_manifest.json']),
     }
+    # B14: the flat final declaration is what route_dispatch.py dispatches from.
+    declaration = CORE / 'contracts/route-declaration.json'
+    archive['wf_browser_core/route_declaration.json'] = declaration.read_text(encoding='utf-8-sig').encode('utf-8')
+    hashes['wf_browser_core/route_declaration.json'] = {
+        'source': declaration.relative_to(ROOT).as_posix(),
+        'sha256': digest(archive['wf_browser_core/route_declaration.json']),
+        'bytes': len(archive['wf_browser_core/route_declaration.json']),
+    }
     return archive, hashes, sorted(external)
 
 

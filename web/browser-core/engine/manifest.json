@@ -1,6 +1,6 @@
 {
   "archive": "canonical.zip",
-  "bytes": 732314,
+  "bytes": 734192,
   "catalog": {
     "schema": "wavefinity-browser-catalog/1",
     "sha256": "5fa7456f9223e349350d1bd0e77abc01fccefafb313f07bfd46aec1b5f0f7980",
@@ -27,7 +27,7 @@
     "photo_nest": "B12 integrates the bundled cv2/Pillow browser packages"
   },
   "schema": "wavefinity-browser-engine/1",
-  "sha256": "b6fdee19cd251d1bf27d22629828589bfafa845088d146b65fb90ca67d287e31",
+  "sha256": "e5bb4804ba0b1fc41a70dad14746a1aacf3dd05a3e34c8edf2bbb849959b3dbb",
   "size_accounting": {
     "assets": {
       "earcut/LICENSE": {
@@ -39,8 +39,8 @@
         "gzip_bytes": 5821
       },
       "engine/canonical.zip": {
-        "bytes": 732314,
-        "gzip_bytes": 723387
+        "bytes": 734192,
+        "gzip_bytes": 725186
       },
       "manifold64/LICENSE": {
         "bytes": 11558,
@@ -177,8 +177,8 @@
     },
     "planning_target_bytes": 67108864,
     "scope": "Entire B02 vendor tree and canonical.zip; excludes future UI/worker assets and manifest JSON. gzip totals are build encoding sizes, not observed network transfer. Hosting compression/traffic allowance is not established here.",
-    "total_bytes": 58742313,
-    "total_gzip_bytes": 51055925,
+    "total_bytes": 58744191,
+    "total_gzip_bytes": 51057724,
     "within_planning_target": true
   },
   "source_hash_mode": "UTF-8 without BOM, LF line endings",
@@ -759,8 +759,8 @@
       "source": "web/browser-core/engine/ai_routes.py"
     },
     "wf_browser_core/build_outputs.py": {
-      "bytes": 11005,
-      "sha256": "bfdef436c1181a3aeead340b68ef5edaa941ee00576222bf85e456687c40a058",
+      "bytes": 11253,
+      "sha256": "72273b49d74335e0ca6b6ad49bee41b9eb6655d7335d64a0ab2f5cf44edda6cd",
       "source": "web/browser-core/engine/build_outputs.py"
     },
     "wf_browser_core/catalog.json": {
@@ -808,14 +808,19 @@
       "sha256": "706338d2368b28d6d9d5c9d6aa8aa4d13ce382dccf3e660ee80e926af81379b3",
       "source": "web/browser-core/engine/print_routes.py"
     },
+    "wf_browser_core/route_declaration.json": {
+      "bytes": 14815,
+      "sha256": "88431ddc5380eb56fff1b0aba715c26726718628c67b303bdb6dca69380dc601",
+      "source": "web/browser-core/contracts/route-declaration.json"
+    },
     "wf_browser_core/route_dispatch.py": {
-      "bytes": 3103,
-      "sha256": "e9b3a187ff9e47970381912bea641aa48231b69282a26646bc7620d00e29dbf1",
+      "bytes": 4572,
+      "sha256": "d61aac34f5594ed8867be6815ad929f42ad85ada92ca1dc47f7b0e7dbc38ab49",
       "source": "web/browser-core/engine/route_dispatch.py"
     },
     "wf_browser_core/route_manifest.json": {
-      "bytes": 101576,
-      "sha256": "bb3388dc0574b5aaa20e05bad86325fbeab6b7af2eaba4c32a79c5030c16a060",
+      "bytes": 101563,
+      "sha256": "3e8ceefbbdc0ae86e4d38cad1bdb22cfe44fd483da11573e405075c62733743c",
       "source": "web/browser-core/contracts/route-manifest.json"
     },
     "wf_browser_core/space_values.py": {
