@@ -40,8 +40,8 @@ Normal Windows launch: double-click `Launch_Organizer_UI.bat`. The launcher chec
 | Outside-AI design option catalog | [ai-features.md](ai-features.md) |
 | Agent/Story workflow, owner testing policy, browser audit rules | [AGENTS.md](AGENTS.md) |
 
-**Agents:** This overview is sufficient for orientation. Do not bulk-read every reference, historical note or large source file for a casual question or screenshot. For a concrete coding task, read the specific affected reference and relevant code; [AGENTS.md](AGENTS.md) governs the work.
+Detailed documentation is organized by topic to keep the introduction short. AI working instructions are maintained separately in [AGENTS.md](AGENTS.md).
 
 ## Planned, not live
 
-A browser-only geometry/hosting migration is **planned**, not the current runtime. Its authoritative design is the [execution specification](Future%20plans/Browser-only-migration-execution-spec.md); supporting contracts and route maps live in `Future plans/`. Do not treat those plans as deployed code or change hosting/DNS without owner authorization.
+A browser-only geometry/hosting migration is **planned**, not the current runtime. Its authoritative design is the [execution specification](Future%20plans/Browser-only-migration-execution-spec.md); supporting contracts and route maps live in `Future plans/`. They are not deployed changes; the current runtime and hosting remain as described above.
