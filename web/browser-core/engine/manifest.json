@@ -1,10 +1,10 @@
 {
   "archive": "canonical.zip",
-  "bytes": 708930,
+  "bytes": 721042,
   "catalog": {
     "schema": "wavefinity-browser-catalog/1",
-    "sha256": "3527551c96c23d983ec84add464b40ddc521adc30881b2d1bc52f53bb5c446db",
-    "source_sha256": "e26a414e85f0e13ed56795a954694f96f497283f19e7e15fd872c61e3dd7e54b"
+    "sha256": "4b6c66bf421ad66f7f54aae10278087947e8127a468bd098b0e7d4f0fb9fd92d",
+    "source_sha256": "02e5da371fcaed3c0f856d4475fd84fa918561e63fd12f445f8b7f405a401a62"
   },
   "external_imports": [
     "PIL",
@@ -27,7 +27,7 @@
     "photo_nest": "B12 integrates the bundled cv2/Pillow browser packages"
   },
   "schema": "wavefinity-browser-engine/1",
-  "sha256": "4fc89331bd4119714b505ae79085237b81bf2426d7717775e542710dde362906",
+  "sha256": "a79c6cbeea833ce929af31c641ec60cbc6be8dfa9707274d517b8ad54b2b71c0",
   "size_accounting": {
     "assets": {
       "earcut/LICENSE": {
@@ -39,8 +39,8 @@
         "gzip_bytes": 5821
       },
       "engine/canonical.zip": {
-        "bytes": 708930,
-        "gzip_bytes": 700452
+        "bytes": 721042,
+        "gzip_bytes": 712217
       },
       "manifold64/LICENSE": {
         "bytes": 11558,
@@ -177,8 +177,8 @@
     },
     "planning_target_bytes": 67108864,
     "scope": "Entire B02 vendor tree and canonical.zip; excludes future UI/worker assets and manifest JSON. gzip totals are build encoding sizes, not observed network transfer. Hosting compression/traffic allowance is not established here.",
-    "total_bytes": 58718929,
-    "total_gzip_bytes": 51032990,
+    "total_bytes": 58731041,
+    "total_gzip_bytes": 51044755,
     "within_planning_target": true
   },
   "source_hash_mode": "UTF-8 without BOM, LF line endings",
@@ -314,8 +314,8 @@
       "source": "organizer_base_trim/outputs.py"
     },
     "organizer_drawer/__init__.py": {
-      "bytes": 57354,
-      "sha256": "83a462ebfe9da4a8cf3883e6be26e710a1e1769a8fd84c7fcfa16c5f546e61a2",
+      "bytes": 58588,
+      "sha256": "9be0ae501bec48cd7382426e6d97c8c90fd06677ba3330104ffc3ff29264ce91",
       "source": "organizer_drawer/__init__.py"
     },
     "organizer_drawer/_core.py": {
@@ -684,8 +684,8 @@
       "source": "photo_nest.py"
     },
     "plate_layout.py": {
-      "bytes": 13241,
-      "sha256": "c516e0a1e8b97a0ff3de29180fe93e11300437a26d3677ecda70d24ae1ec4320",
+      "bytes": 13918,
+      "sha256": "9f671bfd8c7491f2e7d9a99be850036ca418ddbb8cce0489df8208dc1021d914",
       "source": "plate_layout.py"
     },
     "space_source.py": {
@@ -699,8 +699,8 @@
       "source": "wavefinity_web_impl/__init__.py"
     },
     "wavefinity_web_impl/_ai.py": {
-      "bytes": 42909,
-      "sha256": "17a5308f888766d0ff38c078fb241749b65628c68695e1c7cb38ab052811f73c",
+      "bytes": 43276,
+      "sha256": "c55ee6fb4a1242faf2fe8dddef6138e33581a3614db7fb47ddcbb9d2b0c08d29",
       "source": "wavefinity_web_impl/_ai.py"
     },
     "wavefinity_web_impl/_catalog.py": {
@@ -760,13 +760,18 @@
     },
     "wf_browser_core/catalog.json": {
       "bytes": 69746,
-      "sha256": "3527551c96c23d983ec84add464b40ddc521adc30881b2d1bc52f53bb5c446db",
+      "sha256": "4b6c66bf421ad66f7f54aae10278087947e8127a468bd098b0e7d4f0fb9fd92d",
       "source": "web/browser-core/engine/catalog.json"
     },
     "wf_browser_core/catalog_manifest.json": {
       "bytes": 12217,
-      "sha256": "45e2724cff2b99e035209ea6575d4648372abcfd5eac45b9dd4afa65159732b7",
+      "sha256": "b076310436e9f6da4e797c3d5dad294279bf1807c04b534401f2b34e0ac4dbac",
       "source": "web/browser-core/engine/catalog_manifest.json"
+    },
+    "wf_browser_core/drawer_routes.py": {
+      "bytes": 11023,
+      "sha256": "2c80c610654f96f31813915b1e0f24efc01bed73ab294cca3f5936b2e4f1a29a",
+      "source": "web/browser-core/engine/drawer_routes.py"
     },
     "wf_browser_core/editor_routes.py": {
       "bytes": 2835,
@@ -778,10 +783,20 @@
       "sha256": "d3f1c4235515886ca83386b38f49c1b22aa2b00f4073f791231fdd8204c1dd6a",
       "source": "web/browser-core/engine/manifold_bridge.py"
     },
+    "wf_browser_core/plate_layout.py": {
+      "bytes": 15476,
+      "sha256": "1a3e5a663ad6870418789265889dcae86abf51a601f7d30cde2c196cc5152e47",
+      "source": "web/browser-core/engine/plate_layout.py"
+    },
     "wf_browser_core/preview_routes.py": {
       "bytes": 11369,
       "sha256": "5ffe9cecc4ccb3ebf4836a62156cc1509dd60d8dd5cf3bb2973dcb947ad90dba",
       "source": "web/browser-core/engine/preview_routes.py"
+    },
+    "wf_browser_core/print_routes.py": {
+      "bytes": 7644,
+      "sha256": "706338d2368b28d6d9d5c9d6aa8aa4d13ce382dccf3e660ee80e926af81379b3",
+      "source": "web/browser-core/engine/print_routes.py"
     },
     "wf_browser_core/route_dispatch.py": {
       "bytes": 3103,

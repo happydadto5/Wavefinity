@@ -228,6 +228,7 @@ def print_inventory_bins(
     slicer_path: str | None = None,
     generate_from_design: Callable[[Path, dict[str, Any]], list[Path]] | None = None,
     printer_profile: dict | None = None,
+    prepare_only: bool = False,
 ) -> dict[str, Any]:
     """Send selected generated bins (and optional Space connectors) to the slicer.
 
@@ -242,11 +243,11 @@ def print_inventory_bins(
     output_dir = Path(output_dir).expanduser().resolve()
     # Preflight the authoritative slicer before any on-demand bin generation,
     # Inventory File-cell write or connector generation.
-    slicer = detect_slicer(slicer_path)
-    if slicer is None or not Path(slicer).is_file():
+    slicer = None if prepare_only else detect_slicer(slicer_path)
+    if not prepare_only and (slicer is None or not Path(slicer).is_file()):
         raise ValueError("Bambu Studio wasn't found. Open Printer Settings… to choose it.")
     # Fix 096 F11: user-facing copy names the detected slicer, never a hardcoded brand.
-    name_cap = slicer_display_name(slicer) or "The slicer"
+    name_cap = "Bambu Studio" if prepare_only else (slicer_display_name(slicer) or "The slicer")
     by_id = {one["id"]: one for one in bins}
     counts: dict[str, int] = {}
     for bin_id, raw_count in (selection or {}).items():
@@ -266,7 +267,7 @@ def print_inventory_bins(
 
     prepared = prepare_inventory_bins(output_dir, list(counts), generate_from_design)
     if prepared["failed"]:
-        slicer_label = slicer_display_name(slicer) or "The slicer"
+        slicer_label = name_cap
         return _batch_partial(
             prepared, "generate", _prepare_failure_text(prepared, slicer_label), selection=counts)
     rows_files = prepared["files"]
@@ -310,15 +311,19 @@ def print_inventory_bins(
             "A file does not fit the active printer:\n" + "\n".join(fit_issues),
             **result_counts)
     try:
-        launch_slicer(Path(slicer), launch_files)
+        launch_slicer(None if prepare_only else Path(slicer), launch_files)
     except Exception as error:
         # Files and connectors written above are kept; rows stay Saved (never
         # Printed). Return the refreshed Inventory so the browser matches disk.
         return _batch_partial(
-            prepared, "slicer",
-            f"{name_cap} did not open: {error}. Any files made during this attempt were kept.",
+            prepared, "preflight" if prepare_only else "slicer",
+            (f"Print file could not be prepared: {error}. Any files made during this attempt were kept."
+             if prepare_only else f"{name_cap} did not open: {error}. Any files made during this attempt were kept."),
             **result_counts)
 
+    if prepare_only:
+        return {**load_inventory(output_dir), **result_counts,
+                "print_row_ids": list(counts)}
     try:
         # A row is one bin. Placement copy numbers are not print bookkeeping.
         saved = mark_printed_rows(output_dir, counts, specs)
@@ -338,6 +343,7 @@ def drawer_routes(
     hosted: bool = False,
     generate_from_design: Callable[[Path, dict[str, Any]], list[Path]] | None = None,
     printer_profile_for: Callable[[dict], dict] | None = None,
+    prepare_print_only: bool = False,
 ) -> dict[str, Callable[[dict], dict]]:
     """POST handlers for the browser service, keyed by path."""
 
@@ -981,7 +987,7 @@ def drawer_routes(
     def print_spacers_only(payload):
         if hosted:
             raise ValueError("Hosted Wavefinity saves files to your folder instead of opening a local slicer.")
-        if detect_slicer is None or launch_slicer is None:
+        if launch_slicer is None or (not prepare_print_only and detect_slicer is None):
             raise ValueError("printing is not available here")
         with geometry_lock:
             selection = payload.get("selection") or {}
@@ -1015,8 +1021,8 @@ def drawer_routes(
                     + ". Refresh Spacers to remake them, then print again.")
             if not files:
                 raise ValueError("Select at least one spacer to print.")
-            slicer = detect_slicer(payload.get("slicer_path"))
-            if slicer is None or not Path(slicer).is_file():
+            slicer = None if prepare_print_only else detect_slicer(payload.get("slicer_path"))
+            if not prepare_print_only and (slicer is None or not Path(slicer).is_file()):
                 raise ValueError("Bambu Studio wasn't found. Open Printer Settings… to choose it.")
             fit_issues: list[str] = []
             for path in dict.fromkeys(launch_files):
@@ -1024,13 +1030,13 @@ def drawer_routes(
             if fit_issues:
                 raise ValueError(
                     "A file does not fit the active printer:\n" + "\n".join(fit_issues))
-            launch_slicer(Path(slicer), launch_files)
+            launch_slicer(None if prepare_print_only else Path(slicer), launch_files)
             return {"files": [str(path) for path in files], "counts": counts, "notes": []}
 
     def print_bins(payload):
         if hosted:
             raise ValueError("Bulk printing to a local slicer is available in local Wavefinity.")
-        if detect_slicer is None or launch_slicer is None:
+        if launch_slicer is None or (not prepare_print_only and detect_slicer is None):
             raise ValueError("printing is not available here")
         wait_for_builds(folder(payload), (payload.get("selection") or {}).keys())
         with geometry_lock:
@@ -1043,6 +1049,7 @@ def drawer_routes(
                 detect_slicer, launch_slicer, payload.get("slicer_path"),
                 generate_from_design,
                 _printer_profile(payload),
+                prepare_only=prepare_print_only,
             ))
 
     def print_complete(payload):
@@ -1068,7 +1075,7 @@ def drawer_routes(
         """
         if hosted:
             raise ValueError("Hosted Wavefinity saves files to your folder instead of opening a local slicer.")
-        if detect_slicer is None or launch_slicer is None:
+        if launch_slicer is None or (not prepare_print_only and detect_slicer is None):
             raise ValueError("printing is not available here")
         wait_for_builds(folder(payload))
         with geometry_lock:
@@ -1077,8 +1084,8 @@ def drawer_routes(
             layout, bins = inv["layout"], inv["bins"]
             drawers = layout.get("drawers") or []
             # 1. Slicer preflight first.
-            slicer = detect_slicer(payload.get("slicer_path"))
-            if slicer is None or not Path(slicer).is_file():
+            slicer = None if prepare_print_only else detect_slicer(payload.get("slicer_path"))
+            if not prepare_print_only and (slicer is None or not Path(slicer).is_file()):
                 raise ValueError("Bambu Studio wasn't found. Open Printer Settings… to choose it.")
             # 2. One truthful preflight over every placed bin in the Space.
             by_id = {one["id"]: one for one in bins}
@@ -1097,7 +1104,7 @@ def drawer_routes(
             if prepared["failed"]:
                 raise ValueError(
                     "The bins could not be prepared: "
-                    + _prepare_failure_text(prepared, slicer_name=slicer_display_name(slicer) or "The slicer"))
+                    + _prepare_failure_text(prepared, slicer_name="Bambu Studio" if prepare_print_only else (slicer_display_name(slicer) or "The slicer")))
             rows_files = prepared["files"]
             specs = prepared["specs"]
             inventory = prepared["inventory"]
@@ -1188,12 +1195,17 @@ def drawer_routes(
                     "A file does not fit the active printer:\n" + "\n".join(fit_issues),
                     **result_counts, notes=notes)
             try:
-                project_path = launch_slicer(Path(slicer), launch_files)
+                project_path = launch_slicer(None if prepare_print_only else Path(slicer), launch_files)
             except Exception as error:
                 return _batch_partial(
-                    prepared, "slicer",
-                    f"Files were prepared, but Bambu Studio did not open: {error}. The files were kept.",
+                    prepared, "preflight" if prepare_print_only else "slicer",
+                    (f"Print file could not be prepared: {error}. The files were kept."
+                     if prepare_print_only else f"Files were prepared, but Bambu Studio did not open: {error}. The files were kept."),
                     notes=notes)
+            if prepare_print_only:
+                return {**load_inventory(out_dir), **result_counts, "notes": notes,
+                        "files": [path.name for path in launch_files],
+                        "print_row_ids": [*counts, *sorted(spacer_rows_printed)]}
             # 7. One promotion authority (C1's rule): handed off == Printed.
             try:
                 saved = mark_printed_rows(

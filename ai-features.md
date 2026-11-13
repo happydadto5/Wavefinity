@@ -6,6 +6,12 @@ download; multiple downloaded files travel together in a ZIP. Do not return
 export URLs or claim files have been saved. Final browser route assembly is
 a later migration package.
 
+Browser drawer Print prepares a local 3MF for the person to open in Bambu
+Studio. Printed changes only after their explicit confirmation for the same
+Space and unchanged design/inventory; saving or downloading alone is not
+confirmation. There is no persistent Prepared state. Never claim automatic
+slicer launch or set inventory print status in an AI design response.
+
 An ordinary bin on any supported grid may set `box.accent_band` to `true` for
 a top 1 mm accent (default `false`). `box.accent_color` defaults to `"blue"`;
 choices are blue, red, green, yellow, orange, purple, white and black. Include

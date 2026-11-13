@@ -419,12 +419,11 @@ DP.printSelectionPayload = () => Object.fromEntries(
 
 DP.renderBatch = () => {
   renderOutputReport();
-  const hosted = Boolean(state.runtime.hosted);
   const tools = $("#dl-batch-tools");
   if (!tools) return;
-  $("#dl-batch-print").hidden = hosted;
+  $("#dl-batch-print").hidden = false;
   const noSlicerNote = $("#dl-no-slicer-note");
-  if (noSlicerNote) noSlicerNote.hidden = hosted || Boolean(state.slicer?.available);
+  if (noSlicerNote) noSlicerNote.hidden = true;
   const hasBins = DL.bins.some(DL.isOrdinary);
   tools.hidden = !hasBins;
   $(".dl-inv-tools").hidden = !hasBins;
@@ -449,16 +448,13 @@ DP.renderBatch = () => {
   const busy = Boolean(DL.busy);
 
   if (WS.open() && ["settings", "none"].includes(WS.task)) DV.paint();
-  if (hosted) return;
-  const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
   const printCount = scope.subset ? scope.picked.length + (DP.containerPinned ? 1 : 0) : 0;
   button.textContent = (DL.busy === "print-bins" || DL.busy === "print-complete") ? currentOutputReport?.short || currentOutputReport?.text || DL.printBusyLabel
     : scope.subset ? `Print ${DP.containerPinned ? (printCount === 1 ? "container" : `${printCount} items`) : (printCount === 1 ? "bin" : `${printCount} bins`)}` : "Print whole space";
-  button.disabled = noSlicer || busy || (scope.subset && !printCount);
-  button.title = noSlicer ? "A slicer is needed to print. Open Printer Settings… to choose one."
-    : scope.subset && !printCount ? "No selected bins are eligible to print."
-      : "Print the selected bins, or every bin and spacer in the Space when none are selected.";
+  button.disabled = busy || (scope.subset && !printCount);
+  button.title = scope.subset && !printCount ? "No selected bins are eligible to print."
+    : "Prepare a Print file for Bambu Studio, then confirm opening it to record Printed.";
 };
 
 // Inventory row activation: mouse click and keyboard (Enter/Space) share
@@ -1271,7 +1267,7 @@ DP.renderInventory = (force = false) => {
     // Fix 096 A2: a bin/b4b row whose editable source is missing keeps its row
     // but gets a disabled Edit with the reason, never a silent omission.
     const sourceMissing = ["bin", "b4b"].includes(one.kind) && !designSource;
-    const printable = eligible && !state.runtime.hosted && Boolean(state.slicer?.available);
+    const printable = eligible;
     const outputRunning = currentOutputReport?.busy && DL.spaceContextCurrent(currentOutputReport.context)
       && currentOutputReport.rowIds.includes(one.id);
     const outputLabel = mode => outputRunning && currentOutputReport.action === mode

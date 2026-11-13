@@ -1,6 +1,6 @@
 {
   "schema": "wavefinity-browser-catalog/1",
-  "sha256": "3527551c96c23d983ec84add464b40ddc521adc30881b2d1bc52f53bb5c446db",
+  "sha256": "4b6c66bf421ad66f7f54aae10278087947e8127a468bd098b0e7d4f0fb9fd92d",
   "source_hashes": {
     "bambu_handoff.py": "f2a6f6b77c9dafbff9cba4eebf115a78c55705845db69c69895b01470183679c",
     "organizer_app.py": "eea3cbb2b6b67e603d11c1be96a85ca7869ce48700d03ca2bf08c3d8448c086f",
@@ -28,7 +28,7 @@
     "organizer_b4b/_validation.py": "caf49e5af25ba9ee6c80432306e2b18b7e46a4e886f58fa558fb1c186d3e9be8",
     "organizer_base_trim/__init__.py": "6ea2a08081349fd9a4a7a4a32bb11da7f713f6375a253c781e0e9bcf0ef8e209",
     "organizer_base_trim/outputs.py": "f238c0698908d161aa1c93776f45796440b30935efb4ae7ea36747f9b2b4e284",
-    "organizer_drawer/__init__.py": "83a462ebfe9da4a8cf3883e6be26e710a1e1769a8fd84c7fcfa16c5f546e61a2",
+    "organizer_drawer/__init__.py": "9be0ae501bec48cd7382426e6d97c8c90fd06677ba3330104ffc3ff29264ce91",
     "organizer_drawer/_core.py": "1227856a310439edd5f0aedda4f7f2dbccab62a4c715e777745e5a860d64ec75",
     "organizer_drawer/_inventory.py": "fdecdf7b03cc597d4a6e0e4a18fe1d0dfa9e9fe5e1ff2597a0d2e1a8d4064c7c",
     "organizer_drawer/_report.py": "5e56cc5cb2d44f4e50d5f33d7404cfc7d9de4a26392cc804d8910c825a11efcf",
@@ -102,10 +102,10 @@
     "organizer_storage/drawer_outputs.py": "29f108c3eaab542600773cd59685033bf77a7f9f7b764cdea20d024aaaeb874e",
     "organizer_storage/drawers.py": "97da0cccf16d7abaacaf6813c2df86dc6df35853e8555bb4c76f29fcaf44dd36",
     "photo_nest.py": "4280f845cb08e45a73b85c7f30ba3b4bbaabc5df1b3f3b2d4991fdba5094a7a7",
-    "plate_layout.py": "c516e0a1e8b97a0ff3de29180fe93e11300437a26d3677ecda70d24ae1ec4320",
+    "plate_layout.py": "9f671bfd8c7491f2e7d9a99be850036ca418ddbb8cce0489df8208dc1021d914",
     "space_source.py": "07c43ef70318340030839120f392a0334ab4979b7242c1aaab462176479d59a8",
     "wavefinity_web_impl/__init__.py": "5e38f5c13b418ebda12143006c6684e0a3972563a090f0f38816ae904bb35547",
-    "wavefinity_web_impl/_ai.py": "17a5308f888766d0ff38c078fb241749b65628c68695e1c7cb38ab052811f73c",
+    "wavefinity_web_impl/_ai.py": "c55ee6fb4a1242faf2fe8dddef6138e33581a3614db7fb47ddcbb9d2b0c08d29",
     "wavefinity_web_impl/_catalog.py": "9aeb80ac68c3bc2a1b20580502a04c89b4a7445da4197e634f50dea854deb327",
     "wavefinity_web_impl/_designs/__init__.py": "c47817bf81d2666dd16befc833a3103649b2565e6503fcc94a8b0485bb7a26b0",
     "wavefinity_web_impl/_designs/_features.py": "cd4a284cc9533dd4a32af5b6ed62f25ec7e2c47432caa516f9ed0921472b5ef7",
@@ -116,5 +116,5 @@
     "wavefinity_web_impl/_outputs.py": "524fa41b5a4e123d7d8bd77e2ebffb3f68dfce600df62b032c6e0d9496e50777",
     "wavefinity_web_impl/_runtime.py": "19e1ce2dd9d8187871f4115886c328cbefbad19babe54c77c4447e22476d603e"
   },
-  "source_sha256": "e26a414e85f0e13ed56795a954694f96f497283f19e7e15fd872c61e3dd7e54b"
+  "source_sha256": "02e5da371fcaed3c0f856d4475fd84fa918561e63fd12f445f8b7f405a401a62"
 }

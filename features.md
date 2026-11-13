@@ -54,6 +54,17 @@ the original folder as a reported recovery copy. Final route/UI assembly is
 still B14 work; these modules do not establish a complete browser edition.
 See [browser Space persistence](docs/reference/browser-space-persistence.md).
 
+The B10 local drawer adapter covers all inventory, design-source, fill,
+spacer, connector and batch Save/Print routes. The selected browser folder
+owns the inventory and generated files; failed writes roll back their file
+set. Drawer Print prepares one arranged 3MF in that folder and asks the
+person to open the named file in Bambu Studio. Only **I opened it in Bambu
+Studio**, for the same Space, design epoch and unchanged inventory/layout,
+records Printed. Saving the file alone leaves status unchanged; there is no
+Prepared status. Missing files, printer fit and partial generation retain
+their existing checks and errors. Final worker/route assembly remains B14;
+structural Space Print belongs to B11.
+
 The browser migration has a Python dispatcher and bundled catalog/editor routes
 for validation, feature edits, layout fitting and pegboard layout choices.
 They share the existing Python rules and saved Space grid checks. Final worker

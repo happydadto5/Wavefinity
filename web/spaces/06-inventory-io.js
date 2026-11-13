@@ -109,12 +109,12 @@ SP.writeHostedFileSet = async (handle, filesBase64 = {}, promotionCurrent = null
       prior.set(name, await WFFileSystem.readBlob(handle, name));
       const bytes = Uint8Array.from(atob(filesBase64[name]), c => c.charCodeAt(0));
       if (promotionCurrent && !promotionCurrent()) throw DL.staleSpaceError();
+      written.push(name);
       await WFFileSystem.writeBlob(
         handle,
         name,
         new Blob([bytes], { type: "model/3mf" }),
       );
-      written.push(name);
     }
   } catch (error) {
     try {
@@ -166,7 +166,9 @@ SP.inventoryRequest = async (
     const deleting = path === "/api/drawer/save" && Boolean(extra.delete_ids?.length);
     const mayDeleteOwnedFiles =
       deleting || path === "/api/drawer/spacers/refresh";
-    const needsFilenameSnapshot =
+    const batchFiles = ["save-bins", "print-bins", "print-spacers", "print-complete"]
+      .some(name => path === `/api/drawer/${name}`);
+    const needsFilenameSnapshot = batchFiles ||
       mayDeleteOwnedFiles ||
       Boolean(generatedFiles) ||
       path === "/api/drawer/design-source/save" ||
@@ -178,10 +180,34 @@ SP.inventoryRequest = async (
       : [];
     requireContext();
 
+    const inputFiles = {};
+    if (batchFiles) {
+      const inventory = await api("/api/drawer/load", { inventory_text: inventoryText,
+        inventory_title: title, available_filenames: availableFilenames,
+        input_route: path, input_selection: extra.selection });
+      const names = new Set(inventory.input_file_names || []);
+      for (const name of names) {
+        if (!/^[^/\\:\x00]+\.3mf$/i.test(name)) throw new Error("Inventory contains an unsafe 3MF filename.");
+        if (!availableFilenames.includes(name)) continue;
+        const blob = await WFFileSystem.readBlob(handle, name);
+        requireContext();
+        if (!blob) continue;
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let binary = "";
+        for (let start = 0; start < bytes.length; start += 32768) {
+          binary += String.fromCharCode(...bytes.subarray(start, start + 32768));
+        }
+        inputFiles[name] = btoa(binary);
+      }
+    }
+    requireContext();
     const requestBody = {
       inventory_text: inventoryText,
       inventory_title: title,
       ...extra,
+      printer_profile: PrinterProfile.current(),
+      printer_profile_configured: PrinterProfile.configured(),
+      ...(batchFiles ? { input_files_base64: inputFiles } : {}),
       ...(needsFilenameSnapshot
         ? { available_filenames: availableFilenames }
         : {}),
@@ -193,16 +219,22 @@ SP.inventoryRequest = async (
     requireContext();
     if (buildOnly) return data;
     if (promotionCurrent && !promotionCurrent()) throw DL.staleSpaceError();
+    if ((await SP.readInventoryFor(folder)) !== inventoryText) {
+      throw new Error("Inventory changed while this operation was running. No generated files or inventory were applied.");
+    }
+    requireContext();
     const fileTxn = await SP.writeHostedFileSet(
       handle,
       generatedFiles || data.files_base64 || {},
-      promotionCurrent,
+      () => { requireContext(); return !promotionCurrent || promotionCurrent(); },
     );
 
+    let inventoryAttempted = false;
     try {
       requireContext();
       if (promotionCurrent && !promotionCurrent()) throw DL.staleSpaceError();
       if (write && typeof data.inventory_text === "string") {
+        inventoryAttempted = true;
         await WFFileSystem.writeText(
           handle,
           INVENTORY_FILENAME,
@@ -210,11 +242,14 @@ SP.inventoryRequest = async (
         );
       }
     } catch (error) {
-      try {
-        await fileTxn.rollback();
-      } catch (rollbackError) {
+      const restores = await Promise.allSettled([
+        inventoryAttempted ? WFFileSystem.writeText(handle, INVENTORY_FILENAME, inventoryText) : Promise.resolve(),
+        fileTxn.rollback(),
+      ]);
+      const failures = restores.filter(result => result.status === "rejected");
+      if (failures.length) {
         throw new Error(
-          `${error?.message || "Inventory write failed."} ${rollbackError.message}`
+          `${error?.message || "Inventory write failed."} Rollback: ${failures.map(result => result.reason?.message || String(result.reason)).join("; ")}`
         );
       }
       throw error;
@@ -239,7 +274,8 @@ SP.inventoryRequest = async (
     return data;
   };
 
-  const pending = SP._inventoryWriteChain.then(run, run);
+  const queued = () => WFFileSystem.queueFolderWrite(handle, run);
+  const pending = SP._inventoryWriteChain.then(queued, queued);
   if (write) SP._inventoryWriteChain = pending.catch(() => {});
   return pending;
 };

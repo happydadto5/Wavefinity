@@ -1064,17 +1064,9 @@ DL.inventoryCall = async (path, payload = {}, options = {}) => {
   // Fix 096 A5: apiSideEffect is the ONE browser owner of operation ids.
   // DL.inventoryCall never mints an id itself. A retry of the same logical
   // action therefore reuses apiSideEffect's fingerprinted id until terminal.
-  const data = state.runtime.hosted
-    ? await SP.inventoryRequest(path, payload, {
+  const data = await SP.inventoryRequest(path, payload, {
         ...requestOptions, context, sideEffect, onStillFinishing,
-      })
-    : sideEffect
-      ? await apiSideEffect(
-          path,
-          { output: DL.output ?? DL.folder(), ...payload },
-          { onStillFinishing },
-        )
-      : await api(path, { output: DL.output ?? DL.folder(), ...payload });
+      });
   DL.requireSpaceContext(context);
   return data;
 };
@@ -1340,6 +1332,7 @@ DL.editBins = async (changes, {
   selected = DL.selected,
   customFailure = false,
   context = DL.spaceContext(),
+  promotionCurrent = null,
 } = {}) => {
   if (!DL.spaceContextCurrent(context)) return false;
   const deletedNames = (changes.delete_ids || []).map(id => DL.bin(id)).filter(Boolean).map(one => DL.label(one));
@@ -1352,7 +1345,7 @@ DL.editBins = async (changes, {
       Object.keys(update).every(key => key === "id" || key === "object_height_mm"));
   try {
     DL.requireSpaceContext(context);
-    const data = await DL.inventoryCall("/api/drawer/save", payload, { context, sideEffect: true });
+    const data = await DL.inventoryCall("/api/drawer/save", payload, { context, sideEffect: true, promotionCurrent });
     DL.adopt(data);
     if (data.cleanup_failed?.length) {
       toast(`Bin deleted from Inventory, but ${data.cleanup_failed.length} generated file${data.cleanup_failed.length === 1 ? "" : "s"} could not be removed from the folder.`, true, 8000);
@@ -1755,15 +1748,38 @@ DL.promoteSpacerCopies = (group, requestedCount, layout = DL.layout) => {
 // file is sent per group; any newly-printed logical copies are then spread
 // across that group's own previously-unprinted member rows, and reprints
 // never increase the logical quantity in the drawer.
+DL.confirmDrawerPrint = async (result, context, epoch, { promote = true } = {}) => {
+  if (result.partial || !result.handoff?.confirmation_required) return null;
+  const current = () => {
+    DL.requireSpaceContext(context);
+    if (WFLocalAPI.designEpoch !== epoch) throw DL.staleSpaceError();
+  };
+  current();
+  const opened = await confirmOpenedInBambuStudio(result.handoff.filename,
+    "Saved in your selected Space folder.");
+  current();
+  if (!opened) return null;
+  if (!promote) return result;
+  const receipt = result.print_confirmation || [];
+  if (!receipt.length) return result;
+  return DL.inventoryCall("/api/drawer/save", {
+    bin_updates: receipt.map(entry => ({ id: entry.row.id, status: "printed", qty: 1,
+      ...(entry.design ? { expected_design: entry.design } : {}) })),
+    print_confirmation: receipt, opened_in_bambu: true,
+    expected_print_layout: result.expected_print_layout,
+  }, { context, promotionCurrent: () => { current(); return true; } });
+};
+
 DL.printSelectedSpacers = (selection) => DL.busyWith("print", async context => {
   if (Object.keys(selection).length === 0) return;
-  const result = await apiSideEffect("/api/drawer/print-spacers", {
-    output: DL.output ?? DL.folder(),
+  if (!(await DL.prepareBatch([], { printing: true })) || !(await DL.save())) return;
+  DL.requireSpaceContext(context);
+  const printEpoch = WFLocalAPI.designEpoch;
+  const result = await DL.inventoryCall("/api/drawer/print-spacers", {
     selection: selection,
-    slicer_path: state.slicer?.path || null,
-  });
-  if (!DL.spaceContextCurrent(context)) {
-    toast("Bambu Studio opened for the Space you left, but Wavefinity did not mark those spacer counts printed. Reopen that Space and correct Qty if you print.");
+  }, { context, sideEffect: true });
+  if (!(await DL.confirmDrawerPrint(result, context, printEpoch, { promote: false }))) {
+    toast(result.error || "Print file ready. Rows stay unchanged until you confirm opening it in Bambu Studio.", Boolean(result.partial));
     return;
   }
 
@@ -1795,11 +1811,15 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async context => {
     const saved = await DL.editBins({
       bin_updates: updates,
       layout: stagedLayout,
+      print_confirmation: result.print_confirmation,
+      opened_in_bambu: true,
+      expected_print_layout: result.expected_print_layout,
     }, {
       commitLayout: true,
       selected: selectedPlacement ? DL.key(selectedPlacement) : DL.selected,
       customFailure: true,
       context,
+      promotionCurrent: () => WFLocalAPI.designEpoch === printEpoch,
     });
     if (!DL.spaceContextCurrent(context)) {
       toast("Bambu Studio opened for the Space you left. Check that Space's Qty before printing; the current Space was not changed.");
@@ -1813,9 +1833,9 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async context => {
   if (omittedFiles.length > 0) {
     toast("These spacer files were missing and were not marked printed: " + [...new Set(omittedFiles)].join(", "), true, 10000);
   }
-  // The launch already repeats each file once per copy.
+  // The prepared plate already repeats each file once per copy.
   const lines = Object.entries(result.counts || {}).map(([file, copyCount]) => `${copyCount} × ${file}`);
-  toast(["Opened in Bambu Studio", ...lines].join("\n"), false, 9000);
+  toast(["Confirmed opened in Bambu Studio", ...lines].join("\n"), false, 9000);
 });
 
 // A batch Save/Print answer always carries the refreshed Inventory, even when
@@ -1839,10 +1859,6 @@ DL.prepareBatch = async (selection, { printing = false, report = toast } = {}) =
       !(await flushSpaceDesignAutosave({
         materialize: selection.includes(state.designInventoryId),
       }))) return false;
-  if (printing && state.runtime.hosted) {
-    report("Hosted Wavefinity saves files to your folder instead of opening a local slicer.", true);
-    return false;
-  }
   return true;
 };
 
@@ -1881,17 +1897,14 @@ DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", as
 }, (rowIds || []).map(id => ({ id, title: DL.bin(id) ? DL.label(DL.bin(id)) : "Bin" })));
 
 
-// The server re-reads saved Inventory; each selected row opens once in Bambu.
+// The local engine re-reads the snapshot; each selected bin appears once.
 DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async (context, report) => {
   if (!(await DL.prepareBatch(Object.keys(selection || {}), { printing: true, report }))) return;
-  if (!state.slicer || !state.slicer.available) {
-    report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
-    return;
-  }
   const chosen = Object.fromEntries(Object.entries(selection || {}).filter(([, count]) => count > 0));
   if (!Object.keys(chosen).length) return;
   if (!(await DL.save())) return;
   DL.requireSpaceContext(context);
+  const printEpoch = WFLocalAPI.designEpoch;
   let result;
   try {
     result = await DL.inventoryCall("/api/drawer/print-bins", {
@@ -1901,10 +1914,17 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
     }, { context, sideEffect: true, ...report.options });
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) throw error;
-    report("Bambu Studio opened for the Space you left. The current Space was not changed.");
+    report("Print preparation finished for the Space you left. The current Space was not changed.");
     return;
   }
   DL.adoptBatchResult(result);
+  if (!result.partial) {
+    const confirmed = await DL.confirmDrawerPrint(result, context, printEpoch);
+    if (confirmed) DL.adoptBatchResult(confirmed);
+    DP.renderInventory(true); DL.emit(); DL.requestReport();
+    report(confirmed ? "Confirmed opened in Bambu Studio." : "Print file ready. Printed status is unchanged until you confirm opening it in Bambu Studio.");
+    return;
+  }
   // Anything that stopped before a recorded handoff leaves the rows Saved, not
   // Printed. Keep the print selection so Retry is one click, and never show
   // the success toast.
@@ -1922,19 +1942,14 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
 }, Object.keys(selection || {}).map(id => ({ id, title: DL.bin(id) ? DL.label(DL.bin(id)) : "Bin" })));
 
 
-// (Fix 096 C11) One local complete Space handoff: every placed bin + every
-// placed spacer with a file + the Space's connectors, one preflight, one
-// slicer launch. Hosted is rejected by the backend with a plain message.
+// One complete Space Print file: placed bins, eligible spacers and connectors.
 DL.printCompleteSpace = () => DL.busyWith("print-complete", async (context, report) => {
   const drawers = DL.layout && Array.isArray(DL.layout.drawers) ? DL.layout.drawers : [];
   const placedIds = [...new Set(drawers.flatMap(drawer => (drawer.placements || []).map(placement => placement.bin)))];
   if (!(await DL.prepareBatch(placedIds, { printing: true, report }))) return;
-  if (!state.slicer || !state.slicer.available) {
-    report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
-    return;
-  }
   if (!(await DL.save())) return;
   DL.requireSpaceContext(context);
+  const printEpoch = WFLocalAPI.designEpoch;
   let result;
   try {
     result = await DL.inventoryCall("/api/drawer/print-complete", {
@@ -1943,10 +1958,17 @@ DL.printCompleteSpace = () => DL.busyWith("print-complete", async (context, repo
     }, { context, sideEffect: true, ...report.options });
   } catch (error) {
     if (!DL.isStaleSpaceError(error)) throw error;
-    report("Bambu Studio opened for the Space you left. The current Space was not changed.");
+    report("Print preparation finished for the Space you left. The current Space was not changed.");
     return;
   }
   DL.adoptBatchResult(result);
+  if (!result.partial) {
+    const confirmed = await DL.confirmDrawerPrint(result, context, printEpoch);
+    if (confirmed) DL.adoptBatchResult(confirmed);
+    DP.renderInventory(true); DL.emit(); DL.requestReport();
+    report(confirmed ? "Confirmed opened in Bambu Studio." : "Print file ready. Printed status is unchanged until you confirm opening it in Bambu Studio.");
+    return;
+  }
   DP.renderInventory(true);
   DL.emit();
   DL.requestReport();
