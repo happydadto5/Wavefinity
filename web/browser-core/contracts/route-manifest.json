@@ -1,0 +1,3450 @@
+{
+  "schema": "wavefinity-route-manifest/1",
+  "baseline_head": "794691fa72610b94130f3fe1e75de7b6aac775cf",
+  "description": "Canonical machine-readable route contract for the browser-only migration (B01). Derived by reading wavefinity_web.py, organizer_drawer, organizer_spaces and the web/ callers. Every route has exactly one owner.",
+  "entry_fields": [
+    "path",
+    "method",
+    "owner",
+    "disposition",
+    "runtime",
+    "module",
+    "handler",
+    "input_fields",
+    "output_fields",
+    "effects"
+  ],
+  "extra_entry_fields": {
+    "source": "module:line of the handler definition at the baseline head (lookup hint, not ownership of the whole function)",
+    "browser_module": "planned browser-edition module that exports the route",
+    "wrappers": "wrappers applied in wavefinity_web.py: grid_entry_guard (_grid_entry_route), idempotent_operation (_idempotent_operation: accepts operation_id), printer_output_route (_printer_output_route: adds printer_fit)",
+    "callers": "literal frontend call sites at the baseline head (api/apiSideEffect/fetch)",
+    "additional_methods": "other HTTP methods the same path answers at the baseline head",
+    "replacement": "local replacement for a retired route"
+  },
+  "conventions": {
+    "request": "POST application/json (<=25,000,000 bytes) unless method says GET. Same-origin only (Origin must equal Host, else 403 PermissionError). Field lists are the keys the handler reads (the hosted/local twins share one list; local-only fields are output/space_id/slicer_path, hosted-only are inventory_text/inventory_title/available_filenames/printer_profile).",
+    "error_shape": {
+      "body": {
+        "error": "message",
+        "type": "ExceptionClassName"
+      },
+      "status": "400 for KeyError/TypeError/ValueError/JSONDecodeError, 404 unknown route, 403 cross-origin, 500 otherwise; /api/suggestions uses its own {error} bodies (400/403/429/502/503)"
+    },
+    "idempotency": "Routes with wrapper idempotent_operation run at most once per client operation_id (<=128 chars); a repeat returns the stored result/error or {operation_id, operation_status:'running', elapsed_s, progress}; poll /api/operation-status.",
+    "hosted_vs_local": "HOSTED is a server deployment flag in wavefinity_web.py. space_routes() is registered only when not HOSTED, but the browser edition needs those operations (B09).",
+    "static_paths": "Non-API static paths (/, web assets, /images/*, /Brochure.md, /brochure.md) are not routes in this manifest; see the source-route index."
+  },
+  "routes": [
+    {
+      "path": "/api/ai/ask",
+      "method": "POST",
+      "owner": "B13",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "ai_ask_payload",
+      "input_fields": [
+        "prompt"
+      ],
+      "output_fields": [
+        "answer"
+      ],
+      "effects": [
+        "Sends the prompt to the saved AI endpoint (/chat/completions, redirects blocked) and returns {answer}; raises in HOSTED mode or without a saved connection."
+      ],
+      "source": "wavefinity_web.py:3206",
+      "browser_module": "web/browser-core/capabilities.js",
+      "wrappers": [],
+      "callers": [
+        "web/app/02-lifecycle-ai-help.js:916"
+      ]
+    },
+    {
+      "path": "/api/ai/candidate",
+      "method": "POST",
+      "owner": "B13",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "ai_candidate_payload",
+      "input_fields": [
+        "design",
+        "client_id",
+        "generation",
+        "space",
+        "editor_grid",
+        "grid"
+      ],
+      "output_fields": [
+        "design",
+        "preview",
+        "problems",
+        "superseded"
+      ],
+      "effects": [
+        "Proves an AI design through the real geometry path without changing anything; returns design, preview and problems (or superseded)."
+      ],
+      "source": "wavefinity_web.py:3255",
+      "browser_module": "web/browser-core/engine/ai_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/02-lifecycle-ai-help.js:638"
+      ]
+    },
+    {
+      "path": "/api/ai/connection",
+      "method": "POST",
+      "owner": "B13",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "ai_connection_payload",
+      "input_fields": [
+        "action",
+        "name",
+        "url",
+        "model",
+        "key",
+        "keep_key"
+      ],
+      "output_fields": [
+        "configured",
+        "name",
+        "url",
+        "model",
+        "has_key",
+        "ok"
+      ],
+      "effects": [
+        "action status|save|test: status reads the saved connection (has_key flag only); save persists name/url/model/key in preferences (keep_key retains the saved key); test sends one chat request to the endpoint.",
+        "HOSTED returns {configured:false}. Key values must never be logged or echoed."
+      ],
+      "source": "wavefinity_web.py:3158",
+      "browser_module": "web/browser-core/capabilities.js",
+      "wrappers": [],
+      "callers": [
+        "web/app/02-lifecycle-ai-help.js:879",
+        "web/app/02-lifecycle-ai-help.js:900"
+      ]
+    },
+    {
+      "path": "/api/ai/prompt",
+      "method": "POST",
+      "owner": "B13",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "ai_prompt_payload",
+      "input_fields": [
+        "description",
+        "existing_names",
+        "design",
+        "editor_grid",
+        "space",
+        "grid"
+      ],
+      "output_fields": [
+        "request_id",
+        "context_fingerprint",
+        "prompt"
+      ],
+      "effects": [
+        "Pure: assembles the AI design prompt with request_id and context_fingerprint."
+      ],
+      "source": "wavefinity_web.py:3218",
+      "browser_module": "web/browser-core/engine/ai_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/02-lifecycle-ai-help.js:604"
+      ]
+    },
+    {
+      "path": "/api/ai/repair-prompt",
+      "method": "POST",
+      "owner": "B13",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_ai.py",
+      "handler": "ai_repair_prompt_payload",
+      "input_fields": [
+        "request_id",
+        "context_fingerprint",
+        "response",
+        "error"
+      ],
+      "output_fields": [
+        "prompt"
+      ],
+      "effects": [
+        "Pure: builds a repair prompt from request_id, context_fingerprint, response and error."
+      ],
+      "source": "wavefinity_web_impl/_ai.py:646",
+      "browser_module": "web/browser-core/engine/ai_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/02-lifecycle-ai-help.js:801"
+      ]
+    },
+    {
+      "path": "/api/browse-output-folder",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "browse_output_folder_payload",
+      "input_fields": [
+        "space_root",
+        "current"
+      ],
+      "output_fields": [
+        "folder"
+      ],
+      "effects": [
+        "Native folder chooser (tkinter subprocess); never creates Documents/Wavefinity or any root; returns {folder} ('' on cancel).",
+        "Raises ValueError in HOSTED mode (the native/server operation is unavailable there).",
+        "Browser edition replaces it with the File System Access directory picker."
+      ],
+      "source": "wavefinity_web.py:1297",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/07-welcome-folders.js:46"
+      ]
+    },
+    {
+      "path": "/api/browse-slicer-path",
+      "method": "POST",
+      "owner": "B13",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "browse_slicer_path_payload",
+      "input_fields": [
+        "current",
+        "slicer_path"
+      ],
+      "output_fields": [
+        "slicer_path"
+      ],
+      "effects": [
+        "Native file chooser for the slicer executable; returns {slicer_path} (null on cancel); no side effect (browser saves via /api/preferences).",
+        "Raises ValueError in HOSTED mode (the native/server operation is unavailable there).",
+        "Also served as an HTTP GET with an empty payload (no UI caller; the UI uses POST)."
+      ],
+      "source": "wavefinity_web.py:1239",
+      "browser_module": "web/browser-core/capabilities.js",
+      "wrappers": [],
+      "callers": [
+        "web/app/15-generate-dialogs.js:619"
+      ],
+      "additional_methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/catalog",
+      "method": "GET",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "catalog_payload",
+      "input_fields": [],
+      "output_fields": [
+        "platform",
+        "version",
+        "instance",
+        "api_compat",
+        "build",
+        "base_unit",
+        "grids",
+        "max_box_size",
+        "min_height_above_base_mm",
+        "drawer_rules",
+        "pegboard_rules",
+        "item_rules",
+        "text_depth_rules",
+        "modes",
+        "parts",
+        "wall_rules",
+        "base_rules",
+        "stack_rules",
+        "lid_rules",
+        "storage_drawers_rules",
+        "b4b_rules",
+        "base_trim_rules",
+        "lift_grabbers",
+        "scoop_rules",
+        "edge_mount",
+        "side_openings",
+        "setting_interactions",
+        "runtime",
+        "defaults",
+        "connector_rules",
+        "preferences",
+        "slicer"
+      ],
+      "effects": [
+        "Read-only: serves static rules/defaults/platform catalog (grids, drawer/pegboard/item/text/wall/base/stack/lid rules, defaults, connector rules, preferences, slicer detection).",
+        "Local mode also reads saved preferences and detects the slicer executable; HOSTED mode returns empty preferences and no slicer."
+      ],
+      "source": "wavefinity_web.py:733",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": [
+        "web/app.js:7"
+      ]
+    },
+    {
+      "path": "/api/connector",
+      "method": "POST",
+      "owner": "B06",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "connector_save_payload",
+      "input_fields": [
+        "connector",
+        "design",
+        "output",
+        "boxes",
+        "operation_id"
+      ],
+      "output_fields": [
+        "result",
+        "output",
+        "files",
+        "partial",
+        "partial_stage",
+        "error"
+      ],
+      "effects": [
+        "Generates side-connector 3MF files (connector_payload); on a later partial failure returns completed files with partial/partial_stage/error instead of hiding them.",
+        "Local: writes into output. HOSTED: files exposed through /api/export tokens (retired)."
+      ],
+      "source": "wavefinity_web.py:2075",
+      "browser_module": "web/browser-core/engine/build_outputs.py",
+      "wrappers": [
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/app/15-generate-dialogs.js:285",
+        "web/app/15-generate-dialogs.js:291"
+      ]
+    },
+    {
+      "path": "/api/design/division-label-fit",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "division_label_fit_payload",
+      "input_fields": [
+        "feature",
+        "design"
+      ],
+      "output_fields": [
+        "labels"
+      ],
+      "effects": [
+        "Pure: reports which of one divider's labels are too long for their compartment."
+      ],
+      "source": "wavefinity_web.py:1928",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/08-draft-fields-render.js:1026"
+      ]
+    },
+    {
+      "path": "/api/design/inventory-preview",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_designs/_layout.py",
+      "handler": "inventory_preview_payload",
+      "input_fields": [
+        "design"
+      ],
+      "output_fields": [
+        "bin"
+      ],
+      "effects": [
+        "Pure: builds the planning record Space shows for the design being edited."
+      ],
+      "source": "wavefinity_web_impl/_designs/_layout.py:327",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": []
+    },
+    {
+      "path": "/api/design/validate",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "_validate_design_open_guard -> validate_design_payload (wavefinity_web_impl/_designs/_preview.py)",
+      "input_fields": [
+        "design",
+        "space",
+        "inventory_text",
+        "output",
+        "space_id",
+        "resume_design",
+        "new_bin_specs",
+        "layout",
+        "source_row_id",
+        "source_output",
+        "source_inventory_text",
+        "source_space_id"
+      ],
+      "output_fields": [
+        "design"
+      ],
+      "effects": [
+        "Pure. Entry guard: rejects a client-supplied source_space, resolves the destination Space from stored records (never a client Space object), verifies source row ownership and design grid, refuses saved records lacking the 7 mm module marker (OLD_MODULE_NOTICE), then canonicalizes via validate_design_payload (Base Trim or bin design_to_dict).",
+        "Never rewrites an Inventory or folder."
+      ],
+      "source": "wavefinity_web.py:3497",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [
+        "grid_entry_guard"
+      ],
+      "callers": [
+        "web/app/02-lifecycle-ai-help.js:214",
+        "web/app/03-history-utils-catalog.js:172",
+        "web/app/07-kind-pickers-bore-math.js:301",
+        "web/app/11-parts-preview-requests.js:45",
+        "web/app/14-layout-2d.js:1016",
+        "web/spaces/08-space-setup.js:803"
+      ]
+    },
+    {
+      "path": "/api/drawer/connectors",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "connectors",
+      "input_fields": [
+        "layout",
+        "bins",
+        "drawer_id",
+        "output",
+        "operation_id"
+      ],
+      "output_fields": [
+        "connectors",
+        "notes",
+        "files_base64"
+      ],
+      "effects": [
+        "Generates the drawer's required connector files (hosted: temp dir, files_base64; local: into output folder) from the supplied layout/bins."
+      ],
+      "source": "organizer_drawer/__init__.py:1234",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "idempotent_operation"
+      ],
+      "callers": []
+    },
+    {
+      "path": "/api/drawer/design-source/duplicate",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "duplicate_design_source",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "output",
+        "row_id",
+        "operation_id",
+        "space_id",
+        "source_row_id",
+        "source_output",
+        "source_inventory_text",
+        "source_space_id"
+      ],
+      "output_fields": [
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings",
+        "inventory_text",
+        "stack_steps",
+        "stack_metrics",
+        "storage_box_headroom_default_mm",
+        "row_id",
+        "cleanup_files"
+      ],
+      "effects": [
+        "Duplicates one design-source row (new id, unique name) in the Inventory."
+      ],
+      "source": "organizer_drawer/__init__.py:528",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "grid_entry_guard",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/app/03-history-utils-catalog.js:140",
+        "web/drawer-model.js:1406",
+        "web/drawer-panel.js:684"
+      ]
+    },
+    {
+      "path": "/api/drawer/design-source/save",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "save_design_source",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "output",
+        "available_filenames",
+        "design",
+        "row_id",
+        "operation_id",
+        "space_id",
+        "source_row_id",
+        "source_output",
+        "source_inventory_text",
+        "source_space_id"
+      ],
+      "output_fields": [
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings",
+        "inventory_text",
+        "stack_steps",
+        "stack_metrics",
+        "storage_box_headroom_default_mm",
+        "row_id",
+        "build_needed",
+        "cleanup_files"
+      ],
+      "effects": [
+        "Canonicalizes one editable design (design_source_payload) and saves it as a row (new or row_id); local mode queues a delayed background bin-file build.",
+        "Entry-guarded, idempotent; hosted adds build_needed."
+      ],
+      "source": "organizer_drawer/__init__.py:479",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "grid_entry_guard",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/app/02-lifecycle-ai-help.js:95",
+        "web/drawer-view.js:1374",
+        "web/spaces/06-inventory-io.js:172"
+      ]
+    },
+    {
+      "path": "/api/drawer/design-source/status",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "change_design_status",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "output",
+        "available_filenames",
+        "row_id",
+        "action",
+        "file",
+        "design",
+        "operation_id",
+        "space_id",
+        "source_row_id",
+        "source_output",
+        "source_inventory_text",
+        "source_space_id"
+      ],
+      "output_fields": [
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings",
+        "inventory_text",
+        "stack_steps",
+        "stack_metrics",
+        "storage_box_headroom_default_mm",
+        "cleanup_files"
+      ],
+      "effects": [
+        "Changes a row's status by action (e.g. Printed/Saved), checking the expected design and file cell; hosted may use available_filenames as the folder snapshot (omitted vs [] kept distinct)."
+      ],
+      "source": "organizer_drawer/__init__.py:539",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "grid_entry_guard",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/app/15-generate-dialogs.js:254",
+        "web/app/15-generate-dialogs.js:488",
+        "web/app/15-generate-dialogs.js:516",
+        "web/drawer-model.js:1431",
+        "web/spaces/06-inventory-io.js:173"
+      ]
+    },
+    {
+      "path": "/api/drawer/generate-bin",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "generate_hosted_bin",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "design",
+        "row_id",
+        "design_stamp",
+        "printer_profile",
+        "printer_profile_configured",
+        "source_row_id",
+        "source_output",
+        "source_inventory_text",
+        "source_space_id",
+        "output",
+        "space_id"
+      ],
+      "output_fields": [
+        "row_id",
+        "design_stamp",
+        "file",
+        "files_base64",
+        "printer_fit"
+      ],
+      "effects": [
+        "HOSTED only (raises otherwise): builds one row's 3MF files in a temp dir, verifies the design still equals the saved spec, returns files_base64 keyed by file name and the comma-joined file cell.",
+        "Entry-guarded and printer-profile-wrapped."
+      ],
+      "source": "organizer_drawer/__init__.py:500",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "grid_entry_guard",
+        "printer_output_route"
+      ],
+      "callers": [
+        "web/spaces/06-inventory-io.js:62"
+      ]
+    },
+    {
+      "path": "/api/drawer/load",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "load",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "output"
+      ],
+      "output_fields": [
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings",
+        "inventory_text",
+        "stack_steps",
+        "stack_metrics",
+        "storage_box_headroom_default_mm",
+        "space_inferred"
+      ],
+      "effects": [
+        "Loads the Inventory (hosted: parse inventory_text, inferring a lossy layout.space when absent and flagging space_inferred; local: reads output folder) and adds stack_steps, stack_metrics, storage_box_headroom_default_mm."
+      ],
+      "source": "organizer_drawer/__init__.py:439",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/06-form-sync-controls.js:166",
+        "web/drawer-model.js:1205",
+        "web/spaces/06-inventory-io.js:280"
+      ]
+    },
+    {
+      "path": "/api/drawer/print-bins",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "print_bins",
+      "input_fields": [
+        "selection",
+        "include_connectors",
+        "slicer_path",
+        "output",
+        "operation_id",
+        "printer_profile",
+        "printer_profile_configured"
+      ],
+      "output_fields": [
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings",
+        "stack_steps",
+        "stack_metrics",
+        "storage_box_headroom_default_mm",
+        "files",
+        "slicer",
+        "project",
+        "configured",
+        "partial",
+        "partial_stage",
+        "error",
+        "printer_fit"
+      ],
+      "effects": [
+        "Local only: waits for background bin builds, prepares the selected bins (generating from design specs when needed), optionally includes connectors, launches the slicer once and marks Printed.",
+        "Raises in HOSTED mode. Printer-profile-wrapped, idempotent."
+      ],
+      "source": "organizer_drawer/__init__.py:1030",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "printer_output_route",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/drawer-model.js:1898"
+      ]
+    },
+    {
+      "path": "/api/drawer/print-complete",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "print_complete",
+      "input_fields": [
+        "slicer_path",
+        "output",
+        "operation_id",
+        "printer_profile",
+        "printer_profile_configured"
+      ],
+      "output_fields": [
+        "files",
+        "bin_copies",
+        "spacer_copies",
+        "connector_counts",
+        "connector_copies",
+        "notes",
+        "slicer",
+        "project",
+        "configured",
+        "partial",
+        "partial_stage",
+        "error",
+        "saved_rows",
+        "generated_rows",
+        "failed_row",
+        "unfinished",
+        "printer_fit",
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings"
+      ],
+      "effects": [
+        "Raises ValueError in HOSTED mode (hosted saves files instead of opening a local slicer).",
+        "Local complete-Space handoff under one preflight and ONE slicer launch: slicer preflight, blocking-problem check, bin files (generated only when missing), placed spacer files already on disk, required connectors; marks rows Printed only after the slicer opens.",
+        "Partial outcomes return partial/partial_stage/error. Printer-profile-wrapped, idempotent."
+      ],
+      "source": "organizer_drawer/__init__.py:1048",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "printer_output_route",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/drawer-model.js:1941"
+      ]
+    },
+    {
+      "path": "/api/drawer/print-spacers",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "print_spacers_only",
+      "input_fields": [
+        "selection",
+        "slicer_path",
+        "output",
+        "operation_id",
+        "printer_profile",
+        "printer_profile_configured"
+      ],
+      "output_fields": [
+        "files",
+        "counts",
+        "notes"
+      ],
+      "effects": [
+        "Local only: sends the selected spacer files to the slicer (all-or-nothing preflight of file existence, slicer and printer fit).",
+        "Raises in HOSTED mode. Idempotent."
+      ],
+      "source": "organizer_drawer/__init__.py:981",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/drawer-model.js:1761"
+      ]
+    },
+    {
+      "path": "/api/drawer/report",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "report",
+      "input_fields": [
+        "layout",
+        "bins",
+        "drawer_id",
+        "height_reach",
+        "placements"
+      ],
+      "output_fields": [
+        "problems",
+        "grid",
+        "physical_envelopes",
+        "cells",
+        "fill",
+        "free_mm2",
+        "edge_mm2",
+        "opens",
+        "connectors",
+        "connector_total",
+        "connector_mismatched",
+        "connector_short_seams",
+        "connector_rim_label_seams",
+        "connector_side_opening_seams",
+        "height_issues",
+        "placed",
+        "stacks",
+        "planning_heights",
+        "edge_spacers"
+      ],
+      "effects": [
+        "Pure: drawer placement report (problems, fill, connectors, height issues, stacks, planning heights) over the supplied layout and bins."
+      ],
+      "source": "organizer_drawer/__init__.py:565",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/drawer-model.js:1455"
+      ]
+    },
+    {
+      "path": "/api/drawer/save",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "save",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "output",
+        "available_filenames",
+        "bin_updates",
+        "new_bins",
+        "new_bin_specs",
+        "delete_ids",
+        "layout",
+        "operation_id",
+        "space_id",
+        "source_row_id",
+        "source_output",
+        "source_inventory_text",
+        "source_space_id"
+      ],
+      "output_fields": [
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings",
+        "inventory_text",
+        "stack_steps",
+        "stack_metrics",
+        "storage_box_headroom_default_mm",
+        "cleanup_failed",
+        "cleanup_files"
+      ],
+      "effects": [
+        "Merges bin_updates/new_bins/new_bin_specs/delete_ids/layout into the Inventory (hosted returns the new inventory_text and cleanup_files; local writes the folder atomically and may report cleanup_failed).",
+        "Entry-guarded, idempotent per operation_id."
+      ],
+      "source": "organizer_drawer/__init__.py:459",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "grid_entry_guard",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/drawer-model.js:1282",
+        "web/drawer-model.js:1296",
+        "web/drawer-model.js:1356",
+        "web/spaces/06-inventory-io.js:67",
+        "web/spaces/06-inventory-io.js:166",
+        "web/spaces/06-inventory-io.js:257"
+      ]
+    },
+    {
+      "path": "/api/drawer/save-bins",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "save_bins",
+      "input_fields": [
+        "selection",
+        "include_connectors",
+        "output",
+        "operation_id",
+        "printer_profile",
+        "printer_profile_configured"
+      ],
+      "output_fields": [
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings",
+        "stack_steps",
+        "stack_metrics",
+        "storage_box_headroom_default_mm",
+        "saved_rows",
+        "generated_rows",
+        "reused_rows",
+        "connector_counts",
+        "connector_copies",
+        "notes",
+        "partial",
+        "partial_stage",
+        "error",
+        "failed_row",
+        "unfinished",
+        "printer_fit"
+      ],
+      "effects": [
+        "Local only: waits for background builds then writes the selected bins' files (and optionally connectors) into the folder.",
+        "Raises in HOSTED mode. Printer-profile-wrapped, idempotent."
+      ],
+      "source": "organizer_drawer/__init__.py:1222",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "printer_output_route",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/drawer-model.js:1860"
+      ]
+    },
+    {
+      "path": "/api/drawer/spacers",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "spacers",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "output",
+        "drawer_id",
+        "options"
+      ],
+      "output_fields": [
+        "drawer",
+        "height",
+        "resolved_height",
+        "candidates",
+        "selected",
+        "notes",
+        "run_count",
+        "run_count_total",
+        "proposal_cap_applied",
+        "placed_spacer_count",
+        "clearance",
+        "snap",
+        "placements",
+        "boundary",
+        "anchor",
+        "bin_axis",
+        "plan_signature"
+      ],
+      "effects": [
+        "Read-only: plans spacers for a drawer (plan_spacers) and returns the plan with plan_signature."
+      ],
+      "source": "organizer_drawer/__init__.py:630",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/drawer-panel.js:1154"
+      ]
+    },
+    {
+      "path": "/api/drawer/spacers/generate",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "spacers_generate",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "output",
+        "drawer_id",
+        "options",
+        "selected",
+        "plan_signature",
+        "operation_id"
+      ],
+      "output_fields": [
+        "layout",
+        "bins",
+        "inventory_text",
+        "files_base64",
+        "generated",
+        "notes"
+      ],
+      "effects": [
+        "Rejects a stale plan_signature, generates selected spacer 3MF files (local: into the folder; hosted: temp dir, returned as files_base64), adds spacer rows and placements in one Inventory commit."
+      ],
+      "source": "organizer_drawer/__init__.py:648",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "idempotent_operation"
+      ],
+      "callers": []
+    },
+    {
+      "path": "/api/drawer/spacers/refresh",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "spacers_refresh",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "output",
+        "available_filenames",
+        "drawer_id",
+        "options"
+      ],
+      "output_fields": [
+        "layout",
+        "bins",
+        "cleanup_failed",
+        "removed",
+        "inventory_text",
+        "cleanup_files",
+        "files_base64"
+      ],
+      "effects": [
+        "Replaces the active drawer's spacer set in ONE Inventory commit: regenerates selected spacers and removes the old ones; reports removed count and cleanup failures."
+      ],
+      "source": "organizer_drawer/__init__.py:772",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/drawer-model.js:1622",
+        "web/spaces/06-inventory-io.js:168"
+      ]
+    },
+    {
+      "path": "/api/drawer/surface-fill",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "surface_fill",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "output"
+      ],
+      "output_fields": [
+        "signature",
+        "candidates"
+      ],
+      "effects": [
+        "Read-only: plans Fill Empty Space candidates for the Surface (signature + candidates)."
+      ],
+      "source": "organizer_drawer/__init__.py:572",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/drawer-model.js:1540"
+      ]
+    },
+    {
+      "path": "/api/drawer/surface-fill/create",
+      "method": "POST",
+      "owner": "B10",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_drawer/__init__.py",
+      "handler": "surface_fill_create",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "output",
+        "signature",
+        "selected",
+        "operation_id"
+      ],
+      "output_fields": [
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings",
+        "inventory_text",
+        "stack_steps",
+        "stack_metrics",
+        "storage_box_headroom_default_mm",
+        "created",
+        "cleanup_files"
+      ],
+      "effects": [
+        "Re-plans, rejects a stale signature/selection, then adds starter bins (design specs + placements) for the selected candidates in one Inventory commit; returns created ids."
+      ],
+      "source": "organizer_drawer/__init__.py:580",
+      "browser_module": "web/browser-core/engine/drawer_routes.py",
+      "wrappers": [
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/drawer-model.js:1559"
+      ]
+    },
+    {
+      "path": "/api/export/<token>/<filename>",
+      "method": "GET",
+      "owner": "B06",
+      "disposition": "retired",
+      "runtime": null,
+      "module": null,
+      "handler": null,
+      "input_fields": [
+        "token",
+        "filename"
+      ],
+      "output_fields": [],
+      "effects": [
+        "Legacy: one-time download of a temporary generated file from the in-memory EXPORTS ledger (TTL 15 minutes; basename-only names; file removed after fetch); sends Content-Disposition attachment.",
+        "Retired: the browser edition has no server and registers no handler for this route."
+      ],
+      "replacement": "Transferable buffers returned by the worker and local Blob file IDs ([{name, local_file_id}] descriptors) claimed/discarded through LocalFileStore.",
+      "source": "wavefinity_web.py:do_GET (path.startswith('/api/export/'))",
+      "callers": [
+        "web/app/15-generate-dialogs.js:670",
+        "web/app/15-generate-dialogs.js:704",
+        "web/app/15-generate-dialogs.js:734",
+        "web/spaces/10-storage-box-structural.js:365",
+        "web/spaces/11-base-trim.js:211",
+        "web/spaces/14-drawers-cabinet.js:624"
+      ]
+    },
+    {
+      "path": "/api/feature/apply",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_designs/_features.py",
+      "handler": "apply_feature_payload",
+      "input_fields": [
+        "index",
+        "design",
+        "feature"
+      ],
+      "output_fields": [
+        "design",
+        "selected",
+        "warnings"
+      ],
+      "effects": [
+        "Pure: inserts/updates a feature in the returned design, with selected index and warnings."
+      ],
+      "source": "wavefinity_web_impl/_designs/_features.py:297",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/06-form-sync-controls.js:295",
+        "web/app/07-kind-pickers-bore-math.js:525",
+        "web/app/10-draft-update-commit.js:848",
+        "web/app/10-draft-update-commit.js:918",
+        "web/app/10-draft-update-commit.js:1173"
+      ]
+    },
+    {
+      "path": "/api/feature/default",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_designs/_features.py",
+      "handler": "default_feature_payload",
+      "input_fields": [
+        "design",
+        "kind",
+        "item",
+        "along"
+      ],
+      "output_fields": [
+        "feature",
+        "resolved_options",
+        "divider_cells"
+      ],
+      "effects": [
+        "Pure: builds the default feature for a kind/item with resolved options and divider cells."
+      ],
+      "source": "wavefinity_web_impl/_designs/_features.py:67",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/07-kind-pickers-bore-math.js:489"
+      ]
+    },
+    {
+      "path": "/api/feature/delete",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_designs/_features.py",
+      "handler": "delete_feature_payload",
+      "input_fields": [
+        "design",
+        "index"
+      ],
+      "output_fields": [
+        "design"
+      ],
+      "effects": [
+        "Pure: removes one feature from the returned design."
+      ],
+      "source": "wavefinity_web_impl/_designs/_features.py:500",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/11-parts-preview-requests.js:97"
+      ]
+    },
+    {
+      "path": "/api/feature/draft",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_designs/_features.py",
+      "handler": "draft_payload",
+      "input_fields": [
+        "client_id",
+        "generation",
+        "design",
+        "feature",
+        "index"
+      ],
+      "output_fields": [
+        "superseded",
+        "feature",
+        "resolved_options",
+        "divider_cells",
+        "bore_bin",
+        "bore_bin_height"
+      ],
+      "effects": [
+        "Pure: normalizes a draft feature against the design; may return {superseded:true} when a newer client_id/generation request replaced it."
+      ],
+      "source": "wavefinity_web_impl/_designs/_features.py:185",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/10-draft-update-commit.js:675",
+        "web/app/10-draft-update-commit.js:897"
+      ]
+    },
+    {
+      "path": "/api/feature/duplicate",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_designs/_features.py",
+      "handler": "duplicate_feature_payload",
+      "input_fields": [
+        "design",
+        "index"
+      ],
+      "output_fields": [
+        "design",
+        "selected"
+      ],
+      "effects": [
+        "Pure: duplicates a feature (a completed Photo Nest to another spot) in the returned design."
+      ],
+      "source": "wavefinity_web_impl/_designs/_features.py:428",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/09-draft-sizing-helpers.js:543"
+      ]
+    },
+    {
+      "path": "/api/feature/fit",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_designs/_features.py",
+      "handler": "feature_fit_payload",
+      "input_fields": [
+        "design",
+        "feature"
+      ],
+      "output_fields": [
+        "feature"
+      ],
+      "effects": [
+        "Pure: fits a feature to the design (size/position correction)."
+      ],
+      "source": "wavefinity_web_impl/_designs/_features.py:270",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/11-parts-preview-requests.js:846"
+      ]
+    },
+    {
+      "path": "/api/folder/inventory",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "set_inventory",
+      "input_fields": [
+        "output",
+        "inventory"
+      ],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Turns Inventory tracking on/off for a folder (writes metadata) and returns folder state."
+      ],
+      "source": "organizer_spaces/__init__.py:964",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": []
+    },
+    {
+      "path": "/api/folder/no-defined-space",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "no_defined_space",
+      "input_fields": [],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Creates (if missing) and opens the default 'No Defined Space' design folder under the Space root: writes Design metadata when newly created, proves the folder writable, remembers it, and returns its state; a newly created folder is removed again on failure."
+      ],
+      "source": "organizer_spaces/__init__.py:1074",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/08-space-setup.js:313"
+      ]
+    },
+    {
+      "path": "/api/folder/use",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "open_folder",
+      "input_fields": [
+        "output"
+      ],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Opens and remembers an already-set-up folder (recent/registry/active preferences); refuses folders that still need Space setup."
+      ],
+      "source": "organizer_spaces/__init__.py:1067",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/07-welcome-folders.js:94"
+      ]
+    },
+    {
+      "path": "/api/generate",
+      "method": "POST",
+      "owner": "B06",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "generate_payload",
+      "input_fields": [
+        "design",
+        "space",
+        "auto_timestamp",
+        "keep_log",
+        "output",
+        "design_row_id",
+        "printer_profile",
+        "printer_profile_configured",
+        "source_row_id",
+        "source_output",
+        "source_inventory_text",
+        "source_space_id",
+        "inventory_text",
+        "space_id",
+        "operation_id"
+      ],
+      "output_fields": [
+        "build_timings_ms",
+        "inventory_bin",
+        "inventory_design_spec",
+        "result",
+        "files",
+        "output",
+        "configured",
+        "printer_fit"
+      ],
+      "effects": [
+        "Generates the bin's 3MF set under export_printer_profile and returns build_timings_ms; local mode writes files into output (auto_timestamp/keep_log control naming and Inventory logging) and may append an Inventory row/design spec.",
+        "HOSTED mode builds in an isolated temp workspace and replies files:[{name,url}] with one-time /api/export tokens (retired; replaced by local Blob file IDs).",
+        "Entry-guarded, printer-profile-wrapped, idempotent per operation_id."
+      ],
+      "source": "wavefinity_web.py:1734",
+      "browser_module": "web/browser-core/engine/build_outputs.py",
+      "wrappers": [
+        "grid_entry_guard",
+        "printer_output_route",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/app/15-generate-dialogs.js:237"
+      ]
+    },
+    {
+      "path": "/api/health",
+      "method": "GET",
+      "owner": "B03",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "health_payload",
+      "input_fields": [],
+      "output_fields": [
+        "ok",
+        "version",
+        "instance",
+        "api_compat",
+        "build",
+        "commit",
+        "branch",
+        "verified_at",
+        "stamp",
+        "source_fingerprint",
+        "source_root",
+        "runtime_path",
+        "launch_token"
+      ],
+      "effects": [
+        "Read-only: reports build/runtime identity (version, instance, api_compat, build, commit, branch, source fingerprint, launch token).",
+        "GET only; the UI calls it with api(path) (no payload) to detect a different running instance."
+      ],
+      "source": "wavefinity_web.py:547",
+      "browser_module": "web/browser-core/local-api.js",
+      "wrappers": [],
+      "callers": [
+        "web/app/15-generate-dialogs.js:749"
+      ]
+    },
+    {
+      "path": "/api/layout/expand",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_designs/_layout.py",
+      "handler": "expand_layout_payload",
+      "input_fields": [
+        "anchor",
+        "fit_height_to_bore",
+        "design",
+        "fit",
+        "max_height",
+        "source_row_id",
+        "source_output",
+        "source_inventory_text",
+        "source_space_id",
+        "inventory_text",
+        "output",
+        "space_id",
+        "space"
+      ],
+      "output_fields": [
+        "design",
+        "box",
+        "grew",
+        "changed"
+      ],
+      "effects": [
+        "Pure: grows the design box/layout to fit; returns design, box, grew, changed.",
+        "Entry-guarded: _checked_entry_payload verifies destination grid ownership before the handler runs."
+      ],
+      "source": "wavefinity_web_impl/_designs/_layout.py:43",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [
+        "grid_entry_guard"
+      ],
+      "callers": [
+        "web/app/07-kind-pickers-bore-math.js:407",
+        "web/app/09-draft-sizing-helpers.js:127",
+        "web/app/11-parts-preview-requests.js:978",
+        "web/app/11-parts-preview-requests.js:1058"
+      ]
+    },
+    {
+      "path": "/api/layout/mode",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_designs/_features.py",
+      "handler": "mode_payload",
+      "input_fields": [
+        "design",
+        "mode"
+      ],
+      "output_fields": [
+        "design"
+      ],
+      "effects": [
+        "Pure: switches the design's layout mode and returns the design."
+      ],
+      "source": "wavefinity_web_impl/_designs/_features.py:527",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/03-history-utils-catalog.js:876"
+      ]
+    },
+    {
+      "path": "/api/nest/photo",
+      "method": "POST",
+      "owner": "B12",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_nest.py",
+      "handler": "photo_nest_payload",
+      "input_fields": [
+        "contour",
+        "source_contour",
+        "index",
+        "feature",
+        "design",
+        "options"
+      ],
+      "output_fields": [
+        "design",
+        "selected",
+        "access",
+        "warnings"
+      ],
+      "effects": [
+        "Pure: finalizes (create/update) a Photo Nest feature from an already traced contour in the returned design."
+      ],
+      "source": "wavefinity_web_impl/_nest.py:371",
+      "browser_module": "web/browser-core/engine/nest_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/09-draft-sizing-helpers.js:780"
+      ]
+    },
+    {
+      "path": "/api/nest/retrace",
+      "method": "POST",
+      "owner": "B12",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_nest.py",
+      "handler": "nest_retrace_payload",
+      "input_fields": [
+        "rectified_image",
+        "mime_type",
+        "sensitivity",
+        "cleanup"
+      ],
+      "output_fields": [
+        "outline",
+        "contour",
+        "trace_center_mm",
+        "reference"
+      ],
+      "effects": [
+        "Pure: re-tunes an already rectified reference sheet (sensitivity/cleanup) without repeating paper detection."
+      ],
+      "source": "wavefinity_web_impl/_nest.py:350",
+      "browser_module": "web/browser-core/engine/nest_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/09-draft-sizing-helpers.js:597"
+      ]
+    },
+    {
+      "path": "/api/nest/trace",
+      "method": "POST",
+      "owner": "B12",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "nest_trace_payload",
+      "input_fields": [
+        "paper_corners",
+        "image",
+        "mime_type",
+        "paper_size",
+        "sensitivity",
+        "cleanup"
+      ],
+      "output_fields": [
+        "contour",
+        "outline",
+        "trace_center_mm",
+        "reference",
+        "rectified_image"
+      ],
+      "effects": [
+        "Pure image work: paper detection/correction and contour trace of an uploaded photo (no file written)."
+      ],
+      "source": "wavefinity_web.py:699",
+      "browser_module": "web/browser-core/engine/nest_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/09-draft-sizing-helpers.js:706"
+      ]
+    },
+    {
+      "path": "/api/operation-status",
+      "method": "POST",
+      "owner": "B03",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web_impl/_runtime.py",
+      "handler": "operation_status_payload",
+      "input_fields": [
+        "operation_id"
+      ],
+      "output_fields": [
+        "operation_id",
+        "operation_status",
+        "error",
+        "result",
+        "elapsed_s",
+        "progress"
+      ],
+      "effects": [
+        "Read-only: looks up the in-memory operation ledger entry for one operation_id; never runs or retries work.",
+        "Returns operation_status unknown | running (elapsed_s, progress) | done (result) | error (error)."
+      ],
+      "source": "wavefinity_web_impl/_runtime.py:349",
+      "browser_module": "web/browser-core/local-api.js",
+      "wrappers": [],
+      "callers": [
+        "web/app/03-history-utils-catalog.js:480",
+        "web/app/03-history-utils-catalog.js:522"
+      ]
+    },
+    {
+      "path": "/api/pegboard/hooks",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "pegboard_hooks_payload",
+      "input_fields": [
+        "standard",
+        "count",
+        "thickness_mm",
+        "output",
+        "operation_id"
+      ],
+      "output_fields": [
+        "result",
+        "files",
+        "output"
+      ],
+      "effects": [
+        "Generates N printable Pegboard hooks (standard|skadis) into one 3MF named 'Pegboard hooks - <standard> x<count>.3mf' in output (HOSTED: temp workspace + export token).",
+        "Idempotent per operation_id."
+      ],
+      "source": "wavefinity_web.py:2160",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/spaces/12-space-info.js:261"
+      ]
+    },
+    {
+      "path": "/api/pegboard/layouts",
+      "method": "POST",
+      "owner": "B04",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_designs/_layout.py",
+      "handler": "pegboard_layouts_payload",
+      "input_fields": [
+        "standard",
+        "bins"
+      ],
+      "output_fields": [
+        "standard",
+        "layouts"
+      ],
+      "effects": [
+        "Pure: per-bin pegboard layout for standard/bins; a failing bin yields {error, compatible:false} under its id."
+      ],
+      "source": "wavefinity_web_impl/_designs/_layout.py:350",
+      "browser_module": "web/browser-core/engine/route_dispatch.py",
+      "wrappers": [],
+      "callers": [
+        "web/drawer-model.js:1169"
+      ]
+    },
+    {
+      "path": "/api/preferences",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "preferences_payload",
+      "input_fields": [
+        "output",
+        "slicer_path",
+        "connector_settings",
+        "base_trim_bed_x_mm",
+        "base_trim_bed_y_mm"
+      ],
+      "output_fields": [
+        "preferences"
+      ],
+      "effects": [
+        "Local: validates then persists output, slicer_path, base_trim_bed_x_mm/y_mm, connector_settings (range-checked; written to the Wavefinity folder's connector settings file when one exists, else preferences) and returns the served preferences.",
+        "HOSTED mode returns {preferences:{}} and writes nothing."
+      ],
+      "source": "wavefinity_web.py:1191",
+      "browser_module": "web/browser-core/preferences.js",
+      "wrappers": [],
+      "callers": [
+        "web/app/05-surface-trim-form.js:320",
+        "web/app/06-form-sync-controls.js:119",
+        "web/app/15-generate-dialogs.js:631"
+      ]
+    },
+    {
+      "path": "/api/preview",
+      "method": "POST",
+      "owner": "B05",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "preview_payload",
+      "input_fields": [
+        "client_id",
+        "generation",
+        "design",
+        "draft",
+        "selected",
+        "space"
+      ],
+      "output_fields": [
+        "superseded",
+        "build_timings_ms",
+        "design",
+        "base_trim",
+        "label_outline",
+        "label_meta",
+        "text_meta",
+        "geometry",
+        "meshes",
+        "fits",
+        "message",
+        "feature_errors",
+        "invalid_feature_indexes",
+        "draft_error",
+        "dimensions",
+        "layout_bounds",
+        "cavity_outline",
+        "customization_zones",
+        "feature_footprints",
+        "draft_footprint",
+        "feature_outlines",
+        "nest_soft_contours",
+        "draft_soft_contour",
+        "nest_access",
+        "draft_nest_access",
+        "planning",
+        "bore_ceiling_warning",
+        "storage_box_height_warning",
+        "stack",
+        "pick_proxies",
+        "feature_overhang_mm",
+        "draft_overhang_mm",
+        "nest_occurrences",
+        "draft_nest_occurrences",
+        "b4b",
+        "pick_meshes"
+      ],
+      "effects": [
+        "Builds preview geometry (bin, Base Trim, B4B, structural) under the geometry lock; registers the request token so a newer client_id/generation supersedes it, returning {superseded:true}.",
+        "Writes nothing; build_timings_ms reports per-stage time."
+      ],
+      "source": "wavefinity_web.py:1401",
+      "browser_module": "web/browser-core/engine/preview_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/app/11-parts-preview-requests.js:768",
+        "web/structural-design.js:397"
+      ]
+    },
+    {
+      "path": "/api/print",
+      "method": "POST",
+      "owner": "B08",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "print_payload",
+      "input_fields": [
+        "slicer_path",
+        "design",
+        "target",
+        "design_row_id",
+        "structural_output",
+        "printer_profile",
+        "printer_profile_configured",
+        "connector",
+        "output",
+        "boxes",
+        "reuse_printed_file",
+        "source_row_id",
+        "source_output",
+        "source_inventory_text",
+        "source_space_id",
+        "inventory_text",
+        "space_id",
+        "operation_id"
+      ],
+      "output_fields": [
+        "result",
+        "output",
+        "files",
+        "design_files",
+        "design_reused",
+        "slicer",
+        "project",
+        "partial",
+        "partial_stage",
+        "error",
+        "configured",
+        "printer_fit"
+      ],
+      "effects": [
+        "Raises ValueError in HOSTED mode (the native/server operation is unavailable there).",
+        "Local: preflights slicer path (detect_bambu_studio) before any file is written; target bin|all|connector|sampler|base_trim_joint_test; generates (auto_timestamp) or reuses the Printed file (reuse_printed_file); checks files exist/non-empty and fit the active printer; launches the slicer once with all files.",
+        "Partial results (files kept, slicer failed) come back as partial/partial_stage/error. Entry-guarded, printer-profile-wrapped, idempotent per operation_id."
+      ],
+      "source": "wavefinity_web.py:2208",
+      "browser_module": "web/browser-core/engine/print_routes.py",
+      "wrappers": [
+        "grid_entry_guard",
+        "printer_output_route",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/app/15-generate-dialogs.js:467"
+      ]
+    },
+    {
+      "path": "/api/sampler",
+      "method": "POST",
+      "owner": "B06",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "sampler_payload",
+      "input_fields": [
+        "connector",
+        "design",
+        "boxes",
+        "output"
+      ],
+      "output_fields": [
+        "result",
+        "files",
+        "output"
+      ],
+      "effects": [
+        "Generates the fit-sampler 3MF ('Wavefinity fit sampler.3mf') in output (HOSTED: temp workspace + export token) under the geometry lock."
+      ],
+      "source": "wavefinity_web.py:2099",
+      "browser_module": "web/browser-core/engine/build_outputs.py",
+      "wrappers": [],
+      "callers": []
+    },
+    {
+      "path": "/api/show-log",
+      "method": "POST",
+      "owner": "B13",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "show_log_payload",
+      "input_fields": [
+        "output"
+      ],
+      "output_fields": [
+        "file"
+      ],
+      "effects": [
+        "Opens the Inventory file for output in WordPad and returns {file}; errors when no Inventory file exists.",
+        "Raises ValueError in HOSTED mode (the native/server operation is unavailable there)."
+      ],
+      "source": "wavefinity_web.py:1388",
+      "browser_module": "web/browser-core/capabilities.js",
+      "wrappers": [],
+      "callers": []
+    },
+    {
+      "path": "/api/space/browse-storage-parent",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "browse_space_parent_payload",
+      "input_fields": [
+        "pick_only"
+      ],
+      "output_fields": [
+        "folder",
+        "storage"
+      ],
+      "effects": [
+        "Native directory chooser for the Space storage parent; with pick_only returns the chosen parent without saving.",
+        "Otherwise saves space_parent in preferences (refused with 'Use Change Location' when the Wavefinity root already exists). Cancel returns {folder:null, storage}.",
+        "Raises ValueError in HOSTED mode (the native/server operation is unavailable there)."
+      ],
+      "source": "wavefinity_web.py:1333",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/07-welcome-folders.js:377"
+      ]
+    },
+    {
+      "path": "/api/space/configure",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "configure_migrate",
+      "input_fields": [
+        "output",
+        "grid",
+        "built_in_grid",
+        "name",
+        "kind",
+        "x",
+        "y",
+        "z",
+        "trim_size",
+        "max_x_mm",
+        "max_y_mm",
+        "pegboard_standard",
+        "pegboard_thickness_mm",
+        "pegboard_size_mode",
+        "pegboard_holes_x",
+        "pegboard_holes_y",
+        "storage_box",
+        "storage_drawers"
+      ],
+      "output_fields": [
+        "remember_warning",
+        "folder",
+        "space",
+        "recent"
+      ],
+      "effects": [
+        "Configures an existing folder/legacy Inventory as a typed Space (migration path, allows legacy box); writes metadata/layout and remembers it."
+      ],
+      "source": "organizer_spaces/__init__.py:847",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/08-space-setup.js:682"
+      ]
+    },
+    {
+      "path": "/api/space/configure-text",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web_impl/_designs/_layout.py",
+      "handler": "configure_space_text_payload",
+      "input_fields": [
+        "grid",
+        "built_in_grid",
+        "name",
+        "kind",
+        "x",
+        "y",
+        "z",
+        "trim_size",
+        "max_x_mm",
+        "max_y_mm",
+        "pegboard_standard",
+        "pegboard_thickness_mm",
+        "pegboard_size_mode",
+        "pegboard_holes_x",
+        "pegboard_holes_y",
+        "storage_box",
+        "storage_drawers",
+        "inventory_text",
+        "inventory_title"
+      ],
+      "output_fields": [
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings",
+        "inventory_text"
+      ],
+      "effects": [
+        "Pure over supplied Inventory text: hosted Configure/migration (allow_legacy); returns inventory text/layout."
+      ],
+      "source": "wavefinity_web_impl/_designs/_layout.py:412",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/08-space-setup.js:611",
+        "web/spaces/12-space-info.js:453"
+      ]
+    },
+    {
+      "path": "/api/space/copy",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "copy_space",
+      "input_fields": [
+        "output",
+        "space_id"
+      ],
+      "output_fields": [
+        "name",
+        "recent",
+        "other_spaces"
+      ],
+      "effects": [
+        "Copies the open Space (space_id must match; must sit directly inside the Space root; links refused) to a uniquely named sibling with a new Space ID and name via shutil.copytree, rewrites copied metadata/Inventory layout.space, registers it, and removes the partial copy on failure. Caller: SP.runSpaceAction('copy') via a dynamic /api/space/${action} path."
+      ],
+      "source": "organizer_spaces/__init__.py:1151",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/12-space-info.js:195",
+        "web/spaces/12-space-info.js:290"
+      ]
+    },
+    {
+      "path": "/api/space/copy-name",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web_impl/_designs/_layout.py",
+      "handler": "copy_space_name_payload",
+      "input_fields": [
+        "names",
+        "name"
+      ],
+      "output_fields": [
+        "name"
+      ],
+      "effects": [
+        "Pure: picks a unique duplicate name from names[] and name; names must be a list."
+      ],
+      "source": "wavefinity_web_impl/_designs/_layout.py:388",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/12-space-info.js:105"
+      ]
+    },
+    {
+      "path": "/api/space/copy-text",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web_impl/_designs/_layout.py",
+      "handler": "copy_space_text_payload",
+      "input_fields": [
+        "inventory_text",
+        "name"
+      ],
+      "output_fields": [
+        "inventory_text"
+      ],
+      "effects": [
+        "Pure: renames the copied Space inside the supplied inventory_text (name 1-80 chars, requires a saved layout.space); returns {inventory_text}."
+      ],
+      "source": "wavefinity_web_impl/_designs/_layout.py:397",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/12-space-info.js:177"
+      ]
+    },
+    {
+      "path": "/api/space/create",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "configure",
+      "input_fields": [
+        "output",
+        "grid",
+        "built_in_grid",
+        "name",
+        "kind",
+        "x",
+        "y",
+        "z",
+        "trim_size",
+        "max_x_mm",
+        "max_y_mm",
+        "pegboard_standard",
+        "pegboard_thickness_mm",
+        "pegboard_size_mode",
+        "pegboard_holes_x",
+        "pegboard_holes_y",
+        "storage_box",
+        "storage_drawers"
+      ],
+      "output_fields": [
+        "remember_warning",
+        "folder",
+        "space",
+        "recent"
+      ],
+      "effects": [
+        "Creates a new typed Space: validates the definition, creates the folder (under the Space root when output is omitted), writes Space metadata and an Inventory layout, remembers it; returns remember_warning when remembering fails."
+      ],
+      "source": "organizer_spaces/__init__.py:759",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/08-space-setup.js:682"
+      ]
+    },
+    {
+      "path": "/api/space/create-text",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web_impl/_designs/_layout.py",
+      "handler": "create_space_text_payload",
+      "input_fields": [
+        "grid",
+        "built_in_grid",
+        "name",
+        "kind",
+        "x",
+        "y",
+        "z",
+        "trim_size",
+        "max_x_mm",
+        "max_y_mm",
+        "pegboard_standard",
+        "pegboard_thickness_mm",
+        "pegboard_size_mode",
+        "pegboard_holes_x",
+        "pegboard_holes_y",
+        "storage_box",
+        "storage_drawers",
+        "inventory_text",
+        "inventory_title"
+      ],
+      "output_fields": [
+        "file",
+        "folder",
+        "exists",
+        "bins",
+        "layout",
+        "warnings",
+        "inventory_text"
+      ],
+      "effects": [
+        "Pure over supplied Inventory text: hosted equivalent of Create; returns the new inventory text/layout; never accepts legacy 'box'."
+      ],
+      "source": "wavefinity_web_impl/_designs/_layout.py:364",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/08-space-setup.js:611"
+      ]
+    },
+    {
+      "path": "/api/space/defaults",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "set_bin_defaults",
+      "input_fields": [
+        "output",
+        "space_id",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults"
+      ],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Writes keep_bin_defaults/bin_defaults/part_defaults to the Space metadata (space_id must match when given) and returns folder state."
+      ],
+      "source": "organizer_spaces/__init__.py:994",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/05-space-memory.js:553"
+      ]
+    },
+    {
+      "path": "/api/space/delete",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "delete_space",
+      "input_fields": [
+        "output",
+        "space_id"
+      ],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Deletes (shutil.rmtree) the identified Space folder after checks (must be the open Space, space_id matching, directly inside the Space root), then forgets it from registry/recents/active and clears preferences.output if it pointed there; returns the forget() state. Caller: SP.runSpaceAction('delete') via a dynamic /api/space/${action} path."
+      ],
+      "source": "organizer_spaces/__init__.py:1202",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/12-space-info.js:195",
+        "web/spaces/12-space-info.js:303"
+      ]
+    },
+    {
+      "path": "/api/space/forget",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "forget",
+      "input_fields": [
+        "output",
+        "space_id"
+      ],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Removes a Space/folder from the registry and recents (by space_id and/or output) without deleting files; returns folder state."
+      ],
+      "source": "organizer_spaces/__init__.py:1103",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/09-event-wiring.js:134"
+      ]
+    },
+    {
+      "path": "/api/space/inspect",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "inspect",
+      "input_fields": [
+        "output"
+      ],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Read-only describe of one folder: Space/Design mode, metadata, inventory presence, setup needs and resume state; never migrates or rewrites."
+      ],
+      "source": "organizer_spaces/__init__.py:732",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/07-welcome-folders.js:82",
+        "web/spaces/07-welcome-folders.js:253",
+        "web/spaces/08-space-setup.js:343",
+        "web/spaces/08-space-setup.js:951"
+      ]
+    },
+    {
+      "path": "/api/space/no-inventory",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "lambda payload: set_inventory({**payload, 'inventory': False})",
+      "input_fields": [
+        "output"
+      ],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Inline lambda: calls set_inventory({**payload, 'inventory': False}); forces Inventory tracking off."
+      ],
+      "source": "organizer_spaces/__init__.py:1465",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": []
+    },
+    {
+      "path": "/api/space/open",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "open_folder",
+      "input_fields": [
+        "output"
+      ],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Same handler as /api/folder/use: open and remember a set-up folder without changing it."
+      ],
+      "source": "organizer_spaces/__init__.py:1067",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": []
+    },
+    {
+      "path": "/api/space/other-spaces",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "other_spaces_route",
+      "input_fields": [],
+      "output_fields": [
+        "other_spaces"
+      ],
+      "effects": [
+        "Read-only: lists registered Spaces other than the active one (missing/invalid/conflict flagged)."
+      ],
+      "source": "organizer_spaces/__init__.py:726",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/07-welcome-folders.js:166"
+      ]
+    },
+    {
+      "path": "/api/space/printer-profile",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "printer_profile_route",
+      "input_fields": [
+        "profile",
+        "reset"
+      ],
+      "output_fields": [
+        "profile",
+        "explicit",
+        "malformed"
+      ],
+      "effects": [
+        "No profile and no reset: reads the saved printer profile state. profile: validates and saves printer keys to preferences. reset:true: clears only the printer-profile keys."
+      ],
+      "source": "organizer_spaces/__init__.py:1385",
+      "browser_module": "web/browser-core/preferences.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/13-printer-profiles.js:14",
+        "web/spaces/13-printer-profiles.js:19",
+        "web/spaces/13-printer-profiles.js:38",
+        "web/spaces/13-printer-profiles.js:44"
+      ]
+    },
+    {
+      "path": "/api/space/resume",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "resume",
+      "input_fields": [
+        "output",
+        "space_id",
+        "resume_design",
+        "resume_pending",
+        "source_row_id",
+        "source_output",
+        "source_inventory_text",
+        "source_space_id",
+        "inventory_text",
+        "design",
+        "layout",
+        "space"
+      ],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Persists resume_design/resume_pending in Space metadata (checks space_id); entry-guarded so a resumed design must pass the destination-grid check."
+      ],
+      "source": "organizer_spaces/__init__.py:1033",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [
+        "grid_entry_guard"
+      ],
+      "callers": [
+        "web/spaces/05-space-memory.js:430"
+      ]
+    },
+    {
+      "path": "/api/space/show-folder",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "show_folder_payload",
+      "input_fields": [],
+      "output_fields": [
+        "ok"
+      ],
+      "effects": [
+        "Opens the OS file explorer on preferences.output (os.startfile/open/xdg-open); returns {ok:true}.",
+        "Raises ValueError in HOSTED mode (the native/server operation is unavailable there).",
+        "Reads the saved preference, not the request payload; errors if no folder set or folder missing."
+      ],
+      "source": "wavefinity_web.py:1272",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/12-space-info.js:88"
+      ]
+    },
+    {
+      "path": "/api/space/startup",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "startup",
+      "input_fields": [],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "storage",
+        "other_spaces",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Recovers any interrupted relocation, resolves the active Space from preferences (repairing a moved folder path), opens/remembers it when set up, and returns Welcome state with recent, storage and other_spaces.",
+        "Writes preferences only to repair a moved registered folder or remember the opened Space."
+      ],
+      "source": "organizer_spaces/__init__.py:669",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/08-space-setup.js:1132"
+      ]
+    },
+    {
+      "path": "/api/space/storage-box-print",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "storage_box_print_payload",
+      "input_fields": [
+        "space_id",
+        "output",
+        "slicer_path",
+        "operation_id",
+        "printer_profile",
+        "printer_profile_configured"
+      ],
+      "output_fields": [
+        "selected_rows",
+        "files",
+        "slicer",
+        "partial",
+        "partial_stage",
+        "error",
+        "errors",
+        "configured",
+        "bins",
+        "layout",
+        "printer_fit"
+      ],
+      "effects": [
+        "Preflight then one case + placed-bin + connector handoff to the slicer (_combined_space_print); marks printed rows. Raises in HOSTED mode. Printer-profile-wrapped, idempotent."
+      ],
+      "source": "wavefinity_web.py:3004",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [
+        "printer_output_route",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/spaces/10-storage-box-structural.js:384"
+      ]
+    },
+    {
+      "path": "/api/space/storage-change",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "change_storage",
+      "input_fields": [
+        "mode",
+        "parent"
+      ],
+      "output_fields": [
+        "status",
+        "leftover",
+        "storage",
+        "root"
+      ],
+      "effects": [
+        "Change Location: mode Move existing data / Use new location / Use existing; may move the Wavefinity root and update preferences; returns status, leftover, storage, root."
+      ],
+      "source": "organizer_spaces/__init__.py:1316",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/07-welcome-folders.js:445"
+      ]
+    },
+    {
+      "path": "/api/space/storage-drawers-mutate",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "storage_drawers_mutate_route",
+      "input_fields": [
+        "output",
+        "space_id",
+        "operation",
+        "drawer_id",
+        "space",
+        "operation_id"
+      ],
+      "output_fields": [
+        "space"
+      ],
+      "effects": [
+        "Local cabinet mutation (operation on drawer_id/space) applied to the verified Space folder's metadata/Inventory (space_id must match). Idempotent."
+      ],
+      "source": "organizer_spaces/__init__.py:1405",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/spaces/14-drawers-cabinet.js:189"
+      ]
+    },
+    {
+      "path": "/api/space/storage-drawers-mutate-text",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_outputs.py",
+      "handler": "storage_drawers_mutate_text_payload",
+      "input_fields": [
+        "inventory_text",
+        "inventory_title",
+        "drawer_id",
+        "space",
+        "operation",
+        "operation_id"
+      ],
+      "output_fields": [
+        "space"
+      ],
+      "effects": [
+        "Hosted twin of the cabinet mutation: pure over the supplied Inventory text; returns the mutated space. Idempotent."
+      ],
+      "source": "wavefinity_web_impl/_outputs.py:242",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/spaces/14-drawers-cabinet.js:206"
+      ]
+    },
+    {
+      "path": "/api/space/storage-drawers-reset",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_outputs.py",
+      "handler": "storage_drawers_reset_payload",
+      "input_fields": [
+        "space",
+        "operation_id"
+      ],
+      "output_fields": [
+        "space",
+        "message"
+      ],
+      "effects": [
+        "Pure: what Reset cabinet settings would leave, plus why it is needed. Idempotent."
+      ],
+      "source": "wavefinity_web_impl/_outputs.py:316",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/spaces/04-metadata-persistence.js:34"
+      ]
+    },
+    {
+      "path": "/api/space/storage-drawers-summary",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "storage_drawers_summary_payload",
+      "input_fields": [
+        "space",
+        "printer_profile",
+        "printer_profile_configured"
+      ],
+      "output_fields": [
+        "configured",
+        "grid",
+        "built_in_grid",
+        "outside_xyz",
+        "field_units",
+        "field_mm",
+        "drawer_count",
+        "cabinet_style",
+        "printer_mm",
+        "drawers",
+        "effective_material",
+        "components",
+        "fits_printer",
+        "printer_fit",
+        "first_fit_error",
+        "first_fit_part",
+        "warnings"
+      ],
+      "effects": [
+        "Read-only cabinet summary for a draft/saved Storage Drawers Space (requires space object)."
+      ],
+      "source": "wavefinity_web.py:2423",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/14-drawers-cabinet.js:106",
+        "web/structural-design.js:188"
+      ]
+    },
+    {
+      "path": "/api/space/storage-drawers-validate",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web_impl/_outputs.py",
+      "handler": "storage_drawers_validate_payload",
+      "input_fields": [
+        "space"
+      ],
+      "output_fields": [
+        "space"
+      ],
+      "effects": [
+        "Pure: canonical normalizer over a raw Storage Drawers Space."
+      ],
+      "source": "wavefinity_web_impl/_outputs.py:310",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/04-metadata-persistence.js:30"
+      ]
+    },
+    {
+      "path": "/api/space/storage-parent",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "set_storage_parent",
+      "input_fields": [
+        "parent"
+      ],
+      "output_fields": [
+        "storage"
+      ],
+      "effects": [
+        "Validates and saves the Space storage parent in preferences; returns {storage}."
+      ],
+      "source": "organizer_spaces/__init__.py:1215",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": []
+    },
+    {
+      "path": "/api/space/storage-plan",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "storage_plan",
+      "input_fields": [
+        "parent"
+      ],
+      "output_fields": [
+        "plan",
+        "storage"
+      ],
+      "effects": [
+        "Read-only plan for moving/switching the Space storage parent."
+      ],
+      "source": "organizer_spaces/__init__.py:1242",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/07-welcome-folders.js:379"
+      ]
+    },
+    {
+      "path": "/api/space/storage-state",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "storage_state",
+      "input_fields": [],
+      "output_fields": [
+        "storage"
+      ],
+      "effects": [
+        "Read-only: current Space storage location state."
+      ],
+      "source": "organizer_spaces/__init__.py:1238",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/07-welcome-folders.js:356"
+      ]
+    },
+    {
+      "path": "/api/space/structural-design",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "structural_design_payload",
+      "input_fields": [
+        "space",
+        "output",
+        "space_id",
+        "printer_profile",
+        "printer_profile_configured",
+        "include_preview"
+      ],
+      "output_fields": [
+        "kind",
+        "design",
+        "summary",
+        "plan",
+        "signature",
+        "printer_profile",
+        "status",
+        "configured",
+        "orientations",
+        "expected_components",
+        "manifest_plan"
+      ],
+      "effects": [
+        "Read-only: derives a Space's structural design (Storage Box, Base Trim, cabinet) and plain size summary; never touches an Inventory."
+      ],
+      "source": "wavefinity_web.py:2535",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/10-storage-box-structural.js:164",
+        "web/spaces/11-base-trim.js:156",
+        "web/structural-design.js:387",
+        "web/structural-design.js:412"
+      ]
+    },
+    {
+      "path": "/api/space/structural-generate",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "structural_generate_payload",
+      "input_fields": [
+        "output",
+        "auto_timestamp",
+        "space",
+        "printer_profile",
+        "printer_profile_configured",
+        "space_id",
+        "design",
+        "keep_log",
+        "operation_id"
+      ],
+      "output_fields": [
+        "configured",
+        "result",
+        "files",
+        "output",
+        "manifest",
+        "warnings",
+        "status",
+        "plan",
+        "build_timings_ms",
+        "inventory_bin",
+        "inventory_design_spec",
+        "printer_fit"
+      ],
+      "effects": [
+        "Saves a Space's Storage Box, Base Trim or cabinet files (local: verified Space folder, never logs an Inventory row; HOSTED: temp + export token). Printer-profile-wrapped, idempotent."
+      ],
+      "source": "wavefinity_web.py:2604",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [
+        "printer_output_route",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/spaces/10-storage-box-structural.js:358",
+        "web/spaces/11-base-trim.js:195",
+        "web/spaces/11-base-trim.js:306",
+        "web/spaces/14-drawers-cabinet.js:491",
+        "web/spaces/14-drawers-cabinet.js:607"
+      ]
+    },
+    {
+      "path": "/api/space/structural-print",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "structural_print_payload",
+      "input_fields": [
+        "slicer_path",
+        "joint_test_sample",
+        "output",
+        "space",
+        "printer_profile",
+        "printer_profile_configured",
+        "space_id",
+        "design",
+        "target",
+        "design_row_id",
+        "structural_output",
+        "connector",
+        "boxes",
+        "reuse_printed_file",
+        "operation_id"
+      ],
+      "output_fields": [
+        "slicer",
+        "project",
+        "partial",
+        "partial_stage",
+        "error",
+        "configured",
+        "profile",
+        "explicit",
+        "output",
+        "files",
+        "manifest",
+        "warnings",
+        "status",
+        "result",
+        "design_files",
+        "design_reused",
+        "printer_fit"
+      ],
+      "effects": [
+        "Sends a Space's Storage Box, Base Trim or cabinet to the slicer after generation or reuse (reuse_printed_file); never logs an Inventory row. Raises in HOSTED mode. Printer-profile-wrapped, idempotent."
+      ],
+      "source": "wavefinity_web.py:2733",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [
+        "printer_output_route",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/spaces/10-storage-box-structural.js:307",
+        "web/spaces/14-drawers-cabinet.js:475"
+      ]
+    },
+    {
+      "path": "/api/space/structural-print-combined",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "structural_print_combined_payload",
+      "input_fields": [
+        "slicer_path",
+        "printer_profile",
+        "printer_profile_configured",
+        "space_id",
+        "output",
+        "space",
+        "operation_id"
+      ],
+      "output_fields": [
+        "slicer",
+        "project",
+        "partial",
+        "partial_stage",
+        "error",
+        "configured",
+        "profile",
+        "explicit",
+        "output",
+        "files",
+        "manifest",
+        "warnings",
+        "status",
+        "printer_fit"
+      ],
+      "effects": [
+        "Print Cabinet + Bins: cabinet and every placed bin under one preflight and one slicer launch. Raises in HOSTED mode. Printer-profile-wrapped, idempotent."
+      ],
+      "source": "wavefinity_web.py:2620",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [
+        "printer_output_route",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/spaces/14-drawers-cabinet.js:412"
+      ]
+    },
+    {
+      "path": "/api/space/surface-print",
+      "method": "POST",
+      "owner": "B11",
+      "disposition": "local",
+      "runtime": "python",
+      "module": "wavefinity_web.py",
+      "handler": "surface_print_payload",
+      "input_fields": [
+        "space_id",
+        "output",
+        "slicer_path",
+        "operation_id",
+        "printer_profile",
+        "printer_profile_configured"
+      ],
+      "output_fields": [
+        "selected_rows",
+        "files",
+        "slicer",
+        "partial",
+        "partial_stage",
+        "error",
+        "errors",
+        "configured",
+        "bins",
+        "layout",
+        "printer_fit"
+      ],
+      "effects": [
+        "Preflight then one Base Trim + placed-bin + connector handoff to the slicer (_combined_space_print); marks printed rows. Raises in HOSTED mode. Printer-profile-wrapped, idempotent."
+      ],
+      "source": "wavefinity_web.py:3014",
+      "browser_module": "web/browser-core/engine/structural_routes.py",
+      "wrappers": [
+        "printer_output_route",
+        "idempotent_operation"
+      ],
+      "callers": [
+        "web/spaces/11-base-trim.js:347"
+      ]
+    },
+    {
+      "path": "/api/space/update",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "update",
+      "input_fields": [
+        "output",
+        "grid",
+        "built_in_grid",
+        "name",
+        "x",
+        "y",
+        "z",
+        "trim_size",
+        "max_x_mm",
+        "max_y_mm",
+        "pegboard_standard",
+        "pegboard_thickness_mm",
+        "pegboard_size_mode",
+        "pegboard_holes_x",
+        "pegboard_holes_y",
+        "storage_box",
+        "storage_drawers"
+      ],
+      "output_fields": [
+        "remember_warning",
+        "folder",
+        "space",
+        "recent"
+      ],
+      "effects": [
+        "Updates an existing Space definition (kind fixed; Space grid immutable); rewrites Space metadata/layout and refreshes recents."
+      ],
+      "source": "organizer_spaces/__init__.py:908",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/12-space-info.js:488"
+      ]
+    },
+    {
+      "path": "/api/space/use-untyped",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "organizer_spaces/__init__.py",
+      "handler": "use_folder",
+      "input_fields": [
+        "output"
+      ],
+      "output_fields": [
+        "folder",
+        "space",
+        "recent",
+        "folder_name",
+        "missing",
+        "folder_mode",
+        "space_id",
+        "inventory",
+        "keep_bin_defaults",
+        "bin_defaults",
+        "part_defaults",
+        "needs_setup",
+        "needs_identity_migration",
+        "space_source",
+        "setup_prefill_space",
+        "resume_design",
+        "resume_pending",
+        "exists",
+        "no_inventory",
+        "cabinet_recovery"
+      ],
+      "effects": [
+        "Creates the folder if needed and, for a non-Space folder, writes Design metadata (never demotes a typed Space or a Space needing setup), then remembers it."
+      ],
+      "source": "organizer_spaces/__init__.py:735",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/spaces/08-space-setup.js:997"
+      ]
+    },
+    {
+      "path": "/api/space/warm",
+      "method": "POST",
+      "owner": "B09",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "warm_spaces_payload",
+      "input_fields": [],
+      "output_fields": [
+        "started"
+      ],
+      "effects": [
+        "Local: starts one daemon thread that pre-builds previews for listed/recent Spaces (read-only, writes nothing, never opens or remembers a Space); returns {started}.",
+        "HOSTED mode (or already running / nothing to warm) returns {started:false}."
+      ],
+      "source": "wavefinity_web.py:1473",
+      "browser_module": "web/browser-core/space-store.js",
+      "wrappers": [],
+      "callers": [
+        "web/workspace.js:871"
+      ]
+    },
+    {
+      "path": "/api/suggestions",
+      "method": "POST",
+      "owner": "B13",
+      "disposition": "local",
+      "runtime": "javascript",
+      "module": "wavefinity_web.py",
+      "handler": "_post_suggestion",
+      "input_fields": [
+        "kind",
+        "title",
+        "description"
+      ],
+      "output_fields": [
+        "number",
+        "url",
+        "error"
+      ],
+      "effects": [
+        "Handler method WavefinityHandler._post_suggestion (not a POST_ROUTES entry): size/origin/content-type checks, per-source and global rate limits, then creates a GitHub issue with WAVEFINITY_GITHUB_TOKEN (external request).",
+        "Reply {number,url}; errors 400/403/429/502/503. Called with fetch() directly, not api()."
+      ],
+      "source": "wavefinity_web.py:3780",
+      "browser_module": "web/browser-core/capabilities.js",
+      "wrappers": [],
+      "callers": [
+        "web/app/16-suggestions.js:30"
+      ]
+    }
+  ]
+}
