@@ -63,6 +63,7 @@ SP.syncStorageBoxGrid = () => {
   const gridfinity = SP.storageBoxGrid() !== "wavefinity";
   const row = document.getElementById("portable-floor-row");
   if (row) row.hidden = !gridfinity;
+  document.getElementById("portable-lift-row").hidden = !gridfinity || SP.storageBoxFloor() !== "none";
   const note = document.getElementById("portable-grid-note");
   if (note) {
     const editing = Boolean(document.getElementById("portable-grid")?.disabled);
@@ -94,10 +95,7 @@ SP.syncNewStorageBoxLatchDefault = () => {
 
 SP.fillStorageBoxForm = box => {
   SP.newStorageBox = !box;
-  // A measured seated lift is part of the record; the setup form carries it
-  // through an edit unchanged (it has no control for it).
-  SP.storageBoxSeatedLift = box && Number.isFinite(Number(box.seated_lift_mm)) && box.seated_lift_mm !== null
-    ? Number(box.seated_lift_mm) : null;
+  document.getElementById("portable-lift").value = box?.seated_lift_mm ?? "";
   const one = { ...SP.storageBoxDefaults(SP.storageBoxSetupFieldWidth()), ...(box || {}) };
   SP.storageBoxEdgeBevel = box ? (box.edge_bevel || "none") : "default";
   SP.storageBoxHingeType = box && box.hinge_type === "piano" ? "piano" : "screw";
@@ -201,8 +199,8 @@ SP.readStorageBoxForm = () => {
   const labelled = location !== "none";
   return {
     ...SP.storageBoxGridFields(),
-    ...(SP.storageBoxGrid() !== "wavefinity" && SP.storageBoxSeatedLift !== null && SP.storageBoxSeatedLift !== undefined
-      ? { seated_lift_mm: SP.storageBoxSeatedLift } : {}),
+    seated_lift_mm: SP.storageBoxFloor() === "none" && value("portable-lift").trim() !== ""
+      ? Number(value("portable-lift")) : null,
     secure_lid: latched,
     latch_count: value("portable-latch-count") || "1",
     hinge_count: latched ? (value("portable-hinge-count") === "1" ? "1" : "2") : "2",

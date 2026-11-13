@@ -366,7 +366,7 @@ def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     legacy "box"; that only ever comes from configure_space_text_payload's
     migration path (see Fix 004 Correction 7.H)."""
     raw_def = {
-        **{key: payload[key] for key in ("grid", "built_in_grid") if key in payload},
+        **{key: payload[key] for key in ("grid", "built_in_grid", "seated_lift_mm") if key in payload},
         "name": payload.get("name"), "kind": payload.get("kind"),
         "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z"),
     }
@@ -413,7 +413,7 @@ def configure_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Hosted Configure Existing / migration: never rejected merely because
     the browser-owned inventory text already carries a layout.space."""
     raw_def = {
-        **{key: payload[key] for key in ("grid", "built_in_grid") if key in payload},
+        **{key: payload[key] for key in ("grid", "built_in_grid", "seated_lift_mm") if key in payload},
         "name": payload.get("name"), "kind": payload.get("kind"),
         "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z"),
     }

@@ -339,6 +339,9 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
             )
 
     result = {"name": name, "kind": kind, "x": x, "y": y, "z": z, "grid": grid}
+    if kind == "drawer" and grid != "wavefinity":
+        from organizer_features.gridfinity import measured_seated_lift
+        result["seated_lift_mm"] = measured_seated_lift(raw.get("seated_lift_mm"))
     if kind == "surface":
         result["trim_size"] = trim_size
         # Fix 095: the user's maximum finished outside rectangle is durable
@@ -523,6 +526,8 @@ def _configured_space_definition(
         raw_def = retain_space_grid(raw_def, existing)
         if mode == "update":
             _refuse_floor_change(raw_def, existing)
+            if raw_def.get("kind") == "drawer" and "seated_lift_mm" not in raw_def:
+                raw_def = {**raw_def, "seated_lift_mm": existing.get("seated_lift_mm")}
     if raw_def.get("kind") == "storage_drawers":
         if mode == "update":
             raise ValueError("Edit a Storage Drawers Space from its cabinet editor.")

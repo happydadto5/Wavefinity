@@ -758,7 +758,7 @@ def space_routes(
 
     def configure(payload):
         raw_def = {
-            **{key: payload[key] for key in ("grid", "built_in_grid") if key in payload},
+            **{key: payload[key] for key in ("grid", "built_in_grid", "seated_lift_mm") if key in payload},
             "name": payload.get("name"),
             "kind": payload.get("kind"),
             "x": payload.get("x"),
@@ -862,7 +862,7 @@ def space_routes(
         (_mode, _space, inventory, _keep, _defaults, _part_defaults,
          _needs_setup, _source, _prefill) = _folder_state(target, load_preferences())
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
-        raw_def.update({key: payload[key] for key in ("grid", "built_in_grid") if key in payload})
+        raw_def.update({key: payload[key] for key in ("grid", "built_in_grid", "seated_lift_mm") if key in payload})
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
         for key in ("max_x_mm", "max_y_mm"):
@@ -915,7 +915,7 @@ def space_routes(
             raise ValueError("not a typed space")
 
         raw_def = {"name": payload.get("name"), "kind": existing_space["kind"], "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
-        raw_def.update({key: payload[key] for key in ("grid", "built_in_grid") if key in payload})
+        raw_def.update({key: payload[key] for key in ("grid", "built_in_grid", "seated_lift_mm") if key in payload})
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
         for key in ("max_x_mm", "max_y_mm"):

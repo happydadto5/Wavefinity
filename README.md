@@ -2188,6 +2188,9 @@ floor, never the plate's thickness. Missing measurements are `unverified`;
 recorded zero is a measurement. Height fit remains unverified for the later
 layout checks (Story 2973). Container UI and exports are later work.
 
+Gridfinity Plain Drawers and Storage Boxes with Floor None can record and edit
+this measurement in Space setup. Layout heights include the recorded lift.
+
 ### Gridfinity plate lids (Story 2971)
 
 The Gridfinity 42 mm and independent 21 mm paths build a separate loose lid:

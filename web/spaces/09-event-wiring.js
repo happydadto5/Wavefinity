@@ -184,6 +184,7 @@ SP.wire = () => {
 SP.updateReadouts = () => {
     const kind = SP.setupKind;
     if (kind === "drawer") {
+        document.getElementById("drawer-lift-row").hidden = document.getElementById("drawer-grid").value === "wavefinity";
         const x = Number(document.getElementById("drawer-x").value);
         const y = Number(document.getElementById("drawer-y").value);
         const z = Number(document.getElementById("drawer-z").value);

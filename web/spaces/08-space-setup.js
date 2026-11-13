@@ -126,7 +126,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   if (title) {
     title.textContent = "Configure " + typeLabel;
   }
-  $("#space-form").querySelectorAll("#space-name, #drawer-x, #drawer-y, #drawer-z, #surface-x, #surface-y, #surface-trim, #portable-x, #portable-y, #portable-z, #pegboard-x, #pegboard-y, #pegboard-holes-x, #pegboard-holes-y").forEach(input => {
+  $("#space-form").querySelectorAll("#space-name, #drawer-x, #drawer-y, #drawer-z, #drawer-lift, #surface-x, #surface-y, #surface-trim, #portable-x, #portable-y, #portable-z, #portable-lift, #pegboard-x, #pegboard-y, #pegboard-holes-x, #pegboard-holes-y").forEach(input => {
     SP.setupFieldNote(`#${input.id}`, "", "hint");
     SP.setupFieldNote(`#${input.id}`, "", "error");
   });
@@ -188,6 +188,8 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       gridSelect.value = prefillSpace?.grid || "wavefinity";
       gridSelect.disabled = update;
       gridSelect.title = update ? "A Space's grid is set when it is created and cannot be changed." : "";
+      document.getElementById("drawer-lift").value = prefillSpace?.seated_lift_mm ?? "";
+      gridSelect.onchange = SP.updateReadouts;
   } else if (kind === 'surface') {
       const trimSelect = document.getElementById("surface-trim");
       if (trimSelect) {
@@ -228,6 +230,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById("portable-y").value = prefillSpace?.y || "";
       document.getElementById("portable-z").value = prefillSpace?.z || "";
       SP.fillStorageBoxForm(prefillSpace?.storage_box);
+      document.getElementById("portable-lift").value = prefillSpace?.storage_box?.seated_lift_mm ?? prefillSpace?.seated_lift_mm ?? "";
       SP.syncStorageBoxGrid();
   } else if (kind === "pegboard") {
       document.getElementById("pegboard-standard").value = prefillSpace?.pegboard_standard || "standard";
@@ -444,9 +447,17 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
         fail(`A Storage Box needs at least ${fmt(state.catalog.b4b_rules.min_field_mm)} mm of child-bin field.`, selector);
       }
     }
+    const liftSelector = `#${prefix}-lift`;
+    const liftInput = $(liftSelector);
+    const usesLift = kind === "drawer" ? $("#drawer-grid").value !== "wavefinity"
+      : SP.storageBoxGrid() !== "wavefinity" && SP.storageBoxFloor() === "none";
+    const liftText = liftInput.value.trim();
+    if (usesLift && (liftInput.validity.badInput || (liftText && (!Number.isFinite(Number(liftText)) || Number(liftText) < 0)))) {
+      fail("Seated lift must be a measured non-negative height or blank for unverified.", liftSelector);
+    }
     values = { kind, name, ...dimensions, trimSize: null,
       ...(kind === "portable" ? { extra: { ...SP.storageBoxGridFields(), storage_box: SP.readStorageBoxForm() } } : {}),
-      ...(kind === "drawer" ? { extra: { grid: $("#drawer-grid").value } } : {}) };
+      ...(kind === "drawer" ? { extra: { grid: $("#drawer-grid").value, seated_lift_mm: usesLift && liftText ? Number(liftText) : null } } : {}) };
   } else if (kind === "surface") {
     const trimSize = $("#surface-trim").value;
     const maxX = readNumber("#surface-x"), maxY = readNumber("#surface-y");
