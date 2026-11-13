@@ -183,12 +183,12 @@
     // Options group
     const optGroup = el("div", "storage-box-group");
     const optRow = el("div", "space-dimension-row");
-    const stacking = select([["false", "Not stackable"], ["true", "Stackable"]], String(!!box.stacking));
+    const stacking = select([["false", "No recess"], ["true", "Add recess"]], String(!!box.stacking));
     stacking.id = id("stacking");
     const handle = select([["false", "No handle"], ["true", "Add handle"]], String(!!box.handle));
     handle.id = id("handle");
     const handleRow = labeled("Carrying handle", handle);
-    optRow.append(labeled("Storage Box stacking", stacking), handleRow);
+    optRow.append(labeled("Wavefinity stacking recess", stacking), handleRow);
     optGroup.append(optRow);
     caseWrap.append(optGroup);
 
