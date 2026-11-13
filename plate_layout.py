@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import sys
 import tempfile
 import uuid
 import zipfile
@@ -289,3 +290,18 @@ def combine_for_plate(files: list[Path], profile: dict, dest: Path) -> tuple[Pat
     finally:
         temporary.unlink(missing_ok=True)
     return dest, []
+
+
+if sys.platform == "emscripten":
+    # Browser platform: the native-free implementation replaces every entry
+    # point (module-level lookups below resolve to these). Native code above
+    # stays as the desktop path and rollback source.
+    from wf_browser_core import plate_layout as _browser_plate
+
+    plan_plate = _browser_plate.plan_plate
+    _plan_bounds = _browser_plate._plan_bounds
+    pack_mesh_objects = _browser_plate.pack_mesh_objects
+    _placement_move = _browser_plate._placement_move
+    _move_file = _browser_plate._move_file
+    space_out_for_plate = _browser_plate.space_out_for_plate
+    combine_for_plate = _browser_plate.combine_for_plate
