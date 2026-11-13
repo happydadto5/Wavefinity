@@ -627,6 +627,7 @@ def design_to_dict(
     box_block = {
         "magnet_holes": box.magnet_holes,
         "hollow_base": box.hollow_base,
+        "corner_feet": box.corner_feet,
         "accent_band": box.accent_band,
         "accent_color": box.accent_color,
         "x": box.x,
@@ -1055,6 +1056,7 @@ def design_from_dict(
         pegboard=pegboard,
         magnet_holes=raw.get("magnet_holes", "none"),
         hollow_base=raw.get("hollow_base", True),
+        corner_feet=raw.get("corner_feet", False),
         accent_band=raw.get("accent_band", False),
         accent_color=raw.get("accent_color", "blue"),
     )

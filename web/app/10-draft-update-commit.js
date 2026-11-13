@@ -93,6 +93,14 @@ function commitBinHollowBase(event) {
   changedDesign(previous);
 }
 
+function commitBinCornerFeet(event) {
+  const previous = clone(state.design);
+  state.design.box.corner_feet = event.target.value === "on";
+  state.canGenerate = false;
+  updateGenerateAvailability();
+  changedDesign(previous);
+}
+
 function updateDraftFromFields(event) {
   bumpBoreEpoch();
   const previousConflictDesign = clone(state.design);

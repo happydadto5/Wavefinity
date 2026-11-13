@@ -937,8 +937,11 @@ class BoxSpec:
     accent_band: bool = False
     accent_color: str = "blue"
     hollow_base: bool = True
+    corner_feet: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.corner_feet, bool):
+            raise ValueError("Corner feet must be a boolean")
         if not isinstance(self.hollow_base, bool):
             raise ValueError("Hollow base must be a boolean")
         if not isinstance(self.accent_band, bool):

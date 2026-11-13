@@ -5,6 +5,11 @@ Their feet have open undersides with wavy supports and retain the existing
 magnet pockets when selected. Turn it off for solid feet and base. Physical
 print performance remains unverified.
 
+**Corner feet**, off by default, limits Gridfinity feet and any magnet pockets
+to the corner cells and supports the open floor band with wavy lines. Hollow
+base controls whether those feet are hollow or solid. This applies to both
+Gridfinity pitches; physical print performance remains unverified.
+
 Bins on Wavefinity and both Gridfinity grids offer **Top 1 mm accent**, Off by
 default, with a nominal color choice (Blue by default). The color choice appears
 only while the accent is On. 3MF exports carry the body's top 1 mm as named

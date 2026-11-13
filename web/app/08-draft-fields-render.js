@@ -9,6 +9,8 @@ function syncBinGridControl() {
   $("#bin-magnets").value = state.design.box.magnet_holes || "none";
   $("#bin-hollow-base-row").hidden = !["gridfinity", "gridfinity_half"].includes(state.design.grid) || !!state.design.box.b4b?.enabled;
   $("#bin-hollow-base").value = state.design.box.hollow_base === false ? "off" : "on";
+  $("#bin-corner-feet-row").hidden = $("#bin-hollow-base-row").hidden;
+  $("#bin-corner-feet").value = state.design.box.corner_feet ? "on" : "off";
   $("#bin-accent").value = state.design.box.accent_band ? "on" : "off";
   $("#bin-accent-color-row").hidden = !state.design.box.accent_band;
   $("#bin-accent-color").disabled = !state.design.box.accent_band;

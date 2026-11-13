@@ -370,9 +370,13 @@ def foot_solid(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
     profile = _profile(grid)
     sections = list(profile["radii"])
     sections.append((FOOT_HEIGHT + FOOT_CAP, sections[-1][1]))
+    centres = _cell_centres(spec, grid)
+    if spec.corner_feet:
+        xs, ys = [c[0] for c in centres], [c[1] for c in centres]
+        centres = [(x, y) for x, y in centres if x in (min(xs), max(xs)) and y in (min(ys), max(ys))]
     cells = [
         _lofted_cell(centre, profile["foot_half"], sections)
-        for centre in _cell_centres(spec, grid)
+        for centre in centres
     ]
     feet = cells[0] if len(cells) == 1 else union(cells)
     if spec.magnet_holes == "6x2":
@@ -382,7 +386,7 @@ def foot_solid(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
         # only confirmation. Cap depth to preserve at least FLOOR_SKIN.
         depth = min(2.4, FOOT_HEIGHT - FLOOR_SKIN)
         cutters = []
-        for x, y in _cell_centres(spec, grid):
+        for x, y in centres:
             for dx in (-13.0, 13.0):
                 for dy in (-13.0, 13.0):
                     cutter = trimesh.creation.cylinder(radius=3.25, height=depth + 0.1, sections=64)
@@ -398,7 +402,7 @@ def _single_volume(mesh: trimesh.Trimesh, what: str) -> None:
         raise RuntimeError(f"{what} did not leave one connected printable solid")
 
 
-def _hollow_base_cutters(spec: BoxSpec, grid: str) -> list[trimesh.Trimesh]:
+def _hollow_base_cutters(spec: BoxSpec, grid: str, feet: trimesh.Trimesh | None = None):
     """Open the feet and base band, retaining the wavy supports and magnet pads."""
     profile = _profile(grid)
     half = profile["foot_half"]
@@ -421,8 +425,10 @@ def _hollow_base_cutters(spec: BoxSpec, grid: str) -> list[trimesh.Trimesh]:
                 points.append((along, across) if swap else (across, along))
             lines.append(LineString(points).buffer(spec.wall / 2, cap_style=2, join_style=1))
     ribs = unary_union(lines)
-    if spec.magnet_holes == "6x2":
+    if spec.magnet_holes == "6x2" and (not spec.corner_feet or spec.hollow_base):
         for x, y in _cell_centres(spec, grid):
+            if spec.corner_feet and (abs(x) != (nx - 1) * profile["pitch"] / 2 or abs(y) != (ny - 1) * profile["pitch"] / 2):
+                continue
             for dx in (-13.0, 13.0):
                 for dy in (-13.0, 13.0):
                     lines.append(Point(x + dx, y + dy).buffer(3.25 + spec.wall, resolution=16))
@@ -431,7 +437,9 @@ def _hollow_base_cutters(spec: BoxSpec, grid: str) -> list[trimesh.Trimesh]:
     support_meshes = [translated(_extrude_polygon(part, top + 0.2), (0, 0, -0.1)) for part in support_parts]
 
     voids = []
-    for centre in _cell_centres(spec, grid):
+    for centre in _cell_centres(spec, grid) if spec.hollow_base else []:
+        if spec.corner_feet and (abs(centre[0]) != (nx - 1) * profile["pitch"] / 2 or abs(centre[1]) != (ny - 1) * profile["pitch"] / 2):
+            continue
         rings, heights = [], []
         sections = [(-0.1, profile["radii"][0][1]), *profile["radii"]]
         if top > FOOT_HEIGHT:
@@ -447,12 +455,18 @@ def _hollow_base_cutters(spec: BoxSpec, grid: str) -> list[trimesh.Trimesh]:
         if rings and Polygon(rings[0]).intersects(ribs):
             voids.append(_loft_cavity(rings, heights))
     if top > FOOT_HEIGHT:
-        band = _extrude_polygon(flat_cavity_polygon(spec, grid), top - FOOT_HEIGHT)
+        band = _extrude_polygon(flat_outer_polygon(spec, grid) if spec.corner_feet else flat_cavity_polygon(spec, grid), top - FOOT_HEIGHT)
         voids.append(translated(band, (0, 0, FOOT_HEIGHT)))
     # Removing the support footprint from each void makes each line fuse into
     # the unchanged profile and floor, without projecting into the sockets.
-    cutters = [difference([void, *support_meshes]) for void in voids]
-    return [cutter for cutter in cutters if len(cutter.vertices)]
+    cutters = [difference([void, *support_meshes, *([feet] if spec.corner_feet and not spec.hollow_base else [])]) for void in voids]
+    cutters = [cutter for cutter in cutters if len(cutter.vertices)]
+    if spec.corner_feet:
+        footprint = ribs.intersection(flat_outer_polygon(spec, grid))
+        parts = list(footprint.geoms) if footprint.geom_type == "MultiPolygon" else [footprint]
+        supports = [translated(_extrude_polygon(part, top + 0.1), (0, 0, 0)) for part in parts if part.geom_type == "Polygon" and not part.is_empty]
+        return cutters, supports
+    return cutters
 
 
 def gridfinity_body(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
@@ -474,8 +488,27 @@ def gridfinity_body(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
     cavity = _extrude_polygon(flat_cavity_polygon(spec, grid), spec.z - floor + 1.0)
     cavity = translated(cavity, (0.0, 0.0, floor))
     fused = union([shell, feet])
-    _single_volume(fused, "the foot and shell union")
-    if spec.hollow_base:
+    if not spec.corner_feet:
+        _single_volume(fused, "the foot and shell union")
+    if spec.corner_feet:
+        cutters, supports = _hollow_base_cutters(spec, grid, feet)
+        if cutters:
+            fused = difference([fused, *cutters])
+        if supports:
+            fused = union([fused, *supports])
+        if spec.magnet_holes == "6x2":
+            centres = _cell_centres(spec, grid)
+            xs, ys = [c[0] for c in centres], [c[1] for c in centres]
+            depth = min(2.4, FOOT_HEIGHT - FLOOR_SKIN)
+            pockets = []
+            for x, y in centres:
+                if x in (min(xs), max(xs)) and y in (min(ys), max(ys)):
+                    for dx in (-13.0, 13.0):
+                        for dy in (-13.0, 13.0):
+                            pocket = trimesh.creation.cylinder(radius=3.25, height=depth + 0.1, sections=64)
+                            pockets.append(translated(pocket, (x + dx, y + dy, (depth - 0.1) / 2)))
+            fused = difference([fused, *pockets])
+    elif spec.hollow_base:
         cutters = _hollow_base_cutters(spec, grid)
         if cutters:
             fused = difference([fused, *cutters])

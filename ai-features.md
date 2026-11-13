@@ -1,5 +1,10 @@
 # Wavefinity AI Feature Reference
 
+Ordinary Gridfinity bins may set `box.corner_feet` to `true` (default `false`)
+to use only corner-cell feet with wavy floor supports. Magnet pockets then occur
+only in those feet. `box.hollow_base` controls whether the feet are hollow.
+Wavefinity bins ignore this option. Include it only when requested.
+
 Browser ordinary-output adapters use the same bin design schema and geometry
 rules. Export prepares files locally for the person's chosen folder or a
 download; multiple downloaded files travel together in a ZIP. Do not return
