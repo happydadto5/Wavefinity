@@ -17,13 +17,14 @@ These are **working rules**, not product documentation. [README.md](README.md) i
 
 **Feature docs:** Material changes to user-facing capabilities update [features.md](features.md). If an outside AI may choose, configure, return or avoid the changed feature, also update [ai-features.md](ai-features.md) and keep the embedded AI Design prompt aligned. The implementation/catalog owns exact schemas and numerical validation limits.
 
-## Help-Code handoff
+## Help-Code / Poller handoff
 
-Wavefinity contains the product; [Help-Code](https://github.com/happydadto5/Help-Code) owns the current coder/reviewer protocol and assignments. Never restore helper Fix/Story records into this product repo.
+Wavefinity contains the product; [Poller](https://github.com/happydadto5/Poller) is the **live system of record** for Stories, contracts, coder dispatch, reviews and closeout. [Help-Code](https://github.com/happydadto5/Help-Code) contains role-specific reviewer protocol and historical references. Never copy helper Fix/Story records into this product repository.
 
-- A near-entire user message of **`code chat` / `chat code`** (including clear near-matches) wakes the coder: fetch the helper's current default branch and read `CODER.md` and `reviews/code-chat.md` **fresh**, then follow the active instruction/contract. Resolve the product checkout from `help-code.config.json`; recover an incorrect cwd instead of assuming the wrong repo. Follow helper remote-freshness rules before edits/publishing; never force-push.
-- **`chat`** alone wakes the reviewer: follow fresh helper reviewer state and `REVIEWER-CHAT.md`; do not start coding.
-- A read/review request is not authorization to implement. Current helper state and live assignments outrank memories, stale local copies and prior sessions. On genuine access failure, report the specific missing authority rather than guessing.
+- For a current coding assignment, read the **actual Poller dispatch prompt/store contract**, then follow this repository's product rules and the relevant assigned source. Do not infer a job from a remembered Fix number or a stale helper pin.
+- `CODER.md` and `reviews/code-chat.md` in Help-Code describe a **retired dispatch lane**. A standalone `code chat` / `chat code` phrase is not authority to implement from those historical files; locate the current Poller assignment instead.
+- Reviewer #2 is activated only through explicit `WF Chat` / `WF Chat with Pause` with its current role skill and reviewer instructions. Bare `chat` is not that wake command.
+- A read/review request alone is not authorization to implement. Current Poller records and live role instructions outrank memories, prior conversations and cached historical files. On genuine access failure, report the specific missing authority rather than guessing.
 
 ## Communication, commits and boundaries
 
