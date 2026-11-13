@@ -936,8 +936,11 @@ class BoxSpec:
     magnet_holes: str = "none"
     accent_band: bool = False
     accent_color: str = "blue"
+    hollow_base: bool = True
 
     def __post_init__(self) -> None:
+        if not isinstance(self.hollow_base, bool):
+            raise ValueError("Hollow base must be a boolean")
         if not isinstance(self.accent_band, bool):
             raise ValueError("Accent band must be true or false")
         if self.accent_color not in (

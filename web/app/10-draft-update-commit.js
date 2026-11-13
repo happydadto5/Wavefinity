@@ -85,6 +85,14 @@ function commitBinMagnets(event) {
   changedDesign(previous);
 }
 
+function commitBinHollowBase(event) {
+  const previous = clone(state.design);
+  state.design.box.hollow_base = event.target.value === "on";
+  state.canGenerate = false;
+  updateGenerateAvailability();
+  changedDesign(previous);
+}
+
 function updateDraftFromFields(event) {
   bumpBoreEpoch();
   const previousConflictDesign = clone(state.design);

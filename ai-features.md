@@ -692,3 +692,7 @@ If a change is implementation-only and does not affect what the outside AI may l
 
 
 Ordinary 42 mm Gridfinity bins may set `box.magnet_holes` to `"6x2"` for magnet pockets or `"none"` (default). Never use `"6x2"` on Wavefinity, 21 mm Gridfinity, or container floors. The 6.5 mm diameter and 2.4 mm depth are unconfirmed starting values, not verified fit.
+
+Ordinary Gridfinity bins at either pitch have `box.hollow_base` on by default;
+set it to false for solid feet and base when requested. It has no effect on
+Wavefinity bins or container floors. Physical print performance is unverified.

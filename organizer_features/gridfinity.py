@@ -18,7 +18,8 @@ from dataclasses import replace
 
 import numpy as np
 import trimesh
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Point, Polygon
+from shapely.ops import unary_union
 
 from organizer_engine import BoxSpec, MIN_HEIGHT_ABOVE_BASE
 from organizer_engine._specs import GRID_PITCHES, grid_label, lid_enabled, vertical_stack_enabled
@@ -397,6 +398,63 @@ def _single_volume(mesh: trimesh.Trimesh, what: str) -> None:
         raise RuntimeError(f"{what} did not leave one connected printable solid")
 
 
+def _hollow_base_cutters(spec: BoxSpec, grid: str) -> list[trimesh.Trimesh]:
+    """Open the feet and base band, retaining the wavy supports and magnet pads."""
+    profile = _profile(grid)
+    half = profile["foot_half"]
+    top = effective_base(spec, grid) - FLOOR_SKIN
+    # The same global phase is used for every parallel line. The pitch of the
+    # waves is two support spacings; the lines continue through cell boundaries.
+    nx, ny = cell_counts(spec, grid)
+    extent_x, extent_y = nx * profile["pitch"] / 2, ny * profile["pitch"] / 2
+    spacing, amplitude, step = 21.0, 6.0, 1.0
+    lines = []
+    for axis_extent, along_extent, swap in ((extent_x, extent_y, False), (extent_y, extent_x, True)):
+        count = math.ceil(2 * axis_extent / spacing)
+        for index in range(count + 1):
+            offset = -axis_extent + index * spacing
+            samples = math.ceil((2 * along_extent + 8) / step)
+            points = []
+            for n in range(samples + 1):
+                along = -along_extent - 4 + n * (2 * along_extent + 8) / samples
+                across = offset + amplitude * math.sin(2 * math.pi * along / 42.0)
+                points.append((along, across) if swap else (across, along))
+            lines.append(LineString(points).buffer(spec.wall / 2, cap_style=2, join_style=1))
+    ribs = unary_union(lines)
+    if spec.magnet_holes == "6x2":
+        for x, y in _cell_centres(spec, grid):
+            for dx in (-13.0, 13.0):
+                for dy in (-13.0, 13.0):
+                    lines.append(Point(x + dx, y + dy).buffer(3.25 + spec.wall, resolution=16))
+    supports = unary_union(lines)
+    support_parts = list(supports.geoms) if supports.geom_type == "MultiPolygon" else [supports]
+    support_meshes = [translated(_extrude_polygon(part, top + 0.2), (0, 0, -0.1)) for part in support_parts]
+
+    voids = []
+    for centre in _cell_centres(spec, grid):
+        rings, heights = [], []
+        sections = [(-0.1, profile["radii"][0][1]), *profile["radii"]]
+        if top > FOOT_HEIGHT:
+            sections.append((FOOT_HEIGHT + min(0.05, top - FOOT_HEIGHT), profile["radii"][-1][1]))
+        for z, radius in sections:
+            inner_radius = max(0.01, radius - spec.wall)
+            inner_half = half + radius - spec.wall - inner_radius
+            if inner_half <= 0:
+                rings = []
+                break
+            rings.append(_ring(centre, inner_half, inner_half, inner_radius))
+            heights.append(z)
+        if rings and Polygon(rings[0]).intersects(ribs):
+            voids.append(_loft_cavity(rings, heights))
+    if top > FOOT_HEIGHT:
+        band = _extrude_polygon(flat_cavity_polygon(spec, grid), top - FOOT_HEIGHT)
+        voids.append(translated(band, (0, 0, FOOT_HEIGHT)))
+    # Removing the support footprint from each void makes each line fuse into
+    # the unchanged profile and floor, without projecting into the sockets.
+    cutters = [difference([void, *support_meshes]) for void in voids]
+    return [cutter for cutter in cutters if len(cutter.vertices)]
+
+
 def gridfinity_body(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
     """The bin shell: flat walls from z 4.75 up, per-cell feet below, one solid."""
     from organizer_features.side_openings import validate_side_openings
@@ -417,6 +475,10 @@ def gridfinity_body(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
     cavity = translated(cavity, (0.0, 0.0, floor))
     fused = union([shell, feet])
     _single_volume(fused, "the foot and shell union")
+    if spec.hollow_base:
+        cutters = _hollow_base_cutters(spec, grid)
+        if cutters:
+            fused = difference([fused, *cutters])
     body = difference([fused, cavity])
     _single_volume(body, "the Gridfinity body")
     return body

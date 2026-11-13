@@ -1,5 +1,10 @@
 # Wavefinity Feature Catalog
 
+Ordinary 21 mm and 42 mm Gridfinity bins offer **Hollow base**, on by default.
+Their feet have open undersides with wavy supports and retain the existing
+magnet pockets when selected. Turn it off for solid feet and base. Physical
+print performance remains unverified.
+
 Bins on Wavefinity and both Gridfinity grids offer **Top 1 mm accent**, Off by
 default, with a nominal color choice (Blue by default). The color choice appears
 only while the accent is On. 3MF exports carry the body's top 1 mm as named
