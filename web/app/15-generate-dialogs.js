@@ -423,6 +423,41 @@ async function printModel(target = "bin", initiatingButton = null) {
 }
 
 
+// B08: the browser cannot launch a slicer, so Print prepares one arranged 3MF
+// locally, saves it, and asks the user to open it in Bambu Studio. The page
+// never claims the slicer was opened for them; only this explicit
+// confirmation (a user action) may update the existing Printed state.
+function confirmOpenedInBambuStudio(filename, where, note = "") {
+  return new Promise(resolve => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "wf-confirm-dialog";
+    const title = document.createElement("h3");
+    title.textContent = "Open in Bambu Studio";
+    const body = document.createElement("p");
+    body.textContent = `Your print file is ready: ${filename}`;
+    const where_ = document.createElement("p");
+    where_.textContent = `${where} Open this file in Bambu Studio yourself; Wavefinity cannot open it for you from the browser.`;
+    const extra = document.createElement("p");
+    extra.textContent = note;
+    extra.hidden = !note;
+    const actions = document.createElement("div");
+    actions.className = "button-row";
+    const later = document.createElement("button");
+    later.type = "button"; later.textContent = "Not yet"; later.className = "button secondary";
+    const opened = document.createElement("button");
+    opened.type = "button"; opened.textContent = "I opened it in Bambu Studio"; opened.className = "button";
+    let answer = false;
+    opened.addEventListener("click", () => { answer = true; dialog.close(); });
+    later.addEventListener("click", () => dialog.close());
+    actions.append(later, opened);
+    dialog.append(title, body, where_, extra, actions);
+    dialog.addEventListener("close", () => { dialog.remove(); resolve(answer); }, { once: true });
+    document.body.append(dialog);
+    dialog.showModal();
+    opened.focus();
+  });
+}
+
 async function printModelWithReport(target, initiatingButton, report) {
   // Ordinary output entry points defensively reject structural ownership:
   // a Storage Box or Storage Drawers target has its own Save/Print chrome.
@@ -431,15 +466,7 @@ async function printModelWithReport(target, initiatingButton, report) {
     return;
   }
   if (relocationBlocksWrites()) return;
-  if (state.runtime.hosted) {
-    report("Printing needs local Wavefinity and a slicer. Use Export to get the files.", true, 6000);
-    return;
-  }
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
-  if (!state.slicer || !state.slicer.available) {
-    report("A slicer prepares 3D-print files for your printer. Use Settings > Change slicer to choose one.", true, 8000);
-    return;
-  }
   if (typedSpaceOrdinaryBin() &&
       !(await flushSpaceDesignAutosave({ materialize: target === "bin" || target === "all" }))) return;
   const designRowId = typedSpaceOrdinaryBin() && (target === "bin" || target === "all")
@@ -448,40 +475,60 @@ async function printModelWithReport(target, initiatingButton, report) {
   if (!beginDesignMutation()) return;
   const button = initiatingButton || document.createElement("button");
   const old = button.textContent;
-  const slicerName = state.slicer?.name || "the slicer";
-  button.textContent = "Printing…";
+  button.textContent = "Preparing…";
   setError();
+  const outputFolder = state.browserFolder, outputSpace = state.activeSpaceId;
+  let outputEpoch = null;
+  const requireOutputContext = () => {
+    if (state.browserFolder !== outputFolder || state.activeSpaceId !== outputSpace ||
+        (outputEpoch !== null && WFLocalAPI.designEpoch !== outputEpoch) || state.relocating) {
+      throw new Error("The Space or design changed before the files were saved.");
+    }
+  };
+  const savedNames = result => [...new Set((result.design_files || []).map(file => String(file).split(/[\\/]/).pop())
+    .filter(name => /\.3mf$/i.test(name)))];
+  const requireSameDesign = payload => {
+    DL.requireSpaceContext(designSpaceContext);
+    if (state.designInventoryId !== designRowId ||
+        JSON.stringify(state.design) !== JSON.stringify(payload.design))
+      throw new Error("This bin changed during the print preparation.");
+  };
   try {
     await commitVisibleDraft();
+    requireOutputContext();
+    outputEpoch = WFLocalAPI.designEpoch;
+    // Snapshot of the design, Space identity and selected printer profile.
     const payload = {
       design: clone(state.design),
       output: state.output,
       connector: state.connector,
       target: target,
-      keep_log: designRowId ? false : state.keepLog,
+      keep_log: false,
       design_row_id: designRowId || undefined,
-      // Fix 1069: carry the active Space so direct Print STL in a Storage Box
+      printer_profile: PrinterProfile.current(),
+      printer_profile_configured: PrinterProfile.configured(),
+      // Fix 1069: carry the active Space so direct Print in a Storage Box
       // Space is hard-blocked when the bin/closed stack exceeds the interior Z.
       space: state.folderMode === "space" ? (state.activeSpace ?? null) : null,
     };
-    // R67: only a request. The server reuses the existing Printed file(s)
-    // when it can prove the design is unchanged, else it generates as usual.
-    if (designRowId) {
-      const boundRow = DL.bin(designRowId);
-      if (boundRow?.status === "printed" && String(boundRow.file || "").trim()) payload.reuse_printed_file = true;
-    }
     // Fix 032 Correction 1: same exact resume checkpoint contract as
-    // generateParts() - flush the pre-operation state before sending. If it
-    // cannot be durably saved, stop before /api/print rather than proceed
-    // as though the design would still be recoverable on a failed print.
+    // generateParts() - flush the pre-operation state before building. If it
+    // cannot be durably saved, stop rather than proceed as though the design
+    // would still be recoverable on a failed print.
     if (state.folderMode === "space" && typeof SP !== "undefined") {
       try {
         await SP.flushResumeCheckpoint(payload.design, false);
       } catch (error) {
-        throw new Error(`The current design could not be saved to this Space, so nothing was sent: ${error.message}`);
+        throw new Error(`The current design could not be saved to this Space, so nothing was prepared: ${error.message}`);
       }
     }
-    const progress = startOutputProgress("Printing…", text => report.progress?.(text), report.entry);
+    if (outputFolder?.handle) {
+      payload.inventory_text = await SP.readInventoryFor(outputFolder, { migrate: false });
+      payload.space_metadata_text = await WFFileSystem.readText(outputFolder.handle, FOLDER_METADATA);
+      payload.space_id = outputSpace || undefined;
+    }
+    requireOutputContext();
+    const progress = startOutputProgress("Preparing print file…", text => report.progress?.(text), report.entry);
     let result;
     try {
       result = await apiSideEffect("/api/print", payload, {
@@ -491,31 +538,31 @@ async function printModelWithReport(target, initiatingButton, report) {
     } finally {
       progress.stop();
     }
+    // Write to the selected writable folder, or download. Truthful either way.
+    const saved = await saveGeneratedFiles(result, {
+      ownedStale: designRowId ? staleFileNamesForRow(designRowId) : [], requireCurrent: requireOutputContext,
+    });
+    const where = result.downloaded_archive
+      ? `Downloaded ${result.downloaded_archive}.`
+      : `Saved to ${state.browserFolder?.name || "your download folder"}.`;
     if (result.partial) {
-      // Bin/design files are a real side effect even though connectors or
-      // the slicer step failed after them: never mark this row Printed, and
-      // never bury the truth of what was actually saved.
+      // Files are real even though Print could not finish after them: never
+      // mark this row Printed, and never bury what was actually saved.
       let savedStatusFailed = null;
-      // A reused Printed file was not newly saved; its row stays as it was.
-      if (designSpaceContext && !result.design_reused) {
+      if (designSpaceContext && savedNames(result).length) {
         try {
-          DL.requireSpaceContext(designSpaceContext);
-          if (state.designInventoryId !== designRowId ||
-              JSON.stringify(state.design) !== JSON.stringify(payload.design))
-            throw new Error("This bin changed during the slicer handoff.");
-          const names = [...new Set((result.design_files || []).map(file => String(file).split(/[\\/]/).pop())
-            .filter(name => /\.3mf$/i.test(name)))];
-          const saved = await DL.inventoryCall("/api/drawer/design-source/status", {
-            row_id: designRowId, action: "saved", file: names.join(", "), design: payload.design,
+          requireSameDesign(payload);
+          const status = await DL.inventoryCall("/api/drawer/design-source/status", {
+            row_id: designRowId, action: "saved", file: savedNames(result).join(", "), design: payload.design,
           }, { context: designSpaceContext, sideEffect: true });
-          DL.adopt(saved);
+          DL.adopt(status);
           DL.emit();
         } catch (error) {
           savedStatusFailed = error;
         }
       }
-      const partialMessage = result.error || "Files were saved, but the print could not finish.";
-      setError(partialMessage);
+      const partialMessage = `${result.error || "Files were saved, but the print could not be prepared."}\n${where}\n${saved.join("\n")}`;
+      setError(result.error || partialMessage);
       report(
         savedStatusFailed
           ? `${partialMessage}\n\nSaved status could not be recorded: ${savedStatusFailed.message}`
@@ -525,50 +572,44 @@ async function printModelWithReport(target, initiatingButton, report) {
       );
       return;
     }
+    const fileName = result.handoff?.filename || saved[0];
+    // A final checkpoint failure is reported once, together with the outcome.
+    let checkpointSaveFailed = null;
+    if ((target === "bin" || target === "all") && state.folderMode === "space" && typeof SP !== "undefined") {
+      try {
+        await SP.flushResumeCheckpoint(payload.design, false);
+      } catch (error) {
+        checkpointSaveFailed = error;
+      }
+    }
+    report(`Prepared ${fileName}. ${where}\nNext: open it in Bambu Studio.`, false, 7000);
+    // Prominent next step, with the exact filename and an explicit confirmation.
+    const confirmed = await confirmOpenedInBambuStudio(fileName, where,
+      checkpointSaveFailed ? `The current design could not be saved to this Space: ${checkpointSaveFailed.message}` : "");
+    const printable = target === "bin" || target === "all";
+    if (!confirmed) {
+      report(`${fileName} is saved but not marked Printed. Open it in Bambu Studio, then use Print again to confirm.`, false, 8000);
+      return;
+    }
+    if (!printable) {
+      report(`${fileName} opened in Bambu Studio (confirmed by you).`, false, 5000);
+      return;
+    }
     if (designSpaceContext) {
       try {
-        DL.requireSpaceContext(designSpaceContext);
-        if (state.designInventoryId !== designRowId ||
-            JSON.stringify(state.design) !== JSON.stringify(payload.design))
-          throw new Error("This bin changed during the slicer handoff.");
-        const names = [...new Set((result.design_files || []).map(file => String(file).split(/[\\/]/).pop())
-          .filter(name => /\.3mf$/i.test(name)))];
+        requireSameDesign(payload);
         const printed = await DL.inventoryCall("/api/drawer/design-source/status", {
-          row_id: designRowId, action: "printed", file: names.join(", "), design: payload.design,
+          row_id: designRowId, action: "printed", file: savedNames(result).join(", ") || fileName, design: payload.design,
         }, { context: designSpaceContext, sideEffect: true });
         DL.adopt(printed);
         DL.emit();
       } catch (error) {
-        throw new Error(`Bambu Studio opened, but Printed status could not be recorded: ${error.message}`);
+        throw new Error(`You confirmed ${fileName} was opened, but Printed status could not be recorded: ${error.message}`);
       }
+    } else if (typeof WS !== "undefined") {
+      WS.markLooseBinPrinted();
     }
-    const files = result.files || [];
-    const fileNames = files.map(f => f.split(/[\\/]/).pop());
-    const sentMessage = "Sent " + fileNames.join(", ") + " to " + slicerName;
-    if (!designRowId && (target === "bin" || target === "all") && typeof WS !== "undefined") WS.markLooseBinPrinted();
-    if (target === "bin" || target === "all") {
-      // Fix 032 Correction 2 (C2.3): the slicer handoff already succeeded
-      // by this point, so defer the success toast until after the final
-      // checkpoint attempt and report exactly one message - never the
-      // ordinary success toast followed by a contradicting failure one.
-      let checkpointSaveFailed = null;
-      if (state.folderMode === "space" && typeof SP !== "undefined") {
-        try {
-          await SP.flushResumeCheckpoint(payload.design, false);
-        } catch (error) {
-          checkpointSaveFailed = error;
-        }
-      }
-      report(
-        checkpointSaveFailed
-          ? `${sentMessage}\n\nThe current design could not be saved to this Space: ${checkpointSaveFailed.message}`
-          : sentMessage,
-        Boolean(checkpointSaveFailed),
-        checkpointSaveFailed ? 9000 : 7000,
-      );
-    } else {
-      report(sentMessage, false, 7000);
-    }
+    report(`${fileName} marked Printed after your confirmation.`, Boolean(checkpointSaveFailed), 7000);
   } catch (error) {
     setError(error.message);
     report(error.message, true, 8000);
@@ -611,7 +652,7 @@ function chooseIndividualBinPrint(button) {
   dialog.querySelector('[value="print"]').hidden = exporting;
   $("#individual-bin-print-message").textContent = exporting
     ? "Choose what to include in the files."
-    : "Choose what to send to the slicer.";
+    : "Choose what to include in the print file.";
   dialog.returnValue = "cancel";
   dialog.addEventListener("close", () => {
     if (!["export", "print"].includes(dialog.returnValue)) return;
@@ -625,8 +666,8 @@ function chooseIndividualBinPrint(button) {
 }
 
 function updatePrimaryPrintButtonLabel() {
-  $("#settings-slicer-picker").hidden = Boolean(state.runtime.hosted);
-  $("#print-dialog-slicer-picker").hidden = Boolean(state.runtime.hosted);
+  $("#settings-slicer-picker").hidden = true; // B08: a browser cannot launch a slicer
+  $("#print-dialog-slicer-picker").hidden = true; // B08: a browser cannot launch a slicer
 }
 
 function updateSlicerUI() {
