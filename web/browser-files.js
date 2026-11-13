@@ -67,7 +67,9 @@ window.WFFileSystem = (() => {
   // usable writable directory picker in a secure context, or it does not.
   const supportsDirectoryPicker = () =>
     window.isSecureContext &&
-    typeof window.showDirectoryPicker === "function";
+    typeof window.showDirectoryPicker === "function" &&
+    typeof window.FileSystemDirectoryHandle === "function" &&
+    typeof window.FileSystemFileHandle?.prototype?.createWritable === "function";
 
   // Read-only check. Safe at startup, where there is no user gesture to
   // spend on a permission prompt.
@@ -126,6 +128,7 @@ window.WFFileSystem = (() => {
   // permission must never be reported as "the file is not there", and a
   // metadata/inventory write must never fall through to a download.
   const requireDirectoryHandle = handle => {
+    if (!supportsDirectoryPicker()) throw new Error("This browser cannot save Spaces or autosave folders. Use Windows desktop Chrome/Edge and select the original folder, or import your Space export there.");
     if (!handle) {
       throw new Error("Inventory and Spaces need access to a writable folder.");
     }
@@ -155,6 +158,7 @@ window.WFFileSystem = (() => {
   // inventory writes go through writeText(), which requires a real handle.
   const writeBlob = async (handle, filename, blob) => {
     if (!handle) return download(blob, filename);
+    requireDirectoryHandle(handle);
     if (!(await requestReadWritePermission(handle))) throw new Error("Wavefinity needs permission to save in that folder.");
     const file = await handle.getFileHandle(filename, { create: true });
     const writable = await file.createWritable();

@@ -678,6 +678,7 @@ async function browseSlicer(button) {
   if (button) button.disabled = true;
   try {
     const result = await api("/api/browse-slicer-path", { current: state.slicer?.path });
+    if (result.message) toast(result.message, false, 10000);
     if (result.slicer_path) {
       const name = result.slicer_path.split(/[\\/]/).pop().replace(/\.exe$/i, "");
       if (!/bambu|orca/i.test(name)) {
@@ -882,6 +883,15 @@ async function showAboutDialog() {
   } catch (err) {
     content.textContent = "Could not load brochure: " + err.message;
   }
+  const capabilities = document.createElement("p");
+  capabilities.textContent = "Browser edition: geometry, meshes and folder files stay on this PC. Invoking AI sends your prompt and design/Space descriptors to your chosen provider. Direct chat needs your own session key and provider browser permission. Manual copy/paste is always available. Spaces and autosave need writable folder handles; unsupported browsers offer temporary previews and downloads only. Print prepares a 3MF for you to open in Bambu Studio; a browser cannot launch it or open a server log.";
+  content.prepend(capabilities);
+  const recovery = document.createElement("button");
+  recovery.type = "button";
+  recovery.className = "button secondary";
+  recovery.textContent = "Space / preferences recovery";
+  recovery.onclick = () => SP.showBrowserRecovery();
+  content.append(recovery);
 }
 
 function renderSimpleMarkdown(md) {

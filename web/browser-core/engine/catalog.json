@@ -160,7 +160,7 @@
     "unit_mm": 7.0
   },
   "base_unit": 7.0,
-  "build": "02e5da371fcaed3c0f856d4475fd84fa918561e63fd12f445f8b7f405a401a62",
+  "build": "f90292066d5fabe9d25868ad1575c75ebd74cff1cb734933888c6d2f57be4b5c",
   "connector_rules": {
     "arm_thickness_floor_mm": 0.77,
     "arm_thickness_mm": 1.0,
@@ -192,8 +192,10 @@
         "accent_band": false,
         "accent_color": "blue",
         "base_thickness": 0.8,
+        "corner_feet": false,
         "corner_fillet": 0.6,
         "flat_inside": 0.0,
+        "hollow_base": true,
         "magnet_holes": "none",
         "standard_base": true,
         "standard_walls": true,

@@ -95,4 +95,4 @@ SP.snap = mm => {
 };
 
 SP.hasFolder = () => Boolean(state.folderSelected);
-SP.canPersistSpace = () => !state.runtime.hosted || Boolean(state.browserFolder?.handle);
+SP.canPersistSpace = () => Boolean(window.WFFileSystem?.supportsDirectoryPicker() && state.browserFolder?.handle);

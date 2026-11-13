@@ -8,10 +8,10 @@ import math
 import os
 import re
 from typing import Any
-from organizer_inserts import FEATURE_DEFINITIONS
+from organizer_inserts import FEATURE_DEFINITIONS, Feature, Layout
 from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED
 
-from organizer_engine import GRID_PITCH
+from organizer_engine import GRID_PITCH, BoxSpec
 from organizer_engine._specs import validate_grid, cross_grid_message, grid_hinged_lid_refusal
 from ._runtime import default_design
 from ._designs import _is_base_trim_design, validate_design_payload
@@ -83,9 +83,9 @@ def ai_context_grid(candidate: Any, grid: str) -> dict[str, Any]:
 
 # ---------------------------------------------------------------- AI Help (Fix 073)
 #
-# Wavefinity never calls an AI provider. This section only builds the prompt a
-# person pastes into any outside AI, and proves a pasted answer is a legal
-# ordinary bin before the browser installs it. Nothing here is stored: the
+# These local helpers never call an AI provider. Browser-direct BYOK calls
+# belong to ai-providers.js; manual copy/paste remains available. This module
+# builds prompts and proves answers are legal ordinary bins. Nothing is stored:
 # request ID / fingerprint are opaque, and the browser owns the runtime session.
 
 AI_DESIGN_SCHEMA = "wavefinity-ai-design-v1"
@@ -505,6 +505,7 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "=== END USER REQUEST ===",
         "",
         "=== HOW TO WORK ===",
+        "- Browser AI Help uses the person's chosen provider and session key where browser access is permitted, or manual copy/paste. This prompt and its design/Space descriptors are shared with that provider; geometry, meshes and folder files remain on the PC. Never request or return API keys. Unsupported browsers offer temporary previews/downloads without Space autosave; recovery is the same site in Windows desktop Chrome/Edge with the original folder or a Space/preferences export. Browser handles/data do not transfer automatically.",
         "- Design exactly ONE object. If the request describes several, ask the person to narrow it to one BEFORE giving the final answer.",
         "- In the browser edition the person chooses the writable folder. Do not return local paths, folder handles, export URLs or preferences, or claim a design has been saved. Export prepares files locally for the chosen folder or a download (multiple downloaded files are together in a ZIP). Autosave requires granted folder access; folderless designs and imported recovery data need explicit export for a portable copy.",
         "- Browser drawer Print prepares a local 3MF for the person to open in Bambu Studio. Printed changes only after explicit confirmation for the same Space and unchanged design/inventory, never after saving or downloading alone. There is no persistent Prepared state. Never claim automatic slicer launch or set inventory print status in an AI design response.",
@@ -690,3 +691,290 @@ def ai_repair_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "and a complete Wavefinity ordinary-bin \"design\" that fixes the problem above.",
     ])
     return {"prompt": prompt}
+
+
+# Shared canonical payloads; callers supply saved-record, catalog and preview
+# owners so browser code never imports the HTTP server or its filesystem state.
+import secrets
+from organizer_app import LABEL_POSITIONS, base_height
+from organizer_inserts import layout_zone
+from organizer_inserts._bore import bore_reference_top
+from ._runtime import _interior_work_box
+from ._designs._preview import _design
+from ._designs._features import default_feature_payload
+
+def ai_capability_manifest(grid: str = "wavefinity", *, catalog_payload) -> dict[str, Any]:
+    """The AI's authoritative list of what it may put in a design.
+
+    Everything is read from the catalog, the feature registry, rule constants and
+    the canonical serializer - there is no second copy of any range or choice.
+    """
+    catalog = catalog_payload()
+    grid_rules = next(row for row in catalog["grids"] if row["value"] == grid)
+    base = _ai_example_base()
+    features: list[dict[str, Any]] = []
+    for part in catalog["parts"]:
+        if (not part["palette_visible"] and part["kind"] != "pocket") or "box_modifier" in part["capabilities"]:
+            continue
+        entry: dict[str, Any] = {
+            "kind": part["kind"], "title": part["title"],
+            "description": part["description"],
+            "capabilities": part["capabilities"],
+        }
+        if any(cap in AI_MEDIA_CAPABILITIES for cap in part["capabilities"]):
+            entry["ai"] = "recommend_only"
+            entry["reason"] = AI_MEDIA_REASON
+        else:
+            entry["ai"] = "configurable"
+            starter = default_feature_payload({"design": base, "kind": part["kind"]})
+            labels = {one["key"]: one["label"] for one in part["fields"]}
+            entry["options"] = [
+                {**option, **({"label": labels[option["key"]]} if option["key"] in labels else {}),
+                 "legal_values": _ai_legal_values(option)}
+                for option in part["options"]
+                if not option.get("internal") and not option.get("legacy")
+            ]
+            entry["generic_fields"] = _ai_generic_fields(part, starter["feature"], catalog["item_rules"])
+
+            # What Wavefinity fills in for a blank option in the example bin.
+            entry["resolved_defaults"] = starter["resolved_options"]
+            entry["example"] = starter["feature"]
+        features.append(entry)
+    examples = _ai_modifier_examples()
+    modifier_examples = {
+        "accent_band": examples["accent_band"],
+        "lid_stacking": {
+            "stackable_bin": examples["stackable_bin"],
+            "lid_with_handle": examples["lid_with_handle"],
+        },
+        "inside_handles": examples["inside_handles"],
+        "side_openings": examples["side_openings"],
+        "edge_mount": examples["edge_mount"],
+    }
+    modifier_rules = {
+        "accent_band": {
+            "accent_band": {"type": "boolean", "default": False},
+            "accent_color": {"default": "blue", "choices": [
+                "blue", "red", "green", "yellow", "orange", "purple", "white", "black",
+            ]},
+            "band_height_mm": 1.0, "filament_slot": 2, "body_only": True,
+        },
+        "lid_stacking": {
+            "lid_rules": catalog["lid_rules"], "stack_rules": catalog["stack_rules"],
+        },
+        "inside_handles": {"lift_grabbers": catalog["lift_grabbers"]},
+        "side_openings": {"side_openings": catalog["side_openings"]},
+        "edge_mount": {"edge_mount": catalog["edge_mount"]},
+    }
+    modifiers = [
+        {
+            "kind": kind, "title": title, "description": description,
+            "design_paths": list(paths), "ai": "configurable",
+            "rules": modifier_rules[kind], "example": modifier_examples[kind],
+        }
+        for kind, title, description, paths in AI_MODIFIER_BLOCKS
+    ]
+    if grid != "wavefinity":
+        modifiers = [row for row in modifiers if row["kind"] != "edge_mount"]
+        openings = next(row for row in modifiers if row["kind"] == "side_openings")
+        openings["rules"] = {"side_openings": catalog["side_openings"], "grid": grid_rules}
+        openings["example"] = {"side_openings": {"enabled": True, "shape": "square",
+                              "sides": ["front"], "size": "small", "percent_mode": "inset_v2",
+                              "from_bottom_percent": 0, "from_top_percent": 0}}
+        stacking = next(row for row in modifiers if row["kind"] == "lid_stacking")
+        stacking.update(
+            description="Stackable rim: box.stack.mode=direct without a lid; or Gridfinity Lid, optionally with stack_rim=true. No hinged, handle or label variants; no side connectors. All heights use whole 7 mm units.",
+            rules={"grid": grid_rules},
+            example={"stackable_rim": {"box.stack": {"mode": "direct"}},
+                     "grid_lid": {"box.lid": {"enabled": True, "stack_rim": True,
+                                                "flip_enabled": False, "handle_enabled": False,
+                                                "label_enabled": False}}})
+    return {
+        "features": features,
+        "box_modifiers": modifiers,
+        "bin_controls": {
+            "grid_choices": catalog["grids"],
+            "active_grid": grid_rules,
+            "units_are": "millimetres",
+            "base_unit_mm": grid_rules["pitch_mm"],
+            "max_box_size_mm": catalog["max_box_size"],
+            "min_height_above_base_mm": catalog["min_height_above_base_mm"],
+            "ordinary_bin_min_height_mm": catalog["drawer_rules"]["ordinary_bin_min_height_mm"],
+            "wall_rules": catalog["wall_rules"],
+            "base_rules": catalog["base_rules"],
+            "scoop_rules": catalog["scoop_rules"],
+            "layout_modes": catalog["modes"],
+            "label_positions": list(LABEL_POSITIONS),
+            "design_fields": {
+                "grid": "the selected context grid from grid_choices; choose it in the standalone editor before AI Design",
+                "box.x / box.y": "footprint, whole multiples of base_unit_mm",
+                "box.z": "height in whole millimetres" if grid == "wavefinity" else "height in whole 7 mm units, satisfying the floor/rim/lid minimum",
+                "box.wall / box.base_thickness": "use the wall_rules / base_rules choices",
+                "scoop": "true adds the front finger scoop (also available as an interior part)",
+                "label / label_position": "rim ledge label text and its side",
+                "part_name": "the bin name",
+            },
+        },
+        "setting_interactions": catalog["setting_interactions"],
+        "space_restrictions": {
+            "drawer": "X/Y must fit the drawer opening in whole base units; height must not exceed the drawer height.",
+            "box": "Height must not exceed the Space height; X/Y must fit the Space.",
+            "portable": "Height must not exceed the Space height; X/Y must fit the Space.",
+            "storage_drawers": "The Space values are the selected physical drawer's usable X/Y/height; the bin must fit inside it. Never design or return cabinet structure.",
+            "surface": "Base thickness and base mode are Space-controlled; keep them exactly as given.",
+            "pegboard": "Keep box.pegboard exactly as given (it is the Space's mounting); stay at or above the pegboard minimum height.",
+            "pegboard_rules": catalog["pegboard_rules"],
+        },
+        "never_offer": [
+            "Storage Box designs (box.b4b) or Base Trim designs (design_kind = base_trim)",
+            "Photo Nest / traced contours (recommend only)",
+            "hidden, internal or legacy-only part kinds other than Pocket",
+        ],
+    }
+
+
+def ai_prompt_payload(payload: dict[str, Any], *, read_inventory, catalog_payload) -> dict[str, Any]:
+    description = payload.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("Describe the object first.")
+    description = description.strip()
+    if len(description) > AI_MAX_DESCRIPTION:
+        raise ValueError(f"Keep the description under {AI_MAX_DESCRIPTION} characters.")
+    _current, stored_space = read_inventory(payload)
+    from wavefinity_web_impl._ai import ai_context_grid
+    context_grid = _editor_context_grid(payload, stored_space)
+    stored_space = _ai_grid_space(payload, _current, stored_space)
+    design, checkable = _ai_baseline_design(ai_context_grid(payload.get("design"), context_grid))
+    space = _ai_space_context(stored_space)
+    space["grid"] = context_grid
+    request_id = "wf-ai-" + secrets.token_hex(6)
+    fingerprint = _ai_fingerprint(design, space)
+    box, layout, *_ = _design(checkable)
+    bounds = layout_zone(box, layout.mode)
+    # Fix 078: existing Inventory names are advisory context only for the
+    # prompt, so they are added after the fingerprint - an unrelated
+    # Inventory change must not make an otherwise-current prompt go stale.
+    raw_names = payload.get("existing_names")
+    existing_names = [str(name).strip()[:80] for name in raw_names
+                       if isinstance(name, str) and name.strip()][:200] if isinstance(raw_names, list) else []
+    context = {
+        **space,
+        "space_controlled_fields": _ai_controlled_fields(space),
+        "current_baseline_layout_bounds_mm": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
+        "interior_margin_mm": [round(box.x - bounds.width, 3), round(box.y - bounds.depth, 3)],
+        "base_unit_mm": next(row["pitch_mm"] for row in catalog_payload()["grids"] if row["value"] == context_grid),
+        "existing_bin_names": existing_names,
+    }
+    prompt = _ai_prompt_text(
+        description, request_id, fingerprint, context, ai_capability_manifest(context_grid, catalog_payload=catalog_payload), design)
+    return {"request_id": request_id, "context_fingerprint": fingerprint, "prompt": prompt}
+
+
+def ai_candidate_payload(payload: dict[str, Any], *, read_inventory, preview_payload) -> dict[str, Any]:
+    """Prove an AI design in the real geometry path without changing anything.
+
+    A semantic preflight against the manifest's public-control contract runs
+    first, on the raw candidate, then canonical validation, structural/media
+    rejection, and finally the exact preview owner. The preview rides its own
+    client lane so it can never supersede, or be superseded by, the Designer's
+    own preview requests.
+    """
+    violation = _ai_semantic_violation(payload.get("design"))
+    if violation:
+        raise ValueError(f"That design is not legal: {violation}.")
+    from wavefinity_web_impl._ai import ai_context_grid
+    _current, stored_space = read_inventory(payload)
+    candidate = ai_context_grid(payload.get("design"), _editor_context_grid(payload, stored_space))
+    stored_space = _ai_grid_space(payload, _current, stored_space)
+    canonical = _ai_bin_design(candidate)
+    request: dict[str, Any] = {"design": canonical}
+    if isinstance(payload.get("client_id"), str):
+        request["client_id"] = payload["client_id"]
+        request["generation"] = payload.get("generation")
+    try:
+        preview = preview_payload(request)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(_ai_safe_message(error)) from None
+    if preview.get("superseded"):
+        return {"superseded": True}
+    problems = [
+        text for text in (
+            preview.get("message"), *preview.get("feature_errors", []), preview.get("draft_error"),
+        ) if text
+    ]
+    if not preview.get("fits") and not problems:
+        problems.append("The design does not fit.")
+    if not problems:
+        cap_problem = _ai_space_cap_violation(preview["design"], stored_space)
+        if cap_problem:
+            problems.append(cap_problem)
+    return {"design": preview["design"], "preview": preview, "problems": problems}
+
+
+def _capped_bore_violation(
+    box: BoxSpec, layout: Layout, features: list[Feature] | tuple[Feature, ...], cap_z: float,
+) -> tuple[int, float] | None:
+    """Evaluate Bore objects against the same physical body used by preview."""
+    physical_box = _interior_work_box(box)
+    base_z = base_height(physical_box, layout.mode)
+    for index, feature in enumerate(features):
+        if feature.kind != "bore" or feature.item is None:
+            continue
+        try:
+            top = bore_reference_top(physical_box, feature, base_z)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if top > cap_z + 1e-6:
+            return index, top
+    return None
+
+
+def _ai_space_cap_violation(design: dict[str, Any], raw_space: Any) -> str | None:
+    """Fix 078: in a capped Space (Drawer/Storage Box), no Bore-held object's
+    highest point may exceed the Space's own ``z`` - a hard legality rule, not
+    merely the ~30 mm grip preference. Uncapped Spaces (Surface/Pegboard) and
+    no active Space never gain an artificial ceiling here.
+    """
+    space = _ai_space_context(raw_space)
+    if not space.get("capped"):
+        return None
+    cap_z = _capped_space_height(raw_space)
+    if cap_z is None:
+        return None
+    try:
+        box, layout, *_ = _design(design)
+    except (KeyError, TypeError, ValueError):
+        return None
+    violation = _capped_bore_violation(box, layout, layout.features, cap_z)
+    if violation is not None:
+        _index, object_top_z = violation
+        return (
+            f"a Bore-held object's top would reach {object_top_z:.3f} mm, above this "
+            f"capped Space's {cap_z:.3f} mm ceiling; use a shorter bin and/or a shallower "
+            "insertion depth so useful grip stays below the cap"
+        )
+    return None
+
+
+def _editor_context_grid(payload: dict, space: dict | None) -> str:
+    from organizer_engine._specs import validate_grid
+    if isinstance(space, dict):
+        return validate_grid(space.get("grid", "wavefinity"))
+    if isinstance(payload.get("space"), dict) and payload["space"].get("kind"):
+        raise ValueError("Open the saved Space before generating an AI bin for it.")
+    return validate_grid(payload.get("editor_grid", payload.get("grid", "wavefinity")))
+
+
+def _ai_grid_space(payload: dict, current: dict, space: dict | None) -> dict | None:
+    if not isinstance(space, dict):
+        return None
+    result = dict(space)
+    if space.get("kind") == "storage_drawers":
+        from organizer_storage.drawers import storage_drawers_active_limits
+        result.update(storage_drawers_active_limits(space, (current.get("layout") or {}).get("active")))
+    if space.get("kind") == "pegboard" and isinstance(payload.get("space"), dict):
+        # Existing board-specific starter hints are independent of grid identity.
+        result.update({key: payload["space"][key] for key in ("min_x", "min_z") if key in payload["space"]})
+    return result
+
+

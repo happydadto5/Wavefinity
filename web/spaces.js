@@ -13,9 +13,10 @@ const startSpaces = async () => {
     SP.wire();
     // The routing decision - saved folder / Welcome / Resume / setup - is
     // made first, behind the startup cover the initial HTML already shows.
-    await SP.launch();
+    if (!window.WFFileSystem?.supportsDirectoryPicker()) SP.showFolderAccessNeeded("unsupported");
+    else await SP.launch();
     // Fix 116: launch routing is settled, so folder access is now known.
-    try { SP.showFolderAccessNoticeIfNeeded(); } catch (_error) { /* the notice is optional */ }
+    try { if (WFFileSystem.supportsDirectoryPicker()) SP.showFolderAccessNoticeIfNeeded(); } catch (_error) { /* the notice is optional */ }
   } finally {
     // Single owner of successful cover dismissal, so the bare Design UI never
     // flashes between routing states - and an unexpected startup error can

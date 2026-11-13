@@ -29,10 +29,7 @@ SP.beginCreateNew = () => {
   // cannot survive an unsupported-browser message.
   SP.clearSetupContext();
 
-  if (
-    state.runtime.hosted &&
-    !window.WFFileSystem?.supportsDirectoryPicker()
-  ) {
+  if (!window.WFFileSystem?.supportsDirectoryPicker()) {
     SP.showFolderAccessNeeded("unsupported");
     return;
   }
@@ -528,6 +525,7 @@ SP.refreshSetupError = event => {
 };
 
 SP.create = async () => {
+  if (!window.WFFileSystem?.supportsDirectoryPicker()) return SP.showFolderAccessNeeded("unsupported");
   if (SP.isUpdate) return SP.updateSpace();
   // Fix 1019: hard preflight - the app cannot run without DP (drawer-panel.js
   // failed to load), so fail HERE: before the folder picker, before the

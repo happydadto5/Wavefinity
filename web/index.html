@@ -672,7 +672,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <dialog id="suggestions-dialog" class="support-layout-dialog suggestions-dialog" aria-labelledby="suggestions-title">
     <h2 id="suggestions-title">Suggestions</h2>
-    <p>Your submission will be posted publicly on GitHub.</p>
+    <p>Prepare a suggestion or bug report as a local text download. Nothing is posted online.</p>
     <form id="suggestions-form">
       <label>What would you like to share?
         <select name="kind" required><option value="">Choose one</option><option value="bug">Bug report</option><option value="suggestion">Suggestion</option></select>
@@ -680,9 +680,9 @@
       <label>Title<input name="title" required maxlength="200"></label>
       <label>Description<textarea name="description" required maxlength="8000" rows="7"></textarea></label>
       <p id="suggestions-status" role="status" aria-live="polite"></p>
-      <div class="button-row"><button id="suggestions-close" class="button secondary" type="button">Close</button><button id="suggestions-submit" class="button primary" type="submit">Submit</button></div>
+      <div class="button-row"><button id="suggestions-close" class="button secondary" type="button">Close</button><button id="suggestions-submit" class="button primary" type="submit">Download suggestion</button></div>
     </form>
-    <div id="suggestions-result" hidden><p>Created issue <a id="suggestions-link" target="_blank" rel="noopener noreferrer"></a>.</p><p>Decisions and progress are posted on the issue. Watch it on GitHub to hear about them.</p><div class="button-row"><button id="suggestions-done" class="button primary" type="button">Close</button></div></div>
+    <div id="suggestions-result" hidden><p>Suggestion downloaded as a text file on your PC. Nothing was submitted online.</p><div class="button-row"><button id="suggestions-done" class="button primary" type="button">Close</button></div></div>
   </dialog>
 
   <dialog id="support-layout-dialog" class="support-layout-dialog" aria-labelledby="support-layout-dialog-title">
@@ -697,21 +697,28 @@
   <dialog id="ai-help-dialog" class="support-layout-dialog ai-help-dialog" aria-labelledby="ai-help-title">
     <h2 id="ai-help-title">AI Design</h2>
     <div id="ai-connection-offer" hidden>
-      <p>Use AI Design by copying and pasting with your usual chat tool, with nothing to set up. Or connect your own AI service or local model so Wavefinity can send the prompt and receive the design.</p>
+      <p>Copy and paste with your usual chat tool, or connect your own browser-compatible HTTPS AI provider. Direct requests start only when you choose Test connection or Ask my AI.</p>
       <button type="button" id="ai-connection-configure" class="button secondary">Configure automatic AI</button>
       <button type="button" id="ai-connection-later" class="button secondary">Not now</button>
     </div>
     <div id="ai-connection-form" hidden>
+      <label class="ai-help-field">Provider adapter <select id="ai-connection-provider"><option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic Messages</option><option value="gemini">Gemini generateContent</option></select></label>
       <label class="ai-help-field">Connection name <input id="ai-connection-name" type="text"></label>
-      <label class="ai-help-field">Endpoint base URL <input id="ai-connection-url" type="url" placeholder="http://api.example.com:PORT/v1"></label>
-      <label class="ai-help-field">API key (optional) <input id="ai-connection-key" type="password" autocomplete="off"></label>
+      <label class="ai-help-field">Endpoint base URL <input id="ai-connection-url" type="url" placeholder="https://api.openai.com/v1"></label>
+      <p>Base URLs: OpenAI https://api.openai.com/v1; Anthropic https://api.anthropic.com/v1; Gemini https://generativelanguage.googleapis.com/v1beta.</p>
+      <label class="ai-help-field">Your API key (session memory only) <input id="ai-connection-key" type="password" autocomplete="off"></label>
       <label class="ai-help-field">Model name <input id="ai-connection-model" type="text"></label>
+      <p>Browser scripts, extensions and developer tools may expose your key. Use a dedicated key with limited billing where available; provider usage can cost money. Keys are cleared on reload/close; only non-secret connection settings are saved. Revoke an exposed key at your provider.</p>
+      <label><input id="ai-connection-browser-access" type="checkbox"> I confirm my provider permits browser access with this credential, and accept its billing and key exposure.</label>
+      <label><input id="ai-connection-trust" type="checkbox"> For a custom endpoint, I separately trust the exact HTTPS host entered above to receive my key and prompts.</label>
       <p id="ai-connection-status" role="status"></p>
       <button type="button" id="ai-connection-test" class="button secondary">Test connection</button>
       <button type="button" id="ai-connection-save" class="button primary">Save</button>
+      <button type="button" id="ai-connection-clear" class="button secondary">Clear session key</button>
       <button type="button" id="ai-connection-cancel" class="button secondary">Cancel</button>
     </div>
     <button type="button" id="ai-connection-edit" class="button secondary" hidden>AI connection settings</button>
+    <p>When you invoke AI, your prompt and design/Space descriptors go to your chosen provider. Geometry generation, meshes and folder files stay on this PC. CORS or organization policy may block direct chat; manual copy/paste remains available. Wavefinity supplies no provider key or proxy.</p>
     <p class="ai-help-guide">
       <span>Describe object</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
       <span>Generate Prompt</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
@@ -744,7 +751,7 @@
       <textarea id="ai-help-response" rows="5" placeholder="Paste the AI's reply here"></textarea>
     </label>
     <p id="ai-help-status" class="ai-help-status" role="status" hidden></p>
-    <div id="ai-help-failure-actions" class="button-row ai-help-row" hidden>
+    <div id="ai-help-failure-actions" class="button-row ai-help-row">
       <button id="ai-help-paste-manual" type="button" class="button secondary">Paste the answer manually</button>
       <button id="ai-help-open-connection" type="button" class="button secondary">AI connection settings</button>
     </div>
@@ -960,6 +967,8 @@
         <p id="space-unsupported-detail">
           You can still design and download parts normally. Inventory and Spaces require a browser that supports writable folder access.
         </p>
+        <p>Recovery: open this same site in Windows desktop Chrome/Edge and select your original folder, or import a Wavefinity Space/preferences export there. Folder handles and browser data do not transfer automatically between browsers, profiles or origins. Temporary previews and Blob downloads have no Space autosave; reload/close may lose unsaved work.</p>
+        <button type="button" class="button secondary" data-browser-recovery>Space / preferences recovery</button>
         <div class="welcome-actions"><button id="space-unsupported-close" class="button primary" type="button">Keep designing</button></div>
       </div>
 

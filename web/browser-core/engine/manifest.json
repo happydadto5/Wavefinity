@@ -1,10 +1,10 @@
 {
   "archive": "canonical.zip",
-  "bytes": 721042,
+  "bytes": 732314,
   "catalog": {
     "schema": "wavefinity-browser-catalog/1",
-    "sha256": "4b6c66bf421ad66f7f54aae10278087947e8127a468bd098b0e7d4f0fb9fd92d",
-    "source_sha256": "02e5da371fcaed3c0f856d4475fd84fa918561e63fd12f445f8b7f405a401a62"
+    "sha256": "5fa7456f9223e349350d1bd0e77abc01fccefafb313f07bfd46aec1b5f0f7980",
+    "source_sha256": "f90292066d5fabe9d25868ad1575c75ebd74cff1cb734933888c6d2f57be4b5c"
   },
   "external_imports": [
     "PIL",
@@ -27,7 +27,7 @@
     "photo_nest": "B12 integrates the bundled cv2/Pillow browser packages"
   },
   "schema": "wavefinity-browser-engine/1",
-  "sha256": "a79c6cbeea833ce929af31c641ec60cbc6be8dfa9707274d517b8ad54b2b71c0",
+  "sha256": "b6fdee19cd251d1bf27d22629828589bfafa845088d146b65fb90ca67d287e31",
   "size_accounting": {
     "assets": {
       "earcut/LICENSE": {
@@ -39,8 +39,8 @@
         "gzip_bytes": 5821
       },
       "engine/canonical.zip": {
-        "bytes": 721042,
-        "gzip_bytes": 712217
+        "bytes": 732314,
+        "gzip_bytes": 723387
       },
       "manifold64/LICENSE": {
         "bytes": 11558,
@@ -177,8 +177,8 @@
     },
     "planning_target_bytes": 67108864,
     "scope": "Entire B02 vendor tree and canonical.zip; excludes future UI/worker assets and manifest JSON. gzip totals are build encoding sizes, not observed network transfer. Hosting compression/traffic allowance is not established here.",
-    "total_bytes": 58731041,
-    "total_gzip_bytes": 51044755,
+    "total_bytes": 58742313,
+    "total_gzip_bytes": 51055925,
     "within_planning_target": true
   },
   "source_hash_mode": "UTF-8 without BOM, LF line endings",
@@ -209,8 +209,8 @@
       "source": "organizer_app_impl/_common.py"
     },
     "organizer_app_impl/_design_io.py": {
-      "bytes": 57707,
-      "sha256": "ff2428a7b4b679643239824a3bcbe2ef79acbdec5d5a94d5a9f2beb5f2216489",
+      "bytes": 57888,
+      "sha256": "b60f6bb16781528c767b752b04558996246862cbe39b7ecc4541c47cd38d9058",
       "source": "organizer_app_impl/_design_io.py"
     },
     "organizer_app_impl/_filenames.py": {
@@ -369,8 +369,8 @@
       "source": "organizer_engine/_lift_grabbers.py"
     },
     "organizer_engine/_specs.py": {
-      "bytes": 50561,
-      "sha256": "d7c4b579e19dae900ddcf357ea94911cd723dab81bce85bf65db80e32202b8ba",
+      "bytes": 50846,
+      "sha256": "5e37dc1c8f94f1b2dbd4f484608da271052cd33aa4c5ee692707f18f4cfa5378",
       "source": "organizer_engine/_specs.py"
     },
     "organizer_engine/_wave.py": {
@@ -394,8 +394,8 @@
       "source": "organizer_features/edge_mount.py"
     },
     "organizer_features/gridfinity.py": {
-      "bytes": 25300,
-      "sha256": "d78702680d5463aabc2e0db23bbd875d3c3186c3ee56372ed28ea745ef156506",
+      "bytes": 30624,
+      "sha256": "9b2c13cb8cf9688471c84d64b324788a4decb0f209b9c88d8483812b5d577225",
       "source": "organizer_features/gridfinity.py"
     },
     "organizer_features/lid_handle.py": {
@@ -699,8 +699,8 @@
       "source": "wavefinity_web_impl/__init__.py"
     },
     "wavefinity_web_impl/_ai.py": {
-      "bytes": 43276,
-      "sha256": "c55ee6fb4a1242faf2fe8dddef6138e33581a3614db7fb47ddcbb9d2b0c08d29",
+      "bytes": 59203,
+      "sha256": "3c673044df8e559e94d8d95b240e8d6aa6fb4e90cc32b14ae18930b541e1f33d",
       "source": "wavefinity_web_impl/_ai.py"
     },
     "wavefinity_web_impl/_catalog.py": {
@@ -753,19 +753,24 @@
       "sha256": "abc8590100e17b95d5d3689a42d2e8940f7caa97a68e7ad95456d61901311b43",
       "source": "web/browser-core/engine/__init__.py"
     },
+    "wf_browser_core/ai_routes.py": {
+      "bytes": 854,
+      "sha256": "e547c2cc144624bc5293a619bbfb080a709dea1f14dffd88faa39fac8e28426a",
+      "source": "web/browser-core/engine/ai_routes.py"
+    },
     "wf_browser_core/build_outputs.py": {
       "bytes": 11005,
       "sha256": "bfdef436c1181a3aeead340b68ef5edaa941ee00576222bf85e456687c40a058",
       "source": "web/browser-core/engine/build_outputs.py"
     },
     "wf_browser_core/catalog.json": {
-      "bytes": 69746,
-      "sha256": "4b6c66bf421ad66f7f54aae10278087947e8127a468bd098b0e7d4f0fb9fd92d",
+      "bytes": 69805,
+      "sha256": "5fa7456f9223e349350d1bd0e77abc01fccefafb313f07bfd46aec1b5f0f7980",
       "source": "web/browser-core/engine/catalog.json"
     },
     "wf_browser_core/catalog_manifest.json": {
       "bytes": 12217,
-      "sha256": "b076310436e9f6da4e797c3d5dad294279bf1807c04b534401f2b34e0ac4dbac",
+      "sha256": "107bb4e3d7c625b9833261dd68bc23c71c8582f70b5ecdcf0c870871a8d1c0d6",
       "source": "web/browser-core/engine/catalog_manifest.json"
     },
     "wf_browser_core/drawer_routes.py": {
@@ -782,6 +787,11 @@
       "bytes": 5290,
       "sha256": "d3f1c4235515886ca83386b38f49c1b22aa2b00f4073f791231fdd8204c1dd6a",
       "source": "web/browser-core/engine/manifold_bridge.py"
+    },
+    "wf_browser_core/nest_routes.py": {
+      "bytes": 1434,
+      "sha256": "0779c5e3b204f4f16b07389562b983d3f4d7edbebc52ff441d829b2b4d858324",
+      "source": "web/browser-core/engine/nest_routes.py"
     },
     "wf_browser_core/plate_layout.py": {
       "bytes": 15476,
@@ -804,14 +814,19 @@
       "source": "web/browser-core/engine/route_dispatch.py"
     },
     "wf_browser_core/route_manifest.json": {
-      "bytes": 101744,
-      "sha256": "4faac725389d4ba61e950366a86eaf30da006e4c441f9422ce85497ff9199047",
+      "bytes": 101576,
+      "sha256": "bb3388dc0574b5aaa20e05bad86325fbeab6b7af2eaba4c32a79c5030c16a060",
       "source": "web/browser-core/contracts/route-manifest.json"
     },
     "wf_browser_core/space_values.py": {
       "bytes": 5447,
       "sha256": "074fc186890661f4e45c0f03a7370305f208b6e5253f79ceb689e9090f56ba5c",
       "source": "web/browser-core/engine/space_values.py"
+    },
+    "wf_browser_core/structural_routes.py": {
+      "bytes": 15355,
+      "sha256": "6bc621dc9d0f6b18f76370e9641d8c01253cb85447bb76593f82b41fb17d5511",
+      "source": "web/browser-core/engine/structural_routes.py"
     },
     "wf_browser_core/three_mf.py": {
       "bytes": 22170,

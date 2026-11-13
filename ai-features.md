@@ -1,5 +1,17 @@
 # Wavefinity AI Feature Reference
 
+Browser AI Help supports optional direct chat with the person's own session
+key for OpenAI-compatible, Anthropic or Gemini providers that permit browser
+access. Manual copy/paste is always available. Invoking AI shares the prompt
+and design/Space descriptors with the chosen provider; geometry, meshes and
+folder files remain on the PC. Never request or return credentials in an AI
+design response. Unsupported browsers have temporary previews/downloads
+only, with no Space autosave. Recovery means opening the same site in Windows
+desktop Chrome/Edge and selecting the original folder, or importing a saved
+Space/preferences export there; no automatic cross-browser transfer exists.
+B14 still owns final route assembly. See
+[browser capabilities](docs/static-capability-differences.md).
+
 Ordinary Gridfinity bins may set `box.corner_feet` to `true` (default `false`)
 to use only corner-cell feet with wavy floor supports. Magnet pockets then occur
 only in those feet. `box.hollow_base` controls whether the feet are hollow.

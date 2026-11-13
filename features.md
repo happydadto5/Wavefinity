@@ -1,5 +1,17 @@
 # Wavefinity Feature Catalog
 
+B13 adds browser-direct AI Help using the person's own OpenAI-compatible,
+Anthropic or Gemini credential where the provider permits browser access.
+Keys stay in session memory with a clear control; only non-secret connection
+settings persist. The UI explains key exposure, provider billing and prompt/
+design descriptor sharing. Manual copy/paste, candidate validation, repair,
+Modify Current Bin and Generate as New Bin remain available. Unsupported
+browsers get a pre-Space capability gate, temporary preview/download notices
+and explicit original-folder or Space/preferences export recovery controls.
+Suggestions become local text downloads; slicer/log actions explain browser
+limits and Print remains intact. Final route assembly/deployment belongs to
+B14. See [browser capabilities and recovery](docs/static-capability-differences.md).
+
 Ordinary 21 mm and 42 mm Gridfinity bins offer **Hollow base**, on by default.
 Their feet have open undersides with wavy supports and retain the existing
 magnet pockets when selected. Turn it off for solid feet and base. Physical

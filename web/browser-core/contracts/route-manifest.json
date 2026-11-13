@@ -42,8 +42,8 @@
       "owner": "B13",
       "disposition": "local",
       "runtime": "javascript",
-      "module": "wavefinity_web.py",
-      "handler": "ai_ask_payload",
+      "module": "web/browser-core/capabilities.js",
+      "handler": "aiAsk",
       "input_fields": [
         "prompt"
       ],
@@ -51,7 +51,7 @@
         "answer"
       ],
       "effects": [
-        "Sends the prompt to the saved AI endpoint (/chat/completions, redirects blocked) and returns {answer}; raises in HOSTED mode or without a saved connection."
+        "Explicit user action sends the prompt directly to the chosen HTTPS provider with a session-memory key. Redirects, same-site/Wavefinity endpoints and untrusted custom origins are rejected; no proxy."
       ],
       "source": "wavefinity_web.py:3206",
       "browser_module": "web/browser-core/capabilities.js",
@@ -66,7 +66,7 @@
       "owner": "B13",
       "disposition": "local",
       "runtime": "python",
-      "module": "wavefinity_web.py",
+      "module": "web/browser-core/engine/ai_routes.py",
       "handler": "ai_candidate_payload",
       "input_fields": [
         "design",
@@ -74,7 +74,10 @@
         "generation",
         "space",
         "editor_grid",
-        "grid"
+        "grid",
+        "inventory_text",
+        "space_metadata_text",
+        "space_id"
       ],
       "output_fields": [
         "design",
@@ -83,7 +86,7 @@
         "superseded"
       ],
       "effects": [
-        "Proves an AI design through the real geometry path without changing anything; returns design, preview and problems (or superseded)."
+        "Local shared canonical AI logic. Saved folder snapshots establish Space authority; no HTTP server, filesystem paths or writes. Candidate proof uses the B05 canonical preview and Space-cap validation."
       ],
       "source": "wavefinity_web.py:3255",
       "browser_module": "web/browser-core/engine/ai_routes.py",
@@ -98,27 +101,31 @@
       "owner": "B13",
       "disposition": "local",
       "runtime": "javascript",
-      "module": "wavefinity_web.py",
-      "handler": "ai_connection_payload",
+      "module": "web/browser-core/capabilities.js",
+      "handler": "aiConnection",
       "input_fields": [
         "action",
+        "provider",
         "name",
         "url",
         "model",
         "key",
-        "keep_key"
+        "keep_key",
+        "browser_access",
+        "trust_endpoint"
       ],
       "output_fields": [
         "configured",
+        "has_key",
+        "provider",
         "name",
         "url",
         "model",
-        "has_key",
+        "custom",
         "ok"
       ],
       "effects": [
-        "action status|save|test: status reads the saved connection (has_key flag only); save persists name/url/model/key in preferences (keep_key retains the saved key); test sends one chat request to the endpoint.",
-        "HOSTED returns {configured:false}. Key values must never be logged or echoed."
+        "Status/save/clear stay local. Save persists named non-secret settings only; test explicitly contacts the provider. Clear/reload/pagehide discard the session key."
       ],
       "source": "wavefinity_web.py:3158",
       "browser_module": "web/browser-core/capabilities.js",
@@ -134,7 +141,7 @@
       "owner": "B13",
       "disposition": "local",
       "runtime": "python",
-      "module": "wavefinity_web.py",
+      "module": "web/browser-core/engine/ai_routes.py",
       "handler": "ai_prompt_payload",
       "input_fields": [
         "description",
@@ -142,7 +149,10 @@
         "design",
         "editor_grid",
         "space",
-        "grid"
+        "grid",
+        "inventory_text",
+        "space_metadata_text",
+        "space_id"
       ],
       "output_fields": [
         "request_id",
@@ -150,7 +160,7 @@
         "prompt"
       ],
       "effects": [
-        "Pure: assembles the AI design prompt with request_id and context_fingerprint."
+        "Local shared canonical AI logic. Saved folder snapshots establish Space authority; no HTTP server, filesystem paths or writes. Candidate proof uses the B05 canonical preview and Space-cap validation."
       ],
       "source": "wavefinity_web.py:3218",
       "browser_module": "web/browser-core/engine/ai_routes.py",
@@ -165,7 +175,7 @@
       "owner": "B13",
       "disposition": "local",
       "runtime": "python",
-      "module": "wavefinity_web_impl/_ai.py",
+      "module": "web/browser-core/engine/ai_routes.py",
       "handler": "ai_repair_prompt_payload",
       "input_fields": [
         "request_id",
@@ -219,19 +229,15 @@
       "owner": "B13",
       "disposition": "local",
       "runtime": "javascript",
-      "module": "wavefinity_web.py",
-      "handler": "browse_slicer_path_payload",
-      "input_fields": [
-        "current",
-        "slicer_path"
-      ],
+      "module": "web/browser-core/capabilities.js",
+      "handler": "browseSlicerPath",
+      "input_fields": [],
       "output_fields": [
-        "slicer_path"
+        "slicer_path",
+        "message"
       ],
       "effects": [
-        "Native file chooser for the slicer executable; returns {slicer_path} (null on cancel); no side effect (browser saves via /api/preferences).",
-        "Raises ValueError in HOSTED mode (the native/server operation is unavailable there).",
-        "Also served as an HTTP GET with an empty payload (no UI caller; the UI uses POST)."
+        "Return an honest browser capability notice; no executable picker/launch. Print remains the B08 handoff."
       ],
       "source": "wavefinity_web.py:1239",
       "browser_module": "web/browser-core/capabilities.js",
@@ -2027,17 +2033,15 @@
       "owner": "B13",
       "disposition": "local",
       "runtime": "javascript",
-      "module": "wavefinity_web.py",
-      "handler": "show_log_payload",
-      "input_fields": [
-        "output"
-      ],
+      "module": "web/browser-core/capabilities.js",
+      "handler": "showLog",
+      "input_fields": [],
       "output_fields": [
-        "file"
+        "file",
+        "message"
       ],
       "effects": [
-        "Opens the Inventory file for output in WordPad and returns {file}; errors when no Inventory file exists.",
-        "Raises ValueError in HOSTED mode (the native/server operation is unavailable there)."
+        "Explain browser diagnostics and chosen-folder Inventory; no server log or desktop launch."
       ],
       "source": "wavefinity_web.py:1388",
       "browser_module": "web/browser-core/capabilities.js",
@@ -3423,21 +3427,20 @@
       "owner": "B13",
       "disposition": "local",
       "runtime": "javascript",
-      "module": "wavefinity_web.py",
-      "handler": "_post_suggestion",
+      "module": "web/browser-core/capabilities.js",
+      "handler": "suggestions",
       "input_fields": [
         "kind",
         "title",
         "description"
       ],
       "output_fields": [
-        "number",
-        "url",
-        "error"
+        "local",
+        "text",
+        "message"
       ],
       "effects": [
-        "Handler method WavefinityHandler._post_suggestion (not a POST_ROUTES entry): size/origin/content-type checks, per-source and global rate limits, then creates a GitHub issue with WAVEFINITY_GITHUB_TOKEN (external request).",
-        "Reply {number,url}; errors 400/403/429/502/503. Called with fetch() directly, not api()."
+        "Prepare local report text; UI downloads it as a Blob. Nothing is posted online."
       ],
       "source": "wavefinity_web.py:3780",
       "browser_module": "web/browser-core/capabilities.js",

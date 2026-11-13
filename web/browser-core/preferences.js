@@ -59,6 +59,11 @@ async function validated(raw) {
   if (!object(raw)) throw new Error('Preferences must be an object.');
   const result = await values('preferences', raw);
   for (const key of UI_KEYS) if (Object.hasOwn(raw, key)) result[key] = structuredClone(raw[key]);
+  if (Object.hasOwn(raw, 'ai_provider')) {
+    // Import only named non-secret settings, never a credential or trust grant.
+    const { providerSettings } = await import('./ai-providers.js');
+    result.ai_provider = providerSettings(raw.ai_provider);
+  }
   const printerKeys = ['printer_build_x_mm', 'printer_build_y_mm', 'printer_build_z_mm'];
   if (printerKeys.some(key => Object.hasOwn(raw, key))) {
     const profile = Object.fromEntries(['x_mm', 'y_mm', 'z_mm'].map((axis, i) => [axis, raw[printerKeys[i]]]));

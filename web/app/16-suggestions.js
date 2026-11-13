@@ -27,16 +27,8 @@
     submit.disabled = true;
     status.textContent = '';
     try {
-      const response = await fetch('/api/suggestions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: form.elements.kind.value, title: form.elements.title.value, description: form.elements.description.value }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Could not create the issue. Please try again later.');
-      const link = document.getElementById('suggestions-link');
-      link.href = data.url;
-      link.textContent = `#${data.number}`;
+      const data = await api('/api/suggestions', { kind: form.elements.kind.value, title: form.elements.title.value, description: form.elements.description.value });
+      await WFFileSystem.writeBlob(null, 'Wavefinity suggestion.txt', new Blob([data.text], { type: 'text/plain;charset=utf-8' }));
       form.hidden = true;
       result.hidden = false;
     } catch (error) {

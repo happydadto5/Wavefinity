@@ -1,5 +1,77 @@
 "use strict";
 
+// Recovery uses B09's validated export/import format, never browser-handle transfer.
+SP.showBrowserRecovery = () => {
+    let dialog = document.getElementById("browser-recovery-dialog");
+    if (dialog) { dialog.showModal(); return; }
+    dialog = document.createElement("dialog");
+    dialog.id = "browser-recovery-dialog";
+    dialog.className = "support-layout-dialog";
+    dialog.setAttribute("aria-label", "Space and preferences recovery");
+    dialog.innerHTML = `<h2>Space / preferences recovery</h2>
+      <p>Open this same site in Windows desktop Chrome/Edge and choose your original folder to resume. Handles and browser data do not transfer automatically between browsers, profiles or origins.</p>
+      <p>Or export a Space/preferences file here and import it in a supported browser. Restore a Space into an empty folder; existing files are never overwritten. Without writable folder access, use only temporary previews and downloads, with no Space autosave.</p>
+      <div class="button-row"><button type="button" data-recovery="space-export" class="button secondary">Export current Space</button><button type="button" data-recovery="preferences-export" class="button secondary">Export preferences</button></div>
+      <label>Choose recovery JSON <input type="file" accept="application/json,.json" data-recovery-file></label>
+      <div class="button-row"><button type="button" data-recovery="space-import" class="button secondary">Restore Space to empty folder</button><button type="button" data-recovery="preferences-import" class="button secondary">Import preferences</button></div>
+      <p role="status" data-recovery-status></p><button type="button" data-recovery-close class="button primary">Close</button>`;
+    document.body.append(dialog);
+    const note = dialog.querySelector('[data-recovery-status]');
+    let busy = false;
+    const fileInput = dialog.querySelector('[data-recovery-file]');
+    const close = dialog.querySelector('[data-recovery-close]');
+    close.onclick = () => dialog.close();
+    dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
+    dialog.querySelectorAll('[data-recovery]').forEach(button => button.addEventListener('click', async () => {
+        if (busy) return;
+        const action = button.dataset.recovery;
+        if (action.endsWith('import') && !WFFileSystem.supportsDirectoryPicker()) {
+            note.textContent = 'Import Space/preferences exports in Windows desktop Chrome/Edge on the same site. This browser cannot save a Space; nothing was written.';
+            return;
+        }
+        const file = fileInput.files[0];
+        if (action.endsWith('import') && !file) { note.textContent = 'Choose a recovery JSON file first.'; return; }
+        if (action.endsWith('import') && file.size > 256 * 1024 * 1024) { note.textContent = 'The recovery file exceeds 256 MB.'; return; }
+        // Spend the explicit Restore click's activation before imports/reads.
+        const picked = action === 'space-import' ? WFFileSystem.pickDirectory() : null;
+        busy = true;
+        for (const control of dialog.querySelectorAll('button,input')) control.disabled = true;
+        note.textContent = 'Working…';
+        try {
+            const folderChoice = picked ? await picked : null;
+            if (picked && folderChoice?.status !== 'ok') { note.textContent = 'Folder selection cancelled or access unavailable. Nothing was restored.'; return; }
+            if (action.endsWith('export')) {
+                const value = action === 'space-export'
+                    ? await (await import('/browser-core/space-store.js')).exportSpace()
+                    : await (await import('/browser-core/preferences.js')).exportPreferences();
+                await WFFileSystem.writeBlob(null, action === 'space-export' ? 'Wavefinity Space.json' : 'Wavefinity preferences.json',
+                    new Blob([JSON.stringify(value)], { type: 'application/json' }));
+                note.textContent = 'Recovery export downloaded. Keep it somewhere safe on your PC.';
+            } else {
+                const backup = JSON.parse(await file.text());
+                if (action === 'preferences-import') {
+                    await (await import('/browser-core/preferences.js')).importPreferences(backup);
+                    await (await import('/browser-core/ai-providers.js')).aiConnection({ action: 'clear' });
+                    note.textContent = 'Preferences imported. Reload to apply all settings; enter your provider key again for direct AI.';
+                } else {
+                    const folder = { handle: folderChoice.handle, name: folderChoice.handle.name };
+                    if (!(await SP.leaveSpaceSafely())) { note.textContent = 'Restore cancelled. Nothing was written.'; return; }
+                    await (await import('/browser-core/space-store.js')).importSpace(backup, folder);
+                    note.textContent = 'Space restored to the selected folder. Choose that folder from Open Space to resume.';
+                }
+            }
+        } catch (error) { note.textContent = friendlyError(error); }
+        finally {
+            busy = false;
+            for (const control of dialog.querySelectorAll('button,input')) control.disabled = false;
+        }
+    }));
+    dialog.showModal();
+};
+document.addEventListener('click', event => {
+    if (event.target.closest('[data-browser-recovery]')) SP.showBrowserRecovery();
+});
+
 // Story 2658: New Bin sits beside New Space while the Space header's button row is
 // showing. The header is hidden with no active Space and while Space edit is open,
 // so the same element goes back to the front of the Bin actions row then.
@@ -47,6 +119,15 @@ SP.renderSpaceInfoBody = () => {
         return;
     }
     head.hidden = false;
+    if (!document.getElementById("space-browser-recovery")) {
+        const recovery = document.createElement("button");
+        recovery.id = "space-browser-recovery";
+        recovery.type = "button";
+        recovery.className = "button secondary";
+        recovery.textContent = "Space / preferences recovery";
+        recovery.addEventListener("click", () => SP.showBrowserRecovery());
+        head.append(recovery);
+    }
     const viewing = document.getElementById("space-head-view");
     if (viewing) viewing.hidden = SP.editing && !(typeof WS !== "undefined" && WS.task === "settings");
     document.getElementById("space-head-name").textContent = state.activeSpace.name;

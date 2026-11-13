@@ -520,7 +520,7 @@ function aiSetStatus(message = "", { error = false, repair = false, actions = fa
   const repairButton = $("#ai-help-repair");
   if (repairButton) repairButton.hidden = !repair;
   const actionRow = $("#ai-help-failure-actions");
-  if (actionRow) actionRow.hidden = !(actions && message);
+  if (actionRow) actionRow.hidden = false; // Copy/paste and settings remain available after every outcome.
 }
 
 function aiSetBusy(busy) {
@@ -601,13 +601,16 @@ async function aiGeneratePrompt() {
       if (isStructuralDesign(baseline)) throw new AiHelpError("AI Design designs ordinary bins only.");
       const contextKey = aiContextKey();
       const space = aiSpaceContext();
+      const records = await aiSavedContext();
       const result = await api("/api/ai/prompt", {
+        ...records, editor_grid: baseline.grid || "wavefinity",
         description, design: baseline, space, existing_names: aiExistingBinNames(),
       });
       if (aiContextKey() !== contextKey) {
         throw new AiHelpError("Your design changed while the prompt was being written. Try again.");
       }
       aiHelp.session = {
+        records,
         request_id: result.request_id,
         context_fingerprint: result.context_fingerprint,
         contextKey,
@@ -636,6 +639,7 @@ async function aiProveCandidate(envelope, session) {
   let result;
   try {
     result = await api("/api/ai/candidate", {
+      ...session.records, editor_grid: session.baseline.grid || "wavefinity",
       design: envelope.design, client_id: `${previewClientId}-ai`, generation: ++aiHelp.generation,
       // The prompt-bound Space context, never a newly switched Space
       // (Fix 078): the Space-cap preflight must judge against what the
@@ -873,8 +877,16 @@ function aiResetDialog() {
 }
 
 let aiConnection = null;
+async function aiSavedContext() {
+  if (!aiSpaceContext()) return {};
+  const folder = state.browserFolder, spaceId = state.activeSpaceId;
+  if (!folder?.handle) throw new Error("Open the saved Space folder before using AI Design for it.");
+  const inventory_text = await SP.readInventoryFor(folder, { migrate: false });
+  const space_metadata_text = await WFFileSystem.readText(folder.handle, FOLDER_METADATA);
+  if (folder !== state.browserFolder || spaceId !== state.activeSpaceId) throw new Error("The Space changed while reading its records. Generate a fresh prompt.");
+  return { inventory_text: inventory_text || "", space_metadata_text, space_id: spaceId };
+}
 async function aiConnectionRefresh() {
-  if (state.runtime.hosted) return;
   try {
     aiConnection = await api("/api/ai/connection", { action: "status" });
     $("#ai-connection-offer").hidden = aiConnection.configured;
@@ -884,23 +896,31 @@ async function aiConnectionRefresh() {
 }
 function aiConnectionForm(show) {
   $("#ai-connection-form").hidden = !show;
-  $("#ai-connection-offer").hidden = show || state.runtime.hosted || Boolean(aiConnection?.configured);
+  $("#ai-connection-offer").hidden = show || Boolean(aiConnection?.configured);
   $("#ai-connection-edit").hidden = show || !aiConnection?.configured;
   $("#ai-connection-key").value = "";
-  $("#ai-connection-key").placeholder = aiConnection?.has_key ? "Saved key: ******** (leave blank to keep)" : "Optional";
+  $("#ai-connection-key").placeholder = aiConnection?.has_key ? "Key in session memory (leave blank to keep)" : "Required for direct chat this session";
+  $("#ai-connection-provider").value = aiConnection?.provider || "openai";
+  $("#ai-connection-browser-access").checked = false;
+  $("#ai-connection-trust").checked = false;
   for (const field of ["name", "url", "model"]) $("#ai-connection-" + field).value = aiConnection?.[field] || "";
   $("#ai-connection-status").textContent = "";
 }
 async function aiConnectionAction(action) {
   const payload = { action, keep_key: Boolean(aiConnection?.has_key && aiConnection.url === $("#ai-connection-url").value.trim().replace(/\/$/, "")) };
   for (const field of ["name", "url", "model", "key"]) payload[field] = $("#ai-connection-" + field).value;
+  payload.provider = $("#ai-connection-provider").value;
+  payload.browser_access = $("#ai-connection-browser-access").checked;
+  payload.trust_endpoint = $("#ai-connection-trust").checked;
   const status = $("#ai-connection-status");
   status.textContent = action === "test" ? "Contacting your AI..." : "Saving...";
+  for (const id of ["save", "test", "clear"]) $("#ai-connection-" + id).disabled = true;
   try {
     await api("/api/ai/connection", payload);
-    if (action === "save") { await aiConnectionRefresh(); aiConnectionForm(false); }
+    if (action === "save" || action === "clear") { await aiConnectionRefresh(); aiConnectionForm(false); }
     else status.textContent = "Connection worked. Your AI answered.";
   } catch (error) { status.textContent = friendlyError(error); }
+  finally { for (const id of ["save", "test", "clear"]) $("#ai-connection-" + id).disabled = false; }
 }
 async function aiAsk() {
   if (aiHelp.busy) return;
@@ -957,6 +977,10 @@ function aiWireHelp() {
   $("#ai-connection-cancel").addEventListener("click", () => aiConnectionForm(false));
   $("#ai-connection-test").addEventListener("click", () => aiConnectionAction("test"));
   $("#ai-connection-save").addEventListener("click", () => aiConnectionAction("save"));
+  $("#ai-connection-clear").addEventListener("click", () => aiConnectionAction("clear"));
+  $("#ai-connection-url").addEventListener("input", () => { $("#ai-connection-trust").checked = false; });
+  dialog.addEventListener("close", () => { $("#ai-connection-key").value = ""; });
+  window.addEventListener("pagehide", () => { $("#ai-connection-key").value = ""; aiConnection = null; });
   $("#ai-help-ask").addEventListener("click", aiAsk);
   $("#ai-help-paste-manual").addEventListener("click", aiPasteManually);
   $("#ai-help-open-connection").addEventListener("click", aiOpenConnectionSettings);

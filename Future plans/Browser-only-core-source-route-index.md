@@ -6,13 +6,13 @@ Source ownership baseline from November 12, 2026, reconciled to current `main` a
 
 | API path | Existing handler | Main frontend reference(s) | Owner | Runtime | Disposition |
 |---|---|---|---|---|---|
-| `/api/ai/ask` | `ai_ask_payload` · `wavefinity_web.py:3206` | `web/app/02-lifecycle-ai-help.js:916` | B13 | javascript | local |
-| `/api/ai/candidate` | `ai_candidate_payload` · `wavefinity_web.py:3255` | `web/app/02-lifecycle-ai-help.js:638` | B13 | python | local |
-| `/api/ai/connection` | `ai_connection_payload` · `wavefinity_web.py:3158` | `web/app/02-lifecycle-ai-help.js:879`, `web/app/02-lifecycle-ai-help.js:900` | B13 | javascript | local |
-| `/api/ai/prompt` | `ai_prompt_payload` · `wavefinity_web.py:3218` | `web/app/02-lifecycle-ai-help.js:604` | B13 | python | local |
-| `/api/ai/repair-prompt` | `ai_repair_prompt_payload` · `wavefinity_web_impl/_ai.py:646` | `web/app/02-lifecycle-ai-help.js:801` | B13 | python | local |
+| `/api/ai/ask` | `aiAsk` · `web/browser-core/capabilities.js` | `web/app/02-lifecycle-ai-help.js:916` | B13 | javascript | local |
+| `/api/ai/candidate` | `ai_candidate_payload` · `web/browser-core/engine/ai_routes.py` | `web/app/02-lifecycle-ai-help.js:638` | B13 | python | local |
+| `/api/ai/connection` | `aiConnection` · `web/browser-core/capabilities.js` | `web/app/02-lifecycle-ai-help.js:879`, `web/app/02-lifecycle-ai-help.js:900` | B13 | javascript | local |
+| `/api/ai/prompt` | `ai_prompt_payload` · `web/browser-core/engine/ai_routes.py` | `web/app/02-lifecycle-ai-help.js:604` | B13 | python | local |
+| `/api/ai/repair-prompt` | `ai_repair_prompt_payload` · `web/browser-core/engine/ai_routes.py` | `web/app/02-lifecycle-ai-help.js:801` | B13 | python | local |
 | `/api/browse-output-folder` | `browse_output_folder_payload` · `wavefinity_web.py:1297` | `web/spaces/07-welcome-folders.js:46` | B09 | javascript | local |
-| `/api/browse-slicer-path` | `browse_slicer_path_payload` (POST; also GET) · `wavefinity_web.py:1239` | `web/app/15-generate-dialogs.js:619` | B13 | javascript | local |
+| `/api/browse-slicer-path` | `browseSlicerPath` · `web/browser-core/capabilities.js` | `web/app/15-generate-dialogs.js:619` | B13 | javascript | local |
 | `/api/catalog` | `catalog_payload (GET)` · `wavefinity_web.py:733` | `web/app.js:7` | B04 | python | local |
 | `/api/connector` | `connector_save_payload` · `wavefinity_web.py:2075` | `web/app/15-generate-dialogs.js:285`, `web/app/15-generate-dialogs.js:291` | B06 | python | local |
 | `/api/design/division-label-fit` | `division_label_fit_payload` · `wavefinity_web.py:1928` | `web/app/08-draft-fields-render.js:1026` | B04 | python | local |
@@ -59,7 +59,7 @@ Source ownership baseline from November 12, 2026, reconciled to current `main` a
 | `/api/preview` | `preview_payload` · `wavefinity_web.py:1401` | `web/app/11-parts-preview-requests.js:768`, `web/structural-design.js:397` | B05 | python | local |
 | `/api/print` | `print_payload` · `wavefinity_web.py:2208` | `web/app/15-generate-dialogs.js:467` | B08 | python | local |
 | `/api/sampler` | `sampler_payload` · `wavefinity_web.py:2099` | No literal reference in current callers | B06 | python | local |
-| `/api/show-log` | `show_log_payload` · `wavefinity_web.py:1388` | No literal reference in current callers | B13 | javascript | local |
+| `/api/show-log` | `showLog` · `web/browser-core/capabilities.js` | No literal reference in current callers | B13 | javascript | local |
 | `/api/space/browse-storage-parent` | `browse_space_parent_payload` · `wavefinity_web.py:1333` | `web/spaces/07-welcome-folders.js:377` | B09 | javascript | local |
 | `/api/space/configure` | `configure_migrate` · `organizer_spaces/__init__.py:847` | `web/spaces/08-space-setup.js:682` | B09 | javascript | local |
 | `/api/space/configure-text` | `configure_space_text_payload` · `wavefinity_web_impl/_designs/_layout.py:412` | `web/spaces/08-space-setup.js:611`, `web/spaces/12-space-info.js:453` | B09 | javascript | local |
@@ -97,7 +97,7 @@ Source ownership baseline from November 12, 2026, reconciled to current `main` a
 | `/api/space/update` | `update` · `organizer_spaces/__init__.py:908` | `web/spaces/12-space-info.js:488` | B09 | javascript | local |
 | `/api/space/use-untyped` | `use_folder` · `organizer_spaces/__init__.py:735` | `web/spaces/08-space-setup.js:997` | B09 | javascript | local |
 | `/api/space/warm` | `warm_spaces_payload` · `wavefinity_web.py:1473` | `web/workspace.js:871` | B09 | javascript | local |
-| `/api/suggestions` | `_post_suggestion` · `wavefinity_web.py:3780` | `web/app/16-suggestions.js:30` (direct `fetch()`, not `api()`) | B13 | javascript | local |
+| `/api/suggestions` | `suggestions` · `web/browser-core/capabilities.js` | `web/app/16-suggestions.js` (local `api()`; text download only) | B13 | javascript | local |
 
 ## Non-API paths previously supplied by Python
 
