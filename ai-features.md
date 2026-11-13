@@ -136,6 +136,8 @@ Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling:
 - Nominal grid area and printed cavity are separate readouts. None uses the shared provisional per-side baseplate clearance. Optional measured seated lift means height added by the seated baseplate, not its total thickness; a recorded zero is measured. Stacks include that lift and are refused when overheight. Missing lift reads unverified, never a verified fit.
 - Save/reload and cabinet print/export retain the selected pitch and floor configuration. AI returns only an ordinary bin; it must preserve the context grid and fit the selected drawer including any measured seated lift.
 
+Third-party stand-ins are external bins recorded in the Space Inventory for layout only. AI Design does not create or change stand-ins; it returns ordinary bins.
+
 ## Pegboard
 
 - Supports Standard Pegboard and IKEA SKÅDIS Space types.

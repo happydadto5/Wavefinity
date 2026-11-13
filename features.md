@@ -372,6 +372,10 @@ later visit. Older Spaces remain in their existing folders.
 
 Every ordinary bin in a typed Space is represented by one Inventory row.
 
+### Third-party stand-ins
+
+A third-party stand-in represents a bin bought or printed elsewhere. Add one from Inventory to hold its place in a Gridfinity Space. Set its name, 21 mm or 42 mm pitch, and whole-cell width and depth. You may enter its actual exterior height; leave the height blank when it has not been measured, and vertical fit stays unverified. A stand-in has no Wavefinity design or print files and cannot be opened in the editor, printed or exported. Its pitch must match the Space grid.
+
 Inventory distinguishes:
 
 ### Placement state

@@ -4,6 +4,8 @@ Wavefinity helps you design small storage bins and the places they live in, see 
 
 To get started, create a Space, add bins to it, place the bins, then open the print list to print or export them.
 
+For Gridfinity, create a Drawer, Storage Box, or Storage Drawers Space and choose the 21 mm or 42 mm grid. Where offered, choose **Floor** for a built-in socket grid or **None** for a cavity for your own baseplate. Record the baseplate's measured seated lift when known. Then add bins sized to whole grid cells and arrange them in the Space.
+
 ## Spaces and bins
 
 A Space is the drawer, box, surface or board your bins live in. Set its inside size, then design each bin's size, walls and inside parts.
