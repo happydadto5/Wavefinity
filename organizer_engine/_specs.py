@@ -960,7 +960,7 @@ class BoxSpec:
         if self.z < self.base_thickness + MIN_HEIGHT_ABOVE_BASE:
             raise ValueError(
                 f"box Z must be at least {self.base_thickness + MIN_HEIGHT_ABOVE_BASE:g} mm "
-                "to fit the lock bump"
+                "to provide clearance above the base"
             )
         for name, value in (("X", self.x), ("Y", self.y)):
             if value < MIN_BOX_SIZE - 1e-9:

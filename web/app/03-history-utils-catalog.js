@@ -65,7 +65,7 @@ function insideBinFitForStorageBox(space, candidateDesign) {
     const grid = state.catalog.grids.find(row => row.value === space.grid), pitch = grid.pitch_mm;
     const maximum = Math.floor(state.catalog.max_box_size / pitch);
     const lift = DL.baseLift();
-    const spare = space.built_in_grid === "none" && DL.heightFit()?.verified !== true ? grid.height_unit_mm : 0;
+    const spare = space.built_in_grid === "none" && DL.heightFit()?.liftRecorded !== true ? grid.height_unit_mm : 0;
     const z = Math.floor((space.z - lift - spare) / grid.height_unit_mm) * grid.height_unit_mm;
     const fit = { x: Math.min(maximum, Math.floor(space.x / pitch)) * pitch,
       y: Math.min(maximum, Math.floor(space.y / pitch)) * pitch, z };

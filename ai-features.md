@@ -73,25 +73,24 @@ a bare positive number below the pitch means units, otherwise millimetres.
 Units must be whole cells; millimetres snap to the nearest cell. Range errors
 are refused, never clamped, and say how the input was read. The settled field shows
 millimetres and unit count. Gridfinity height treats bare numbers as 7 mm units;
-`mm` explicitly enters millimetres. The model's floor, rim and lid minimums apply;
+`mm` explicitly enters millimetres. Gridfinity bins have a 14 mm minimum; the model's floor, rim and lid minimums also apply;
 Wavefinity height keeps plain millimetres. Space forms
 keep their existing millimetre entry.
-Gridfinity Stage 1 offers a Stackable rim (`box.stack.mode` direct; none is off), a loose Gridfinity Lid or a lid with a stacking
+Gridfinity offers a Stackable rim (`box.stack.mode` direct; none is off), a loose Gridfinity Lid or a lid with a stacking
 socket (`box.lid.enabled`, `box.lid.stack_rim`) on both pitches. Closed Z stays nominal in whole 7 mm units; the body and
 interior shorten by the lid rise. A grid lid needs at least two height units and
 enough body clearance for its floor and lid. Use the same footprint and pitch
 when stacking on a grid lid; lid-on-lid uses the standard rim seat descent.
 Label and handle lids and side connectors are Wavefinity options, hidden on
-grid bodies. The Hinged lid is refused on both Gridfinity pitches (Story 3009:
-its open swing overruns the one-cell envelope and neighbour gap; nominal,
+grid bodies. The Hinged lid is refused on both Gridfinity pitches (its open swing overruns the one-cell envelope and neighbour gap; nominal,
 unverified), so it is not a Gridfinity Lid choice and each grid row carries a
 `hinged_lid_refusal` message. A hinged lid is never also a Lid for stacking. The capability manifest filters lid choices by the
 selected grid, using the same catalog as the editor.
-Physical grid-lid fit is not yet printed (S1-13 gate).
+Physical grid-lid fit is not yet print-confirmed.
 Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Gridfinity Side Openings are available on both pitches subject to the protected zones below. Edge Mount is excluded because it projects beyond the cell envelope; only Andrew may approve a separate inside-envelope replacement.
 A Space's grid is fixed when created. Bins cannot enter a Space
 with a different grid. An external older design without a grid means Wavefinity;
-a saved bin inside a Space inherits that verified source Space's grid.
+a saved bin inside a Space inherits that source Space's grid.
 
 Wavefinity may be used without a typed Space or inside one of these typed Spaces.
 
@@ -120,8 +119,8 @@ Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling:
 - The AI result is still an ordinary bin, not the Storage Box case itself.
 - Generating or printing a bin in a Storage Box Space requires the bin or closed design to fit the interior height, including its foot, handle and raised lettering. Unverifiable height blocks generation. Lid snugness does not add capacity; designs without a Space are unaffected.
 - Hard object-height cap: the Storage Box Space's own height.
-- Gridfinity Storage Box creation offers 21 or 42 mm pitch and immutable Floor or None. Floor builds the raised socket floor; None leaves a plain cavity for an owner-supplied baseplate. Nominal grid cells and printed cavity sizes are distinct. Optional measured seated lift is the height added by the seated baseplate, not total thickness; zero is measured, missing lift is unverified. The full seated stack includes measured lift and must fit the usable height. These settings stay in the Space; AI returns only an ordinary bin on its grid.
-- Gridfinity Plain Drawers and Storage Boxes with Floor None can record and later edit the measured seated lift. Blank is unverified and zero is measured; layout heights include the lift.
+- Gridfinity Storage Box creation offers 21 or 42 mm pitch and immutable Floor or None. Floor builds the raised socket floor; None leaves a plain cavity for an owner-supplied baseplate. Nominal grid cells and printed cavity sizes are distinct. Optional measured seated lift is the height added by the seated baseplate, not total thickness; zero is measured, missing lift is not recorded. The full seated stack includes measured lift and must fit the usable height. These settings stay in the Space; AI returns only an ordinary bin on its grid.
+- Gridfinity Plain Drawers and Storage Boxes with Floor None can record and later edit the measured seated lift. Blank means not recorded and zero is measured; layout heights include the lift.
 - The case is configured in its Space: interior width and depth, usable inside height, Latched Lid or Lid Only and lid snugness, stacking on/off, carrying handle on/off, and no label or a front label in Flat or Wavy style. Number of latches offers None or 1 at every width, and 2 only above 96 mm of interior child-bin field width; new cases start with 2 above that width, otherwise 1. User selections and saved counts are kept. Latch tightness is Loose / Default / Tight (0.35 / 0.40 / 0.45 mm snap grip). Wall and Base/Lid thickness share these choices: 0.8 mm Very thin, 1.2 mm Thin, 1.6 mm Default, 2.0 mm Strong, 2.4 mm Very strong and 3.0 mm Heavy duty. New cases default to 1.6 mm for both. These are case settings, not bin fields.
 
 ## Storage Drawers
@@ -134,7 +133,7 @@ Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling:
 - Creation offers one grid for the whole cabinet: Wavefinity 7 mm (default), Gridfinity half 21 mm, or Gridfinity 42 mm. Gridfinity offers Floor (built-in raised pocket grid) or None (flat floor, cavity clearanced for an owner-supplied baseplate). Grid and Floor are immutable after creation.
 - Wavefinity starts at 210 × 119 mm with three drawers at 40 mm usable height. Both Gridfinity pitches derive a 210 × 126 mm field and 42 mm usable height (six 7 mm height units); stored heights remain net of Drawer fit.
 - Gridfinity placement uses pitch cells, including 1×1 and 2×3 bins. Bins of another grid are refused naming both grids. No side connectors or bin spacers are available in Gridfinity drawers.
-- Nominal grid area and printed cavity are separate readouts. None uses the shared provisional per-side baseplate clearance. Optional measured seated lift means height added by the seated baseplate, not its total thickness; a recorded zero is measured. Stacks include that lift and are refused when overheight. Missing lift reads unverified, never a verified fit.
+- Nominal grid area and printed cavity are separate readouts. None uses the shared provisional per-side baseplate clearance. Optional measured seated lift means height added by the seated baseplate, not its total thickness; a recorded zero is measured. Stacks include that lift and are refused when overheight. Missing lift is shown as not recorded; physical fit remains unconfirmed.
 - Save/reload and cabinet print/export retain the selected pitch and floor configuration. AI returns only an ordinary bin; it must preserve the context grid and fit the selected drawer including any measured seated lift.
 
 Third-party stand-ins are external bins recorded in the Space Inventory for layout only. AI Design does not create or change stand-ins; it returns ordinary bins.

@@ -444,6 +444,8 @@ def _ai_fingerprint(design: dict[str, Any], space: dict[str, Any]) -> str:
 def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
                     context: dict[str, Any], manifest: dict[str, Any],
                     shape: dict[str, Any]) -> str:
+    from organizer_engine._specs import grid_label
+
     def block(value: Any) -> str:
         return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     envelope = {
@@ -480,10 +482,10 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
     elif context.get("floor") == "external_plate":
         lift = context.get("seated_lift_mm")
         cap_line += (
-            f"\n- This {container} uses {context.get('grid')} with None: a flat floor and cavity for a baseplate the person supplies. "
+            f"\n- This {container} uses {grid_label(context.get('grid'))} with None: a flat floor and cavity for a baseplate the person supplies. "
             + (f"The baseplate's measured seated lift is {lift:g} mm. " if lift is not None
-               else "The baseplate's seated lift is not measured, so the height fit is unverified. ")
-            + "Its Grid and Floor are fixed when the Space is created and are set in Wavefinity. The full seated stack, including measured lift, must fit the usable height; missing lift means unverified fit. These settings belong in Wavefinity, "
+               else "The baseplate's seated lift is not measured, so height calculations cannot include it. ")
+            + "Its Grid and Floor are fixed when the Space is created and are set in Wavefinity. The full seated stack, including measured lift, must fit the usable height; missing lift means the full seated height is unknown. These settings belong in Wavefinity, "
             "not in the returned design; keep design.grid equal to the context grid.")
     return "\n".join([
         "You are helping design ONE 3D-printable storage bin for the Wavefinity app.",
@@ -498,13 +500,13 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "- Design exactly ONE object. If the request describes several, ask the person to narrow it to one BEFORE giving the final answer.",
         "- If any critical measurement is missing, ambiguous, suspicious or has conflicting units, ASK the person first. Do not guess it and do not reinterpret the units they gave.",
         "- Width and depth must be whole cells of the selected grid pitch in the catalog-built CAPABILITY MANIFEST (7, 21 or 42 mm). Gridfinity height uses independent 7 mm units; Wavefinity height stays plain millimetres. The standalone editor offers these three grids; choose the grid there before requesting an AI design, then keep the context grid.",
-        "- Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Space Grid is immutable. Storage Box and Storage Drawers also choose immutable Floor or None; Floor builds the raised socket floor, None leaves room for an owner-supplied baseplate. Nominal cells describe the field, not the printed cavity. Measured seated lift is the added seated height, not total plate thickness; zero is measured, missing lift is unverified. Container settings stay in the Space, never BoxSpec. Side Openings are available on both Gridfinity pitches, with the foot/base, stacking rim, corner radii and selected minimum wall protected; illegal openings are refused without clipping or shrinking. Edge Mount is excluded on Gridfinity because it projects beyond the cell envelope. Physical fit is unverified. On ordinary 42 mm Gridfinity bins only, box.magnet_holes may be none (default) or 6x2 when requested; never use it on 21 mm, Wavefinity, or container floors.",
+        "- Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Space Grid is immutable. Storage Box and Storage Drawers also choose immutable Floor or None; Floor builds the raised socket floor, None leaves room for an owner-supplied baseplate. Nominal cells describe the field, not the printed cavity. Measured seated lift is the added seated height, not total plate thickness; zero is measured, missing lift is not recorded. Container settings stay in the Space, never BoxSpec. Side Openings are available on both Gridfinity pitches, with the foot/base, stacking rim, corner radii and selected minimum wall protected; illegal openings are refused without clipping or shrinking. Edge Mount is excluded on Gridfinity because it projects beyond the cell envelope. Physical fit is unverified. On ordinary 42 mm Gridfinity bins only, box.magnet_holes may be none (default) or 6x2 when requested; never use it on 21 mm, Wavefinity, or container floors.",
         "- All values in the design are millimetres. Convert nothing silently; ask if unsure.",
         "- You may use any legal part, option or modifier in the CAPABILITY MANIFEST that best solves the request.",
         "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",
         "- Interior part zones are [x0,y0,x1,y1] in mm from the bin centre. current_baseline_layout_bounds_mm is only the interior of the CURRENT bin size. If you change box.x/box.y/box.z, the legal interior changes with it (each axis keeps about interior_margin_mm of shell in total): every zone you return must fit inside the interior of the design you RETURN, not the old one. Adjust the example zones, counts and sizes to the real item.",
         "- Keep every field listed in space_controlled_fields exactly as it is in the current design.",
-        "- Keep design.grid equal to the context grid (wavefinity, gridfinity_half, or gridfinity). A missing grid inherits this context; a conflicting grid is refused. Gridfinity Stage 1 offers Stackable rim (box.stack.mode direct; off is none) and loose plain plate lids or stacking-socket lids (box.lid.enabled; box.lid.stack_rim) on both pitches: closed Z is nominal in whole 7 mm units, the body and interior shorten by the lid rise, and lids need at least two height units plus enough remaining body clearance for the floor and lid. Stack only the same footprint and pitch; lid-on-lid uses the standard rim seat descent. Hinged, label and handle lids are Wavefinity options and unavailable on grid bodies. Physical grid-lid fit is not yet printed (S1-13 gate).",
+        "- Keep design.grid equal to the context grid (wavefinity, gridfinity_half, or gridfinity). A missing grid inherits this context; a conflicting grid is refused. Gridfinity offers Stackable rim (box.stack.mode direct; off is none) and loose plain plate lids or stacking-socket lids (box.lid.enabled; box.lid.stack_rim) on both pitches: closed Z is nominal in whole 7 mm units with a 14 mm minimum, the body and interior shorten by the lid rise, and lids need at least two height units plus enough remaining body clearance for the floor and lid. Stack only the same footprint and pitch; lid-on-lid uses the standard rim seat descent. Hinged, label and handle lids are Wavefinity options and unavailable on grid bodies. Physical grid-lid fit is not yet print-confirmed.",
         cap_line,
         "- design.part_name must be a short, descriptive, non-blank name (1-80 characters) for what the bin holds - for example \"Lipstick\" or \"Hex Drivers\", never a generic \"Bin\" or dimensions-only text. Existing Inventory names, when supplied below, are advisory: avoid an obvious duplicate, but Wavefinity enforces final uniqueness itself, so do not invent your own numbering suffix.",
         "- A design may contain at most one rim Label in total, not one per rim side.",

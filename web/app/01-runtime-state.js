@@ -917,7 +917,7 @@ function applySpaceSizingDefaults(design, remembered = null, keepStarterXY = fal
       design.box[axis] = cells * pitch;
     }
     const lift = DL.baseLift();
-    const spare = space.built_in_grid === "none" && DL.heightFit()?.verified !== true ? grid.height_unit_mm : 0;
+    const spare = space.built_in_grid === "none" && DL.heightFit()?.liftRecorded !== true ? grid.height_unit_mm : 0;
     design.box.z = Math.max(grid.height_unit_mm, Math.floor((space.z - lift - spare) / grid.height_unit_mm) * grid.height_unit_mm);
     design.box.base_thickness = Math.max(design.box.base_thickness, grid.minimum_base_mm);
     design.box.standard_base = false;

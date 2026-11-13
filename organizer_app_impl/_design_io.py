@@ -35,7 +35,7 @@ from organizer_engine import (
 from organizer_features.side_openings import SIDE_OPENING_TOP_BRIDGE_MM, validate_side_openings
 from organizer_features.pegboard import normalise_mount_spec, receiver_layout
 from organizer_b4b import b4b_effective_box, b4b_summary, validate_b4b_design
-from organizer_features.gridfinity import normalize_gridfinity_settings
+from organizer_features.gridfinity import HEIGHT_UNIT, gridfinity_short_bin_message, normalize_gridfinity_settings
 from organizer_features.stack import (
     normalize_stack_settings,
     stack_closed_height,
@@ -1010,6 +1010,8 @@ def design_from_dict(
             legacy_stack_mode == "lid"
             or (isinstance(lid_raw, dict) and lid_raw.get("stackable"))):
         requested_z -= 1.0
+    if grid != "wavefinity" and not b4b.enabled and 0 < requested_z < 2 * HEIGHT_UNIT:
+        raise ValueError(gridfinity_short_bin_message(grid))
     box = BoxSpec(
         x, y, requested_z,
         wall,

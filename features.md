@@ -26,7 +26,7 @@ regenerate bins and side clips made with that profile as a set.
 ## Status
 
 An isolated browser geometry experiment is available directly at
-`/browser-local-poc.html` (Story 2979). It downloads tools into browser memory
+`/browser-local-poc.html`. It downloads tools into browser memory
 without installation and leaves designs untouched. The full-bin feasibility
 attempt failed because the pinned browser dependencies lack float64 Mesh64
 booleans; it does not offer a finished bin or STL. See `browser-tests/README.md`.
@@ -35,11 +35,11 @@ Production creation/export and AI Design options are unchanged.
 Space and design records preserve their grid identity: Wavefinity (7 mm),
 Gridfinity half (21 mm), or Gridfinity (42 mm). A Space keeps the grid chosen at
 creation; bin entry across different grids is refused without changing either
-record. Older external designs use Wavefinity. Stage 1's Gridfinity body paths
+record. Older external designs use Wavefinity. Gridfinity body paths
 also support a loose plate lid, optionally with a receiving socket on a perimeter
 ridge, for both 42 mm and 21 mm pitches. For Storage Drawers using an external
 Gridfinity plate with no recorded seated lift, new-bin sizing reserves one 7 mm
-height unit until the lift is verified. The closed bin keeps its nominal height
+height unit until the lift is recorded. The closed bin keeps its nominal height
 in whole 7 mm units; its body and interior shorten to make room for the lid.
 The same skirt clears a plain or rimmed body. Stacking uses the same footprint
 and grid pitch and the standard rim seat descent, including lid-on-lid stacks.
@@ -59,12 +59,11 @@ mean millimetres. Units must be whole cells; millimetres snap to the selected
 pitch without clamping out-of-range sizes. The field shows millimetres and units.
 Range errors say how the input was read. Gridfinity Height treats bare numbers as
 units at the independent 7 mm height pitch; `mm` explicitly enters millimetres.
-Height enforces floor/rim/lid minimums. Wavefinity Height and Space forms keep their
+Gridfinity Height has a 14 mm minimum and enforces floor/rim/lid minimums. Wavefinity Height and Space forms keep their
 existing entry rules. Gridfinity offers the Stackable rim and Gridfinity Lid
 (plain or for stacking), hiding connectors and hinged/handle/label lid variants.
 AI Design uses the selected grid and those catalog choices. Older designs
-without a grid remain Wavefinity. Physical grid-lid fit is **not yet printed**;
-the S1-13 print gate remains outstanding.
+without a grid remain Wavefinity. Physical grid-lid fit is **not yet print-confirmed**.
 
 - **Current** — accepted on `main`.
 - **In review** — implemented on a fix branch but not yet accepted into `main`.
@@ -292,8 +291,8 @@ All four supported kinds (No-Space bins, Plain Drawers, Storage Box and Storage 
 
 - Choose one Grid for the entire cabinet: Wavefinity 7 mm (default), Gridfinity half 21 mm, or Gridfinity 42 mm. For Gridfinity choose **Floor** (built-in raised pocket grid) or **None** (flat floor, clearanced for an owner-supplied baseplate). Grid and Floor are immutable after creation; editing shows the fixed choices and explains why.
 - Gridfinity drawers use pitch-cell placement (including 1×1 and 2×3), refuse bins of other grids naming both grids, and offer no side connectors or bin spacers. Nominal grid and printed cavity sizes are read out separately; the external-baseplate clearance is provisional.
-- None can record measured seated lift: the height a seated baseplate adds, never its total thickness. Stack heights include it, and an overheight stack is refused. Missing lift reads **unverified**; zero is a measured value. Save/reload preserves grid, floor, nominal field and lift. Print/export uses the same cabinet record and shared floor geometry for both pitches and both floor choices.
-- Gridfinity Plain Drawers and Storage Boxes with Floor None also let you record or later edit this measurement. Blank means unverified; zero is a measurement. Layout heights include the recorded lift.
+- None can record measured seated lift: the height a seated baseplate adds, never its total thickness. Stack heights include it, and an overheight stack is refused. Missing lift is shown as **not recorded**; zero is a measured value. Save/reload preserves grid, floor, nominal field and lift. Print/export uses the same cabinet record and shared floor geometry for both pitches and both floor choices.
+- Gridfinity Plain Drawers and Storage Boxes with Floor None also let you record or later edit this measurement. Blank means not recorded; zero is a measurement. Layout heights include the recorded lift.
 
 - Drawer walls use a safe minimum thickness; Design excludes thinner choices and repairs older thin-wall settings to a supported choice. Other cabinet and base material choices remain available.
 - One shared Inventory and parking lot for the whole cabinet; every drawer is a physical drawer with its own stable identity and usable height.

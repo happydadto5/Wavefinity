@@ -333,15 +333,14 @@ DL.seatedLift = () => {
 // floor: it has no external plate, so no plate lift.
 DL.floorBuiltIn = () => (DL.isStorageBox() || DL.isStorageDrawers()) && DL.spaceGrid() !== "wavefinity" && (DL.layout?.space?.built_in_grid ?? "floor") === "floor";
 DL.baseLift = (drawer = DL.drawer()) => DL.isGridfinity(drawer) && !DL.floorBuiltIn() ? (DL.seatedLift() ?? 0) : 0;
-// What the height state may claim. A Gridfinity fit is verified only when the
-// Space's seated lift is recorded; otherwise it is presented as unverified.
+// Track whether the Space's seated lift is recorded, independently of print fit.
 DL.heightFit = (drawer = DL.drawer()) => {
   if (!DL.isGridfinity(drawer)) return null;
-  if (DL.floorBuiltIn()) return { verified: false, lift: null, note: "Bins seat in this container's own socket grid; its fit is not print-verified." };
+  if (DL.floorBuiltIn()) return { liftRecorded: false, lift: null, note: "Bins seat in this container's own socket grid; its fit is not print-verified." };
   const lift = DL.seatedLift();
   return lift === null
-    ? { verified: false, lift: null, note: "Height fit is not verified: no seated lift is recorded for this Space's baseplate." }
-    : { verified: true, lift, note: `Heights include the recorded ${fmt(lift)} mm seated lift.` };
+    ? { liftRecorded: false, lift: null, note: "No seated lift is recorded for this Space's baseplate; height calculations cannot include it." }
+    : { liftRecorded: true, lift, note: `Heights include the recorded ${fmt(lift)} mm seated lift.` };
 };
 // The foot-bottom height of `one` seated on `parent` (a support layer): the
 // engine's rim seating or stacking-lid seating (Stories 2970/2971) for the

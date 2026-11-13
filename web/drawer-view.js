@@ -442,7 +442,7 @@ DV.render = () => {
     const keyed = DL.isStorageBox() || DL.isStorageDrawers();
     heightLegend.hidden = !keyed && !fit;
     heightLegend.innerHTML = (keyed ? `<span class="dl-height-swatch yellow"></span>Yellow: below full height · <span class="dl-height-swatch red"></span>Red: over space height · ${DL.stackIconForRoles({ bottom: true })} can take a stack · ${DL.stackIconForRoles({ top: true })} can sit on a bin` : "")
-      + (fit ? `<div class="dl-height-fit" data-verified="${fit.verified}">${fit.note}</div>` : "");
+      + (fit ? `<div class="dl-height-fit" data-lift-recorded="${fit.liftRecorded}">${fit.note}</div>` : "");
   }
 };
 

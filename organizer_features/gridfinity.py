@@ -21,7 +21,7 @@ import trimesh
 from shapely.geometry import Polygon
 
 from organizer_engine import BoxSpec, MIN_HEIGHT_ABOVE_BASE
-from organizer_engine._specs import GRID_PITCHES, lid_enabled, vertical_stack_enabled
+from organizer_engine._specs import GRID_PITCHES, grid_label, lid_enabled, vertical_stack_enabled
 from organizer_geometry import (
     _extrude_polygon,
     _loft_cavity,
@@ -79,7 +79,7 @@ def _profile(grid: str) -> dict:
     try:
         return PROFILES[grid]
     except KeyError:
-        raise ValueError(f"{grid!r} is not a Gridfinity grid") from None
+        raise ValueError(f"{grid_label(grid)} is not a Gridfinity grid") from None
 
 
 # --------------------------------------------------------------------------- #
@@ -223,13 +223,17 @@ def assembled_lid_stack_height(lower: BoxSpec, upper: BoxSpec, grid: str) -> flo
 
 
 def minimum_height_units(grid: str, stackable: bool, floor: float | None = None) -> int:
-    """Fewest whole units a bin may be: 1. The stacking lip stands above the
+    """Fewest whole units a bin may be: 2 (14 mm). The stacking lip stands above the
     typed height, so Stackable adds no height requirement of its own.
 
     ``floor`` is kept for callers that pass it.
     """
     _profile(grid)
-    return 1
+    return 2
+
+
+def gridfinity_short_bin_message(grid: str) -> str:
+    return f"A {grid_label(grid)} bin must be at least 14 mm tall (2 height units)."
 
 
 def normalize_gridfinity_settings(box: BoxSpec, grid: str) -> BoxSpec:
@@ -250,20 +254,20 @@ def normalize_gridfinity_settings(box: BoxSpec, grid: str) -> BoxSpec:
     def too_short() -> ValueError:
         why = (
             "Gridfinity lid minimum: a lidded bin needs at least 2 height units"
-            if lid_enabled(box) else "a bin is at least one height unit"
+            if lid_enabled(box) else "a bin is at least two height units"
         )
         return ValueError(
-            f"a {grid} bin's Z must be at least {needed} height unit"
+            f"a {grid_label(grid)} bin's Z must be at least {needed} height unit"
             f"{'s' if needed != 1 else ''} ({needed * HEIGHT_UNIT:g} mm): {why}; "
             f"{box.z:g} mm is too short"
         )
 
-    if units < 1.0 - 1e-9:
-        raise too_short()
+    if units < 2.0 - 1e-9:
+        raise ValueError(gridfinity_short_bin_message(grid))
     if abs(units - round(units)) > 1e-9:
         below = math.floor(units) * HEIGHT_UNIT
         raise ValueError(
-            f"a {grid} bin's Z must be a whole number of {HEIGHT_UNIT:g} mm height "
+            f"a {grid_label(grid)} bin's Z must be a whole number of {HEIGHT_UNIT:g} mm height "
             f"units; {box.z:g} mm is {units:.3g} units - use {below:g} mm or "
             f"{below + HEIGHT_UNIT:g} mm"
         )
@@ -402,7 +406,7 @@ def gridfinity_body(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
     floor = effective_base(spec, grid)
     if spec.z < floor + MIN_HEIGHT_ABOVE_BASE:
         raise ValueError(
-            f"a {grid} bin needs Z of at least {floor + MIN_HEIGHT_ABOVE_BASE:g} mm "
+            f"a {grid_label(grid)} bin needs Z of at least {floor + MIN_HEIGHT_ABOVE_BASE:g} mm "
             f"({floor:g} mm for the feet and floor)"
         )
     # Never from z = 0: a full-width shell down there would bury the foot.
@@ -523,7 +527,7 @@ def validate_floor_build(grid: str, thickness: float, underside_depth: float = 0
     minimum = minimum_floor_build(grid, underside_depth)
     if not math.isfinite(thickness) or thickness + 1e-9 < minimum:
         raise ValueError(
-            f"Gridfinity minimum floor build: {minimum:g} mm for {grid} "
+            f"Gridfinity minimum floor build: {minimum:g} mm for {grid_label(grid)} "
             f"({floor_pocket_depth(grid):g} mm pocket + "
             f"{CONTAINER_FLOOR_SKIN_MM:g} mm floor skin + "
             f"{underside_depth:g} mm underside recess); got {thickness:g} mm"
