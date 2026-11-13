@@ -204,12 +204,53 @@ def unique_object_names(names: Iterable[str], taken: Iterable[str] = ()) -> list
     return out
 
 
+def accent_body_parts(
+    body_name: str,
+    mesh: trimesh.Trimesh,
+    color: str,
+    top: float | None = None,
+    taken: Iterable[str] = (),
+) -> tuple[list[tuple[str, trimesh.Trimesh]], dict[str, int]]:
+    """Partition the finished body without moving or changing its material.
+
+    The datum comes from the completed shell, including any receiving rim,
+    before internal features are added. Features above that rim stay on slot 1.
+    A horizontal cut can disconnect an open-top wall: keep every component as
+    its own closed part rather than demanding that the band be one solid.
+    Color is nominal naming data only; it never selects geometry.
+    """
+    mesh_report(body_name, mesh)
+    low, high = mesh.bounds
+    top = float(high[2]) if top is None else float(top)
+    slab = trimesh.creation.box(extents=(
+        high[0] - low[0] + 2.0, high[1] - low[1] + 2.0, 1.0,
+    ))
+    slab.apply_translation((
+        (low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0, top - 0.5,
+    ))
+    band = trimesh.boolean.intersection([mesh, slab], engine="manifold")
+    remainder = trimesh.boolean.difference([mesh, slab], engine="manifold")
+    if band is None or remainder is None or not len(band.faces) or not len(remainder.faces):
+        raise RuntimeError("Accent split did not leave both body and top 1 mm material")
+    lower = list(remainder.split(only_watertight=False))
+    upper = list(band.split(only_watertight=False))
+    raw_names = [body_name] * len(lower) + [f"Accent band ({color})"] * len(upper)
+    names = unique_object_names(raw_names, taken=taken)
+    parts = list(zip(names, lower + upper))
+    for name, part in parts:
+        mesh_report(name, part)
+    return parts, {name: 2 for name in names[len(lower):]}
+
+
 def export_text_body_3mf(
     body_mesh: trimesh.Trimesh,
     texts: Iterable[tuple[str, trimesh.Trimesh]],
     output: Path,
     body_name: str = "box",
     part_filament: int = TEXT_PART_FILAMENT,
+    *,
+    accent_color: str | None = None,
+    accent_top: float | None = None,
 ) -> list[str]:
     """Write a body plus any number of text solids as one 3MF **assembly**.
 
@@ -240,6 +281,18 @@ def export_text_body_3mf(
                 "its own pocket"
             )
         scene.add_geometry(mesh, node_name=name, geom_name=name)
+
+    if accent_color is not None:
+        # Split after all cuts/additions. The original whole-body validation
+        # and text-pocket overlap checks above still apply unchanged.
+        parts, slots = accent_body_parts(
+            body_name, body_mesh, accent_color, accent_top, taken=names,
+        )
+        slots.update({name: part_filament for name in names})
+        export_assembly_3mf(
+            parts + list(zip(names, (mesh for _, mesh in texts))), output, slots,
+        )
+        return names
 
     generic = scene.export(file_type="3mf")
     if not isinstance(generic, bytes):
@@ -295,9 +348,13 @@ def export_labelled_box(
     output: Path,
     box_name: str = "box",
     label_name: str = "label",
+    *,
+    accent_color: str | None = None,
+    accent_top: float | None = None,
 ) -> None:
     """One body and one label - the rim-ledge and plain ``box --label`` case."""
-    export_text_body_3mf(box_mesh, [(label_name, label_mesh)], output, box_name)
+    export_text_body_3mf(box_mesh, [(label_name, label_mesh)], output, box_name,
+                        accent_color=accent_color, accent_top=accent_top)
 
 
 def export_assembly_3mf(
@@ -476,7 +533,10 @@ def export_object_groups_3mf(
     return object_names
 
 
-def export_mesh(mesh: trimesh.Trimesh, output: Path, name: str) -> None:
+def export_mesh(
+    mesh: trimesh.Trimesh, output: Path, name: str, *,
+    accent_color: str | None = None, accent_top: float | None = None,
+) -> None:
     mesh_report(name, mesh)
     suffix = output.suffix.lower()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -484,6 +544,10 @@ def export_mesh(mesh: trimesh.Trimesh, output: Path, name: str) -> None:
         mesh.export(output, file_type="stl")
         return
     if suffix == ".3mf":
+        if accent_color is not None:
+            parts, slots = accent_body_parts(name, mesh, accent_color, accent_top)
+            export_assembly_3mf(parts, output, slots)
+            return
         scene = trimesh.Scene()
         scene.units = "mm"
         scene.add_geometry(mesh, node_name=name, geom_name=name)

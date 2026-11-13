@@ -1,5 +1,15 @@
 # Wavefinity AI Feature Reference
 
+An ordinary bin on any supported grid may set `box.accent_band` to `true` for
+a top 1 mm accent (default `false`). `box.accent_color` defaults to `"blue"`;
+choices are blue, red, green, yellow, orange, purple, white and black. Include
+the option only when requested. The color is nominal: the 3MF band's named
+parts use filament slot 2 and the actual loaded filament determines the print.
+The remaining body uses slot 1. An open stacking rim is part of the body's top;
+the split preserves fit. Lids and removable inserts are unchanged. STL retains
+the complete body without color separation. There is no adjustable band depth
+or partial-band setting.
+
 > **Audience:** External AI systems helping a person design one ordinary Wavefinity bin.
 >
 > **Purpose:** Public, compact background reference for Wavefinity AI Design. The AI Design prompt may link here instead of repeating every explanatory detail.

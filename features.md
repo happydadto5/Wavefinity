@@ -1,5 +1,15 @@
 # Wavefinity Feature Catalog
 
+Bins on Wavefinity and both Gridfinity grids offer **Top 1 mm accent**, Off by
+default, with a nominal color choice (Blue by default). The color choice appears
+only while the accent is On. 3MF exports carry the body's top 1 mm as named
+parts on filament slot 2; the remaining body stays on slot 1. Set the slot's
+filament in the slicer: the loaded filament determines the printed color.
+Stacking rims are included in the body's top, preserving their receiving
+profile and fit. Lids, removable inserts and separate accessories are unchanged.
+STL retains the complete body without color separation. Open-top cuts may split
+the band into several closed parts, kept registered in the same object.
+
 > **Purpose:** Keep one readable inventory of Wavefinity's important user-facing capabilities.
 >
 > This file describes **what the product can do**. It is not the authoritative source for geometry constants, numeric validation limits, schemas, or implementation details. Those remain in the code/catalog/rule owners.

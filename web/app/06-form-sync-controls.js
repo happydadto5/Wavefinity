@@ -927,6 +927,8 @@ function wireControls() {
   const heightInput = $("#z");
   $("#bin-grid").addEventListener("change", commitBinGrid);
   $("#bin-magnets").addEventListener("change", commitBinMagnets);
+  $("#bin-accent").addEventListener("change", commitBinAccent);
+  $("#bin-accent-color").addEventListener("change", commitBinAccent);
   heightInput.addEventListener("keydown", event => { if (event.key === "Enter") heightInput.blur(); });
   heightInput.addEventListener("focus", () => {
     heightInput.select();

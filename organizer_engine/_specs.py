@@ -934,8 +934,16 @@ class BoxSpec:
     # Pegboard Space mounting. Inert for every ordinary/legacy design.
     pegboard: PegboardMountSpec = field(default_factory=PegboardMountSpec)
     magnet_holes: str = "none"
+    accent_band: bool = False
+    accent_color: str = "blue"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.accent_band, bool):
+            raise ValueError("Accent band must be true or false")
+        if self.accent_color not in (
+            "blue", "red", "green", "yellow", "orange", "purple", "white", "black",
+        ):
+            raise ValueError("Accent color must be blue, red, green, yellow, orange, purple, white or black")
         if self.magnet_holes not in ("none", "6x2"):
             raise ValueError("Magnet holes must be none or 6x2")
         if self.b4b.enabled and self.magnet_holes != "none":

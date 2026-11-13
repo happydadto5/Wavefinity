@@ -3060,6 +3060,7 @@ def ai_capability_manifest(grid: str = "wavefinity") -> dict[str, Any]:
         features.append(entry)
     examples = _ai_modifier_examples()
     modifier_examples = {
+        "accent_band": examples["accent_band"],
         "lid_stacking": {
             "stackable_bin": examples["stackable_bin"],
             "lid_with_handle": examples["lid_with_handle"],
@@ -3069,6 +3070,13 @@ def ai_capability_manifest(grid: str = "wavefinity") -> dict[str, Any]:
         "edge_mount": examples["edge_mount"],
     }
     modifier_rules = {
+        "accent_band": {
+            "accent_band": {"type": "boolean", "default": False},
+            "accent_color": {"default": "blue", "choices": [
+                "blue", "red", "green", "yellow", "orange", "purple", "white", "black",
+            ]},
+            "band_height_mm": 1.0, "filament_slot": 2, "body_only": True,
+        },
         "lid_stacking": {
             "lid_rules": catalog["lid_rules"], "stack_rules": catalog["stack_rules"],
         },

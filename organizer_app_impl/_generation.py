@@ -67,11 +67,13 @@ def generate_box_file(
     location = label_position(label_location)
     validate_scoop_lift_grabbers(box, scoop)
     body = make_box(box)
+    accent_options = {"accent_color": box.accent_color,
+                      "accent_top": float(body.bounds[1][2])} if box.accent_band else {}
     if scoop:
         body = union([body, make_scoop(box)])
     if not tidy:
         report = mesh_report("wavy_box", body)
-        export_mesh(body, output, "wavy_box")
+        export_mesh(body, output, "wavy_box", **accent_options)
         result = _part_result(output, report)
         result["customizations"] = {"scoop": scoop, "label_position": location}
         return result
@@ -85,7 +87,8 @@ def generate_box_file(
         pocketed, inlay = make_labelled_box(box, tidy, occupied, body)
         label_info = label_report(box, tidy, occupied)
     report = mesh_report("wavy_box", pocketed)
-    export_labelled_box(pocketed, inlay, output, box_filename(box, suffix=""), tidy)
+    export_labelled_box(pocketed, inlay, output, box_filename(box, suffix=""), tidy,
+                        **accent_options)
     result = _part_result(output, report)
     result["label"] = label_info
     result["customizations"] = {"scoop": scoop, "label_position": location}

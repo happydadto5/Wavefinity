@@ -626,6 +626,8 @@ def design_to_dict(
         validate_bin_side_openings(box, layout.design_grid)
     box_block = {
         "magnet_holes": box.magnet_holes,
+        "accent_band": box.accent_band,
+        "accent_color": box.accent_color,
         "x": box.x,
         "y": box.y,
         "z": box.z,
@@ -1051,6 +1053,8 @@ def design_from_dict(
         side_openings=side_openings,
         pegboard=pegboard,
         magnet_holes=raw.get("magnet_holes", "none"),
+        accent_band=raw.get("accent_band", False),
+        accent_color=raw.get("accent_color", "blue"),
     )
     from organizer_engine._specs import validate_bin_magnets
     validate_bin_magnets(box, grid)

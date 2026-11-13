@@ -81,6 +81,7 @@ from organizer_features.edge_mount import (
     edge_mount_text_object,
     make_edge_mount_label_part,
 )
+from organizer_engine._export import accent_body_parts
 from organizer_features.side_openings import (
     SIDE_OPENING_TOP_BRIDGE_MM,
     apply_side_openings,
@@ -307,6 +308,19 @@ def generate_b4b_files(
     )
     summary = b4b_summary(box)
     print_objects = b4b_build_print_objects(box, features=features)
+    accent_slots: dict[str, int] = {}
+    if box.accent_band:
+        taken = [name for _object, object_parts in print_objects for name, _mesh in object_parts
+                 if name != "Storage Box Body"]
+        accented_objects = []
+        for object_name, object_parts in print_objects:
+            if object_name == "Storage Box Body":
+                body_name, body_mesh = object_parts[0]
+                object_parts, accent_slots = accent_body_parts(
+                    body_name, body_mesh, box.accent_color, taken=taken,
+                )
+            accented_objects.append((object_name, object_parts))
+        print_objects = accented_objects
     parts = [
         part
         for _object_name, object_parts in print_objects
@@ -335,6 +349,7 @@ def generate_b4b_files(
         if name in ("Storage Box Top Label", "Storage Box Front Label Text",
                     "Storage Box Note Text")
     }
+    filaments.update(accent_slots)
     written = export_object_groups_3mf(print_objects, target, filaments)
     report = validate_object_groups_3mf(target, print_objects, filaments)
 
@@ -607,6 +622,8 @@ def _generate_organizer_files(
     if layout.mode == "fused":
         _phase("shell")
         shell = make_box(box, grid=layout.design_grid)
+        accent_options = {"accent_color": box.accent_color,
+                          "accent_top": float(shell.bounds[1][2])} if box.accent_band else {}
         _phase("features")
         body = make_fused_box(box, layout.features, shell)
         if scoop:
@@ -645,10 +662,11 @@ def _generate_organizer_files(
             written = export_text_body_3mf(
                 reported, [(name, mesh) for name, mesh, _raised in inlays],
                 output, "fused_organizer",
+                **accent_options,
             )
         else:
             written = []
-            export_mesh(reported, output, "fused_organizer")
+            export_mesh(reported, output, "fused_organizer", **accent_options)
         result: dict[str, object] = {
             "mode": layout.mode,
             "box": _part_result(output, mesh_report("fused_organizer", reported)),
@@ -659,6 +677,8 @@ def _generate_organizer_files(
         box_output = _resolve_file(box_filename, stack_request, part_name)
         _phase("shell")
         plain_box = make_box(box, grid=layout.design_grid)
+        accent_options = {"accent_color": box.accent_color,
+                          "accent_top": float(plain_box.bounds[1][2])} if box.accent_band else {}
         _phase("features")
         insert_features = tuple(one for one in layout.features
                                 if not (is_text(one) and one.options.get("level") == "rim"))
@@ -706,10 +726,11 @@ def _generate_organizer_files(
             box_written = export_text_body_3mf(
                 reported_box, [(name, mesh) for name, mesh, _raised in box_inlays],
                 box_output, box_output.stem,
+                **accent_options,
             )
         else:
             box_written = []
-            export_mesh(reported_box, box_output, "wavy_box")
+            export_mesh(reported_box, box_output, "wavy_box", **accent_options)
         if texts:
             written = export_text_body_3mf(
                 reported_insert, [(name, mesh) for name, mesh, _raised in texts],

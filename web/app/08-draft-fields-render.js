@@ -7,6 +7,10 @@ function syncBinGridControl() {
   select.value = state.design.grid || "wavefinity";
   $("#bin-magnets-row").hidden = state.design.grid !== "gridfinity" || !!state.design.box.b4b?.enabled;
   $("#bin-magnets").value = state.design.box.magnet_holes || "none";
+  $("#bin-accent").value = state.design.box.accent_band ? "on" : "off";
+  $("#bin-accent-color-row").hidden = !state.design.box.accent_band;
+  $("#bin-accent-color").disabled = !state.design.box.accent_band;
+  $("#bin-accent-color").value = state.design.box.accent_color || "blue";
 }
 
 function renderDraftFields() {

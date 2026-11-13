@@ -116,6 +116,13 @@ AI_MEDIA_REASON = (
     "never put this part in the returned design."
 )
 AI_MODIFIER_BLOCKS = (
+    ("accent_band", "Top 1 mm Accent",
+     "Set box.accent_band=true only when requested (default false). "
+     "box.accent_color defaults to blue; choices are blue, red, green, yellow, orange, purple, white, black. "
+     "Only the body's top 1 mm, including an open stacking rim, becomes named 3MF parts on filament slot 2. "
+     "Fit and lids are unchanged. The color is nominal; loaded filament determines the printed color. "
+     "STL retains the full body without color separation.",
+     ("box.accent_band", "box.accent_color")),
     ("lid_stacking", "Lid & Stacking",
      "Stackable Bin is box.stack = {\"mode\": \"direct\"} (its own base sits in the bin below); it may be combined with a lid. "
      "A Lid is box.lid; a resting lid (not flip_enabled) may set stack_rim=true (this is the \"Lid for stacking\" lid type; OFF by default, add it only when a bin is to stand on the lid) to carry a 2 mm rim on its top face that another stackable bin sits into. "
@@ -272,6 +279,7 @@ def _ai_modifier_examples() -> dict[str, dict[str, Any]]:
     design uses, so an example can never drift from the real serializer.
     """
     raw_blocks = {
+        "accent_band": {"accent_band": True, "accent_color": "blue"},
         "lid_with_handle": {"lid": {"enabled": True}},
         "stackable_bin": {"stack": {"mode": "direct"}},
         "inside_handles": {"lift_grabbers": {

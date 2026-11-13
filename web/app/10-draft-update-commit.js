@@ -67,6 +67,16 @@ function commitBinGrid(event) {
   changedDesign(previous);
 }
 
+function commitBinAccent() {
+  const previous = clone(state.design);
+  state.design.box.accent_band = $("#bin-accent").value === "on";
+  state.design.box.accent_color = $("#bin-accent-color").value || "blue";
+  syncBinGridControl();
+  state.canGenerate = false;
+  updateGenerateAvailability();
+  changedDesign(previous);
+}
+
 function commitBinMagnets(event) {
   const previous = clone(state.design);
   state.design.box.magnet_holes = event.target.value;

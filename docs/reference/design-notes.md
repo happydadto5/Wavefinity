@@ -99,6 +99,16 @@ Both were stated as done and later found false. Tests now exist for each.
 
 ## Traps
 
+- **Top 1 mm accent (Story 3056):** take the horizontal band from the finished
+  body at its shell's actual top, including a stacking receiving rim. Partition
+  after fused features, mounts, lettering pockets and final side-opening cuts;
+  splitting in the early builder would be lost through those later booleans.
+  Preserve every closed connected component of both partitions as a registered
+  part, with slot 2 for the band and slot 1 for the rest. A feature projecting
+  above the shell does not raise the band datum. This changes material assignment
+  only, preserving the rim and lid interface profile. Lids are never split.
+  Single-mesh STL retains the original full mesh.
+
 - **3MF hashes are not reproducible.** `lib3mf` writes a fresh build UUID each
   export, so identical code gives a different `.3mf` hash every run. The STL
   fingerprints are the real regression guard.
