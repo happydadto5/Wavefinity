@@ -68,7 +68,7 @@ self.onmessage = async ({ data: job }) => {
     send('result', { result }, [...transfers]);
   } catch (error) {
     const message = String(error?.message || error);
-    const fatal = /memory|allocation|heap capacity/i.test message;
+    const fatal = /memory|allocation|heap capacity/i.test(message);
     send('error', { status: 500, fatal, error: { kind: 'LOCAL_RUNTIME_ERROR', message } });
   }
 };
