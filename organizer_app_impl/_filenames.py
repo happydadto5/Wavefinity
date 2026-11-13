@@ -110,7 +110,8 @@ def pegboard_adapter_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf"
 def lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf", *, grid: str | None = None) -> str:
     """The ordinary bin's matching removable lid."""
     effective = stack_effective_box(box)
-    name = f"{'Stack Lid' if lid_receives_stack(box) else 'Handled Lid'} {box.x:g} x {box.y:g}"
+    lid_name = "Stack Lid" if lid_receives_stack(box) else ("Gridfinity Lid" if grid == "gridfinity" else "Handled Lid")
+    name = f"{lid_name} {box.x:g} x {box.y:g}"
     if not math.isclose(effective.wall, DEFAULT_WALL, abs_tol=1e-9):
         name += f" Wall {effective.wall:g}mm"
     tidy = clean_label(part)
