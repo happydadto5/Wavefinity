@@ -86,14 +86,16 @@ def _profile(grid: str) -> dict:
 # stacking rim (female receiving profile) - Story 2970, spec section 1-2
 # --------------------------------------------------------------------------- #
 HEIGHT_UNIT = 7.0          # one Gridfinity height unit, foot bottom to nominal rim
-RIM_OVERSHOOT = 0.5        # the cutter's mouth continues this far above the rim
+RIM_OVERSHOOT = 0.5        # the cutter's mouth continues this far above the lip top
+RIM_UNDERCUT = 0.1         # the lip solid and its cutter reach this far below the datum
 # A cutter band never leaves less than this much wall at the outside face, so a
 # narrow pitch cannot cut through its own bin (42 mm keeps 0.6, so is untouched).
 RIM_MIN_WALL = 0.4
 
-# 42 mm: the specification's table exactly, as (depth below the rim, opening
-# width, corner radius). The theoretical tip is 4.4 deep at 41.5 / R3.75; this
-# reference trims 0.6 from it, so the profile ends at 3.8.
+# 42 mm: the specification's table exactly, as (height ABOVE the nominal rim,
+# opening width, corner radius): narrowest at the datum, widest at the lip top,
+# so a foot nests its full depth. The theoretical tip is 4.4 high at 41.5 / R3.75;
+# this reference trims 0.6 from it, so the lip ends at 3.8 above the rim.
 RIM_TIP_THEORETICAL = (4.4, 41.5, 3.75)
 RIM_TIP_TRIM = 0.6
 _RIM_42 = ((0.0, 36.3, 1.15), (0.7, 37.7, 1.85), (2.5, 37.7, 1.85), (3.8, 40.3, 3.15))
@@ -123,7 +125,7 @@ def _rim_bands(grid: str) -> tuple:
 
 
 def rim_depth(grid: str) -> float:
-    """How far the receiving profile reaches below the rim."""
+    """How far the receiving lip stands above the nominal rim (the 7 mm-unit height)."""
     return _rim_bands(grid)[-1][0]
 
 
@@ -200,27 +202,34 @@ def interior_depth(spec: BoxSpec, grid: str) -> float:
 
 
 def assembled_stack_height(lower: BoxSpec, upper: BoxSpec, grid: str) -> float:
-    """Two stacked grid bins: both exteriors less the descent the rim allows."""
+    """Two stacked grid bins: both nominal heights less the descent the lip allows.
+
+    Each bin's height is foot bottom to nominal rim; the lip stands above that
+    and is not counted, because the upper foot nests inside it.
+    """
     _profile(grid)
     return lower.z + upper.z - SEAT_DESCENT[grid]
 
 
 def assembled_lid_stack_height(lower: BoxSpec, upper: BoxSpec, grid: str) -> float:
-    """Closed lower bin plus upper bin, seated in the lid's standard socket."""
-    return assembled_stack_height(lower, upper, grid)
+    """Closed lower bin plus upper bin, seated in the lid's receiving lip.
+
+    ``lower.z`` is the lidded total, whose top is the lip top. The foot enters
+    the lip and bears on the plate, so it sinks the whole lip height and no
+    further (the plate is solid below the datum).
+    """
+    _profile(grid)
+    return lower.z + upper.z - rim_depth(grid)
 
 
 def minimum_height_units(grid: str, stackable: bool, floor: float | None = None) -> int:
-    """Fewest whole units a bin may be: 1 plain; stackable also fits floor + rim.
+    """Fewest whole units a bin may be: 1. The stacking lip stands above the
+    typed height, so Stackable adds no height requirement of its own.
 
-    ``floor`` is the effective cavity floor, defaulting to the foot's minimum.
+    ``floor`` is kept for callers that pass it.
     """
     _profile(grid)
-    if not stackable:
-        return 1
-    floor = MIN_GRID_BASE if floor is None else floor
-    # round() first so 14.000000000000002 / 7 never costs a whole extra unit
-    return max(1, math.ceil(round((floor + rim_depth(grid)) / HEIGHT_UNIT, 9)))
+    return 1
 
 
 def normalize_gridfinity_settings(box: BoxSpec, grid: str) -> BoxSpec:
@@ -241,10 +250,7 @@ def normalize_gridfinity_settings(box: BoxSpec, grid: str) -> BoxSpec:
     def too_short() -> ValueError:
         why = (
             "Gridfinity lid minimum: a lidded bin needs at least 2 height units"
-            if lid_enabled(box) else
-            f"a Stackable bin needs its {floor:g} mm floor plus the "
-            f"{rim_depth(grid):g} mm stacking rim" if stackable
-            else "a bin is at least one height unit"
+            if lid_enabled(box) else "a bin is at least one height unit"
         )
         return ValueError(
             f"a {grid} bin's Z must be at least {needed} height unit"
@@ -413,24 +419,32 @@ def gridfinity_body(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
 
 
 def rim_cutter(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
-    """The stacking rim's receiving void: every cell's profile, rim top downward.
+    """The stacking lip's receiving void, opening at the nominal rim (``spec.z``).
 
-    One loft per cell at pitch spacing, spanning ``rim_depth`` below the rim
-    (``spec.z``) plus ``RIM_OVERSHOOT`` of straight mouth above it. It is the void
-    only: cutting it from the shell leaves the rim. Bands are the table in
+    One loft per cell at pitch spacing: narrowest at the rim, widening upward
+    through ``rim_depth`` of lip, then straight above it. Bands are the table in
     ``RIM_PROFILES``, narrowed only where a pitch's outer wall would otherwise
     fall under ``RIM_MIN_WALL``.
     """
-    profile = _profile(grid)
-    bands = _rim_bands(grid)
-    depth = bands[-1][0]
-    floor = effective_base(spec, grid)
-    if spec.z - depth < floor:
-        raise ValueError(
-            f"a Stackable {grid} bin needs Z of at least {floor + depth:g} mm "
-            f"({floor:g} mm floor plus the {depth:g} mm stacking rim)"
-        )
+    _profile(grid)
     return rim_socket_cutter(spec, grid, spec.z)
+
+
+def rim_lip(spec: BoxSpec, grid: str, datum_z: float) -> trimesh.Trimesh:
+    """The perimeter lip: material standing on ``datum_z`` for ``rim_depth``.
+
+    The outline is the bin's outer shape less the whole-footprint mouth (no
+    crossbars between cells); its inside is the receiving profile, narrow at the
+    datum and wide at the top. It reaches ``RIM_UNDERCUT`` below the datum so the
+    union with the wall below overlaps in volume.
+    """
+    depth = rim_depth(grid)
+    ring = _extrude_polygon(
+        flat_outer_polygon(spec, grid).difference(rim_mouth_polygon(spec, grid)),
+        depth + RIM_UNDERCUT,
+    )
+    ring = translated(ring, (0.0, 0.0, datum_z - RIM_UNDERCUT))
+    return difference([ring, rim_socket_cutter(spec, grid, datum_z)])
 
 
 def rim_mouth_polygon(spec: BoxSpec, grid: str) -> Polygon:
@@ -447,20 +461,22 @@ def rim_mouth_polygon(spec: BoxSpec, grid: str) -> Polygon:
 
 
 def rim_socket_cutter(spec: BoxSpec, grid: str, opening_z: float) -> trimesh.Trimesh:
-    """Identical rim-profile void, opening at a body's rim or a lid ridge top.
+    """Rim-profile void, right way up, opening at ``opening_z``: a body's nominal
+    rim or a lid's plate top.
 
-    The lowest band is exactly ``rim_depth(grid)`` below the opening. A lid
-    ridge that tall therefore keeps the cutter entirely above its plate.
+    Band z is height above ``opening_z``. The cutter starts ``RIM_UNDERCUT``
+    below it at the narrowest width, so it never leaves a coplanar face.
     """
     profile = _profile(grid)
     bands = _rim_bands(grid)
     half = profile["foot_half"]
     widest = profile["pitch"] - 0.5 - 2.0 * RIM_MIN_WALL
     sections = [
-        (opening_z - band_depth, min(width, widest) / 2.0 - half)
-        for band_depth, width, _radius in reversed(bands)
+        (opening_z + height, min(width, widest) / 2.0 - half)
+        for height, width, _radius in bands
     ]
-    sections.append((opening_z + RIM_OVERSHOOT, sections[-1][1]))
+    sections.insert(0, (opening_z - RIM_UNDERCUT, sections[0][1]))
+    sections.append((sections[-1][0] + RIM_OVERSHOOT, sections[-1][1]))
     cells = [_lofted_cell(centre, half, sections) for centre in _cell_centres(spec, grid)]
     return cells[0] if len(cells) == 1 else union(cells)
 

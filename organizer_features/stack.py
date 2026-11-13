@@ -761,7 +761,7 @@ def _make_grid_lid(eff: BoxSpec, grid: str) -> trimesh.Trimesh:
     """Flush plate, mouth-clearing skirt and optional perimeter socket ridge."""
     from organizer_features.gridfinity import (
         _single_volume, flat_cavity_polygon, flat_outer_polygon,
-        rim_depth, rim_mouth_polygon, rim_socket_cutter,
+        rim_lip, rim_mouth_polygon,
     )
 
     outer = flat_outer_polygon(eff, grid)
@@ -779,13 +779,10 @@ def _make_grid_lid(eff: BoxSpec, grid: str) -> trimesh.Trimesh:
     plate.apply_translation((0.0, 0.0, eff.z))
     lid = union([plate, skirt])
     if lid_receives_stack(eff):
-        top = eff.z + stack_lid_rise(eff)
-        # A perimeter ridge, with no crossbars between cells. Its socket cut
-        # stops on the plate top; the overlap below fuses it into the plate.
-        ridge = _extrude_polygon(outer.difference(mouth), rim_depth(grid) + 0.1)
-        ridge.apply_translation((0.0, 0.0, top - rim_depth(grid) - 0.1))
-        ridge = difference([ridge, rim_socket_cutter(eff, grid, top)])
-        lid = union([lid, ridge])
+        # A perimeter lip, with no crossbars between cells, standing on the
+        # plate top; its overlap below fuses it into the plate.
+        plate_top = eff.z + float(lid_spec(eff).thickness)
+        lid = union([lid, rim_lip(eff, grid, plate_top)])
     _single_volume(lid, "the Gridfinity lid")
     lid.remove_unreferenced_vertices()
     return lid
