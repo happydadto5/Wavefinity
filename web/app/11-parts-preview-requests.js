@@ -481,6 +481,7 @@ function cancelPreviewWait() {
 }
 
 function invalidatePendingPreview() {
+  WFLocalAPI.advanceDesign();
   state.previewRequest += 1;
   cancelPreviewWait();
 }
@@ -730,6 +731,7 @@ async function refreshPreview({ persistResume = true, recovery = false } = {}) {
   // an ordinary design must never preview or checkpoint under it.
   if (typeof designTargetIsStructural === "function" && designTargetIsStructural()) return;
   fullPreviewStarts += 1;
+  WFLocalAPI.advanceDesign();
   const request = ++state.previewRequest;
   state.previewInFlight = { request, key: previewGeometryKey(state.design), draft: Boolean(state.draft) };
   const lidEpochAtRequest = state.lidThicknessEpoch;

@@ -1,6 +1,6 @@
 # Wavefinity — Browser runtime architecture (static, browser-only)
 
-Status: target architecture for the browser-only migration (GPU/server elimination). The migration is **not yet cut over**: the Python-hosted path is still the live implementation, and the `web/browser-core/` tree described below is built by later packages (B01–B14). Paths marked *planned* do not exist in the repository yet. Final authority: `Future plans/Browser-only-migration-execution-spec.md`; package details: `Future plans/Browser-only-core-detailed-build-contracts.md`. The old server path is preserved in [legacy-python-server-hosting.md](legacy-python-server-hosting.md).
+Status: browser-only migration in progress (GPU/server elimination). The local worker transport is present, but route packages and the final static cutover are not yet complete; the intermediate UI is not functional. Final authority: `Future plans/Browser-only-migration-execution-spec.md`; package details: `Future plans/Browser-only-core-detailed-build-contracts.md`. The old server path is preserved in [legacy-python-server-hosting.md](legacy-python-server-hosting.md).
 
 ## Request and data flow
 
@@ -16,7 +16,7 @@ existing UI (web/index.html, web/app/*, web/spaces/*)
 
 - Geometry runs on the visitor's CPU. It is not a rewrite to simplified JavaScript and not float32; the canonical Python engine and the float64 MeshGL64 kernel are kept.
 - There is **no Wavefinity-operated server-side geometry process** and no visitor-installed Wavefinity application. The hosting side only serves static files.
-- Routes the UI used to call as `/api/*` are answered locally. Python-side routes are registered through `route_dispatch.py` (planned); JavaScript-side routes (Spaces/preferences storage, browser AI providers) are registered in JS. Unknown routes fail closed.
+- Routes the UI used to call as `/api/*` are answered locally. Health and operation status are local; the remaining route implementations and registry assembly belong to later packages. Unknown routes fail closed without a network fallback.
 - The old `wavefinity_web.py` HTTP server is a different thing from the canonical geometry code. The server goes away at cutover; the geometry source stays and is what Pyodide runs.
 
 ## Local files

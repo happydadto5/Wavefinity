@@ -4,6 +4,7 @@ async function init() {
   wireBinNameDialog();
   wireSafeDialogBackdrops();
   try {
+    await WFBrowserCore.init();
     const catalog = await api("/api/catalog");
     state.catalog = catalog;
     if (typeof StorageDrawers !== "undefined") {

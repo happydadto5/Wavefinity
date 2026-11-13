@@ -388,30 +388,8 @@ async function api(path, payload = null, { timeoutMs = 60000, onStillFinishing =
   // live validation, which blocks Create while its summary is pending).
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
-  const options = payload === null ? { signal: controller.signal } : {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: controller.signal,
-  };
   try {
-    const response = await fetch(path, options);
-    let data;
-    try {
-      data = await response.json();
-    } catch (_error) {
-      throw new Error(isOutputRequest(path) && response.status >= 500
-        ? outputErrorText("", label, true)
-        : `The local Wavefinity service returned ${response.status}.`);
-    }
-    if (!response.ok) {
-      const text = data.error || `Request failed (${response.status}).`;
-      const error = new Error(isOutputRequest(path)
-        ? outputErrorText(text, label, response.status >= 500) : text);
-      error.status = response.status;
-      throw error;
-    }
-    return data;
+    return await WFLocalAPI.request(path, payload, { signal: controller.signal });
   } catch (error) {
     if (error?.name === "AbortError") {
       // (Fix 096 A5) The abort only cancels this wait: a side-effecting
