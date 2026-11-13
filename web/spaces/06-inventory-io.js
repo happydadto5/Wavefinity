@@ -139,6 +139,8 @@ SP.inventoryRequest = async (
     onStillFinishing = null,
     buildOnly = false,
     generatedFiles = null,
+    preparedResult = null,
+    expectedInventoryText = null,
     promotionCurrent = null,
     ...requestOptions
   } = {},
@@ -163,10 +165,15 @@ SP.inventoryRequest = async (
       { ...folder, handle },
       { migrate: write },
     );
+    if (expectedInventoryText !== null && inventoryText !== expectedInventoryText) {
+      throw new Error("Inventory changed while Print was prepared. No bin files or inventory were applied.");
+    }
     const deleting = path === "/api/drawer/save" && Boolean(extra.delete_ids?.length);
     const mayDeleteOwnedFiles =
       deleting || path === "/api/drawer/spacers/refresh";
-    const batchFiles = ["save-bins", "print-bins", "print-spacers", "print-complete"]
+    const structuralBatch = ["structural-print-combined", "storage-box-print", "surface-print"]
+      .some(name => path === `/api/space/${name}`);
+    const batchFiles = structuralBatch || ["save-bins", "print-bins", "print-spacers", "print-complete"]
       .some(name => path === `/api/drawer/${name}`);
     const needsFilenameSnapshot = batchFiles ||
       mayDeleteOwnedFiles ||
@@ -184,7 +191,7 @@ SP.inventoryRequest = async (
     if (batchFiles) {
       const inventory = await api("/api/drawer/load", { inventory_text: inventoryText,
         inventory_title: title, available_filenames: availableFilenames,
-        input_route: path, input_selection: extra.selection });
+        input_route: structuralBatch ? "/api/drawer/print-complete" : path, input_selection: extra.selection });
       const names = new Set(inventory.input_file_names || []);
       for (const name of names) {
         if (!/^[^/\\:\x00]+\.3mf$/i.test(name)) throw new Error("Inventory contains an unsafe 3MF filename.");
@@ -212,9 +219,9 @@ SP.inventoryRequest = async (
         ? { available_filenames: availableFilenames }
         : {}),
     };
-    const data = sideEffect
+    const data = preparedResult || (sideEffect
       ? await apiSideEffect(path, requestBody, { onStillFinishing })
-      : await api(path, requestBody, requestOptions);
+      : await api(path, requestBody, requestOptions));
 
     requireContext();
     if (buildOnly) return data;

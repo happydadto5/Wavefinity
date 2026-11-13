@@ -104,7 +104,7 @@ SP.mountStorageDrawersForm = (prefill, update) => {
       openPrinterSettings: () => SP.openPrinterSettings(),
       onChange: () => { if (update) SP.queueSetupAutosave(); },
       requestSummary: ({ space, printer_profile }) => api("/api/space/storage-drawers-summary", {
-        space, ...(state.runtime.hosted ? { printer_profile } : {}),
+        space, printer_profile, printer_profile_configured: PrinterProfile.configured(),
       }, { timeoutMs: 15000 }),
     },
     onReadyChange: ready => { if (primaryButton) primaryButton.disabled = !ready; },
@@ -185,12 +185,8 @@ SP.mutateCabinet = async (operation, payload = {}) => {
 };
 
 SP.cabinetMutate = async (operation, { drawer_id = null, space = null } = {}) => {
-  if (!state.runtime.hosted) {
-    return apiSideEffect("/api/space/storage-drawers-mutate", {
-      output: state.output, space_id: state.activeSpaceId, operation, drawer_id, space,
-    });
-  }
-  // Hosted twin: the browser folder is the transaction owner.
+  // The browser folder is the transaction owner.
+  const context = DL.spaceContext();
   const folder = state.browserFolder;
   const spaceId = state.activeSpaceId;
   const filename = SP.inventoryFilenameFor(folder);
@@ -208,6 +204,11 @@ SP.cabinetMutate = async (operation, { drawer_id = null, space = null } = {}) =>
     // Reset rebuilds from the folder's stored (damaged) definition.
     space: operation === "reset" ? current.data?.space : space,
   });
+  DL.requireSpaceContext(context);
+  if ((await SP.readInventoryFor(folder)) !== inventoryText) {
+    throw new Error("Inventory changed while the cabinet was being updated. Nothing was applied.");
+  }
+  DL.requireSpaceContext(context);
   await WFFileSystem.writeText(folder.handle, filename, result.inventory_text);
   try {
     await SP.writeMetadata(folder.handle, "space", result.space, true, {}, { expectedSpaceId: spaceId });
@@ -215,6 +216,7 @@ SP.cabinetMutate = async (operation, { drawer_id = null, space = null } = {}) =>
     await WFFileSystem.writeText(folder.handle, filename, inventoryText);
     throw error;
   }
+  DL.requireSpaceContext(context);
   await SP.rememberHostedRecent(folder, { folder_mode: "space", space: result.space, space_id: spaceId });
   return result;
 };
@@ -365,7 +367,6 @@ SP.updateCabinetWorkspace = () => {
 // settles the journal itself before comparing ownership.
 SP.settleCabinetJournal = async () => {
   if (!DL.isStorageDrawers() || !state.activeSpace || state.cabinetRecovery) return;
-  if (!state.runtime.hosted) return;
   const key = JSON.stringify([state.activeSpace, PrinterProfile.current(), state.activeSpaceId, SP.cabinetInfo.commitSerial]);
   if (SP.cabinetInfo.key === key) return;
   SP.cabinetInfo = { ...SP.cabinetInfo, key };
@@ -379,136 +380,12 @@ SP.settleCabinetJournal = async () => {
 // ---- structural Save / Print for the cabinet
 
 // (Fix 096 C7) Print Cabinet + Bins: the cabinet and every placed bin under
-// one truthful preflight (the backend runs C6's blocking predicate literally)
-// and one slicer handoff. Hosted stays unavailable: it has no local slicer.
-SP.printCabinetAndBins = async event => {
-  if (SP.structuralBusy) return;
-  const report = SP.beginStructuralReport("Printing…");
-  let savedName, savedWhere, wroteFiles = false;
-  SP.structuralBusy = true;
-  SP.structuralBusyLabel = "Preparing cabinet and bins…";
-  SP.renderSpaceInfo();
-  try {
-    // A dirty structural Design draft must be settled before output is
-    // manufactured from the accepted Space: Save Changes, Discard, or the
-    // output stays blocked while the user keeps editing.
-    if (!(await SP.confirmLeaveStructuralEditor())) return;
-    const hosted = Boolean(state.runtime.hosted);
-    if (hosted) { report(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true); return; }
-    if (!state.slicer?.available) {
-      report("A slicer was not found. Use Change slicer in Design to locate Bambu Studio or OrcaSlicer.", true);
-      return;
-    }
-    const context = DL.spaceContext();
-    savedName = state.activeSpace?.name || "the cabinet";
-    savedWhere = state.output;
-    const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\\\/]/).pop()))].join("\n");
-    DL.requireSpaceContext(context);
-    if (typeof flushSpaceDesignAutosave === "function" &&
-        !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
-    DL.requireSpaceContext(context);
-    if (!(await DL.save())) return;
-    DL.requireSpaceContext(context);
-    const result = await apiSideEffect("/api/space/structural-print-combined", {
-      space: clone(state.activeSpace),
-      output: state.output, space_id: state.activeSpaceId,
-      slicer_path: state.slicer?.path || null,
-    }, report.options);
-    wroteFiles = true;
-    DL.requireSpaceContext(context);
-    DL.adoptBatchResult(result);
-    DP.renderInventory(true);
-    DL.emit();
-    DL.requestReport();
-    if (result.partial) {
-      report(result.error || "Cabinet + bins files were saved, but the slicer did not open.", true);
-    } else {
-      report(`Sent ${names(result.files)} to ${state.slicer?.name || "the slicer"}`, false);
-      if (typeof WS !== "undefined") WS.markContainerPrinted();
-    }
-  } catch (error) {
-    if (DL.isStaleSpaceError(error)) {
-      report(wroteFiles
-        ? `Cabinet + bins files for "${savedName}" were saved to ${savedWhere}. The Space you switched to was not changed.`
-        : `You switched Spaces before "${savedName}" was saved, so nothing was written.`, false, 8000);
-    } else {
-      report(error.message, true);
-    }
-  } finally {
-    report.finish();
-    SP.structuralBusy = false;
-    SP.structuralBusyLabel = "";
-    SP.cabinetInfo.commitSerial += 1;
-    SP.renderSpaceInfo();
-  }
-};
-SP.runCabinetStructural = async mode => {
-  if (SP.structuralBusy) return;
-  const report = SP.beginStructuralReport(mode === "save" ? "Saving cabinet…" : "Printing…");
-  let savedName, savedWhere, wroteFiles = false;
-  SP.structuralBusy = true;
-  SP.structuralBusyLabel = mode === "save" ? "Saving cabinet…" : "Printing cabinet…";
-  SP.renderSpaceInfo();
-  try {
-    // A dirty structural Design draft must be settled before output is
-    // manufactured from the accepted Space: Save Changes, Discard, or the
-    // output stays blocked while the user keeps editing.
-    if (!(await SP.confirmLeaveStructuralEditor())) return;
-    const hosted = Boolean(state.runtime.hosted);
-    if (hosted && !state.browserFolder) { report("Choose a folder before saving files.", true); return; }
-    if (mode === "print" && hosted) { report(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true); return; }
-    if (mode === "print" && !state.slicer?.available) {
-      report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
-      return;
-    }
-    const context = DL.spaceContext();
-    const payload = {
-      space: clone(state.activeSpace),
-      ...(hosted ? { printer_profile: PrinterProfile.current() } : { output: state.output, space_id: state.activeSpaceId }),
-    };
-    // Remembered now, so a late completion can say exactly what it did and to whom.
-    savedName = state.activeSpace?.name || "the cabinet";
-    savedWhere = hosted ? (state.browserFolder?.name || "your chosen folder") : state.output;
-    const names = files => [...new Set((files || []).map(file => String(file?.name || file).split(/[\\/]/).pop()))].join("\n");
-    let saved;
-    if (mode === "print") {
-      const result = await apiSideEffect("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null }, report.options);
-      wroteFiles = true;
-      DL.requireSpaceContext(context);
-      if (result.partial) {
-        report(result.error || "Cabinet files were saved, but the slicer did not open.", true);
-      } else {
-        report(`Sent ${names(result.files)} to ${state.slicer?.name || "the slicer"}`, false);
-        if (typeof WS !== "undefined") WS.markContainerPrinted();
-      }
-      saved = result;
-    } else if (hosted) {
-      saved = await SP.hostedCabinetSave(payload, context, report.options);
-      wroteFiles = true;
-      DL.requireSpaceContext(context);
-      report(`Saved Cabinet files to ${savedWhere}\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false);
-    } else {
-      saved = await apiSideEffect("/api/space/structural-generate", payload, report.options);
-      wroteFiles = true;
-      DL.requireSpaceContext(context);
-      report(`Saved Cabinet files to ${saved.output || state.output}\n${names(saved.files)}${saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : ""}`, false);
-    }
-  } catch (error) {
-    if (DL.isStaleSpaceError(error)) {
-      report(wroteFiles
-        ? `Cabinet files for "${savedName}" were saved to ${savedWhere}. The Space you switched to was not changed.`
-        : `You switched Spaces before "${savedName}" was saved, so nothing was written.`, false, 8000);
-    } else {
-      report(error.message, true);
-    }
-  } finally {
-    report.finish();
-    SP.structuralBusy = false;
-    SP.structuralBusyLabel = "";
-    SP.cabinetInfo.commitSerial += 1;
-    SP.renderSpaceInfo();
-  }
-};
+// one truthful preflight (the worker runs C6's blocking predicate literally)
+// and one local print file, followed by the person's opening confirmation.
+SP.printCabinetAndBins = event => SP.browserStructural({ mode: "print", combined: true, event });
+
+SP.runCabinetStructural = mode => SP.browserStructural({ mode });
+
 
 // ---- hosted durable save journal (Fix 086)
 //
@@ -595,19 +472,20 @@ SP.recoverHostedCabinetJournal = async (handle, spaceId, { own = false } = {}) =
   return committed ? "committed" : "rolled_back";
 };
 
-// Hosted Save Cabinet. Every candidate file is downloaded and verified first,
+// Browser Save Cabinet. Every candidate local file is verified first,
 // only files this cabinet already owns (same bytes as its committed manifest)
 // are replaced, and the manifest is committed only after every write succeeded.
 // Any failure - or a lost tab - is settled from the durable journal.
-SP.hostedCabinetSave = async (payload, context, options = {}) => {
+SP.hostedCabinetSave = async (payload, context, options = {}, prepared = null) => {
+  DL.requireSpaceContext(context);
   const handle = state.browserFolder.handle;
   const spaceId = state.activeSpaceId;
   // Settle any earlier interrupted save before ownership is compared.
   await SP.recoverHostedCabinetJournal(handle, spaceId);
-  const exported = await apiSideEffect("/api/space/structural-generate", payload, options);
+  const exported = prepared || await apiSideEffect("/api/space/structural-generate", payload, options);
   DL.requireSpaceContext(context);
   const candidate = exported.manifest;
-  if (!candidate?.components?.length) throw new Error("The server did not return the cabinet files.");
+  if (!candidate?.components?.length) throw new Error("The local engine did not return the cabinet files.");
   const { current } = await SP.readMetadata(handle);
   const meta = SP.classifyMetadata(current);
   if (meta.status !== "space" || meta.space_id !== spaceId) {
@@ -621,14 +499,12 @@ SP.hostedCabinetSave = async (payload, context, options = {}) => {
 
   const blobs = new Map();
   for (const item of exported.files || []) {
-    const response = await fetch(item.url);
-    if (!response.ok) throw new Error(`Could not download ${item.name}.`);
-    blobs.set(item.name, await response.blob());
+    blobs.set(item.name, SP.structuralBlob(item));
   }
   for (const component of candidate.components) {
     const blob = blobs.get(component.filename);
     if (!blob || (await WFFileSystem.sha256Blob(blob)) !== component.sha256) {
-      throw new Error("A cabinet file did not download correctly. Nothing was changed.");
+      throw new Error("A cabinet file failed its integrity check. Nothing was changed.");
     }
   }
   for (const component of candidate.components) {
@@ -660,8 +536,10 @@ SP.hostedCabinetSave = async (payload, context, options = {}) => {
       version: 1, tx: txid, space_id: spaceId, prior_manifest: prior, candidate_manifest: candidate, files: entries,
     }));
     for (const component of candidate.components) {
+      await SP.requireStructuralFolder(handle, payload, context);
       await WFFileSystem.writeBlob(handle, component.filename, blobs.get(component.filename));
     }
+    await SP.requireStructuralFolder(handle, payload, context);
     await SP.writeMetadata(handle, "space", null, true, {
       structural_output_updates: { storage_drawers: candidate },
     }, { preserveSpace: true, expectedSpaceId: spaceId });

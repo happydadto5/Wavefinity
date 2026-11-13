@@ -155,12 +155,11 @@ SP.refreshBaseTrimSummary = async () => {
   try {
     const result = await api("/api/space/structural-design", {
       space: clone(space),
-      ...(hosted ? { printer_profile: profile } : { output: state.output, space_id: state.activeSpaceId }),
+      printer_profile: profile, printer_profile_configured: PrinterProfile.configured(), space_id: state.activeSpaceId,
     });
     if (SP.baseTrimInfo.key !== key) return;
     SP.baseTrimInfo.plan = result.plan;
-    SP.baseTrimInfo.status = hosted
-      ? await SP.hostedBaseTrimStatus(result.plan, result.signature) : result.status;
+    SP.baseTrimInfo.status = await SP.hostedBaseTrimStatus(result.plan, result.signature);
   } catch (error) {
     if (SP.baseTrimInfo.key !== key) return;
     if (error.code === "BASE_TRIM_RECOVERY") {
@@ -187,15 +186,16 @@ SP.fileNames = files => [...new Set((files || []).map(file => String(file?.name 
 // committed only after every write succeeded. A durable journal plus on-disk
 // backups make an interrupted save recoverable: the next status or save settles
 // the journal first, idempotently. (Fix 096 A8)
-SP.hostedBaseTrimSave = async (payload, context, options = {}) => {
+SP.hostedBaseTrimSave = async (payload, context, options = {}, prepared = null) => {
+  DL.requireSpaceContext(context);
   const handle = state.browserFolder.handle;
   const spaceId = state.activeSpaceId;
   // Settle any earlier interrupted save before ownership is compared.
   await SP.recoverBaseTrimJournal(handle, spaceId);
-  const exported = await apiSideEffect("/api/space/structural-generate", { ...payload, space_id: spaceId }, options);
+  const exported = prepared || await apiSideEffect("/api/space/structural-generate", { ...payload, space_id: spaceId }, options);
   DL.requireSpaceContext(context);
   const candidate = exported.manifest;
-  if (!candidate?.pieces?.length) throw new Error("The server did not return the Base Trim files.");
+  if (!candidate?.pieces?.length) throw new Error("The local engine did not return the Base Trim files.");
   const { current } = await SP.readMetadata(handle);
   const meta = SP.classifyMetadata(current);
   if (meta.status !== "space" || meta.space_id !== spaceId) {
@@ -208,14 +208,12 @@ SP.hostedBaseTrimSave = async (payload, context, options = {}) => {
 
   const blobs = new Map();
   for (const item of exported.files || []) {
-    const response = await fetch(item.url);
-    if (!response.ok) throw new Error(`Could not download ${item.name}.`);
-    blobs.set(item.name, await response.blob());
+    blobs.set(item.name, SP.structuralBlob(item));
   }
   for (const piece of candidate.pieces) {
     const blob = blobs.get(piece.filename);
     if (!blob || (await WFFileSystem.sha256Blob(blob)) !== piece.sha256) {
-      throw new Error("A Base Trim file did not download correctly. Nothing was changed.");
+      throw new Error("A Base Trim file failed its integrity check. Nothing was changed.");
     }
   }
   for (const piece of candidate.pieces) {
@@ -248,6 +246,7 @@ SP.hostedBaseTrimSave = async (payload, context, options = {}) => {
       version: 1, tx: txid, space_id: spaceId, prior_manifest: prior, candidate_manifest: candidate, files: entries,
     }));
     for (const piece of candidate.pieces) {
+      await SP.requireStructuralFolder(handle, payload, context);
       await WFFileSystem.writeBlob(handle, piece.filename, blobs.get(piece.filename));
     }
     for (const piece of candidate.pieces) {
@@ -255,7 +254,7 @@ SP.hostedBaseTrimSave = async (payload, context, options = {}) => {
         throw new Error(`${piece.filename} did not save correctly.`);
       }
     }
-    DL.requireSpaceContext(context);
+    await SP.requireStructuralFolder(handle, payload, context);
     await SP.writeMetadata(handle, "space", null, true, {
       structural_output_updates: { base_trim: candidate },
     }, { preserveSpace: true, expectedSpaceId: spaceId });
@@ -288,88 +287,12 @@ SP.hostedBaseTrimSave = async (payload, context, options = {}) => {
   return { files: [...desired], warnings };
 };
 
-SP.saveBaseTrim = async () => {
-  if (SP.structuralBusy || SP.structuralKind() !== "base_trim") return;
-  const report = SP.beginStructuralReport("Exporting…");
-  const hosted = Boolean(state.runtime.hosted);
-  if (hosted && !state.browserFolder) { report("Choose a folder before saving files.", true); return; }
-  const context = DL.spaceContext();
-  const payload = {
-    space: clone(state.activeSpace), space_id: state.activeSpaceId,
-    ...(hosted ? { printer_profile: PrinterProfile.current() } : { output: state.output }),
-  };
-  SP.structuralBusy = true;
-  SP.renderSpaceInfo();
-  try {
-    const saved = hosted
-      ? await SP.hostedBaseTrimSave(payload, context, report.options)
-      : await apiSideEffect("/api/space/structural-generate", payload, report.options);
-    DL.requireSpaceContext(context);
-    const warnings = saved.warnings?.length ? `\n${saved.warnings.join("\n")}` : "";
-    report(`Saved Base Trim files to ${hosted ? state.browserFolder?.name || "your chosen folder" : saved.output || state.output}\n${SP.fileNames(saved.files)}${warnings}`, false);
-  } catch (error) {
-    if (DL.isStaleSpaceError(error)) {
-      report("Base Trim finished for the Space you left. Nothing was changed in the current Space.");
-    } else {
-      report(error.message, true);
-    }
-  } finally {
-    report.finish();
-    SP.structuralBusy = false;
-    SP.structuralBusyLabel = "";
-    SP.baseTrimInfo.serial += 1;
-    SP.renderSpaceInfo();
-  }
-};
+SP.saveBaseTrim = () => SP.browserStructural({ mode: "save" });
 
 // The one Surface print: current-printer Base Trim + placed Not Printed bins + the
 // required connectors, handed to the slicer once. Ctrl+Shift+click stays the hidden
 // maintainer joint-fit sample (no bins, connectors or status changes).
-SP.printSurface = async event => {
-  if (SP.structuralBusy || SP.structuralKind() !== "base_trim") return;
-  const report = SP.beginStructuralReport("Printing…");
-  if (state.runtime.hosted) { report(SP.HOSTED_SURFACE_PRINT_TOOLTIP, true); return; }
-  if (!state.slicer?.available) {
-    report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
-    return;
-  }
-  if (event?.ctrlKey && event?.shiftKey) return SP.runStructural("print", event);
-  const context = DL.spaceContext();
-  SP.structuralBusy = true;
-  SP.renderSpaceInfo();
-  try {
-    DL.requireSpaceContext(context);
-    if (typeof flushSpaceDesignAutosave === "function" &&
-        !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
-    DL.requireSpaceContext(context);
-    if (!(await DL.save())) return;
-    DL.requireSpaceContext(context);
-    const result = await apiSideEffect("/api/space/surface-print", {
-      output: context.output, space_id: context.spaceId,
-      slicer_path: state.slicer?.path || null,
-    }, report.options);
-    DL.requireSpaceContext(context);
-    DL.adoptBatchResult(result);
-    DP.renderInventory(true);
-    DL.emit();
-    DL.requestReport();
-    if (result.partial) report(result.error || "Surface print stopped before Bambu Studio opened.", true);
-    else {
-      report(`Sent Surface + Bins to ${state.slicer?.name || "the slicer"}!\n${SP.fileNames(result.files)}`, false);
-      if (typeof WS !== "undefined") WS.markContainerPrinted();
-    }
-  } catch (error) {
-    if (DL.isStaleSpaceError(error)) {
-      report("Surface print belongs to the Space you left. The current Space was not changed.");
-    } else {
-      report(error.message, true);
-    }
-  } finally {
-    report.finish();
-    SP.structuralBusy = false;
-    SP.structuralBusyLabel = "";
-    SP.baseTrimInfo.serial += 1;
-    SP.renderSpaceInfo();
-  }
-};
+SP.printSurface = event => SP.browserStructural({
+  mode: "print", combined: !(event?.ctrlKey && event?.shiftKey), event,
+});
 

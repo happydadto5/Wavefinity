@@ -17,6 +17,14 @@ Space and unchanged design/inventory; saving or downloading alone is not
 confirmation. There is no persistent Prepared state. Never claim automatic
 slicer launch or set inventory print status in an AI design response.
 
+Browser structural adapters use the same rule for Storage Box, Storage
+Drawers and Surface Print, including combined container/bin Print. They build
+from the selected Space; cabinet structure is never an ordinary bin design
+or inventory row. Container floors and all existing Gridfinity options retain
+the canonical geometry and fit limits. External baseplate clearance remains
+provisional; do not claim verified physical fit. Final browser route assembly
+remains B14 work.
+
 An ordinary bin on any supported grid may set `box.accent_band` to `true` for
 a top 1 mm accent (default `false`). `box.accent_color` defaults to `"blue"`;
 choices are blue, red, green, yellow, orange, purple, white and black. Include

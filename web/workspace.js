@@ -785,6 +785,7 @@ WS.rowOutputs = (one, picked) => {
   const hosted = Boolean(state.runtime.hosted);
   const printTitle = !live ? "Select this row to print it."
     : one.kind === "settings" ? "Choose which bins to print"
+    : one.kind === "container" ? "Prepare a local 3MF to open in Bambu Studio"
     : hosted ? "Printing needs local Wavefinity and a slicer"
     : !state.slicer?.available ? "A slicer is needed - use Printer Settings to choose one"
     : `Send the ${what} to ${state.slicer.name || "the slicer"}`;

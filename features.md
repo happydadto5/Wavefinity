@@ -73,7 +73,21 @@ Studio**, for the same Space, design epoch and unchanged inventory/layout,
 records Printed. Saving the file alone leaves status unchanged; there is no
 Prepared status. Missing files, printer fit and partial generation retain
 their existing checks and errors. Final worker/route assembly remains B14;
-structural Space Print belongs to B11.
+structural Space Print is covered by the B11 adapters below.
+
+The B11 browser adapters cover Storage Box cases, lids and hardware, Storage
+Drawers cabinets and drawers, Surface Base Trim, and pegboard hooks using the
+current canonical geometry. Structural Print and combined container/bin Print
+prepare local 3MF files for the selected Space folder. Printed is recorded only
+after the person confirms opening the named file in Bambu Studio; the Base
+Trim joint-fit sample does not mark the container Printed. Cabinet and trim
+files retain manifest ownership checks and interrupted-save recovery. Builds
+capture the Space, inventory and printer settings; stale results cannot be
+applied to another Space. Wavefinity 7 mm and Gridfinity 21/42 mm floors,
+external-plate clearance, lids, magnets, stacking and side openings retain
+their current rules and physical-fit limitations. Final route/worker assembly
+and shipping-bundle regeneration remain B14 work. See
+[browser structural operations](docs/reference/browser-structural-operations.md).
 
 The browser migration has a Python dispatcher and bundled catalog/editor routes
 for validation, feature edits, layout fitting and pegboard layout choices.

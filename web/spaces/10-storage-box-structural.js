@@ -169,7 +169,7 @@ SP.refreshSetupOutside = () => {
         space,
         // Fix 111 N3: hosted supplies the printer profile so the server can
         // warn when the case will not fit the printer; local reads its own.
-        ...(state.runtime.hosted ? { printer_profile: PrinterProfile.current() } : {}),
+        printer_profile: PrinterProfile.current(), printer_profile_configured: PrinterProfile.configured(),
       });
       if (token !== SP.setupOutsideToken) return;
       const size = result.summary?.assembled_envelope_mm;
@@ -252,8 +252,8 @@ SP.structuralKind = () => {
 SP.structuralLabel = kind => kind === "storage_box" ? "Storage Box" : kind === "storage_drawers" ? "Cabinet" : "Base Trim";
 SP.structuralInfo = { key: "", data: null, error: "" };
 SP.structuralBusy = false;
-SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP = "Printing needs local Wavefinity and a slicer. Use Export to get the files.";
-SP.HOSTED_SURFACE_PRINT_TOOLTIP = "Printing needs local Wavefinity and a slicer. Use Export to get the files.";
+SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP = "Print prepares a local 3MF to open in Bambu Studio.";
+SP.HOSTED_SURFACE_PRINT_TOOLTIP = "Print prepares a local 3MF to open in Bambu Studio.";
 
 SP.beginStructuralReport = working => {
   const report = beginOutputReport(working, "container", []);
@@ -268,74 +268,118 @@ SP.beginStructuralReport = working => {
   return report;
 };
 
-SP.runStructural = async (mode, event) => {
+// B11: folder writes use the captured Space; Print only prepares a file.
+SP.structuralSnapshotKey = value => JSON.stringify(value, (_key, item) =>
+  item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+SP.structuralBlob = file => {
+  const blob = WFLocalFiles.claim(file.local_file_id);
+  if (!blob?.size) throw new Error(`The local file ${file.name} expired. Prepare it again.`);
+  return blob;
+};
+
+SP.requireStructuralFolder = async (handle, payload, context) => {
+  DL.requireSpaceContext(context);
+  const { current } = await SP.readMetadata(handle);
+  DL.requireSpaceContext(context);
+  const meta = SP.classifyMetadata(current);
+  if (meta.status !== "space" || meta.space_id !== payload.space_id ||
+      SP.structuralSnapshotKey(meta.space) !== SP.structuralSnapshotKey(payload.space)) {
+    throw new Error("The saved Space changed while files were prepared. Nothing was applied.");
+  }
+};
+
+SP.saveBrowserStructure = async (result, payload, context) => {
+  DL.requireSpaceContext(context);
+  if (SP.structuralSnapshotKey(state.activeSpace) !== SP.structuralSnapshotKey(payload.space)) throw DL.staleSpaceError();
+  await SP.requireStructuralFolder(state.browserFolder.handle, payload, context);
+  const exported = { ...result, files: result.structural_files || result.files };
+  if (result.manifest && payload.space.kind === "storage_drawers") {
+    return SP.hostedCabinetSave(payload, context, {}, exported);
+  }
+  if (result.manifest && payload.space.kind === "surface") {
+    return SP.hostedBaseTrimSave(payload, context, {}, exported);
+  }
+  const files = await saveGeneratedFiles(exported, { kind: "structural", requireCurrent: () => DL.requireSpaceContext(context) });
+  return { files };
+};
+
+SP.browserStructural = async ({ mode = "print", combined = false, event = null } = {}) => {
+  if (SP.structuralBusy) return;
   const kind = SP.structuralKind();
-  if (kind === "storage_drawers") return SP.runCabinetStructural(mode);
-  if (!kind || SP.structuralBusy) return;
   const label = SP.structuralLabel(kind);
-  const report = SP.beginStructuralReport(mode === "print" ? "Printing…" : "Exporting…");
+  const report = SP.beginStructuralReport(mode === "print" ? "Preparing Print…" : `Saving ${label}…`);
   SP.structuralBusy = true;
   SP.renderSpaceInfo();
+  let result;
   try {
-    // A dirty structural Design draft must be settled before output is
-    // manufactured from the accepted Space: Save Changes, Discard, or the
-    // output stays blocked while the user keeps editing.
     if (!(await SP.confirmLeaveStructuralEditor())) return;
-    const hosted = Boolean(state.runtime.hosted);
-    if (hosted && !state.browserFolder) { report("Choose a folder before saving files.", true); return; }
-    // Hosted Wavefinity has no local slicer: Print is disabled there (Save stays
-    // available) and never quietly becomes a Save.
-    if (mode === "print" && hosted) {
-      report(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true);
-      return;
-    }
-    const printing = mode === "print";
-    if (printing && !state.slicer?.available) {
-      report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
-      return;
-    }
-    // Fix 056 D: hidden maintainer shortcut restored at its new owner - local
-    // Base Trim Print only. Ctrl+Shift+click sends the existing production
-    // joint-fit sample instead of the full Base Trim; Storage Box Print has no
-    // special behavior for the same chord.
-    const jointTest = printing && kind === "base_trim" && Boolean(event?.ctrlKey && event?.shiftKey);
-    // Built from the Space definition alone, so the Designer's autosave is not involved.
+    if (!state.browserFolder?.handle || !state.activeSpaceId) throw new Error("Choose a Space folder before saving files.");
     const context = DL.spaceContext();
-    const space = clone(state.activeSpace);
-    const payload = {
-      space, output: state.output,
-      // Base Trim's bed is the one global printer profile; hosted supplies it.
-      ...(kind === "base_trim" && hosted ? { printer_profile: PrinterProfile.current() } : {}),
-      ...(jointTest ? { joint_test_sample: true } : {}),
-    };
-    if (printing) {
-      const result = await apiSideEffect("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null }, report.options);
+    if (combined) {
+      if (typeof flushSpaceDesignAutosave === "function" && !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
       DL.requireSpaceContext(context);
-      if (result.partial) {
-        // Files are a real side effect even though the slicer step failed -
-        // never claim "Sent to Bambu Studio" when it did not open.
-        report(result.error || `${label} files were saved, but the slicer did not open.`, true);
-      } else {
-        const names = (result.files || []).map(file => String(file).split(/[\\/]/).pop());
-        report(`Sent ${names.join(", ")} to ${state.slicer?.name || "the slicer"}`, false);
-        if (typeof WS !== "undefined") WS.markContainerPrinted();
-      }
+      if (!(await DL.save())) return;
     }
+    DL.requireSpaceContext(context);
+    const epoch = WFLocalAPI.designEpoch;
+    const payload = { space: clone(state.activeSpace), space_id: state.activeSpaceId,
+      printer_profile: PrinterProfile.current(), printer_profile_configured: PrinterProfile.configured(),
+      ...(kind === "base_trim" && mode === "print" && event?.ctrlKey && event?.shiftKey ? { joint_test_sample: true } : {}) };
+    const current = () => {
+      DL.requireSpaceContext(context);
+      if (WFLocalAPI.designEpoch !== epoch || SP.structuralSnapshotKey(state.activeSpace) !== SP.structuralSnapshotKey(payload.space)) throw DL.staleSpaceError();
+      return true;
+    };
+    const path = combined ? (kind === "storage_box" ? "/api/space/storage-box-print"
+      : kind === "base_trim" ? "/api/space/surface-print" : "/api/space/structural-print-combined")
+      : `/api/space/structural-${mode === "print" ? "print" : "generate"}`;
+    result = combined
+      ? await SP.inventoryRequest(path, payload, { context, sideEffect: true, buildOnly: true, ...report.options })
+      : await apiSideEffect(path, payload, report.options);
+    current();
+    // A changed inventory must not install a stale structural snapshot either.
+    if (combined && (await SP.readInventoryFor(state.browserFolder)) !== result.original_inventory_text) {
+      throw new Error("Inventory changed while Print was prepared. Nothing was applied.");
+    }
+    const saved = await SP.saveBrowserStructure(result, payload, context);
+    current();
+    if (combined) {
+      const applied = await SP.inventoryRequest("/api/drawer/load", {}, { context,
+        preparedResult: result, expectedInventoryText: result.original_inventory_text, promotionCurrent: current });
+      DL.adoptBatchResult(applied);
+      DP.renderInventory(true); DL.emit(); DL.requestReport();
+    } else if (result.print_file) {
+      await saveGeneratedFiles({ files: [result.print_file] }, { kind: "structural", requireCurrent: current });
+    }
+    if (result.partial) { report(result.error || "Some files were saved, but Print could not finish.", true); return; }
+    const notes = `${kind === "storage_box" ? SP.storageBoxMaterialNote(payload.space) : ""}${saved.warnings?.length ? "\n" + saved.warnings.join("\n") : ""}`;
+    if (mode !== "print") { report(`Saved ${label}: ${outputFileNames(saved.files)}${notes}`, false); return; }
+    current();
+    const confirmed = combined
+      ? await DL.confirmDrawerPrint(result, context, epoch)
+      : await confirmOpenedInBambuStudio(result.handoff.filename, "Saved in your selected Space folder.");
+    current();
+    if (!confirmed) { report(`Print file ready: ${result.handoff.filename}. Printed status is unchanged.`); return; }
+    if (combined && confirmed.bins) DL.adoptBatchResult(confirmed);
+    if (!payload.joint_test_sample && typeof WS !== "undefined") WS.markContainerPrinted();
+    DP.renderInventory(true); DL.emit(); DL.requestReport();
+    report(`Confirmed opening ${result.handoff.filename} in Bambu Studio.${notes}`, false);
   } catch (error) {
-    if (DL.isStaleSpaceError(error)) {
-      report(`${label} finished for the Space you left. Nothing was changed in the current Space.`);
-    } else if (/different name to avoid overwriting/i.test(String(error.message))) {
-      report(`A file with that ${label} name already exists in this folder. Rename or move it, then try again.`, true);
-    } else {
-      report(error.message, true);
-    }
+    report(DL.isStaleSpaceError(error) ? "The Space changed. The current Space was not changed by this Print." : error.message, true);
   } finally {
-    report.finish();
-    SP.structuralBusy = false;
-    SP.structuralBusyLabel = "";
+    for (const file of [...(result?.structural_files || result?.files || []), result?.print_file].filter(Boolean)) {
+      if (file.local_file_id) WFLocalFiles.discard(file.local_file_id);
+    }
+    report.finish(); SP.structuralBusy = false; SP.structuralBusyLabel = "";
+    if (SP.cabinetInfo) SP.cabinetInfo.commitSerial += 1;
+    if (SP.baseTrimInfo) SP.baseTrimInfo.serial += 1;
     SP.renderSpaceInfo();
   }
 };
+
+SP.runStructural = (mode, event) => SP.browserStructural({ mode, event });
+
 SP.saveStructural = () => {
   if (SP.structuralKind() === "base_trim") return SP.saveBaseTrim();
   if (SP.structuralKind() === "storage_box") return SP.printStorageBox("export");
@@ -343,76 +387,8 @@ SP.saveStructural = () => {
 SP.storageBoxMaterialNote = space => space?.storage_box?.secure_lid === false
   ? ""
   : " The latch holds by spring; ordinary PLA softens in heat at about 55–60 °C, such as in a closed car or a bag in the sun, and can lose that spring first. For a box that will be carried or left in heat, a heat-tolerant material is safer."
-SP.printStorageBox = async (mode = "print") => {
-  if (SP.structuralBusy || SP.structuralKind() !== "storage_box") return;
-  const report = SP.beginStructuralReport(mode === "print" ? "Printing…" : "Exporting…");
-  SP.structuralBusy = true;
-  SP.renderSpaceInfo();
-  try {
-    // A dirty structural Design draft must be settled before output is
-    // manufactured from the accepted Space: Save Changes, Discard, or the
-    // output stays blocked while the user keeps editing.
-    if (!(await SP.confirmLeaveStructuralEditor())) return;
-    if (mode === "print" && state.runtime.hosted) {
-      report(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true);
-      return;
-    }
-    if (mode === "export") {
-      if (state.runtime.hosted && !state.browserFolder) { report("Choose a folder before saving files.", true); return; }
-      const context = DL.spaceContext();
-      const result = await apiSideEffect("/api/space/structural-generate", {
-        space: clone(state.activeSpace), output: state.output,
-      }, report.options);
-      DL.requireSpaceContext(context);
-      if (!result.files?.length) throw new Error("The server did not return any print files.");
-      if (state.runtime.hosted) {
-        for (const file of result.files) {
-          const response = await fetch(file.url);
-          if (!response.ok) throw new Error(`Could not download ${file.name}.`);
-          await WFFileSystem.writeBlob(null, file.name, await response.blob());
-        }
-      }
-      report(`Saved Storage Box files to ${state.runtime.hosted ? "your browser’s download folder" : result.output || state.output}: ${outputFileNames(result.files)}${SP.storageBoxMaterialNote(state.activeSpace)}`);
-      return;
-    }
-    if (!state.slicer?.available) {
-      report("A slicer prepares 3D-print files for your printer. Open Printer Settings… to choose one.", true);
-      return;
-    }
-    const context = DL.spaceContext();
-    DL.requireSpaceContext(context);
-    if (typeof flushSpaceDesignAutosave === "function" &&
-        !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
-    DL.requireSpaceContext(context);
-    if (!(await DL.save())) return;
-    DL.requireSpaceContext(context);
-    const result = await apiSideEffect("/api/space/storage-box-print", {
-      output: context.output, space_id: context.spaceId,
-      slicer_path: state.slicer?.path || null,
-    }, report.options);
-    DL.requireSpaceContext(context);
-    DL.adoptBatchResult(result);
-    DP.renderInventory(true);
-    DL.emit();
-    DL.requestReport();
-    if (result.partial) report(result.error || "Storage Box print stopped before Bambu Studio opened.", true);
-    else {
-      report(`Sent ${outputFileNames(result.files)} to ${state.slicer?.name || "the slicer"}${SP.storageBoxMaterialNote(state.activeSpace)}`);
-      if (typeof WS !== "undefined") WS.markContainerPrinted();
-    }
-  } catch (error) {
-    if (DL.isStaleSpaceError(error)) {
-      report("Storage Box print belongs to the Space you left. The current Space was not changed.");
-    } else {
-      report(error.message, true);
-    }
-  } finally {
-    report.finish();
-    SP.structuralBusy = false;
-    SP.structuralBusyLabel = "";
-    SP.renderSpaceInfo();
-  }
-};
+SP.printStorageBox = (mode = "print") => SP.browserStructural({ mode, combined: mode === "print" });
+
 SP.printStructural = event => {
   const kind = SP.structuralKind();
   if (kind === "storage_box") return SP.printStorageBox();
@@ -450,9 +426,9 @@ SP.renderStructuralActions = () => {
   // Show the hosted printing limitation beside the action.
   const printReason = document.getElementById("space-structural-print-reason");
   if (printReason) {
-    printReason.hidden = !hosted;
+    printReason.hidden = true;
     printReason.textContent = hosted
-      ? "Printing is unavailable on hosted Wavefinity: there is no local slicer here."
+      ? "Print prepares a local 3MF to open in Bambu Studio."
       : "";
   }
 };

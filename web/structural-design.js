@@ -186,7 +186,7 @@ function mountStructuralEditor(kind, key) {
           identity: () => state.activeSpaceId || state.activeSpace?.name || "structural",
           openPrinterSettings: () => SP.openPrinterSettings(),
           requestSummary: ({ space: draft, printer_profile }) => api("/api/space/storage-drawers-summary", {
-            space: draft, ...(state.runtime.hosted ? { printer_profile } : {}),
+            space: draft, printer_profile, printer_profile_configured: PrinterProfile.configured(),
           }, { timeoutMs: 15000 }),
           onChange: onStructuralDraftChange,
           onSummary: () => { if (structuralEditorRecord === record) updateStructuralActions(); },
@@ -303,9 +303,9 @@ function structuralDraftKey(kind, space) {
   const profile = typeof PrinterProfile !== "undefined" ? PrinterProfile.current() : null;
   if (kind === "storage_drawers") return StorageDrawers.structuralDraftKey(space, profile);
   // Fix 111 (F3): the trim is fixed by the Surface footprint, trim size and
-  // printer profile (hosted only — local uses the one global profile).
-  if (kind === "base_trim") return JSON.stringify([space.x, space.y, space.trim_size, state.runtime.hosted ? profile : null]);
-  return JSON.stringify([space.x, space.y, space.z, space.storage_box, state.runtime.hosted ? profile : null]);
+  // printer profile used by the local worker.
+  if (kind === "base_trim") return JSON.stringify([space.x, space.y, space.trim_size, profile]);
+  return JSON.stringify([space.x, space.y, space.z, space.storage_box, profile]);
 }
 
 // A cabinet draft row that has no saved id yet still needs one to preview.
@@ -380,12 +380,11 @@ async function refreshStructuralPreview() {
   };
   setStructuralPreviewState(state.structuralPreview?.meshes?.length ? "Updating preview" : "Building preview...");
   try {
-    const hosted = Boolean(state.runtime.hosted);
     const profile = typeof PrinterProfile !== "undefined" ? PrinterProfile.current() : null;
     let result;
     if (kind === "box" || kind === "base_trim") {
       const structural = await api("/api/space/structural-design", {
-        space: draft.space, ...(hosted ? { printer_profile: profile } : {}),
+        space: draft.space, printer_profile: profile, printer_profile_configured: PrinterProfile.configured(),
       });
       if (!current()) return;
       if (kind === "box") record.form?.setSummary?.(structural?.summary);
@@ -411,7 +410,7 @@ async function refreshStructuralPreview() {
       // R4: production meshes only on this explicit structural-preview intent.
       const payload = await api("/api/space/structural-design", {
         space: structuralWithDrawerIds(draft.space), include_preview: true,
-        ...(hosted ? { printer_profile: profile } : {}),
+        printer_profile: profile, printer_profile_configured: PrinterProfile.configured(),
       });
       if (!current()) return;
       if (!payload?.preview) throw new Error("The cabinet preview is not available right now.");
