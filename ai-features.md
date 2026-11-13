@@ -72,7 +72,9 @@ cells. Width/Depth parse only on commit: `6u` means six cells, `6mm` is millimet
 a bare positive number below the pitch means units, otherwise millimetres.
 Units must be whole cells; millimetres snap to the nearest cell. Range errors
 are refused, never clamped, and say how the input was read. The settled field shows
-millimetres and unit count. Gridfinity height treats bare numbers as 7 mm units;
+millimetres and unit count. AI design dimensions are validated as supplied:
+off-pitch Gridfinity width or depth is refused with the nearest whole-cell sizes,
+not snapped. Gridfinity height treats bare numbers as 7 mm units;
 `mm` explicitly enters millimetres. Gridfinity bins have a 14 mm minimum; the model's floor, rim and lid minimums also apply;
 Wavefinity height keeps plain millimetres. Space forms
 keep their existing millimetre entry.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from organizer_engine._specs import validate_grid
+from organizer_engine._specs import GRID_PITCHES, validate_grid
 import math
 from pathlib import Path
 from typing import Iterable
@@ -965,6 +965,7 @@ def design_from_dict(
             version=int(b4b_raw.get("version", 1)),
         )
     x, y = float(raw["x"]), float(raw["y"])
+    original_xy = (x, y)
     if b4b.enabled and design_version == 2:
         # Deterministic schema migration: v2 stored physical case X/Y and used
         # the reduced old rail capacity.  v3 stores that exact old capacity as
@@ -989,6 +990,24 @@ def design_from_dict(
         allowance = WAVE_MATING_GAP + 2.0 * wall_depth + 2.0 * WAVE_AMPLITUDE
         x = max(GRID_PITCH, round((x - allowance) / GRID_PITCH) * GRID_PITCH)
         y = max(GRID_PITCH, round((y - allowance) / GRID_PITCH) * GRID_PITCH)
+    if grid != "wavefinity" and not b4b.enabled:
+        pitch = GRID_PITCHES[grid]
+        for name, original, value in zip(("width", "depth"), original_xy, (x, y)):
+            for size in (original, value):
+                if not math.isfinite(size) or size <= 0:
+                    raise ValueError(f"box {name} must be a positive finite number")
+                units = size / pitch
+                if abs(units - round(units)) > 1e-6 or units < 1 - 1e-6:
+                    lower = max(1, math.floor(units))
+                    upper = max(1, math.ceil(units))
+                    nearest = min(abs(units - lower), abs(units - upper))
+                    choices = sorted({n * pitch for n in (lower, upper)
+                                      if abs(abs(units - n) - nearest) < 1e-9})
+                    sizes = " or ".join(f"{choice:g} mm" for choice in choices)
+                    raise ValueError(
+                        f"Gridfinity box {name} must be whole {pitch:g} mm cells; "
+                        f"{size:g} mm is not - try {sizes}"
+                    )
     raw_wall = float(raw.get("wall", DEFAULT_WALL))
     max_wall = 3.0 if b4b.enabled else MAX_WALL
     if not math.isfinite(raw_wall) or not MIN_WALL <= raw_wall <= max_wall:

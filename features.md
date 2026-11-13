@@ -57,6 +57,8 @@ are not whole cells. Width/Depth accept
 `u` or `mm` on commit; bare values below the pitch mean units, other bare values
 mean millimetres. Units must be whole cells; millimetres snap to the selected
 pitch without clamping out-of-range sizes. The field shows millimetres and units.
+Saved, imported, API and AI designs with off-pitch Gridfinity width or depth are
+refused with the nearest whole-cell sizes; their dimensions are not snapped.
 Range errors say how the input was read. Gridfinity Height treats bare numbers as
 units at the independent 7 mm height pitch; `mm` explicitly enters millimetres.
 Gridfinity Height has a 14 mm minimum and enforces floor/rim/lid minimums. Wavefinity Height and Space forms keep their
