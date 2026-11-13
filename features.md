@@ -55,8 +55,9 @@ are not whole cells. Width/Depth accept
 `u` or `mm` on commit; bare values below the pitch mean units, other bare values
 mean millimetres. Units must be whole cells; millimetres snap to the selected
 pitch without clamping out-of-range sizes. The field shows millimetres and units.
-Gridfinity Height uses the same entry rules at the independent 7 mm height pitch
-and enforces floor/rim/lid minimums. Wavefinity Height and Space forms keep their
+Range errors say how the input was read. Gridfinity Height treats bare numbers as
+units at the independent 7 mm height pitch; `mm` explicitly enters millimetres.
+Height enforces floor/rim/lid minimums. Wavefinity Height and Space forms keep their
 existing entry rules. Gridfinity offers the Stackable rim and Gridfinity Lid
 (plain or for stacking), hiding connectors and hinged/handle/label lid variants.
 AI Design uses the selected grid and those catalog choices. Older designs

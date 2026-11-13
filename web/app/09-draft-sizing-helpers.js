@@ -8,18 +8,18 @@ function binGridRules(design = state.design) {
   return state.catalog.grids.find(row => row.value === (design.grid || "wavefinity"));
 }
 
-function parseCellDimension(raw, pitch, minimum, maximum = Infinity) {
+function parseCellDimension(raw, pitch, minimum, maximum = Infinity, bareUnits = false) {
   const match = String(raw).trim().match(/^(\d+(?:\.\d*)?|\.\d+)\s*(u|mm)?$/i);
   if (!match || !Number.isFinite(Number(match[1])) || Number(match[1]) <= 0)
     return { reason: "positive_number", message: "Enter a positive number, with u or mm if needed." };
   const value = Number(match[1]);
-  const units = match[2]?.toLowerCase() === "u" || (!match[2] && value < pitch);
+  const units = match[2]?.toLowerCase() === "u" || (!match[2] && (bareUnits || value < pitch));
   if (units && Math.abs(value - Math.round(value)) > 1e-9)
     return { reason: "whole_cells", message: "Units must be a whole number of cells; use mm to snap a measurement." };
   const requested = units ? value * pitch : value;
   const mm = units ? requested : Math.round(value / pitch) * pitch;
   if (requested > maximum || mm < minimum - 1e-9 || mm > maximum)
-    return { reason: "range", message: `Use at least ${fmt(minimum)} mm${Number.isFinite(maximum) ? ` and at most ${fmt(maximum)} mm` : ""}.` };
+    return { reason: "range", message: `Read as ${fmt(value)} ${units ? `units (${fmt(requested)} mm)` : "mm"}. Use at least ${fmt(minimum)} mm${Number.isFinite(maximum) ? ` and at most ${fmt(maximum)} mm` : ""}.` };
   return { mm, units: mm / pitch };
 }
 
@@ -48,7 +48,7 @@ function parseVerticalDimension(raw, design = state.design) {
     minimum = Math.max(2 * pitch, minimum + thickness + (box.lid.stack_rim ? rules.rim_depth_mm : 0));
   }
   minimum = Math.ceil((minimum - 1e-9) / pitch) * pitch;
-  return parseCellDimension(raw, pitch, minimum);
+  return parseCellDimension(raw, pitch, minimum, Infinity, true);
 }
 
 function binDimensionResult(axis, raw, design = state.design) {

@@ -71,9 +71,10 @@ Changing grid preserves millimetres and refuses dimensions that do not fit whole
 cells. Width/Depth parse only on commit: `6u` means six cells, `6mm` is millimetres;
 a bare positive number below the pitch means units, otherwise millimetres.
 Units must be whole cells; millimetres snap to the nearest cell. Range errors
-are refused, never clamped. The settled field shows millimetres and unit count.
-Gridfinity height uses the same rules against 7 mm, with the model's floor,
-rim and lid minimums; Wavefinity height keeps plain millimetres. Space forms
+are refused, never clamped, and say how the input was read. The settled field shows
+millimetres and unit count. Gridfinity height treats bare numbers as 7 mm units;
+`mm` explicitly enters millimetres. The model's floor, rim and lid minimums apply;
+Wavefinity height keeps plain millimetres. Space forms
 keep their existing millimetre entry.
 Gridfinity Stage 1 offers a Stackable rim (`box.stack.mode` direct; none is off), a loose Gridfinity Lid or a lid with a stacking
 socket (`box.lid.enabled`, `box.lid.stack_rim`) on both pitches. Closed Z stays nominal in whole 7 mm units; the body and
