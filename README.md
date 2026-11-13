@@ -11,7 +11,7 @@ license: mit
 
 # Wavefinity — wavy drawer organizer generator
 
-> **OWNER'S CODER POLICY — READ FIRST (2026-11-12, clarified): Wavefinity is USER-TESTED for development acceptance. Story/implementation coders validate changes by reading and reasoning about code, not by executing tests. No coder-created automated tests, manual app checks or user test plans; implement, inspect the diff, commit/push and stop. Separately, the owner may explicitly direct an isolated UI-audit agent to explore the app and capture screenshots. See [Owner-mandated user-tested development policy](#3-owner-mandated-user-tested-development-policy--no-coder-testing) and the audit rules in [AGENTS.md](AGENTS.md).**
+> **OWNER'S CODER POLICY — READ FIRST (2026-11-12, clarified): Wavefinity is USER-TESTED for development acceptance. Story/implementation coders validate changes by reading and reasoning about code, not by executing tests. No coder-created automated tests, manual app checks or user test plans; implement, inspect the diff, commit/push and stop. Separately, the owner may explicitly direct an isolated UI-audit agent to explore the app and capture screenshots. See [Owner-mandated user-tested development policy](AGENTS.md) and the audit rules in [AGENTS.md](AGENTS.md).**
 
 > **PLANNED BROWSER-ONLY MIGRATION (NOT LIVE):** [FINAL EXECUTION SPECIFICATION](Future%20plans/Browser-only-migration-execution-spec.md) is the one authoritative design; [one-line Story-creation handoff](Future%20plans/Browser-only-migration-story-creation-handoff.md) is executed ONLY when Andrew finishes Gridfinity and says GO. Exact [B00–B16 contracts](Future%20plans/Browser-only-core-detailed-build-contracts.md), [source diff map](Future%20plans/Browser-only-core-diff-map.md), and [route index](Future%20plans/Browser-only-core-source-route-index.md) are supporting implementation references. Target: complete browser-local float64 geometry and Print on FREE Render Static Site, with Porkbun registrar AND authoritative DNS unchanged. AI Help uses user-key direct provider access where allowed and retains copy/paste. No coder tests, no QA plans, no partial working builds, no hosting/DNS changes without approval.
 
@@ -310,69 +310,7 @@ supplies the font outlines for floor labels.
 
 ## Developer & AI coding guidelines
 
-### Feature documentation contract
-
-- `features.md` is the broad user-facing product feature catalog.
-- `ai-features.md` is the compact public reference for outside AI systems used with Wavefinity AI Design.
-- Any change that adds, removes, renames, or materially changes a user-facing feature must update `features.md`.
-- If that change affects something an outside AI could legally choose, configure, return, or must avoid, the same change must also update `ai-features.md`.
-- These documentation files explain capabilities; exact geometry constants, validation limits, and canonical schema remain code/catalog-owned.
-
-Project-wide coding and architecture guidance is centralized here for all agents and human contributors. Help Code orchestration and task contracts are maintained in the helper repository described below; this README is its entry point, not a duplicate protocol. Do not create competing tool-specific instructions.
-
-
-### Development handoff workflow
-
-**Wavefinity contains the product. [Help-Code](https://github.com/happydadto5/Help-Code) contains the development protocol and Fix records.** The helper repository is private and requires authenticated access. A missing local `/fixes` directory is intentional, not evidence that a Fix is missing. Never copy, restore, or commit helper Fix records into this product repository.
-
-| Authority | Where it lives |
-| --- | --- |
-| Product behavior, architecture, code and project guidance | This Wavefinity repository and README |
-| Help Code workflow and role boundaries | Helper `README.md`, `help-code-state.json` and its declared overrides; Wavefinity's no-testing rule below governs product implementation |
-| Current coder assignment and startup rules | Helper `reviews/code-chat.md` and `CODER.md` |
-| Exact implementation behavior and evidence | Assigned active Fix or fixlet in helper `fixes/`; its master controls shared ordering/status |
-| Permanent lifecycle ledger | Helper `fixes/Fix Master.md`, maintained by reviewers; coders neither read nor edit it |
-| Reviewer coordination | Helper `REVIEWER-CHAT.md`; use its current transport, not an old channel path |
-
-Use the helper's **current default branch**, freshly resolved through authenticated GitHub access. Read related authorities from the same resolved commit and record that SHA. Memory, old branches, copied plans, and unverified local files are not authority.
-
-- **`code chat` / `chat code`** (including obvious standalone near-matches such as `hat code` or `check code`) wakes the coder: fetch the helper's current default branch and read `CODER.md` and `reviews/code-chat.md` fresh. Follow only the current instruction and explicitly referenced contract.
-- **`chat`** wakes a reviewer: read helper state and `REVIEWER-CHAT.md`, then perform the reviewer work. It does not authorize coder implementation.
-- **`read fix 4`** means read helper `fixes/fix-004.md`; `Fix 35A` ordinarily uses `fixes/fix-035a.md`. For fixlet bundles, follow the current assignment/master's exact paths rather than inventing names. A read/review request does not itself start implementation.
-- An empty or unrelated cwd requires safe repository recovery, not a request for the PM to locate the code. If authoritative helper access actually fails, report **HELPER REPO ACCESS FAILED** with the concrete failure; never implement from a stale copy.
-
-The helper protocol governs Help Code orchestration; this README governs product facts and project constraints; the active contract governs the assigned change within those rules. Generic non-Help-Code guidance cannot broaden a Help Code task, but the owner's no-coder-testing rule below applies to Wavefinity work in either workflow. If the active assignment mandates testing, request correction rather than running it.
-
-### 1. User communication preferences
-- **Operate in "caveman mode"**: keep messages simple, plain, and short.
-- **User is NOT a programmer**: avoid code jargon and long technical explanations unless asked.
-- **Show progress**: give a clear, general sense of progress in layman's terms.
-
-### 2. Help Code implementation handoff
-
-The helper repository's fresh `CODER.md` and `reviews/code-chat.md` define the coder workflow and current assignment. This product README supplies product facts and generic project guidance; it does not select a Fix or define a parallel coder protocol. The coder resolves this repository from `help-code.config.json`, preserves unrelated local work, and follows the fresh helper protocol for preparing, editing, committing, pushing, outbriefing, and reporting. Reviewers perform acceptance and closure. A historical READY file or stale ledger label never selects the coder's next job.
-
-### 3. Owner-mandated user-tested development policy — NO CODER TESTING
-
-**Authoritative instruction for Wavefinity product implementation, November 12, 2026.** Applies to all coders implementing Stories, direct changes, reviews and migrations. Older testing guidance in this README, archived discussions, developer prompts, repository tests and generic Help-Code instructions is superseded. If an implementation assignment demands tests, flag the conflict and request correction. **Only a separate, explicit owner-directed UI-audit assignment is exempt from the ban on operating the app; it is not a coder acceptance phase.**
-
-**Wavefinity is user-tested for development acceptance.** The owner is the application tester but may separately delegate UI exploration, bug hunting and screenshot capture to an agent in an isolated test environment.
-
-- **Coders implement and validate their logic by reasoning and inspecting the source and diff.** Read relevant callers and data contracts; inspect types, control flow, preconditions, numerical formulas, error paths, async/state ownership, file operations, and affected call sites. Correct problems apparent from code analysis.
-- **Coders DO NOT WRITE, GENERATE, MODIFY, REPAIR, OR RUN AUTOMATED TESTS.** No Python unittest/pytest, JavaScript/Node test runners, Playwright, browser automation, geometry comparison harnesses, fixture snapshots, regression sweeps, CI test gates or test-only scripts. Do not run existing test suites just because the repository contains them. Do not treat a test result as a completion requirement.
-- **Coders DO NOT RUN MANUAL APPLICATION TESTS.** Do not drive browsers, simulate user interactions, click through UI flows, produce test prints, load slicers to experiment, or perform acceptance walkthroughs. The owner performs real-world application testing when and how they choose.
-- **Coders DO NOT WRITE MANUAL TEST PLANS, STEP-BY-STEP QA CHECKLISTS, OR TEST REQUESTS FOR THE OWNER.** Do not append a "How to test" section, list user click sequences or ask the owner to execute a scripted acceptance matrix. The handoff should say what changed and any known limitations; the owner will try the app naturally and report issues.
-- **Do not add testing scaffolding.** No new `tests/`, `browser-tests/`, `fixtures/`, `TESTING.md`, test-status logs, mock servers, throwaway harnesses or testing-only dependencies. Previously existing tests are historical artifacts, not instructions to run or expand them.
-- **Do not promise that changes are proven or fully tested.** A coder may state that the implementation is logically reviewed, built/committed/pushed, and describe known unverified limitations. If logic is ambiguous, reason through it from the existing code and product rules; surface only genuine blocked decisions.
-- **Code correctness still matters.** Keep runtime input validation, mesh validity checks used by the product, file-format constraints, safety boundaries, error reporting, integrity hashes, and production diagnostic output. These are application behaviors, not test suites. Avoid deleting legitimate runtime validation merely because it contains the word "validate."
-- **Build steps are permitted to produce shipping assets.** Compile WASM, bundle the static site, generate required manifests and run tools needed for actual implementation. Do not turn builds into test runs, test suites or scripted acceptance checks.
-- **No partial-app operability requirement during the browser-only migration.** Implement all assigned components directly and complete one final cutover. Do not add dual-mode compatibility code, interim tests or releases only to keep a partly migrated app working.
-
-**Default coder workflow:** Understand the request and existing implementation -> reason through the exact code changes and integration points -> implement -> review the changed source/diff logically -> commit and publish safely -> report changed behavior, affected files, commit and known limitations. **Stop.** Do not add a test phase. The owner reports application bugs after using the result.
-
-**Conflict handling:** This explicit owner instruction governs Wavefinity product development even when a generic reviewer rubric or older Fix requests automated tests. Correct the implementation assignment or escalate a genuinely mandatory conflict. Do not infer permission to add testing from risk, change size, or a Story's review requirements.
-
-**Separate owner-directed UI-audit exception (not part of coding):** When the owner directly asks an agent to capture screenshots, inspect UI behavior, perform a specific application exercise, or explore the application for bugs, that independent audit may use Playwright and disposable test data. The audit must run state-changing interactions against a verified isolated test instance with separate Space storage and preferences, not the owner's real Spaces. Use an isolated browser rather than computer-use/desktop control; no physical printing, no app-source edits, and no automatic conversion of findings into coding work. Screenshots, browser scripts and findings stay in the external test workspace, not in product tests or CI. The audit may be long-running if explicitly requested, with progress checkpoints and failure reports. **This exception never authorizes testing by the coder as part of implementation or a Help-Code Story.** See [AGENTS.md](AGENTS.md), “Browser work — owner-directed UI audits only,” for detailed operational rules.
+Working rules for AI agents and coders — user communication preferences, the Help Code handoff, the feature documentation contract, and the owner-mandated user-tested development policy (no coder testing) — live in [AGENTS.md](AGENTS.md). This README is the product and architecture authority those rules point back to.
 
 ### Using the browser UI
 
@@ -1862,35 +1800,7 @@ Non-Python files:
 
 ## Working on this
 
-This project is developed locally, mostly by prompting an LLM. GitHub is a
-**backup, public contribution point, and record of what changed**. Outside
-contributions use pull requests; the repository owner gives final approval.
-
-Project moderators are **@happydadto5** and trusted collaborator
-**@xdkaplan (adkaplan)**. The protected `main` rules keep @happydadto5 as the
-final approval authority.
-
-**After completing an implementation, commit all changes and push them to
-GitHub before reporting that the work is finished.** For Help Code, follow
-the freshly fetched helper coder protocol; explicitly non-Help-Code work
-follows the local workflow below.
-
-**When given an implementation plan, review it first.** Understand what it
-does and confirm that the execution is sound before beginning. If it is sound,
-implement the plan and commit the completed code.
-
-**One prompt may become one cohesive commit.** Keep all product code and documentation needed to complete the request together; do not split a request into artificial commits. When implementation is logically complete, inspect the changes and commit/push them. **Do not write or execute tests or produce a manual test plan for the owner, including for Help-Code assignments.** If older helper instructions demand tests, request that the assignment be corrected. Separate unrelated prompts into separate commits where practical. No feature branches or pull requests are needed for explicitly non-Help-Code local work. Help Code follows its current protocol for routing and review:
-
-```powershell
-git add -A
-git commit -m "short description of what changed"
-git push
-```
-
-**No automated tests, no manual application tests and no user test plans, without exceptions based on change size.** Review code logic and changed diffs instead. The owner will use and evaluate the application.
-
-**Write commit messages that say why.** The history is the record. A message
-that explains the reasoning is worth more here than a tidy branch structure.
+Working rules for developing this project — committing and pushing, more than one person in the repo, and the no-testing policy — live in [AGENTS.md](AGENTS.md). The notes below stay here because they describe how the local service itself behaves.
 
 **Relaunching replaces whatever is already running on the port.** If a
 relaunch finds the port taken, it first confirms a genuine Wavefinity
@@ -1915,31 +1825,6 @@ safely use the new backend.
 Render Auto-Deploy may be disabled in the Render dashboard when GitHub pushes
 should not immediately change the live site. Manual deployment needs no special
 session-pinning system because compatible open pages continue working.
-
-### If more than one person is working in the repo
-
-For explicitly non-Help-Code work, everyone commits to `main`, so the only rule
-that matters is: **pull before you start, push as soon as you are done.** Help
-Code work follows the fresh helper protocol and outside review workflow above.
-
-```powershell
-git pull --rebase        # before starting
-git push                 # right after committing
-```
-
-Long-lived uncommitted work is the thing to avoid — two sessions editing
-`organizer_engine.py` for a day will conflict, and geometry conflicts are
-unpleasant to resolve by hand. Small, frequent, pushed commits keep that from
-happening.
-
-If a non-Help-Code push is rejected because someone else pushed first, `git pull
---rebase` then push again. If that surfaces a real conflict, resolve it and inspect
-the reconciled diff carefully. No test run is called for, even after rebasing. Help Code
-corrections follow current routing instructions while retaining the owner-tested policy.
-
-Also worth knowing before editing: the **traps** section below, and that
-`.venv/`, `__pycache__/` and `generated/` are gitignored and should stay that
-way.
 
 ---
 
