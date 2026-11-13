@@ -2,6 +2,34 @@
 
 Only consult the relevant CLI, code-layout or service section for the current task.
 
+## Quick start
+
+Double-click `Launch_Organizer_UI.bat`. It starts Wavefinity from this folder
+and opens the browser interface, showing a message box only if something is
+wrong. Before each launch it checks GitHub and safely updates this folder to
+the latest `main`. If it cannot check or update, it shows why and leaves the
+current service and saved data alone. On the first run it builds a private
+Python environment under `%LOCALAPPDATA%\Wavefinity\Env` and installs
+`requirements.txt`. A successful launch restarts the local service to load the
+updated code. The service listens only on
+`127.0.0.1`; it is not hosted on the internet and the browser never replaces
+the Python geometry engine.
+
+`Launch_Wavefinity_Clean.bat` does the same after wiping saved data in
+`%LOCALAPPDATA%\Wavefinity\Data` (test data, generated files). Both call
+`launch_wavefinity.ps1`.
+
+Manual setup instead:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install opencv-python-headless==5.0.0.93 lib3mf==2.5.0 lxml==6.1.2 manifold3d==3.5.2 mapbox-earcut==2.0.0 matplotlib==3.11.1 networkx==3.6.1 numpy==2.5.2 shapely==2.1.2 trimesh==5.0.0
+.venv\Scripts\python.exe wavefinity_web.py
+```
+
+Those ten pins are the whole dependency list. `matplotlib` is not optional — it
+supplies the font outlines for floor labels.
+
 ## Command line
 
 ```powershell

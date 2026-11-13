@@ -2,6 +2,34 @@
 
 For product feature options, data ownership and the browser service. See the [overview](../../README.md) for the document map.
 
+## Original product overview and connector guidance
+
+Parametric Python generator for a 3D-printable modular drawer organizer with
+**wavy walls that interlock** and configurable holders inside. The local browser
+UI, command-line interface and fit sampler share the same Python box,
+insert and export engines.
+
+The basic system has a box and **connectors**. The normal **Side connector** is a
+small staple that joins two boxes across their shared seam and supports same or
+different bin heights. Holders can be fused into the box, printed as a
+removable fitted insert, or printed on an optional 7 mm cartridge footprint.
+
+Connector fit always comes automatically from the active bin's wall thickness;
+there is no separate connector wall setting. Two compact top/rim connectors
+join bins around one grid corner: the **3-Way Corner** joins three bins (its open
+quadrant is chosen by rotating the printed part) and the **4-Way Corner** joins
+four. Corner connectors need equal-height, equal-wall bins, do not support
+different heights, and need at least 14 mm (2 Wavefinity units) in both X and Y.
+Corner Quantity (1–20) prints separate copies on one plate. A Space may mix wall
+thicknesses, but a connector never bridges different walls; Wavefinity shows a
+non-blocking warning when you change Wall in a Space that already has an
+ordinary bin with a different known wall.
+
+Everything below is millimetres. This is the whole documentation for the
+project: design, rationale, measured evidence, and the traps.
+
+(The historical test log has been moved to an untracked `archive/` folder; keeping a testing log is no longer needed or maintained.)
+
 ## Parts and variables
 
 Wavefinity separates reusable **bin/shell intent** from **content placed inside
