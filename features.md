@@ -48,8 +48,10 @@ Gridfinity pitches** (its open swing reaches about 2.4 mm behind the bin against
 a 0.25 mm gap; nominal, unverified): the Lid selector omits it, says why, and
 saved or API designs asking for it are refused. It is never combined with Lid
 for stacking and makes no stackable claim. Awaiting Andrew's product decision.
-The No-Space Designer now has a Grid selector. Switching grid keeps dimensions
-in millimetres and refuses sizes that are not whole cells. Width/Depth accept
+The No-Space Designer now has a Grid selector. Switching the untouched initial
+starter to Gridfinity starts at one cell by one cell and six height units.
+Otherwise switching grid keeps dimensions in millimetres and refuses sizes that
+are not whole cells. Width/Depth accept
 `u` or `mm` on commit; bare values below the pitch mean units, other bare values
 mean millimetres. Units must be whole cells; millimetres snap to the selected
 pitch without clamping out-of-range sizes. The field shows millimetres and units.

@@ -265,6 +265,7 @@ function showStackableBaseChange(value) {
 }
 
 function changedDesign(previousDesign = null) {
+  state.initialStarterUntouched = false;
   noteLidThicknessEdit();
   // Width/length keyboard, wheel and blur handlers update state immediately so
   // their inline inside-dimension readout stays correct. Preserve the snapshot
@@ -663,6 +664,7 @@ function wireControls() {
   ["#x-size", "#y-size", "#z", "#base-thickness", "#wall-thickness", "#part-name"]
     .forEach(selector => $(selector).addEventListener("input", () => {
       if (["#x-size", "#y-size", "#z"].includes(selector)) {
+        state.initialStarterUntouched = false;
         const axis = selector === "#x-size" ? "x" : selector === "#y-size" ? "y" : "z";
         if (!state.binSizeFields) bindBinSizeFields();
         state.binSizeFields[axis].edited = true;

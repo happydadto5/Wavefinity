@@ -24,7 +24,16 @@ function commitBinDimension(axis, raw = null) {
 
 function commitBinGrid(event) {
   const previous = clone(state.design);
-  const candidate = { ...state.design, grid: event.target.value };
+  const candidate = { ...state.design, box: { ...state.design.box }, grid: event.target.value };
+  const starter = state.initialStarterUntouched && !state.activeSpace && state.folderMode !== "space"
+    && state.designInventoryId == null && !state.designTarget
+    && JSON.stringify(state.design) === JSON.stringify(state.catalog.defaults.design);
+  const rules = binGridRules(candidate);
+  if (starter && ["gridfinity", "gridfinity_half"].includes(candidate.grid)) {
+    candidate.box.x = rules.pitch_mm;
+    candidate.box.y = rules.pitch_mm;
+    candidate.box.z = 6 * rules.height_unit_mm;
+  }
   let refused = false;
   for (const axis of ["x", "y", "z"]) {
     const suffix = axis === "z" && !binGridRules(candidate).height_unit_mm ? "" : "mm";
@@ -49,6 +58,7 @@ function commitBinGrid(event) {
   }
   if (refused) { event.target.value = previous.grid || "wavefinity"; return; }
   state.design.grid = candidate.grid;
+  if (starter) Object.assign(state.design.box, candidate.box);
   syncBinGridControl();
   state.canGenerate = false;
   updateGenerateAvailability();

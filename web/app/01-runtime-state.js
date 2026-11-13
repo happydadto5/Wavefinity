@@ -40,6 +40,7 @@ const state = {
   catalog: null,
   design: null,
   cleanDesign: null,
+  initialStarterUntouched: true,
   preview: null,
   previewDesignKey: null,
   // Fix 103 (Section C): the single client slot for structural 3D preview.
