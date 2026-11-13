@@ -249,6 +249,8 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 
 ### Case options
 
+- **Gridfinity stacking** (21 mm and 42 mm): adds standard-profile feet below the body and a perimeter receiving grid above the closed lid. Available in Design for **Lid Only** from 1×1 cells; **Latched Lid** needs screw hinges (one or two), one or two latches, and at least 2×2 cells at 42 mm or 3×3 at 21 mm. Both Floor and None remain available. Piano hinges, zero-latch latched lids, lid-top labels, and the Wavefinity stacking recess/pegs are refused with an explanation. Choose Front or No label. Head-room stays 0.5 / 1.0 / 2.0 mm measured to the unchanged lid underside; the latched skin remains 2.4 mm. Save and export retain the setting and include the feet and ridge.
+- Stacking heights include the 4.75 mm feet and the pitch's receiving ridge (3.8 mm at 42 mm, 4.75 mm at 21 mm). The summary reports nominal closed/stacked heights and latched-lid rear reach. Remove the upper box before opening. Align pitch centres and keep the upper cell field inside the lower field; odd cell-count differences need a half-pitch offset. Receiving is perimeter-only, with no crossbars. **Fit, closure and mating remain unverified** until Andrew records the S2-00 W-A/W-B/W-C print results. The existing flipped lid print pose is retained: the ridge crest rests on the bed and barrel print quality remains unverified.
 - **Case stacking**
   - Not stackable.
   - Stackable.

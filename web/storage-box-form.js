@@ -56,7 +56,7 @@
       secure_lid: true, latch_count: fieldWidth > 96 ? "2" : "1", hinge_count: "2", hinge_type: "screw", lid_headroom_mm: 1, latch_tightness: "default",
       edge_bevel: "default",
       label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat", label_size: "default",
-      stacking: false, handle: false,
+      stacking: false, grid_stacking: false, handle: false,
       wall_mm: Number(rules.default_wall_mm ?? 1.6),
       base_mm: Number(rules.default_base_mm ?? 1.6),
     };
@@ -83,7 +83,7 @@
     const unit = gridKey === "wavefinity" ? baseUnit : (Number(gridRow?.pitch_mm) || ({ gridfinity_half: 21, gridfinity: 42 })[gridKey] || baseUnit);
     const unitName = gridKey === "wavefinity" ? "units" : "cells";
     const maxMM = 2000; // Container authority; never the single-bin ceiling.
-    const minField = Number(rules.min_field_mm) || unit;
+    const minField = gridKey === "wavefinity" ? (Number(rules.min_field_mm) || unit) : unit;
     const minHeight = Number(rules.min_secure_height_mm) || 1;
     const box = { ...defaults(catalog, normalizeAxis("x", initialSpace?.x)), ...(initialSpace?.storage_box || {}), edge_bevel: bevelOf(initialSpace) };
 
@@ -185,11 +185,17 @@
     const optRow = el("div", "space-dimension-row");
     const stacking = select([["false", "No recess"], ["true", "Add recess"]], String(!!box.stacking));
     stacking.id = id("stacking");
+    const gridStacking = select([["false", "Off"], ["true", "Feet and lid receiving grid"]], String(!!box.grid_stacking));
+    gridStacking.id = id("grid-stacking");
+    const gridStackingRow = labeled("Gridfinity stacking", gridStacking);
+    gridStackingRow.hidden = gridKey === "wavefinity" && !box.grid_stacking;
+    const gridStackingNote = el("p", "dl-note");
+    gridStackingNote.hidden = !box.grid_stacking;
     const handle = select([["false", "No handle"], ["true", "Add handle"]], String(!!box.handle));
     handle.id = id("handle");
     const handleRow = labeled("Carrying handle", handle);
-    optRow.append(labeled("Wavefinity stacking recess", stacking), handleRow);
-    optGroup.append(optRow);
+    optRow.append(labeled("Wavefinity stacking recess", stacking), gridStackingRow, handleRow);
+    optGroup.append(optRow, gridStackingNote);
     caseWrap.append(optGroup);
 
     // Label group
@@ -329,6 +335,12 @@
     // Visibility: latch/snugness only for latched; label text/style only when labeled.
     function syncVisibility() {
       const latched = lidType.value === "latched";
+      const gridOn = gridStacking.value === "true";
+      const topOption = labelLoc.querySelector('option[value="top"]');
+      topOption.hidden = gridOn;
+      topOption.disabled = gridOn;
+      gridStackingNote.hidden = !gridOn;
+      gridStackingNote.textContent = "Fit, closure and mating are unverified. Remove the upper box before opening the lid. The lid keeps its flipped print pose, resting on the ridge crest.";
       latchRow.hidden = !latched;
       latchTightnessRow.hidden = !latched;
       hingeTypeRow.hidden = !latched;
@@ -364,6 +376,18 @@
       }
       const latched = lidType.value === "latched";
       const labelOn = labelLoc.value !== "none";
+      if (latched && (x < 48 || y < 48)) {
+        return { ok: false, message: "A latched Storage Box needs at least 48 mm of width and depth. Use Lid only for a smaller box.", focusId: id("lid-type") };
+      }
+      if (gridStacking.value === "true") {
+        let message = "";
+        if (gridKey === "wavefinity") message = "Grid stacking needs a 21 mm or 42 mm Gridfinity Storage Box.";
+        else if (stacking.value === "true") message = "Grid stacking cannot be combined with the Wavefinity stacking recess and pegs. Turn one off.";
+        else if (labelLoc.value === "top") message = "Grid stacking cannot use a lid-top label. Choose Front or No label.";
+        else if (latched && hingeType.value === "piano") message = "Grid stacking is unavailable with a piano hinge. Choose screw hinges or Lid only.";
+        else if (latched && latchCount.value === "0") message = "Grid stacking with a latched lid needs one or two latches. Choose a latch count or Lid only.";
+        if (message) return { ok: false, message, focusId: id("grid-stacking") };
+      }
       return {
         ok: true,
         space: {
@@ -378,10 +402,11 @@
             edge_bevel: bevel.value,
             label_enabled: labelOn,
             label_text: labelOn ? labelText.value.trim() : "",
-            label_location: labelOn ? labelLoc.value : "top",
+            label_location: labelOn ? labelLoc.value : (gridStacking.value === "true" ? "none" : "top"),
             front_label_style: labelStyle.value,
             label_size: labelSize.value,
             stacking: stacking.value === "true",
+            grid_stacking: gridStacking.value === "true",
             handle: latched && handle.value === "true",
             wall_mm: Number(wallSel.value),
             base_mm: floorBase(Number(baseSel.value), stacking.value === "true"),
@@ -397,10 +422,13 @@
 
     function onChange() {
       screwsLine.hidden = true;
-      if (callbacks.onChange) callbacks.onChange(read());
+      syncVisibility();
+      const draft = read();
+      setError(draft.ok ? "" : draft.message);
+      if (callbacks.onChange) callbacks.onChange(draft);
     }
     hingeType.addEventListener("change", syncVisibility, { signal: events.signal });
-    for (const input of [lidType, snugness, latchCount, hingeCount, hingeType, latchTightness, stacking, handle, labelLoc, labelText, labelSize, labelStyle, wallSel, baseSel, bevel]) {
+    for (const input of [lidType, snugness, latchCount, hingeCount, hingeType, latchTightness, stacking, gridStacking, handle, labelLoc, labelText, labelSize, labelStyle, wallSel, baseSel, bevel]) {
       input.addEventListener("input", onChange, { signal: events.signal });
       input.addEventListener("change", onChange, { signal: events.signal });
     }
@@ -423,6 +451,7 @@
       hingeCount.value = String(b.hinge_count) === "1" ? "1" : "2";
       hingeType.value = b.hinge_type === "piano" ? "piano" : "screw";
       stacking.value = String(!!b.stacking);
+      gridStacking.value = String(!!b.grid_stacking);
       handle.value = String(!!b.handle);
       labelLoc.value = b.label_enabled ? (b.label_location || "top") : "none";
       labelText.value = b.label_text || "";
@@ -435,6 +464,13 @@
     }
 
     function setSummary(summary) {
+      if (summary?.grid_stacking_model && gridStacking.value === "true") {
+        const model = summary.grid_stacking_model;
+        const reach = model.open_lid_rear_reach_mm;
+        gridStackingNote.textContent = `Fit, closure and mating are unverified. Closed height with feet and grid: ${Number(model.closed_with_grid_mm).toFixed(2)} mm.`
+          + (Number.isFinite(reach) ? ` Allow at least ${reach.toFixed(2)} mm behind the rear crest for the nominal open-lid envelope.` : "")
+          + " Remove the upper box before opening. The lid keeps its flipped print pose, resting on the ridge crest; barrel print quality is unverified.";
+      }
       const totals = summary?.screw_totals || [];
       screwsLine.textContent = totals.length
         ? `Screws needed: ${totals.map(([family, length, count]) => `${family} × ${length} mm (${count})`).join(", ")}`
@@ -458,7 +494,7 @@
     // cannot be silently superseded by newer input.
     function setDisabled(value) {
       const frozen = !!value;
-      for (const input of [xInput, yInput, zInput, lidType, snugness, latchCount, latchTightness, stacking, handle, labelLoc, labelText, labelSize, labelStyle, wallSel, baseSel, bevel]) {
+      for (const input of [xInput, yInput, zInput, lidType, snugness, latchCount, latchTightness, stacking, gridStacking, handle, labelLoc, labelText, labelSize, labelStyle, wallSel, baseSel, bevel]) {
         input.disabled = frozen;
       }
     }

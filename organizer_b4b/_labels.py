@@ -185,6 +185,8 @@ def b4b_top_label_outline(box: BoxSpec):
     eff = b4b_effective_box(box)
     if not eff.b4b.lid:
         raise ValueError("a top label needs the lid enabled")
+    if eff.b4b.grid_stacking:
+        raise ValueError("Grid stacking cannot use a lid-top label. Choose Front or No label.")
     # The label lives on the derived lid footprint, not the child field.
     case_x, case_y = b4b_layout(box).case_size
     avail_w = case_x - 2.0 * B4B_TOP_LABEL_MARGIN

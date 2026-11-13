@@ -103,6 +103,8 @@ def _b4b_log_note(summary: dict) -> str:
             bits.append("; ".join(bom))
     if summary["stacking"]:
         bits.append("stacking")
+    if summary.get("grid_stacking"):
+        bits.append("Gridfinity stacking (fit unverified)")
     if summary["label_location"] != "none":
         bits.append(f"{summary['label_location']} label")
     return ", ".join(bits)
@@ -656,6 +658,7 @@ def design_to_dict(
             "front_label_style": b4b.front_label_style,
             "label_size": b4b.label_size,
             "stacking": b4b.stacking,
+            "grid_stacking": b4b.grid_stacking,
             "handle": b4b.handle,
             "version": b4b.version,
         }
@@ -956,6 +959,7 @@ def design_from_dict(
             front_label_style=str(b4b_raw.get("front_label_style", "flat")),
             label_size=str(b4b_raw.get("label_size", "default")),
             stacking=bool(b4b_raw.get("stacking", False)),
+            grid_stacking=b4b_raw.get("grid_stacking", False),
             # A pre-v2 ``handle`` meant a fixed arch on the lid top, and it was
             # on by default.  The bail that replaced it is body hardware with
             # real size requirements, so an old file carries the *intent*

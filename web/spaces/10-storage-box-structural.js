@@ -10,7 +10,7 @@ SP.storageBoxDefaults = fieldWidth => ({
   grid: "wavefinity", built_in_grid: "floor", seated_lift_mm: null,
   secure_lid: true, latch_count: fieldWidth > 96 ? "2" : "1", hinge_count: "2", lid_headroom_mm: 1, latch_tightness: "default",
   label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat", label_size: "default",
-  stacking: false, handle: false,
+  stacking: false, grid_stacking: false, handle: false,
   wall_mm: Number(state.catalog?.b4b_rules?.default_wall_mm ?? 1.6),
   base_mm: Number(state.catalog?.b4b_rules?.default_base_mm ?? 1.6),
 });
@@ -31,6 +31,8 @@ SP.fillMaterialSelect = (id, choices, value) => {
 SP.storageBoxEdgeBevel = "default";
 // Hinge type is chosen in the Design-panel form; the setup dialog keeps it.
 SP.storageBoxHingeType = "screw";
+// Case options live in Design; basic setup edits must preserve grid stacking.
+SP.storageBoxGridStacking = false;
 
 // portable-x is Interior width, not the finished outside case size.
 // Match the normalized child-bin field passed to the engine.
@@ -50,13 +52,16 @@ SP.storageBoxPitch = (grid = SP.storageBoxGrid()) => {
 };
 SP.storageBoxFloor = () => SP.storageBoxGrid() === "wavefinity" ? null
   : (document.getElementById("portable-floor")?.value === "none" ? "none" : "floor");
+SP.storageBoxMinimumField = () => SP.storageBoxGrid() !== "wavefinity"
+  && document.getElementById("portable-lid-type")?.value === "lid_only"
+  ? SP.storageBoxPitch() : Number(state.catalog?.b4b_rules?.min_field_mm);
 // The nearest legal whole-cell field at the chosen pitch (the spec's rounding
 // rule: nearest positive whole cells, never fewer than the box's minimum field).
 SP.storageBoxSnap = mm => {
   const grid = SP.storageBoxGrid();
   if (grid === "wavefinity") return SP.snap(mm);
   const pitch = SP.storageBoxPitch(grid);
-  const minimum = Number(state.catalog?.b4b_rules?.min_field_mm) || 0;
+  const minimum = SP.storageBoxMinimumField() || 0;
   return Math.max(1, Math.ceil(minimum / pitch - 1e-9), Math.floor(mm / pitch + 0.5)) * pitch;
 };
 SP.syncStorageBoxGrid = () => {
@@ -99,6 +104,7 @@ SP.fillStorageBoxForm = box => {
   const one = { ...SP.storageBoxDefaults(SP.storageBoxSetupFieldWidth()), ...(box || {}) };
   SP.storageBoxEdgeBevel = box ? (box.edge_bevel || "none") : "default";
   SP.storageBoxHingeType = box && box.hinge_type === "piano" ? "piano" : "screw";
+  SP.storageBoxGridStacking = Boolean(one.grid_stacking);
   const set = (id, value) => { const node = document.getElementById(id); if (node) node.value = String(value); };
   set("portable-lid-type", one.secure_lid === false ? "lid_only" : "latched");
   set("portable-lid-snugness", one.lid_headroom_mm);
@@ -152,7 +158,7 @@ SP.refreshSetupOutside = () => {
   clearTimeout(SP.setupOutsideTimer);
   const num = id => Number(document.getElementById(id)?.value);
   const x = SP.storageBoxSnap(num("portable-x")), y = SP.storageBoxSnap(num("portable-y")), z = num("portable-z");
-  const minField = Number(state.catalog?.b4b_rules?.min_field_mm);
+  const minField = SP.storageBoxMinimumField();
   const minHeight = Number(state.catalog?.b4b_rules?.min_secure_height_mm);
   const valid = [x, y, z].every(n => Number.isFinite(n) && n > 0) && x >= minField && y >= minField && z >= minHeight;
   if (!valid || SP.setupKind !== "portable") { hideOutside(); hideFit(); return; }
@@ -210,10 +216,11 @@ SP.readStorageBoxForm = () => {
     edge_bevel: SP.storageBoxEdgeBevel,
     label_enabled: labelled,
     label_text: labelled ? String(value("portable-label-text") || "").trim() : "",
-    label_location: labelled ? location : "top",
+    label_location: labelled ? location : (SP.storageBoxGridStacking ? "none" : "top"),
     front_label_style: value("portable-front-label-style") === "wavy" ? "wavy" : "flat",
     label_size: value("portable-label-size") || "default",
     stacking: value("portable-stacking") === "true",
+    grid_stacking: SP.storageBoxGridStacking,
     handle: latched && value("portable-handle") === "true",
     wall_mm: Number(value("portable-wall")),
     base_mm: SP.storageBoxFloorBase(Number(value("portable-base")), value("portable-stacking") === "true"),

@@ -101,6 +101,11 @@ def b4b_summary(box: BoxSpec) -> dict:
         min_y = min(min_y, holder_y)
     if b4b.stacking:
         top_z += B4B_STACK_PEG_EXPOSED
+    grid_stack = None
+    if b4b.grid_stacking:
+        from organizer_inventory.stacking import stacking_record
+        grid_stack = stacking_record(box, plan)
+        top_z = grid_stack["closed_with_grid_mm"]
     summary: dict = {
         "field_mm": [eff.x, eff.y, eff.z],
         "field_units": [round(eff.x / GRID_PITCH), round(eff.y / GRID_PITCH)],
@@ -124,6 +129,7 @@ def b4b_summary(box: BoxSpec) -> dict:
         "lid_headroom_mm": b4b.lid_headroom_mm,
         "latch_tightness": b4b.latch_tightness,
         "stacking": b4b.stacking,
+        "grid_stacking": b4b.grid_stacking,
         "handle": handle is not None,
         "handle_requested": b4b.handle,
         "label_location": b4b.label_location if b4b.label_text.strip() else "none",
@@ -133,6 +139,8 @@ def b4b_summary(box: BoxSpec) -> dict:
         ),
         "max_child_height_text": f"Maximum bin height: {b4b_max_child_height(box):g} mm",
     }
+    if grid_stack is not None:
+        summary["grid_stacking_model"] = grid_stack
     if b4b.grid != "wavefinity":
         from organizer_features.gridfinity import container_floor_record
         record = container_floor_record(b4b.grid, b4b.built_in_grid, eff.x, eff.y, b4b.seated_lift_mm)
@@ -224,7 +232,8 @@ def _print_pose(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
             trimesh.transformations.rotation_matrix(math.pi / 2.0, (0.0, 1.0, 0.0))
         )
     elif kind == "lid":
-        # broad, flat top face on the bed; skirt and hardware build upward
+        # Existing flipped pose, including grid lids (owner decision U1).
+        # A grid lid rests on the ridge crest; barrel print quality is unverified.
         m.apply_transform(
             trimesh.transformations.rotation_matrix(math.pi, (1.0, 0.0, 0.0))
         )
@@ -412,6 +421,9 @@ def b4b_print_object_bounds(box: BoxSpec) -> list[dict]:
     for name, kind, make in _print_object_plan(box):
         if name == "Storage Box Body":
             bounds = [*body_xy, body_z]
+            if b4b.grid_stacking:
+                from organizer_features.gridfinity import FOOT_HEIGHT
+                bounds[2] += FOOT_HEIGHT
         elif name == "Storage Box Lid":
             lap = _skirt_lap(eff)
             lid_z = lid_top - underside + (lap if lap >= B4B_LID_SKIRT_MIN_LAP else 0.0)
@@ -420,6 +432,9 @@ def b4b_print_object_bounds(box: BoxSpec) -> list[dict]:
                 lid_z = max(lid_z, 2.0 * hw.profile.pivot_radius)
                 if hw.piano is not None:
                     lid_z = max(lid_z, 2.0 * hw.piano.half)
+            if b4b.grid_stacking:
+                from organizer_features.gridfinity import rim_depth
+                lid_z += rim_depth(b4b.grid)
             bounds = [*lid_xy, lid_z]
         else:
             try:

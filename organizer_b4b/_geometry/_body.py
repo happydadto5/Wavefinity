@@ -299,6 +299,12 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     if eff.b4b.stacking and eff.b4b.lid:
         body = difference([body, *_stack_recesses(box)])
 
+    if eff.b4b.grid_stacking:
+        from organizer_features.gridfinity import _single_volume
+        from organizer_inventory.stacking import stacking_feet
+        body = union([body, stacking_feet(box)])
+        _single_volume(body, "the Storage Box body and grid feet")
+
     return _weld(body)
 
 
@@ -409,6 +415,12 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
 
     if eff.b4b.stacking:
         lid = difference([lid, *_stack_lid_sockets(box)])
+
+    if eff.b4b.grid_stacking:
+        from organizer_features.gridfinity import _single_volume
+        from organizer_inventory.stacking import stacking_ridge
+        lid = union([lid, stacking_ridge(box)])
+        _single_volume(lid, "the Storage Box lid and receiving ridge")
 
     return _weld(lid)
 

@@ -117,6 +117,7 @@ Drawer, Storage Box and the selected Storage Drawer are a hard vertical ceiling:
 
 ## Storage Box
 
+- The structural case's `storage_box.grid_stacking` (saved design: `box.b4b.grid_stacking`, default false) adds Gridfinity feet and a lid receiving ridge at 21 or 42 mm pitch. Lid Only starts at 1×1; latched lids need one or two screw hinges and one or two latches, from 2×2 at 42 mm or 3×3 at 21 mm. Piano hinges, zero-latch latched lids, top labels and the peg stacking option are refused. Set label location to Front or None explicitly. Both floor modes remain available; headroom and skin datums stay unchanged. Fit, closure, mating and flipped-lid barrel print quality remain unverified pending Andrew's recorded prints. Open only with nothing seated on the lid. These are structural Space settings; an AI bin result must not set them or return the case.
 - Ordinary bins may be designed to fit inside a Storage Box Space.
 - The AI result is still an ordinary bin, not the Storage Box case itself.
 - Generating or printing a bin in a Storage Box Space requires the bin or closed design to fit the interior height, including its foot, handle and raised lettering. Unverifiable height blocks generation. Lid snugness does not add capacity; designs without a Space are unaffected.

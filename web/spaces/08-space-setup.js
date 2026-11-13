@@ -443,8 +443,8 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
         fail($("#drawer-grid").value === "wavefinity"
           ? "The drawer must have room for at least one Wavefinity unit after wall clearance."
           : `The drawer must have room for at least one ${state.catalog?.grids?.find(row => row.value === $("#drawer-grid").value)?.label || "Gridfinity"} cell.`, selector);
-      } else if (kind === "portable" && used < Number(state.catalog?.b4b_rules?.min_field_mm)) {
-        fail(`A Storage Box needs at least ${fmt(state.catalog.b4b_rules.min_field_mm)} mm of child-bin field.`, selector);
+      } else if (kind === "portable" && used < SP.storageBoxMinimumField()) {
+        fail(`A Storage Box needs at least ${fmt(SP.storageBoxMinimumField())} mm of child-bin field.`, selector);
       }
     }
     const liftSelector = `#${prefix}-lift`;

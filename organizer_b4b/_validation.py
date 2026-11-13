@@ -453,6 +453,18 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
     # detent, (b) the hook is off the pin by the release angle, and (c) nothing
     # rubs after that.
     for lever in make_b4b_latches(box):
+        if b4b.grid_stacking and lid is not None:
+            # The whole lid and ridge must clear from closed through release
+            # to the fully open lever pose, without the body's detent allowance.
+            lid_hit = _sweep_intersection_cc(
+                lever, lid, plan.pivot_axis_y, plan.pivot_axis_z,
+                angles_deg=tuple(-a for a in _sweep_angles(B4B_LATCH_OPEN_ANGLE)),
+            )
+            if lid_hit > B4B_NOISE_CC:
+                raise ValueError(
+                    f"A latch touches the lid or grid ridge while opening "
+                    f"(overlap {lid_hit:.3f} cc). Grid stacking cannot be generated with this configuration."
+                )
         closed = _sweep_intersection_cc(
             lever, body, plan.pivot_axis_y, plan.pivot_axis_z, angles_deg=(0.0,)
         )
@@ -550,6 +562,8 @@ def validate_b4b_design(
     if not raw.enabled:
         raise ValueError("validate_b4b_design called on a non-Storage Box design")
     b4b = raw.normalised()
+    from organizer_inventory.stacking import validate_box
+    validate_box(box)
     unsupported = [kind for kind in layout_feature_kinds if kind != "divider"]
     if unsupported:
         raise ValueError(

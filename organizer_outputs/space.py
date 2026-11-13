@@ -82,6 +82,7 @@ def storage_box_design(space: dict[str, Any]) -> dict[str, Any]:
         front_label_style=settings["front_label_style"],
         label_size=settings["label_size"],
         stacking=settings["stacking"],
+        grid_stacking=settings["grid_stacking"],
         handle=settings["handle"] and settings["secure_lid"],
     )
     box = BoxSpec(

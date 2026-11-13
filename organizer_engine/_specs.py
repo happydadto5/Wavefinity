@@ -589,10 +589,13 @@ class B4BSpec:
     grid: str = "wavefinity"
     built_in_grid: str = "floor"
     seated_lift_mm: float | None = None
+    grid_stacking: bool = False       # Gridfinity feet and lid receiving ridge
 
     def __post_init__(self) -> None:
         validate_grid(self.grid)
         validate_built_in_grid(self.built_in_grid)
+        if not isinstance(self.grid_stacking, bool):
+            raise ValueError("Storage Box grid stacking must be true or false")
         if self.seated_lift_mm is not None and (
             isinstance(self.seated_lift_mm, bool)
             or not isinstance(self.seated_lift_mm, (int, float))
@@ -686,6 +689,7 @@ class B4BSpec:
             front_label_style=self.front_label_style,
             label_size=self.label_size,
             stacking=stacking,
+            grid_stacking=self.grid_stacking,
             handle=handle,
             version=B4B_SCHEMA_VERSION,
             grid=self.grid,

@@ -122,6 +122,7 @@ def storage_box_defaults() -> dict[str, Any]:
         "front_label_style": "flat",
         "label_size": "default",
         "stacking": False,
+        "grid_stacking": False,
         "handle": False,
         "wall_mm": B4B_DEFAULT_WALL,
         "base_mm": B4B_DEFAULT_BASE,
@@ -236,11 +237,14 @@ def normalise_storage_box(raw: Any, width_mm: Any = None, depth_mm: Any = None) 
         "front_label_style": _storage_box_choice(merged["front_label_style"], B4B_FRONT_LABEL_STYLES, "front label style"),
         "label_size": _storage_box_choice(merged["label_size"], B4B_LABEL_SIZES, "label size"),
         "stacking": _storage_box_flag(merged["stacking"], "stacking"),
+        "grid_stacking": _storage_box_flag(merged["grid_stacking"], "grid stacking"),
         "handle": _storage_box_flag(merged["handle"], "handle"),
         "wall_mm": _storage_box_material(merged["wall_mm"], "wall thickness"),
         "base_mm": base,
         "seated_lift_mm": measured_seated_lift(merged["seated_lift_mm"]),
     }
+    from .stacking import validate_grid_stacking
+    validate_grid_stacking(result, width_mm, depth_mm)
     if width_mm is not None and depth_mm is not None:
         result.update(container_floor_record(grid, mode, width_mm, depth_mm, result["seated_lift_mm"]))
     return result
