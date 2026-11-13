@@ -24,6 +24,8 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-drawer-row select { font-size: 14px; font-weight: 650; color: var(--ink); }
 .button.dl-small { padding: 7px 10px; font-size: var(--type-small-button); }
 .dl-note { margin: 8px 0 0; font-size: 11px; color: var(--muted); line-height: 1.45; }
+.dl-sp-front-note { font-size: 12px; }
+#dl-sp-action-note { white-space: pre-line; }
 .dl-warning { color: #8a4e12; }
 .dl-details { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
 .dl-details summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--teal-dark); }

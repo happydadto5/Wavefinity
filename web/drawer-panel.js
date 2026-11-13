@@ -196,13 +196,13 @@ DP.build = () => {
           <label class="checkbox-row"><span>Back</span><input id="dl-sp-wall-back" type="checkbox" checked></label>
           <label class="checkbox-row"><span>Right</span><input id="dl-sp-wall-right" type="checkbox" checked></label>
         </fieldset>
-        <p class="dl-note" style="font-size: 12px;">No front-wall spacers: bins are pulled toward you when opening the drawer, so front bracing would fight you every time.</p>
+        <p class="dl-note dl-sp-front-note">No front-wall spacers: bins are pulled toward you when opening the drawer, so front bracing would fight you every time.</p>
         <div class="dl-action-grid">
           <button type="button" id="dl-sp-refresh" class="button secondary" title="Remove the existing spacers, then generate and place new ones">Refresh Spacers</button>
         </div>
         <p id="dl-sp-reason" class="dl-note" hidden></p>
         <p id="dl-sp-status" class="dl-note" hidden></p>
-        <p id="dl-sp-action-note" class="dl-note" role="status" style="white-space: pre-line" hidden></p>
+        <p id="dl-sp-action-note" class="dl-note" role="status" hidden></p>
       </div>
     </details>
 
@@ -904,12 +904,9 @@ DP.renderDrawer = () => {
   // Hide drawer selector if only one drawer in a typed Space.
   const isTypedSpace = state.folderMode === "space" && state.activeSpace;
   const row = select.closest(".dl-drawer-row");
-  if (row) {
-    if (isTypedSpace && DL.layout.drawers.length === 1) row.style.display = "none";
-    else row.style.display = "";
-  }
+  if (row) row.hidden = isTypedSpace && DL.layout.drawers.length === 1;
   const addBtn = $("#dl-drawer-add");
-  if (addBtn) addBtn.style.display = isTypedSpace ? "none" : "";
+  if (addBtn) addBtn.hidden = isTypedSpace;
   // A typed Space keeps one physical drawer; a preserved selector with more
   // than one only ever holds legacy/previous drawers carried over from
   // before this folder became a typed Space - label it clearly rather than
@@ -1318,8 +1315,8 @@ DP.renderInventory = (force = false) => {
         ${actions}
       </div>`;
   }).join("");
-  // The page's security policy refuses inline style attributes, so colours
-  // go on through the DOM instead.
+  // Individual CSS property assignments preserve the continuous height colours
+  // without parsing an inline style attribute under the page's CSP.
   $$(".dl-swatch", list).forEach(node => {
     node.style.background = node.dataset.top;
     node.style.color = node.dataset.ink;
