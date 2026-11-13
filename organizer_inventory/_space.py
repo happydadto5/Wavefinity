@@ -261,6 +261,9 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
         # Correction 8.D.
         kind = "portable"
 
+    if kind not in {"drawer", "portable", "storage_drawers"} and grid != "wavefinity":
+        raise ValueError(f"{kind} spaces only support the Wavefinity grid")
+
     if kind == "pegboard":
         resolved = normalise_pegboard_space(raw)
         return {"name": name, "kind": kind, **resolved, "grid": grid}
