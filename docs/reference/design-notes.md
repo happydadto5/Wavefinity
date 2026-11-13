@@ -331,14 +331,14 @@ not covered. Separately, `make_fused_box` drops zero-volume boolean slivers
 
 ### Browser-only geometry feasibility (Story 2979, 2026-11-12)
 
-`/browser-local-poc.html` is an opt-in, isolated experiment on the existing
-host. It loads tools into browser memory without installation. Chrome and Edge
+An opt-in, isolated experiment on the existing host loaded tools into browser
+memory without installation. Chrome and Edge
 reproduce the canonical wall/cavity profiles and 0.25 mm seam, including with
 network blocked after load. The original PoC lacked a float64 boolean interface, but the later custom
 MeshGL64 WebAssembly bridge generated valid downloadable bins with real
 Wavefinity geometry, and Windows Chrome/Edge were confirmed by the owner.
-The original feasibility history remains in [browser-tests/README.md](../../browser-tests/README.md)
-for reference, not as a development testing mandate. Production still uses the
+The experiment and its test harness have since been removed from the
+repository; this section is the retained record. Production still uses the
 legacy Python server until the complete browser-only migration is delivered.
 
 ### Gridfinity container floors (Story 2974, model and geometry)

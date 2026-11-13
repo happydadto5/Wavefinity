@@ -37,7 +37,6 @@ The app is moved in one final cutover, not through a long-lived dual mode. No co
 | Version pins (Pyodide 0.28.3, wheels, MeshGL64 bridge) and vendored assets | `web/browser-core/vendor/`, verified by `scripts/build-browser-core.py` (B02) |
 | Packaged engine and its source hashes | `web/browser-core/engine/canonical.zip` and `engine/manifest.json` (B02) |
 | Route manifest (every route: local or retired, owner, runtime, module) | `web/browser-core/contracts/route-manifest.json` (B01); checked against runtime registrations by the static build (B14) |
-| Proof-of-concept source that B02 starts from | `web/browser-local-poc*`, `web/browser-local-poc/` (not shipped in the final bundle) |
 | Recovery record (last deployed SHAs, hostnames, cutover date, restore steps) | [legacy-python-server-hosting.md](legacy-python-server-hosting.md), section "Exact recovery-source references" — fields are intentionally still "NOT YET RECORDED" until B15 |
 | Private domain/DNS/account record | private Help-Code repository (`docs/wavefinity-domain.md`), never in this public repo |
 

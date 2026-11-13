@@ -108,11 +108,8 @@ and UI assembly remains a later migration step; these modules alone do not
 establish a complete browser edition. See
 [`browser-editor-routes.md`](docs/reference/browser-editor-routes.md).
 
-An isolated browser geometry experiment is available directly at
-`/browser-local-poc.html`. It downloads tools into browser memory
-without installation and leaves designs untouched. The full-bin feasibility
-attempt failed because the pinned browser dependencies lack float64 Mesh64
-booleans; it does not offer a finished bin or STL. See `browser-tests/README.md`.
+An earlier isolated browser geometry experiment has been removed from the
+repository (its findings are recorded in `docs/reference/design-notes.md`).
 Production creation/export and AI Design options are unchanged.
 
 Space and design records preserve their grid identity: Wavefinity (7 mm),

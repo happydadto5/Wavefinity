@@ -106,7 +106,6 @@ layered implementation:
 | `web/spaces.js` | Typed Space setup and opening, folder and Space activation, resume and startup handoff, and Space setup lifecycle. | No. |
 | `web/browser-files.js` | Hosted-browser writable-folder permission and handle persistence, plus browser-owned file operations; Python receives no fake client path. | No. |
 | `web/preview3d-webgl.js` | Shared depth-buffered WebGL renderer for solid 3D preview geometry; `app.js` owns 2D overlay annotations. | No. |
-| Historical `tests/` and `run_tests.py` | Legacy automated test artifacts: coders must not run, modify, repair or expand them under the current owner policy. | Not part of coder workflow. |
 
 `web/index.html`, `web/styles.css`, `web/feature-icons.js` and `web/app.js` are
 plain dependency-free frontend files with no build step. Icon artwork lives in
@@ -185,12 +184,9 @@ transaction owner. When adding a persistence or replacement action, use the
 existing Designer commit/mutation owner. When transforming a Layout, preserve
 all additive metadata.
 
-Two things worth knowing before tidying anything up:
-
-- The `*Tests` classes look unreferenced, because
-  nothing calls them by name - `unittest` discovers them. They are not dead.
-- Registered holder builders look unreferenced because the registry calls them.
-  Check the tests before deleting apparently orphaned definitions.
+One thing worth knowing before tidying anything up: registered holder builders
+look unreferenced because the registry calls them. Check the registry before
+deleting apparently orphaned definitions.
 
 ### Adding or changing an interior feature
 

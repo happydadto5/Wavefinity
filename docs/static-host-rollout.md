@@ -35,8 +35,7 @@ Python standard library only, no network, no Emscripten. It aborts (non-zero exi
 
 It regenerates `web/browser-core/engine/canonical.zip` and its manifest from the checked-out sources, then writes
 `dist/`: production `web/*` at the root, repository-root `images/` at `dist/images/`, and `Brochure.md` as both
-`dist/Brochure.md` and byte-identical `dist/brochure.md`. The proof-of-concept page, scripts, worker and the whole
-`web/browser-local-poc/` tree, all test trees, the bridge's C++/shell build inputs and the legacy `web/images/`
+`dist/Brochure.md` and byte-identical `dist/brochure.md`. The bridge's C++/shell build inputs and the legacy `web/images/`
 duplicates (the canonical artwork is `images/`) are not shipped.
 
 ## Render dashboard: create the NEW Static Site
