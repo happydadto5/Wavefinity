@@ -173,7 +173,12 @@ def print_file_fit_issues(path, profile: dict) -> list[str]:
     if not source.is_file() or source.suffix.lower() != ".3mf":
         return [f"{source.name}: a current 3MF file is unavailable"]
     try:
-        scene = trimesh.load(source, force="scene")
+        import sys
+        if sys.platform == "emscripten":
+            from wf_browser_core.three_mf import scene_for_fit
+            scene = scene_for_fit(source)
+        else:
+            scene = trimesh.load(source, force="scene")
         nodes = list(scene.graph.nodes_geometry)
         if not nodes:
             return [f"{source.name}: the 3MF has no printable component"]

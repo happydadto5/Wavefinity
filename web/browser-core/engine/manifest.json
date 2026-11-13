@@ -1,10 +1,10 @@
 {
   "archive": "canonical.zip",
-  "bytes": 698754,
+  "bytes": 708930,
   "catalog": {
     "schema": "wavefinity-browser-catalog/1",
-    "sha256": "275f3a95cbfb9075c622db59c62207e05bbf5daf2864b76eadc30563072df422",
-    "source_sha256": "298f51f39629c4c7d48c846567fa8ab6c2479042853738da1c7355596ff5cf84"
+    "sha256": "3527551c96c23d983ec84add464b40ddc521adc30881b2d1bc52f53bb5c446db",
+    "source_sha256": "e26a414e85f0e13ed56795a954694f96f497283f19e7e15fd872c61e3dd7e54b"
   },
   "external_imports": [
     "PIL",
@@ -27,7 +27,7 @@
     "photo_nest": "B12 integrates the bundled cv2/Pillow browser packages"
   },
   "schema": "wavefinity-browser-engine/1",
-  "sha256": "edb3093287778ece6043bf0efa89431ab5536f7b41d3d71795fd3759fa47bd7f",
+  "sha256": "4fc89331bd4119714b505ae79085237b81bf2426d7717775e542710dde362906",
   "size_accounting": {
     "assets": {
       "earcut/LICENSE": {
@@ -39,8 +39,8 @@
         "gzip_bytes": 5821
       },
       "engine/canonical.zip": {
-        "bytes": 698754,
-        "gzip_bytes": 690433
+        "bytes": 708930,
+        "gzip_bytes": 700452
       },
       "manifold64/LICENSE": {
         "bytes": 11558,
@@ -177,8 +177,8 @@
     },
     "planning_target_bytes": 67108864,
     "scope": "Entire B02 vendor tree and canonical.zip; excludes future UI/worker assets and manifest JSON. gzip totals are build encoding sizes, not observed network transfer. Hosting compression/traffic allowance is not established here.",
-    "total_bytes": 58708753,
-    "total_gzip_bytes": 51022971,
+    "total_bytes": 58718929,
+    "total_gzip_bytes": 51032990,
     "within_planning_target": true
   },
   "source_hash_mode": "UTF-8 without BOM, LF line endings",
@@ -349,8 +349,8 @@
       "source": "organizer_engine/_boxes.py"
     },
     "organizer_engine/_export.py": {
-      "bytes": 30097,
-      "sha256": "b233a0958ac3df935e6a67dc229fe6d7cd2587ffe0b97d061f452131e62a1d17",
+      "bytes": 31266,
+      "sha256": "256dd699a55d8cf9d94301318054a62fcd5c42dacbbce6aae2c5b273f24e84b4",
       "source": "organizer_engine/_export.py"
     },
     "organizer_engine/_fit.py": {
@@ -634,8 +634,8 @@
       "source": "organizer_outputs/__init__.py"
     },
     "organizer_outputs/printer_profile.py": {
-      "bytes": 7854,
-      "sha256": "d0b4eb4b2e0089e71dc7a97ead0c89d1f7d836c3af4a271630b221c09c8071bb",
+      "bytes": 8037,
+      "sha256": "097e5886686966dc7c5de5a23a574ee86c352ebd12ed3200610a1d18711e8e8a",
       "source": "organizer_outputs/printer_profile.py"
     },
     "organizer_outputs/slicer.py": {
@@ -699,8 +699,8 @@
       "source": "wavefinity_web_impl/__init__.py"
     },
     "wavefinity_web_impl/_ai.py": {
-      "bytes": 42779,
-      "sha256": "0bd09de1fd9b6212f65fc185ee304289d0a09fa715bfb9dcb4d7c6caad928206",
+      "bytes": 42909,
+      "sha256": "17a5308f888766d0ff38c078fb241749b65628c68695e1c7cb38ab052811f73c",
       "source": "wavefinity_web_impl/_ai.py"
     },
     "wavefinity_web_impl/_catalog.py": {
@@ -753,14 +753,19 @@
       "sha256": "abc8590100e17b95d5d3689a42d2e8940f7caa97a68e7ad95456d61901311b43",
       "source": "web/browser-core/engine/__init__.py"
     },
+    "wf_browser_core/build_outputs.py": {
+      "bytes": 11005,
+      "sha256": "bfdef436c1181a3aeead340b68ef5edaa941ee00576222bf85e456687c40a058",
+      "source": "web/browser-core/engine/build_outputs.py"
+    },
     "wf_browser_core/catalog.json": {
       "bytes": 69746,
-      "sha256": "275f3a95cbfb9075c622db59c62207e05bbf5daf2864b76eadc30563072df422",
+      "sha256": "3527551c96c23d983ec84add464b40ddc521adc30881b2d1bc52f53bb5c446db",
       "source": "web/browser-core/engine/catalog.json"
     },
     "wf_browser_core/catalog_manifest.json": {
       "bytes": 12217,
-      "sha256": "24f5817d8bd10cd3da7fbc46f623d4b97250623f544094beac66f25e6c153905",
+      "sha256": "45e2724cff2b99e035209ea6575d4648372abcfd5eac45b9dd4afa65159732b7",
       "source": "web/browser-core/engine/catalog_manifest.json"
     },
     "wf_browser_core/editor_routes.py": {
@@ -792,6 +797,11 @@
       "bytes": 5447,
       "sha256": "074fc186890661f4e45c0f03a7370305f208b6e5253f79ceb689e9090f56ba5c",
       "source": "web/browser-core/engine/space_values.py"
+    },
+    "wf_browser_core/three_mf.py": {
+      "bytes": 22170,
+      "sha256": "e63ab8f80e4b8a161faccf29b0444c05e5f22bbc551a95113e1384296cbeb73c",
+      "source": "web/browser-core/engine/three_mf.py"
     }
   },
   "vendor_manifest_sha256": "8ba568549272c49eb8a7a37b10ac2b49b25972e0d41dfd1bd2bf8f5dae6e49e3"

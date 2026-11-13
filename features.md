@@ -35,6 +35,16 @@ regenerate bins and side clips made with that profile as a set.
 
 ## Status
 
+Browser output adapters now build ordinary bins, connectors and fit samplers
+with the canonical geometry, naming and runtime fit checks. Ordinary 3MF
+exports use a browser-native writer with named parts, filament assignments
+and package/mesh integrity checks. Output files use local Blob handles: save
+to the selected folder, or download (a single ZIP for a multi-file set).
+Folder saves preserve collision choices and restore earlier files if a later
+write fails. Final route assembly remains B14 work; plate packaging and Print
+are separate migration packages. See
+[browser outputs](docs/reference/browser-outputs.md).
+
 Browser Space/folder and preference route modules now use selected browser
 directory handles, the existing `.wavefinity.json` identity, and queued folder
 writes. Explicit Space and preference backup/import APIs support recovery;

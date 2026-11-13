@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import zipfile
 from pathlib import Path
 from typing import Iterable
@@ -64,6 +65,9 @@ def _strict_write(model, wrapper, output: Path) -> None:
 
 
 def export_bambu_compatible_3mf(scene: trimesh.Scene, output: Path) -> None:
+    if sys.platform == "emscripten":
+        from wf_browser_core.three_mf import export_bambu_compatible_3mf as local_export
+        return local_export(scene, output)
     output.parent.mkdir(parents=True, exist_ok=True)
     generic = scene.export(file_type="3mf")
     if not isinstance(generic, bytes):
@@ -266,6 +270,10 @@ def export_text_body_3mf(
     share faces and nothing else; a raised one stands on the surface and
     touches it the same way. Returns the part names actually written.
     """
+    if sys.platform == "emscripten":
+        from wf_browser_core.three_mf import export_text_body_3mf as local_export
+        return local_export(body_mesh, texts, output, body_name, part_filament,
+                            accent_color=accent_color, accent_top=accent_top)
     texts = list(texts)
     mesh_report(body_name, body_mesh)
     names = unique_object_names((name for name, _ in texts), taken=(body_name,))
@@ -374,6 +382,9 @@ def export_assembly_3mf(
 
     Returns the unique part names written, in order.
     """
+    if sys.platform == "emscripten":
+        from wf_browser_core.three_mf import export_assembly_3mf as local_export
+        return local_export(parts, output, filaments)
     parts = list(parts)
     if not parts:
         raise ValueError("an assembly needs at least one part")
@@ -450,6 +461,9 @@ def export_object_groups_3mf(
     registered meshes inside it.  Existing assembly exports retain their
     single-object behaviour through :func:`export_assembly_3mf`.
     """
+    if sys.platform == "emscripten":
+        from wf_browser_core.three_mf import export_object_groups_3mf as local_export
+        return local_export(objects, output, filaments)
     raw_objects = [(name, list(parts)) for name, parts in objects]
     if not raw_objects or any(not parts for _name, parts in raw_objects):
         raise ValueError("each 3MF print object needs at least one part")
@@ -575,6 +589,9 @@ def validate_3mf(
     strict model then holds ``expected_objects + 1`` objects and 1 build item.
     The returned ``filaments`` maps each part name to the slot it opens on.
     """
+    if sys.platform == "emscripten":
+        from wf_browser_core.three_mf import validate_3mf as local_validate
+        return local_validate(path, expected_objects, multipart)
     assembly = bool(multipart)
     scene = trimesh.load(path, force="scene")
     if len(scene.geometry) != expected_objects:
@@ -627,6 +644,9 @@ def validate_object_groups_3mf(
     may use ComponentsObjects, and each must contain exactly its declared mesh
     resources.  ``filaments`` names deliberate non-default part slots.
     """
+    if sys.platform == "emscripten":
+        from wf_browser_core.three_mf import validate_object_groups_3mf as local_validate
+        return local_validate(path, objects, filaments)
     groups = [(name, list(parts)) for name, parts in objects]
     if not groups or any(not parts for _name, parts in groups):
         raise ValueError("each expected 3MF print object needs at least one part")

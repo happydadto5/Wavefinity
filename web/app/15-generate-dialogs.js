@@ -121,10 +121,6 @@ async function generatePartsWithReport(target, report) {
     return;
   }
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
-  if (state.runtime.hosted && !state.browserFolder) {
-    report("Choose a folder before saving files.", true);
-    return;
-  }
   const beforeForm = pendingPreEditDesign || clone(state.design);
   const previousCanGenerate = state.canGenerate;
 
@@ -190,18 +186,29 @@ async function generatePartsWithReport(target, report) {
   // say so instead of presenting the whole action as failed.
   let saveStage = "setup";
   let binSaved = false;
+  const outputFolder = state.browserFolder, outputSpace = state.activeSpaceId;
+  let outputEpoch = null;
+  const requireOutputContext = () => {
+    if (state.browserFolder !== outputFolder || state.activeSpaceId !== outputSpace ||
+        (outputEpoch !== null && WFLocalAPI.designEpoch !== outputEpoch) || state.relocating) {
+      throw new Error("The Space or design changed before the files were saved.");
+    }
+  };
 
   try {
     // A debounced support edit may still be visible only in the draft. Save
     // it now so the exported files always match the canvas.
     await commitVisibleDraft();
+    requireOutputContext();
+    outputEpoch = WFLocalAPI.designEpoch;
 
     const payload = {
       design: clone(state.design),
-      output: state.output,
       connector: state.connector,
-      keep_log: designRowId ? false : state.keepLog,
+      keep_log: !designRowId && Boolean(outputFolder?.handle) && state.keepLog,
       design_row_id: designRowId || undefined,
+      printer_profile: PrinterProfile.current(),
+      printer_profile_configured: PrinterProfile.configured(),
       // Fix 1069: carry the active Space so direct Save in a Storage Box Space
       // is hard-blocked when the bin/closed stack exceeds the interior Z.
       // Standalone designs (no Space) send null and are unaffected.
@@ -222,6 +229,15 @@ async function generatePartsWithReport(target, report) {
       }
     }
 
+    // Generation's grid guard reads saved ownership, never a client path or
+    // the editable Space object as proof. Capture after the resume flush.
+    if (outputFolder?.handle) {
+      payload.inventory_text = await SP.readInventoryFor(outputFolder, { migrate: false });
+      payload.space_metadata_text = await WFFileSystem.readText(outputFolder.handle, FOLDER_METADATA);
+      payload.space_id = outputSpace || undefined;
+    }
+    requireOutputContext();
+
     // Step 1: Generate Bin if requested
     if (target === "all" || target === "bin") {
       saveStage = "bin";
@@ -240,9 +256,10 @@ async function generatePartsWithReport(target, report) {
       } finally {
         progress.stop();
       }
-      if (designSpaceContext) DL.requireSpaceContext(designSpaceContext);
       saveOutput = binResult.output || saveOutput;
-      const binFiles = await saveGeneratedFiles(binResult, { ownedStale: staleFileNamesForRow(designRowId) });
+      const binFiles = await saveGeneratedFiles(binResult, {
+        ownedStale: staleFileNamesForRow(designRowId), requireCurrent: requireOutputContext,
+      });
       if (designSpaceContext) {
         DL.requireSpaceContext(designSpaceContext);
         if (state.designInventoryId !== designRowId ||
@@ -262,7 +279,9 @@ async function generatePartsWithReport(target, report) {
       }
       allFiles.push(...binFiles);
       binSaved = true;
-      setItemStatus("bin", "done", "Saved to " + (state.runtime.hosted ? state.browserFolder?.name || "your download folder" : saveOutput) + ": " + binFiles.join(", "));
+      setItemStatus("bin", "done", binResult.downloaded_archive
+        ? `Downloaded ${binResult.downloaded_archive} containing: ${binFiles.join(", ")}`
+        : "Saved to " + (state.browserFolder?.name || "your download folder") + ": " + binFiles.join(", "));
       // The just-saved bin is the next resume target. The generated files and
       // inventory entry already exist by this point, so a checkpoint-save
       // failure here must not be reported as the generation itself
@@ -279,6 +298,7 @@ async function generatePartsWithReport(target, report) {
 
     // Step 2: Generate Connector if requested
     if (target === "all" || target === "connector") {
+      requireOutputContext();
       saveStage = "connector";
       setItemStatus("connector", "generating", "Exporting…");
       const connectorPayload = { ...payload, replace_existing_connectors: false };
@@ -298,7 +318,7 @@ async function generatePartsWithReport(target, report) {
         connectorPlan = connResult.connector_plan;
         renderConnectorReadout(connResult.connector_plan);
       }
-      const connFiles = await saveGeneratedFiles(connResult, { kind: "connector" });
+      const connFiles = await saveGeneratedFiles(connResult, { kind: "connector", requireCurrent: requireOutputContext });
       allFiles.push(...connFiles);
       if (connResult.partial) {
         // Some connectors were really written before a later one failed.
@@ -317,7 +337,7 @@ async function generatePartsWithReport(target, report) {
         report(message, true, 9000);
         return;
       }
-      setItemStatus("connector", "done", "Saved to " + (state.runtime.hosted ? state.browserFolder?.name || "your download folder" : saveOutput) + ": " + connFiles.join(", "));
+      setItemStatus("connector", "done", "Saved to " + (state.browserFolder?.name || "your download folder") + ": " + connFiles.join(", "));
     }
 
     // Fix 032 Correction 2 (C2.3): the generated output is real either way,
@@ -339,8 +359,8 @@ async function generatePartsWithReport(target, report) {
       ? `\nConnector: ${fmt(connectorPlan.length_mm)} mm long, ${fmt(connectorPlan.web_thickness_mm)} mm web, `
         + `${fmt(connectorPlan.printed_height_mm)} mm printed height`
       : "";
-    if (state.runtime.hosted) saveOutput = state.browserFolder?.name || "your download folder";
-    const savedMessage = `Saved to ${saveOutput}${uniqueFiles.length ? `\n${uniqueFiles.join("\n")}` : ""}${planNote}${state.runtime.hosted ? "\nOpen the saved file in your slicer." : ""}`;
+    saveOutput = state.browserFolder?.name || "your download folder (multiple files are together in Wavefinity files.zip)";
+    const savedMessage = `Saved to ${saveOutput}${uniqueFiles.length ? `\n${uniqueFiles.join("\n")}` : ""}${planNote}\nOpen the saved file in your slicer.`;
     report(
       checkpointSaveFailed
         ? `${savedMessage}\n\nThe current design could not be saved to this Space: ${checkpointSaveFailed.message}`
@@ -656,90 +676,127 @@ function collectOutputs(value, found = []) {
 const OWNED_OUTPUT_LABELS = { structural: "Storage Box", pegboard_hooks: "Pegboard hook" };
 
 async function saveGeneratedFiles(result, policy = {}) {
-  if (!state.runtime.hosted) return collectOutputs(result.result);
   const files = result.files || [];
-  if (!files.length) throw new Error("The server did not return any files to save.");
+  if (!files.length) throw new Error("The local engine did not return any files to save.");
   const folder = state.browserFolder;
+  const spaceId = state.activeSpaceId;
+  const epoch = WFLocalAPI.designEpoch;
+  const requireCurrent = () => {
+    policy.requireCurrent?.();
+    if (state.browserFolder !== folder || state.activeSpaceId !== spaceId ||
+        WFLocalAPI.designEpoch !== epoch || state.relocating) {
+      throw new Error("The Space or design changed before the files were saved.");
+    }
+  };
   const connector = policy.kind === "connector";
   const blobs = new Map();
   const skip = new Set();
-  if (connector) {
-    // Fetch every candidate before anything is written: a failed download
-    // must leave the folder exactly as it was.
+  try {
+    // Claim the whole set before the first write. A missing/expired handle or
+    // invalid/duplicate name leaves the destination untouched.
+    const ids = new Set(), names = new Set();
     for (const file of files) {
-      const response = await fetch(file.url);
-      if (!response.ok) throw new Error(`Could not download ${file.name}.`);
-      blobs.set(file.name, await response.blob());
-    }
-  }
-  if (folder?.handle) {
-    const existing = [];
-    for (const file of files) {
-      if (await WFFileSystem.fileExists(folder.handle, file.name)) existing.push(file);
-    }
-    // A re-save may replace Wavefinity's own superseded output: the caller
-    // lists those names in policy.ownedStale (the row's server-tracked
-    // stale_files). Any other collision still demands a rename.
-    const ownedStale = new Set((policy.ownedStale || []).filter(name => typeof name === "string" && name));
-    const foreign = existing.filter(file => !ownedStale.has(file.name));
-    if (existing.length && connector) {
-      const different = [];
-      for (const file of existing) {
-        const [oldHash, newHash] = await Promise.all([
-          WFFileSystem.sha256(folder.handle, file.name), WFFileSystem.sha256Blob(blobs.get(file.name)),
-        ]);
-        if (oldHash === newHash) skip.add(file.name); else different.push(file.name);
+      const folded = typeof file.name === "string" ? file.name.normalize("NFC").toLowerCase() : "";
+      if (!folded || /[<>:"\\/|?*\x00-\x1f]/.test(file.name) || /[. ]$/.test(file.name) ||
+          /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(file.name) || names.has(folded) ||
+          typeof file.local_file_id !== "string" || ids.has(file.local_file_id)) {
+        throw new Error("The local engine returned an invalid file set.");
       }
-      if (different.length && !(await confirmReplaceConnectorFiles(different))) {
-        throw new Error("Connector save cancelled. Nothing was replaced.");
-      }
-    } else if (OWNED_OUTPUT_LABELS[policy.kind] && existing.length) {
-      // A Storage Box or Pegboard hooks re-save reuses the same deterministic
-      // names. A byte-identical file is provably Wavefinity's own prior output
-      // and is left alone; a differing same-name file gets an explicit Replace
-      // / Cancel choice instead of a hard rename demand.
-      const label = OWNED_OUTPUT_LABELS[policy.kind];
+      ids.add(file.local_file_id);
+      names.add(folded);
+      const blob = WFLocalFiles.claim(file.local_file_id);
+      if (!blob?.size) throw new Error(`The local file ${file.name} is unavailable. Generate the files again.`);
+      blobs.set(file.name, blob);
+    }
+    requireCurrent();
+    if (!folder?.handle) {
+      result.downloaded_archive = await WFLocalFiles.downloadSet(files.map(file => ({ name: file.name, blob: blobs.get(file.name) })), requireCurrent);
+      return files.map(file => file.name);
+    }
+    return await WFFileSystem.queueFolderWrite(folder.handle, async () => {
+      requireCurrent();
+      const existing = [];
       for (const file of files) {
-        if (!blobs.has(file.name)) {
-          const response = await fetch(file.url);
-          if (!response.ok) throw new Error(`Could not download ${file.name}.`);
-          blobs.set(file.name, await response.blob());
+        if (await WFFileSystem.fileExists(folder.handle, file.name)) existing.push(file);
+      }
+      // A re-save may replace Wavefinity's own superseded output: the caller
+      // lists those names in policy.ownedStale (the row's server-tracked
+      // stale_files). Any other collision still demands a rename.
+      const ownedStale = new Set((policy.ownedStale || []).filter(name => typeof name === "string" && name));
+      const foreign = existing.filter(file => !ownedStale.has(file.name));
+      if (existing.length && connector) {
+        const different = [];
+        for (const file of existing) {
+          const [oldHash, newHash] = await Promise.all([
+            WFFileSystem.sha256(folder.handle, file.name), WFFileSystem.sha256Blob(blobs.get(file.name)),
+          ]);
+          if (oldHash === newHash) skip.add(file.name); else different.push(file.name);
         }
+        if (different.length && !(await confirmReplaceConnectorFiles(different))) {
+          throw new Error("Connector save cancelled. Nothing was replaced.");
+        }
+      } else if (OWNED_OUTPUT_LABELS[policy.kind] && existing.length) {
+        // A Storage Box or Pegboard hooks re-save reuses the same deterministic
+        // names. A byte-identical file is provably Wavefinity's own prior output
+        // and is left alone; a differing same-name file gets an explicit Replace
+        // / Cancel choice instead of a hard rename demand.
+        const label = OWNED_OUTPUT_LABELS[policy.kind];
+        const different = [];
+        for (const file of existing) {
+          const [oldHash, newHash] = await Promise.all([
+            WFFileSystem.sha256(folder.handle, file.name), WFFileSystem.sha256Blob(blobs.get(file.name)),
+          ]);
+          if (oldHash === newHash) skip.add(file.name); else different.push(file.name);
+        }
+        if (different.length && !(await confirmReplaceOutputFiles(different, label))) {
+          throw new Error(`${label} save cancelled. Nothing was replaced.`);
+        }
+      } else if (foreign.length) {
+        const hint = policy.kind === "structural"
+          ? "Give the Space a different name, then try exporting again."
+          : undefined;
+        showFilenameConflictDialog(foreign.map(file => file.name), hint);
+        throw new Error(policy.kind === "structural"
+          ? "Give the Space a different name to avoid overwriting an existing file."
+          : "Give the bin a different name to avoid overwriting an existing file.");
       }
-      const different = [];
-      for (const file of existing) {
-        const [oldHash, newHash] = await Promise.all([
-          WFFileSystem.sha256(folder.handle, file.name), WFFileSystem.sha256Blob(blobs.get(file.name)),
-        ]);
-        if (oldHash === newHash) skip.add(file.name); else different.push(file.name);
+      const previous = new Map(), touched = [];
+      for (const file of files) {
+        if (skip.has(file.name)) continue;
+        // Capture original bytes before changing any member of the set.
+        const old = existing.some(one => one.name === file.name)
+          ? await (await folder.handle.getFileHandle(file.name)).getFile() : null;
+        previous.set(file.name, old ? new Blob([await old.arrayBuffer()], { type: old.type }) : null);
       }
-      if (different.length && !(await confirmReplaceOutputFiles(different, label))) {
-        throw new Error(`${label} save cancelled. Nothing was replaced.`);
+      try {
+        for (const file of files) {
+          requireCurrent();
+          if (!skip.has(file.name)) {
+            touched.push(file.name); // includes a create/write that fails midway
+            await WFFileSystem.writeBlob(folder.handle, file.name, blobs.get(file.name));
+          }
+        }
+        requireCurrent();
+      } catch (error) {
+        const failed = [];
+        for (const name of touched.reverse()) {
+          try {
+            const old = previous.get(name);
+            if (old) await WFFileSystem.writeBlob(folder.handle, name, old);
+            else {
+              try { await WFFileSystem.removeFile(folder.handle, name); }
+              catch (removeError) { if (removeError.name !== "NotFoundError") throw removeError; }
+            }
+          } catch (_rollbackError) { failed.push(name); }
+        }
+        if (failed.length) throw new Error(`${error.message} The folder could not be fully restored: ${failed.join(", ")}.`);
+        throw error;
       }
-    } else if (foreign.length) {
-      const hint = policy.kind === "structural"
-        ? "Give the Space a different name, then try exporting again."
-        : undefined;
-      showFilenameConflictDialog(foreign.map(file => file.name), hint);
-      throw new Error(policy.kind === "structural"
-        ? "Give the Space a different name to avoid overwriting an existing file."
-        : "Give the bin a different name to avoid overwriting an existing file.");
-    }
+      return files.map(file => file.name);
+    });
+  } finally {
+    for (const file of files) WFLocalFiles.discard(file.local_file_id);
   }
-  const saved = [];
-  for (const file of files) {
-    if (!skip.has(file.name)) {
-      let blob = blobs.get(file.name);
-      if (!blob) {
-        const response = await fetch(file.url);
-        if (!response.ok) throw new Error(`Could not download ${file.name}.`);
-        blob = await response.blob();
-      }
-      await WFFileSystem.writeBlob(folder?.handle, file.name, blob);
-    }
-    saved.push(file.name);
-  }
-  return saved;
 }
 
 function watchServerVersion() {

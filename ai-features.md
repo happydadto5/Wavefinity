@@ -1,5 +1,11 @@
 # Wavefinity AI Feature Reference
 
+Browser ordinary-output adapters use the same bin design schema and geometry
+rules. Export prepares files locally for the person's chosen folder or a
+download; multiple downloaded files travel together in a ZIP. Do not return
+export URLs or claim files have been saved. Final browser route assembly is
+a later migration package.
+
 An ordinary bin on any supported grid may set `box.accent_band` to `true` for
 a top 1 mm accent (default `false`). `box.accent_color` defaults to `"blue"`;
 choices are blue, red, green, yellow, orange, purple, white and black. Include
