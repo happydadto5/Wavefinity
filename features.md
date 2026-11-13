@@ -62,6 +62,7 @@ units at the independent 7 mm height pitch; `mm` explicitly enters millimetres.
 Gridfinity Height has a 14 mm minimum and enforces floor/rim/lid minimums. Wavefinity Height and Space forms keep their
 existing entry rules. Gridfinity offers the Stackable rim and Gridfinity Lid
 (plain or for stacking), hiding connectors and hinged/handle/label lid variants.
+The lid's underside skirt locates in the body's plain mouth with clearance.
 AI Design uses the selected grid and those catalog choices. Older designs
 without a grid remain Wavefinity. Physical grid-lid fit is **not yet print-confirmed**.
 

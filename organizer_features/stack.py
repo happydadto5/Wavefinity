@@ -761,14 +761,13 @@ def _make_grid_lid(eff: BoxSpec, grid: str) -> trimesh.Trimesh:
     """Flush plate, mouth-clearing skirt and optional perimeter socket ridge."""
     from organizer_features.gridfinity import (
         _single_volume, flat_cavity_polygon, flat_outer_polygon,
-        rim_lip, rim_mouth_polygon,
+        rim_lip,
     )
 
     outer = flat_outer_polygon(eff, grid)
-    mouth = rim_mouth_polygon(eff, grid)
-    # Clear both a plain wall and the narrowest band of an optional open rim.
+    # Lidded bodies have a plain mouth, not the open-bin stacking rim.
     # Stack fit is fixed for this interface, independent of Wavefinity lid fit.
-    locating = mouth.intersection(flat_cavity_polygon(eff, grid)).buffer(-STACK_FIT)
+    locating = flat_cavity_polygon(eff, grid).buffer(-STACK_FIT)
     if locating.is_empty or not isinstance(locating, Polygon):
         raise ValueError("this Gridfinity bin is too small for its lid skirt")
     inner = locating.buffer(-STACK_LID_SKIRT_WIDTH)
