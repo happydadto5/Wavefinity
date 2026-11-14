@@ -15,7 +15,26 @@ SP.adoptFolderPrinter = raw => {
     : (SP.globalPrinterProfile || { profile: PrinterProfile.DEFAULT, explicit: false }));
 };
 
+SP.isNewSpacePrinterDraft = () =>
+  Boolean(SP.printerSetupActive && (WS.task === "newspace" || (SP.dialog().open && !SP.isUpdate)));
+
+SP.syncSetupPrinterCaps = profile => {
+  const active = profile || PrinterProfile.DEFAULT;
+  SP.setupPrinterProfile = active;
+  SP.storageDrawersForm?.setPrinterProfile(active);
+  if (SP.setupKind === "portable") {
+    for (const axis of ["x", "y", "z"]) document.getElementById(`portable-${axis}`).max = active[`${axis}_mm`];
+    SP.refreshSetupError();
+    SP.refreshSetupOutside?.();
+  }
+};
+
 SP.saveFolderPrinter = async (profile, { reset = false } = {}) => {
+  if (SP.isNewSpacePrinterDraft()) {
+    const next = reset ? null : PrinterProfile.normalise(profile);
+    SP.syncSetupPrinterCaps(next || { ...PrinterProfile.DEFAULT });
+    return { profile: SP.setupPrinterProfile, explicit: Boolean(next) };
+  }
   const requireOwner = SP.spaceOwnerGuard();
   if (!state.activeSpaceId) {
     const saved = await api("/api/space/printer-profile", reset ? { reset: true } : { profile });
@@ -33,11 +52,7 @@ SP.saveFolderPrinter = async (profile, { reset = false } = {}) => {
   }
   requireOwner();
   state.folderPrinterProfile = next;
-  if (SP.isUpdate) {
-    SP.setupPrinterProfile = next || PrinterProfile.DEFAULT;
-    for (const axis of ["x", "y", "z"]) document.getElementById(`portable-${axis}`).max = SP.setupPrinterProfile[`${axis}_mm`];
-    if (SP.setupKind === "portable") SP.refreshSetupError();
-  }
+  if (SP.isUpdate) SP.syncSetupPrinterCaps(next);
   return { profile: next || PrinterProfile.DEFAULT, explicit: Boolean(next) };
 };
 
@@ -162,20 +177,17 @@ SP.initPrinterProfile = async () => {
 // the setup Summary and from the cabinet panel. Closing it changes nothing else.
 
 SP.openPrinterSettings = async () => {
-  if (SP.printerSetupActive && (WS.task === "newspace" || (SP.dialog().open && !SP.isUpdate))) {
-    const profile = await SP.askPrinterBed(SP.setupPrinterProfile);
-    if (profile) {
-      SP.setupPrinterProfile = profile;
-      SP.storageDrawersForm?.setPrinterProfile(profile);
-      if (SP.setupKind === "portable") {
-        for (const axis of ["x", "y", "z"]) document.getElementById(`portable-${axis}`).max = profile[`${axis}_mm`];
-        SP.refreshSetupError();
-      }
-    }
-    return;
-  }
+  SP.renderSettingsHomeFolder?.();
   const dialog = document.getElementById("printer-settings-dialog");
-  if (dialog && !dialog.open) dialog.showModal();
+  if (!dialog || dialog.open) return;
+  if (SP.isNewSpacePrinterDraft() && SP.setupPrinterProfile) {
+    const previous = { profile: PrinterProfile.current(), explicit: PrinterProfile.configured() };
+    PrinterProfile.loadLocal({ profile: SP.setupPrinterProfile, explicit: true });
+    dialog.addEventListener("close", () => {
+      if (SP.isNewSpacePrinterDraft()) PrinterProfile.loadLocal(previous);
+    }, { once: true });
+  }
+  dialog.showModal();
 };
 
 SP.closePrinterSettings = () => {
@@ -183,8 +195,9 @@ SP.closePrinterSettings = () => {
   if (dialog?.open) dialog.close();
 };
 
-// ---- Header Settings opens Printer Settings directly; Change slicer lives in that dialog.
+// ---- Header Settings opens Settings directly; folder, printer bed and slicer live in that dialog.
 document.getElementById("designer-settings-open")?.addEventListener("click", () => SP.openPrinterSettings());
+document.getElementById("settings-home-folder-change")?.addEventListener("click", () => SP.changeSettingsHomeFolder?.());
 document.getElementById("settings-slicer-picker")?.addEventListener("click", event => {
   browseSlicer(event.currentTarget);
 });

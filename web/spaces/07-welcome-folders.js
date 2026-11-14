@@ -533,3 +533,60 @@ SP.openLooseBins = async () => {
   WS.prior = null;
   WS.sync();
 };
+
+SP.renderSettingsHomeFolder = () => {
+  const label = document.getElementById("settings-home-folder-value");
+  const button = document.getElementById("settings-home-folder-change");
+  if (!label || !button) return;
+  if (state.runtime.hosted) {
+    const name = SP.hostedHome?.handle?.name;
+    label.textContent = name
+      ? `Default Wavefinity folder — ${name}`
+      : "Default Wavefinity folder — Not chosen yet";
+    button.disabled = false;
+    return;
+  }
+  const info = SP.storage;
+  const text = info?.unavailable
+    ? "Folder not found"
+    : info?.explicit
+      ? info.root
+      : "Documents (default)";
+  label.textContent = `Default Wavefinity folder — ${text}`;
+  button.disabled = false;
+};
+
+SP.changeSettingsHomeFolder = () => SP.run(async () => {
+  const button = document.getElementById("settings-home-folder-change");
+  if (!state.runtime.hosted) {
+    SP.closePrinterSettings?.();
+    await SP.changeStorageParent();
+    return;
+  }
+  if (button) button.disabled = true;
+  try {
+    const picked = await SP.pickFolder({ home: true });
+    if (!picked?.handle) {
+      if (SP.dialog?.().open) SP.closePrinterSettings?.();
+      return;
+    }
+    const home = { handle: picked.handle };
+    await WFFileSystem.save("home", home);
+    SP.hostedHome = home;
+    SP.homeAvailable = true;
+    SP.pendingReconnect = null;
+    const folderHelp = document.getElementById("space-folder-help");
+    if (folderHelp) folderHelp.hidden = true;
+    const createBtn = document.getElementById("space-create");
+    if (createBtn && createBtn.textContent === "Choose Folder & Create Space") {
+      createBtn.textContent = "Create Space";
+    }
+    SP.renderSettingsHomeFolder();
+    if (typeof WS !== "undefined" && (WS.task === "landing" || WS.task === "picker")) {
+      await SP.showHostedFolderHome();
+    }
+    toast(`Default Wavefinity folder set to ${picked.name}.`);
+  } finally {
+    if (button) button.disabled = false;
+  }
+});
