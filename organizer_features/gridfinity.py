@@ -423,14 +423,20 @@ def _polygons(shape) -> list[Polygon]:
 
 
 def _support_ribs(spec: BoxSpec, grid: str):
-    """Wavy built-in support lines, one wall thick, in both directions.
+    """Wavy built-in support lines for a grid bin, one wall thick."""
+    profile = _profile(grid)
+    nx, ny = cell_counts(spec, grid)
+    return wavy_support_lines(
+        nx * profile["pitch"] / 2, ny * profile["pitch"] / 2, spec.wall,
+    )
+
+
+def wavy_support_lines(extent_x: float, extent_y: float, thickness: float):
+    """Wavy built-in support lines in both directions over +/- the extents.
 
     The same global phase is used for every parallel line. The pitch of the
     waves is two support spacings; the lines continue through cell boundaries.
     """
-    profile = _profile(grid)
-    nx, ny = cell_counts(spec, grid)
-    extent_x, extent_y = nx * profile["pitch"] / 2, ny * profile["pitch"] / 2
     spacing, amplitude, step = 21.0, 6.0, 1.0
     lines = []
     for axis_extent, along_extent, swap in ((extent_x, extent_y, False), (extent_y, extent_x, True)):
@@ -443,7 +449,7 @@ def _support_ribs(spec: BoxSpec, grid: str):
                 along = -along_extent - 4 + n * (2 * along_extent + 8) / samples
                 across = offset + amplitude * math.sin(2 * math.pi * along / 42.0)
                 points.append((along, across) if swap else (across, along))
-            lines.append(LineString(points).buffer(spec.wall / 2, cap_style=2, join_style=1))
+            lines.append(LineString(points).buffer(thickness / 2, cap_style=2, join_style=1))
     return unary_union(lines)
 
 

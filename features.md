@@ -27,8 +27,9 @@ Both choices are shaped to print without slicer supports: the supports are
 part of the model. Physical print performance remains unverified.
 
 A Stackable Gridfinity bin's stacking lip has a 45 degree fillet beneath it,
-and a Gridfinity Lid for stacking carries the same wavy lines under its plate,
-inside the skirt, so both also print without slicer supports.
+and a Lid for stacking, on Wavefinity and both Gridfinity grids, carries the
+same wavy lines under its plate, inside the skirt, so both also print without
+slicer supports.
 
 Bins on Wavefinity and both Gridfinity grids offer **Top 1 mm accent**, Off by
 default, with a nominal color choice (Blue by default). The color choice appears

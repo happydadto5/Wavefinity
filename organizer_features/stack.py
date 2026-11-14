@@ -838,6 +838,18 @@ def make_lid_parts(
     parts = [plate]
     if hinge is None:
         parts.append(_lid_skirt(eff, rim))
+        if lid_receives_stack(eff):
+            # This lid prints as built, skirt down, so its plate would bridge
+            # the whole mouth. Wavy lines as deep as the skirt carry it;
+            # interior parts already stop below the skirt.
+            from organizer_features.gridfinity import _polygons, wavy_support_lines
+            well = _lid_plug_polygon(eff).buffer(-STACK_LID_SKIRT_WIDTH + 0.1)
+            if not well.is_empty:
+                ribs = wavy_support_lines(eff.half_x, eff.half_y, eff.wall).intersection(well)
+                for part in _polygons(ribs):
+                    rib = _extrude_polygon(part, STACK_SKIRT_DEPTH + 0.1)
+                    rib.apply_translation((0.0, 0.0, rim - STACK_SKIRT_DEPTH))
+                    parts.append(rib)
 
     bumps = [] if hinge is not None else _lid_lock_bumps(eff, rim)
     lid = union([*parts, *bumps, *_lid_alignment_tabs(eff, rim)])

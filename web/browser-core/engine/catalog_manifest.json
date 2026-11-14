@@ -1,6 +1,6 @@
 {
   "schema": "wavefinity-browser-catalog/1",
-  "sha256": "2f5eb04c8d6a54f7292445d6a11608e2dd16bacfc55d2ba5bce7fe3fa2aaced5",
+  "sha256": "b386f9f2aadd525b6ffcab1d6042dae08b7fbb4f085787905da19f5ee3677cac",
   "source_hashes": {
     "bambu_handoff.py": "f2a6f6b77c9dafbff9cba4eebf115a78c55705845db69c69895b01470183679c",
     "organizer_app.py": "eea3cbb2b6b67e603d11c1be96a85ca7869ce48700d03ca2bf08c3d8448c086f",
@@ -44,12 +44,12 @@
     "organizer_engine/product_rules.py": "62d6a1b0f61ec78d0bb3b5ba93be2a4129ec75a2ec1dd72eb8035e6662110482",
     "organizer_features/__init__.py": "1913fc786ff873ac72535a59bf4b691f363813c8dd5ac07ad7614a9c06fffc67",
     "organizer_features/edge_mount.py": "97583a44013c6c4e2408cf867bb7eba689f46a5dfc1d6e915e2bec270523ae49",
-    "organizer_features/gridfinity.py": "88a0bd10890b3cb0bdb7a85f85dbd9c676a24748fa140fcb61f681098e0cfd57",
+    "organizer_features/gridfinity.py": "132460666b762bdbc0a3a5baef0e715c2af348364caaa28c1fb7ee433b980c1e",
     "organizer_features/lid_handle.py": "9334780322ca34f27c98ae69f3ab55bbfe2e83ec78e5f071c9b262f2830ecd0f",
     "organizer_features/lid_hinge.py": "0d751d1d350e85123e4ccbb982e0d8ba31ed71131795397b92d0ada249ea471c",
     "organizer_features/pegboard.py": "a6efd8730eabbd34b67b1967b13c474e8e6dc4bef0d2015d9bd92f13b4e9271d",
     "organizer_features/side_openings.py": "a43b18b9549d0a096a2a5fe20c1c00c0fb7dc2018291666979cc1ad5c6c2ca25",
-    "organizer_features/stack.py": "41c73a1a3e5748a11979f517fcfb958d01aba180d13136c7ab96602c864cfb7b",
+    "organizer_features/stack.py": "e50bd308cee69e0b2b13b8ff5f1793490ea7be5ec10f0c688f173f35095a043b",
     "organizer_geometry/__init__.py": "7095578d36fc8887629a13e12b1180824b1620c5d5a8d116ea9bc0429b34a30f",
     "organizer_geometry/_nearest.py": "c5bd4b50ee8153333d1b2f3ab85764ad20b34eb8a9c6f57febb4684809f9f082",
     "organizer_geometry/_stages.py": "ac2d212e4004ef4a560ca72c698d77b41ba89da9557ce46307a9120b25493201",
@@ -116,5 +116,5 @@
     "wavefinity_web_impl/_outputs.py": "524fa41b5a4e123d7d8bd77e2ebffb3f68dfce600df62b032c6e0d9496e50777",
     "wavefinity_web_impl/_runtime.py": "19e1ce2dd9d8187871f4115886c328cbefbad19babe54c77c4447e22476d603e"
   },
-  "source_sha256": "0763612692fcfddb9a0dc04ff07c59cccc7f8cbdb8275e405de86f0b16235bed"
+  "source_sha256": "d3776e855e2bf1e346c148d7a9c561f085e13d1f3072557c5c6ec682ebd59414"
 }
