@@ -854,6 +854,7 @@ SP.initializeDesignForActiveSpace = async () => {
 
   let restored = false;
   let resumeValidationFailed = false;
+  const resumeBinId = state.spaceResumeDesign?.[SP.RESUME_BIN_ID_FIELD];
   // A checkpoint left by an older version may hold a Storage Box or Base Trim
   // design. Those are Space outputs now, not Designer objects: the checkpoint is
   // left untouched and the Designer starts a fresh Bin instead.
@@ -861,8 +862,10 @@ SP.initializeDesignForActiveSpace = async () => {
     state.spaceResumeDesign.design_kind === "base_trim" || Boolean(state.spaceResumeDesign.box?.b4b?.enabled));
   if (state.spaceResumeDesign && !resumeIsStructural) {
     try {
+      const resumeDesign = clone(state.spaceResumeDesign);
+      delete resumeDesign[SP.RESUME_BIN_ID_FIELD];
       const result = await api("/api/design/validate", {
-        design: clone(state.spaceResumeDesign),
+        design: resumeDesign,
       });
       requireOwner();
       // A restored design bypasses SP.installSpaceStarterDesign() and
@@ -890,7 +893,10 @@ SP.initializeDesignForActiveSpace = async () => {
     const key = JSON.stringify(state.design);
     const matches = Object.entries(DL.layout?.design_specs || {})
       .filter(([, design]) => JSON.stringify(design) === key);
-    if (matches.length === 1) {
+    if (resumeBinId && DL.bin(resumeBinId)) {
+      state.designInventoryId = resumeBinId;
+      state.designTarget = null;
+    } else if (matches.length === 1) {
       state.designInventoryId = matches[0][0];
       state.designTarget = null; // Fix 103
     } else if (matches.length === 0 && typeof freshDesignForCurrentFolder === "function" &&

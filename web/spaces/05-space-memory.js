@@ -5,6 +5,14 @@
 // Memory owns every copy until an explicit Discard; there is no eviction cap.
 SP.BIN_RECOVERY_FIELD = "__wavefinity_set_aside_v1";
 SP.BIN_RECOVERY_PREFIX = "wavefinity.binRecovery.v1.";
+SP.RESUME_BIN_ID_FIELD = "__wavefinity_resume_bin_id_v1";
+SP.resumeWithBinId = design => {
+  const checkpoint = clone(design);
+  if (state.designInventoryId && typedSpaceOrdinaryBin() && !designTargetIsStructural())
+    checkpoint[SP.RESUME_BIN_ID_FIELD] = state.designInventoryId;
+  else delete checkpoint[SP.RESUME_BIN_ID_FIELD];
+  return checkpoint;
+};
 SP._binRecovery = new Map();
 SP._binRecoveryTargets = new Map();
 SP._binRecoveryBase = new Map();
@@ -193,6 +201,9 @@ SP.leaveBinForSpaceSwitch = async ({ visible = true, ...options } = {}) => {
     clearTimeout(spaceAutosaveTimer);
     spaceAutosaveTimer = null;
     if (!saved) {
+      // A bin save may have succeeded before a later step failed. Preserve its
+      // newly assigned identity along with the original unfinished editor.
+      snapshot.values.designInventoryId = state.designInventoryId;
       await SP.setAsideBin(snapshot);
     }
   } finally {
@@ -499,6 +510,7 @@ SP.queueResumeCheckpoint = (design, pending) => {
   if (state.relocating) return;
   const target = SP._captureResumeTarget();
   if (!target) return;
+  design = SP.resumeWithBinId(design);
   const key = `${pending ? 1 : 0}:${JSON.stringify(design)}`;
   if (!SP._resume.inFlight && !SP._resume.latest && SP._resume.savedKey.get(target.spaceId) === key) return;
   if (SP._resume.latest?.target.spaceId === target.spaceId && SP._resume.latest.key === key) return;
@@ -516,6 +528,7 @@ SP.queueResumeCheckpoint = (design, pending) => {
 SP.flushResumeCheckpoint = (design, pending) => {
   const target = SP._captureResumeTarget();
   if (!target) return Promise.resolve();
+  design = SP.resumeWithBinId(design);
   const key = `${pending ? 1 : 0}:${JSON.stringify(design)}`;
   return new Promise((resolve, reject) => {
     SP._rejectSupersededWaiters();

@@ -109,6 +109,9 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
     state.designInventoryId = data.row_id;
     DL.adopt(data);
     DL.emit();
+    // Persist the binding even when the preview checkpoint preceded the first
+    // row creation; returning to this Space must resume the same bin.
+    SP.queueResumeCheckpoint(state.design, false);
     if (state.runtime.hosted) SP.queueHostedBinBuild(data, context);
     if (JSON.stringify(state.design) === JSON.stringify(design)) {
       state.design = clone(data.design);
