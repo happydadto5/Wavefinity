@@ -499,14 +499,26 @@ def _base_cutters_and_supports(spec: BoxSpec, grid: str):
             # A foot no rib crosses stays solid: nothing would carry its floor.
             if rings and Polygon(rings[0]).intersects(ribs):
                 voids.append(_loft_cavity(rings, heights))
+        foot_voids = len(voids)
         if top > FOOT_HEIGHT:
             # Inside the walls only, so the outer wall still joins every foot.
             band = _extrude_polygon(flat_cavity_polygon(spec, grid), top - FOOT_HEIGHT)
             voids.append(translated(band, (0, 0, FOOT_HEIGHT)))
         # Removing the kept footprint from each void makes each line fuse into
         # the unchanged profile and floor, without projecting into the sockets.
-        cutters = [difference([void, *kept_meshes]) for void in voids]
-        cutters = [cutter for cutter in cutters if len(cutter.vertices)]
+        for index, void in enumerate(voids):
+            cutter = difference([void, *kept_meshes])
+            if not len(cutter.vertices):
+                continue
+            if index >= foot_voids:
+                cutters.append(cutter)
+                continue
+            # A support line can pinch off a corner of a foot's void where the
+            # foot tapers, leaving a fragment that never reaches the open
+            # underside. Cutting it would seal a tiny air pocket inside the
+            # foot (and fail the one-solid check), so that corner stays solid.
+            cutters.extend(piece for piece in cutter.split(only_watertight=False)
+                           if piece.bounds[0][2] < 0.0)
 
     supports = []
     if open_cells:

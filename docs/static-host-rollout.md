@@ -11,15 +11,16 @@ stay exactly as they are.
 - No more ~60-second wake-up of a sleeping Python process: the site is static files on a CDN.
 - First load downloads the browser engine (Pyodide/WASM) and starts it. Worked out on 2026-11-13 from
   the files the live page actually requests on first load: about 45 MB uncompressed (43 MiB; about 37 MB
-  compressed), against the 64 MiB planning budget. The whole published site is larger (about 62 MB) because it also carries
-  vendored packages the app does not load at start. That one-time delay remains; the browser caches the
+  compressed), against the 64 MiB planning budget. The published site is about the same
+  size: four vendored files the app never loaded (SciPy, lxml, OpenBLAS and the unused `pyodide.js` loader,
+  about 17 MB) were removed on 2026-11-14. That one-time delay remains; the browser caches the
   files afterwards.
 - Work stays on the user's own PC (their chosen Space folder). A DNS or hosting change neither uploads nor
   restores any user files. Browsers without folder access (Firefox/Safari) get the honest limited mode
   described in [static-capability-differences.md](static-capability-differences.md).
 - Render Static Sites are free within monthly bandwidth and build-minute allowances; they are not unlimited.
   Check the allowances and the per-file size limit in Render's current documentation when creating the site
-  (the largest shipped file is a 13.3 MB Pyodide wheel) and tell Andrew before anything is billed.
+  (the largest shipped file is the 11.7 MB OpenCV wheel) and tell Andrew before anything is billed.
 
 ## Build
 

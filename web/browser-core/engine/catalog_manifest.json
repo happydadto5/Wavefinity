@@ -1,6 +1,6 @@
 {
   "schema": "wavefinity-browser-catalog/1",
-  "sha256": "b386f9f2aadd525b6ffcab1d6042dae08b7fbb4f085787905da19f5ee3677cac",
+  "sha256": "b91431749e6318bb0abab88cbb2b78434dff02cb4b3d457b8e3c14da39dc3b70",
   "source_hashes": {
     "bambu_handoff.py": "f2a6f6b77c9dafbff9cba4eebf115a78c55705845db69c69895b01470183679c",
     "organizer_app.py": "eea3cbb2b6b67e603d11c1be96a85ca7869ce48700d03ca2bf08c3d8448c086f",
@@ -44,7 +44,7 @@
     "organizer_engine/product_rules.py": "62d6a1b0f61ec78d0bb3b5ba93be2a4129ec75a2ec1dd72eb8035e6662110482",
     "organizer_features/__init__.py": "1913fc786ff873ac72535a59bf4b691f363813c8dd5ac07ad7614a9c06fffc67",
     "organizer_features/edge_mount.py": "97583a44013c6c4e2408cf867bb7eba689f46a5dfc1d6e915e2bec270523ae49",
-    "organizer_features/gridfinity.py": "132460666b762bdbc0a3a5baef0e715c2af348364caaa28c1fb7ee433b980c1e",
+    "organizer_features/gridfinity.py": "cc7669d43ccaafa1990579cb14dfe6171c556fb18c83e4c2e7e1db5cc32a27de",
     "organizer_features/lid_handle.py": "9334780322ca34f27c98ae69f3ab55bbfe2e83ec78e5f071c9b262f2830ecd0f",
     "organizer_features/lid_hinge.py": "0d751d1d350e85123e4ccbb982e0d8ba31ed71131795397b92d0ada249ea471c",
     "organizer_features/pegboard.py": "a6efd8730eabbd34b67b1967b13c474e8e6dc4bef0d2015d9bd92f13b4e9271d",
@@ -116,5 +116,5 @@
     "wavefinity_web_impl/_outputs.py": "524fa41b5a4e123d7d8bd77e2ebffb3f68dfce600df62b032c6e0d9496e50777",
     "wavefinity_web_impl/_runtime.py": "19e1ce2dd9d8187871f4115886c328cbefbad19babe54c77c4447e22476d603e"
   },
-  "source_sha256": "d3776e855e2bf1e346c148d7a9c561f085e13d1f3072557c5c6ec682ebd59414"
+  "source_sha256": "bc7234ff350b044f1cd2e767e0c45c777bdd0034bf186d34bc7dedcb887caf15"
 }

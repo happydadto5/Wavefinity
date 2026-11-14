@@ -65,8 +65,11 @@ binary hashes explicitly before updating the vendor manifest.
 Browser pins are Pyodide 0.28.3, NumPy 2.2.5, Shapely 2.0.7 / GEOS 3.12.1,
 networkx 3.4.2, Trimesh 5.0.0, Earcut 3.0.2 and Manifold C++ 3.5.0 at
 `541c33bd2ab9b1a72816bdecff90566c0a3ee56c`. Matplotlib 3.8.4, Pillow 11.3.0,
-OpenCV 4.11.0.86, SciPy 1.14.1, lxml 6.0.0 and their recursive dependencies
-come from the same Pyodide release lock, rather than native requirements.txt.
+OpenCV 4.11.0.86 and their recursive dependencies come from the same Pyodide
+release lock, rather than native requirements.txt. SciPy, lxml and OpenBLAS are
+deliberately not shipped: the worker never loaded them, and Trimesh's component
+counting uses networkx. Add a wheel back to `vendor/manifest.json` only together
+with the worker code that loads it.
 Matplotlib's wheel carries the engine's DejaVu Sans Bold TTF and its license;
 the font member's hash is separately recorded. These assets are self-hosted;
 the later worker must set a local Pyodide indexURL and use the manifest's local
