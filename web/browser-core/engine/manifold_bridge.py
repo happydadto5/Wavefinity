@@ -6,6 +6,7 @@ read_mesh(Solid) -> JSON {vertices: flat doubles, faces: flat integers},
 earcut(vertices_json, cumulative_ring_ends_json) -> JSON triangle indices.
 No namespace-package bypasses, dimension restrictions, or float32 fallback.
 """
+import importlib.machinery
 import json
 import sys
 import types
@@ -112,9 +113,11 @@ def install(make_solid, read_mesh, earcut, check_capacity):
         return faces.ravel()
 
     manifold = types.ModuleType('manifold3d')
+    manifold.__spec__ = importlib.machinery.ModuleSpec('manifold3d', None)
     manifold.Mesh64, manifold.Manifold = Mesh64, Manifold
     manifold.__version__ = '3.5.0-meshgl64'
     triangulation = types.ModuleType('mapbox_earcut')
+    triangulation.__spec__ = importlib.machinery.ModuleSpec('mapbox_earcut', None)
     triangulation.triangulate_float64 = triangulate_float64
     sys.modules['manifold3d'] = manifold
     sys.modules['mapbox_earcut'] = triangulation
