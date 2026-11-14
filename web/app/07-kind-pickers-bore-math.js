@@ -313,7 +313,7 @@ async function removeModifier(kind) {
   } finally {
     finishDesignMutation();
   }
-  });
+  }, undefined, { deleting: true });
 }
 
 function flushModifierForm() {

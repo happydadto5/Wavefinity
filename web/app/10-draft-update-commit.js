@@ -916,7 +916,7 @@ async function autoCommitDraft(request) {
   }
 }
 
-async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
+async function commitVisibleDraft({ previewAfterCommit = true, deleting = false } = {}) {
   if (!state.draft) return false;
   if (state.draft?.kind === "nest" && !state.draft.contour) return false;
   if (isBlankTextDraft(state.draft)) return false;
@@ -937,6 +937,9 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
       throw new Error("The Label changed while it was being saved. Try again.");
     }
     const cap = Number(checked.resolved_options?.cap_height ?? checked.feature?.options?.cap_height);
+    if (deleting && (!Number.isFinite(cap) || cap < 5)) {
+      throw new Error("The Label cannot be saved without confirmation.");
+    }
     await allowSmallTextEdit(cap, request, draftAtCheck);
     if (request !== state.draftRequest || state.draft !== draftAtCheck) {
       throw new Error("The Label changed while it was being saved. Try again.");
@@ -1009,13 +1012,14 @@ function draftNeedsSaving() {
 // caller may go ahead and replace the draft, false if the user chose to stay
 // and keep editing. Edits are auto-saved cleanly when valid; only an edit
 // that cannot be saved prompts the user to discard or keep editing.
-async function guardDraftSwitch({ previewAfterCommit = true } = {}) {
+async function guardDraftSwitch({ previewAfterCommit = true, deleting = false } = {}) {
   if (!draftNeedsSaving()) return true;
   try {
     state.draftAutoCommit = true;
-    await commitVisibleDraft({ previewAfterCommit });
+    await commitVisibleDraft({ previewAfterCommit, deleting });
     return true;
   } catch (error) {
+    if (deleting) return true;
     return promptDraftConflict(error.message);
   }
 }
@@ -1023,9 +1027,9 @@ async function guardDraftSwitch({ previewAfterCommit = true } = {}) {
 // A transition owns the preview after saving the old draft. If it exits before
 // starting that owner, restore the committed state's preview exactly once.
 let fullPreviewStarts = 0;
-async function deferredDraftSwitch() {
+async function deferredDraftSwitch({ deleting = false } = {}) {
   const priorDesign = state.design;
-  const proceed = await guardDraftSwitch({ previewAfterCommit: false });
+  const proceed = await guardDraftSwitch({ previewAfterCommit: false, deleting });
   const committed = state.design !== priorDesign;
   const ownerAtReturn = fullPreviewStarts;
   let finished = false;
@@ -1050,8 +1054,8 @@ async function deferredDraftSwitch() {
   };
 }
 
-async function withDeferredDraftSwitch(action, refused = undefined) {
-  const guard = await deferredDraftSwitch();
+async function withDeferredDraftSwitch(action, refused = undefined, options = {}) {
+  const guard = await deferredDraftSwitch(options);
   try {
     if (!guard.proceed) return refused;
     return await action(guard);

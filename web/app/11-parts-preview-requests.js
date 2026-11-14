@@ -83,11 +83,9 @@ async function deleteSupportAt(index) {
     toast(dividerLockMessage(), true, 6500);
     return;
   }
-  // Deleting a part other than the one open in the editor can throw away an
-  // unsaved edit underneath it - route through the same guard used to switch
-  // parts so that edit is saved (or the user confirms losing it) first.
+  // Save another open edit when possible, but never prompt during deletion.
   const switchGuard = state.draft && draftCommitIndex() !== index
-    ? await deferredDraftSwitch() : null;
+    ? await deferredDraftSwitch({ deleting: true }) : null;
   try {
   if (switchGuard && !switchGuard.proceed) return;
   if (!beginDesignMutation()) return;
