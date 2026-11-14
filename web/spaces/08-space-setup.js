@@ -383,7 +383,7 @@ SP.setupFieldNote = (selector, text, slot = "hint") => {
     note.id = id;
     note.className = slot === "error" ? "field-help status-error" : "field-help";
     note.setAttribute("aria-live", "polite");
-    input.after(note);
+    (input.closest(".storage-size-field") || input).after(note);
     input.setAttribute("aria-describedby", [input.getAttribute("aria-describedby"), id].filter(Boolean).join(" "));
   }
   note.textContent = text;
@@ -399,7 +399,9 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
   const fail = (message, selector) => {
     const input = $(selector);
     firstInvalid ||= input;
-    const show = focus || SP.setupValidationStarted || input?.dataset.setupTouched || input?.value.trim();
+    const boxDimension = SP.setupKind === "portable" && /^portable-[xyz]$/.test(input?.id || "");
+    const show = boxDimension ? (focus || (document.activeElement !== input && (SP.setupValidationStarted || input?.dataset.setupTouched)))
+      : (focus || SP.setupValidationStarted || input?.dataset.setupTouched || input?.value.trim());
     if (show) {
       SP.setupFieldNote(selector, message, "error");
       input?.setAttribute("aria-invalid", "true");
@@ -412,7 +414,6 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
   const kind = SP.setupKind;
   const name = $("#space-name").value.trim();
   if (!name) fail("Give the Space a name.", "#space-name");
-  const unit = Number(state.catalog?.base_unit || 7);
   let values = null;
 
   if (kind === "drawer" || kind === "portable") {
@@ -423,15 +424,11 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
       const raw = readNumber(selector);
       const used = kind === "portable" && axis !== "z" ? SP.storageBoxSnap(raw) : raw;
       dimensions[axis] = used;
-      const notes = ["At most 2000 mm."];
-      if (kind === "drawer") notes.push(axis === "z"
-        ? `Usable drawer height must be at least ${fmt(ordinaryBinMinimumHeight())} mm.`
-        : "Must fit at least one Wavefinity unit after wall clearance.");
-      if (Number.isFinite(raw) && raw > 0 && Math.abs(raw - used) > 1e-6) {
-        const cell = kind === "portable" ? SP.storageBoxPitch() : unit;
-        notes.push(`Uses ${fmt(used)} mm (${fmt(used / cell)} ${kind === "portable" && SP.storageBoxGrid() !== "wavefinity" ? "cells" : "units"}).`);
+      if (kind === "drawer") {
+        SP.setupFieldNote(selector, `At most 2000 mm. ${axis === "z"
+          ? `Usable drawer height must be at least ${fmt(ordinaryBinMinimumHeight())} mm.`
+          : "Must fit at least one Wavefinity unit after wall clearance."}`);
       }
-      SP.setupFieldNote(selector, notes.join(" "));
       if (!Number.isFinite(raw) || raw <= 0) fail("Enter a dimension in mm greater than zero.", selector);
       else if (raw > 2000 || used > 2000) fail("Dimensions must be at most 2000 mm.", selector);
       else if (axis === "z") {

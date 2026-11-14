@@ -1005,9 +1005,9 @@
 
         <div id="space-fields-portable" class="space-type-fields" hidden>
           <div class="space-dimension-row">
-            <label class="space-field"><span>Interior width <span class="unit">mm</span></span><input id="portable-x" type="number" min="1" max="2000" step="any"></label>
-            <label class="space-field"><span>Interior depth <span class="unit">mm</span></span><input id="portable-y" type="number" min="1" max="2000" step="any"></label>
-            <label class="space-field"><span>Interior height <span class="unit">mm</span></span><input id="portable-z" type="number" min="1" max="2000" step="any"></label>
+            <label class="space-field"><span>Interior width <span class="unit">mm</span></span><span class="storage-size-field"><input id="portable-x" type="number" min="1" max="2000" step="any" aria-describedby="portable-x-size"><span id="portable-x-size" class="storage-size-readout" hidden></span></span></label>
+            <label class="space-field"><span>Interior depth <span class="unit">mm</span></span><span class="storage-size-field"><input id="portable-y" type="number" min="1" max="2000" step="any" aria-describedby="portable-y-size"><span id="portable-y-size" class="storage-size-readout" hidden></span></span></label>
+            <label class="space-field"><span>Interior height <span class="unit">mm</span></span><span class="storage-size-field"><input id="portable-z" type="number" min="1" max="2000" step="any" aria-describedby="portable-z-size"><span id="portable-z-size" class="storage-size-readout" hidden></span></span></label>
           </div>
           <div class="space-dimension-row">
             <label class="space-field"><span>Grid</span>
@@ -1027,9 +1027,6 @@
           <label id="portable-lift-row" class="space-field" hidden><span>Baseplate seated lift <span class="unit">mm</span></span><input id="portable-lift" type="number" min="0" step="any" placeholder="Unverified"><span class="space-help">Measured height added by a seated baseplate, not its total thickness. Leave blank for unverified.</span></label>
           <p id="portable-grid-note" class="space-help" hidden></p>
           <p id="portable-printer-fit" class="portable-fit-warning" hidden></p>
-          <div id="portable-readout" class="derived-readout" hidden>
-             <dt id="portable-outside-label" hidden>Finished outside</dt><dd id="portable-outside-readout" hidden></dd>
-          </div>
           <div id="portable-case" class="storage-box-case">
             <div id="portable-case-lid-group" class="storage-box-group">
               <div class="space-dimension-row">

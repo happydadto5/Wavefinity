@@ -140,27 +140,26 @@ SP.syncStorageBoxForm = () => {
   hide("portable-front-label-style-row", location !== "front");
 };
 
-// R66: "Finished outside" for the Storage Box setup draft. The number comes
-// from the server's read-only summary (assembled_envelope_mm); there is no
-// second formula here. A newer draft always wins over an older response.
+// Outside sizes come from the server's assembled envelope; a newer draft wins.
 SP.setupOutsideToken = 0;
 SP.refreshSetupOutside = () => {
-  const label = document.getElementById("portable-outside-label");
-  const value = document.getElementById("portable-outside-readout");
   const fitWarn = document.getElementById("portable-printer-fit");
-  // The readout box holds only the Finished outside row, so it shows only
-  // while that row does.
-  const readout = document.getElementById("portable-readout");
-  if (!label || !value) return;
-  const hideOutside = () => { label.hidden = true; value.hidden = true; value.textContent = ""; if (readout) readout.hidden = true; };
+  const hideOutside = () => ["x", "y", "z"].forEach(axis => {
+    const readout = document.getElementById(`portable-${axis}-size`);
+    if (readout) { readout.hidden = true; readout.textContent = ""; }
+  });
   const hideFit = () => { if (fitWarn) { fitWarn.hidden = true; fitWarn.textContent = ""; } };
   const token = ++SP.setupOutsideToken;
   clearTimeout(SP.setupOutsideTimer);
+  hideOutside();
   const num = id => Number(document.getElementById(id)?.value);
   const x = SP.storageBoxSnap(num("portable-x")), y = SP.storageBoxSnap(num("portable-y")), z = num("portable-z");
   const minField = SP.storageBoxMinimumField();
   const minHeight = Number(state.catalog?.b4b_rules?.min_secure_height_mm);
-  const valid = [x, y, z].every(n => Number.isFinite(n) && n > 0) && x >= minField && y >= minField && z >= minHeight;
+  const valid = ["portable-x", "portable-y", "portable-z"].every(id => {
+    const input = document.getElementById(id);
+    return input.value.trim() && !input.validity.badInput && Number(input.value) > 0 && Number(input.value) <= 2000;
+  }) && [x, y, z].every(Number.isFinite) && x >= minField && y >= minField && z >= minHeight;
   if (!valid || SP.setupKind !== "portable") { hideOutside(); hideFit(); return; }
   const space = { kind: "portable", name: "Storage Box", x, y, z, ...SP.storageBoxGridFields(), storage_box: SP.readStorageBoxForm() };
   SP.setupOutsideTimer = setTimeout(async () => {
@@ -174,8 +173,16 @@ SP.refreshSetupOutside = () => {
       if (token !== SP.setupOutsideToken) return;
       const size = result.summary?.assembled_envelope_mm;
       if (!Array.isArray(size) || size.length < 3) { hideOutside(); hideFit(); return; }
-      value.textContent = `${size.map(n => fmt(Number(n))).join(" × ")} mm`;
-      label.hidden = false; value.hidden = false; if (readout) readout.hidden = false;
+      ["x", "y", "z"].forEach((axis, index) => {
+        const input = document.getElementById(`portable-${axis}`);
+        const readout = document.getElementById(`portable-${axis}-size`);
+        const entered = Number(input.value);
+        const resolved = axis === "z" ? entered : SP.storageBoxSnap(entered);
+        const pitch = axis === "z" ? Number(state.catalog?.base_unit || 7) : SP.storageBoxPitch();
+        const unitLabel = axis !== "z" && SP.storageBoxGrid() !== "wavefinity" ? "cells" : "units";
+        readout.textContent = `${fmt(entered)} mm (${fmt(resolved / pitch)} ${unitLabel}, ${fmt(Number(size[index]))} mm outside)`;
+        readout.hidden = false;
+      });
       // Fix 111 N3: nearby nonblocking printer-size warning, like Storage
       // Drawers - visible at the size input, creation stays allowed.
       const fitError = result.summary?.first_fit_error;

@@ -1489,6 +1489,12 @@ body.relocating > :not(dialog) { pointer-events: none; }
 .space-folder > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .link-button { border: 0; background: none; padding: 0; color: var(--teal); font: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; }
 .space-field { display: grid; gap: 4px; }
+.storage-size-field { position: relative; min-width: 0; }
+.storage-size-field input { width: 100%; }
+.storage-size-field:has(.storage-size-readout:not([hidden])):not(:focus-within) input { color: transparent; }
+.storage-size-readout { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 8px; font-size: 0.8em; white-space: nowrap; overflow: hidden; pointer-events: none; }
+.storage-size-readout[hidden], .storage-size-field:focus-within .storage-size-readout { display: none; }
+#space-fields-portable .space-field > small[id*="-setup-"]:empty { display: none; }
 .space-kinds { border: 0; margin: 14px 0; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .space-kinds legend { padding: 0; margin-bottom: 6px; }
 .space-kind {

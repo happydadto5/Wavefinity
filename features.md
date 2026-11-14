@@ -323,9 +323,7 @@ A Storage Box is a printable outer case designed to contain ordinary Wavefinity 
 
 ### Space dimensions
 
-- Outside width.
-- Outside length.
-- Usable inside height.
+- Interior width, depth, and usable height. The size fields show the entered measurement, resolved grid count, and finished outside measurement when the complete dimensions can be resolved. Dimension errors appear after leaving a field or attempting creation.
 
 ### Case lid
 

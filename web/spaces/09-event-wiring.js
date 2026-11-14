@@ -50,6 +50,9 @@ SP.wire = () => {
     spaceForm.addEventListener("submit", event => event.preventDefault());
     spaceForm.addEventListener("input", SP.refreshSetupError);
     spaceForm.addEventListener("change", SP.refreshSetupError);
+    spaceForm.addEventListener("focusout", event => {
+      if (SP.setupKind === "portable" && /^portable-[xyz]$/.test(event.target.id)) SP.refreshSetupError(event);
+    });
     spaceForm.addEventListener("input", SP.queueSetupAutosave);
     spaceForm.addEventListener("change", SP.queueSetupAutosave);
   }
@@ -141,8 +144,7 @@ SP.wire = () => {
     const input = document.getElementById(id);
     if (input) input.addEventListener("input", SP.updateReadouts);
   });
-  // Leaving a size field never changes its text. Storage Box rounding is
-  // explained below the field; physical Drawer measurements stay exact.
+  // Leaving a size field never changes its editable value.
   ["drawer-x", "drawer-y", "portable-x", "portable-y"].forEach(id => {
     const input = document.getElementById(id);
     if (!input) return;
