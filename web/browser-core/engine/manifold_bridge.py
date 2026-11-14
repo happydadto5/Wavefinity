@@ -46,14 +46,23 @@ def install(make_solid, read_mesh, earcut, check_capacity):
             self.vert_properties = coordinates(vert_properties)
             self.tri_verts = indices(tri_verts, len(self.vert_properties))
 
+    class Mesh:
+        """Float32 twin of Mesh64, as in the real manifold3d API."""
+
+        def __init__(self, vert_properties, tri_verts):
+            self.vert_properties = coordinates(vert_properties).astype(np.float32)
+            self.tri_verts = indices(tri_verts, len(self.vert_properties))
+
     class Manifold:
         def __init__(self, mesh=None, *, _solid=None):
             self.solid = _solid
             try:
                 check_capacity()
                 if _solid is None:
+                    if isinstance(mesh, Mesh):
+                        mesh = Mesh64(mesh.vert_properties.astype(np.float64), mesh.tri_verts)
                     if not isinstance(mesh, Mesh64):
-                        raise TypeError('Manifold requires Mesh64')
+                        raise TypeError('Manifold requires Mesh or Mesh64')
                     self.solid = make_solid(
                         json.dumps(mesh.vert_properties.ravel().tolist(), allow_nan=False),
                         json.dumps(mesh.tri_verts.ravel().tolist()))
@@ -87,6 +96,11 @@ def install(make_solid, read_mesh, earcut, check_capacity):
             check_capacity()
             return mesh
 
+        def to_mesh(self):
+            mesh64 = self.to_mesh64()
+            return Mesh(mesh64.vert_properties.astype(np.float32),
+                        mesh64.tri_verts.astype(np.uint32))
+
         def close(self):
             solid, self.solid = self.solid, None
             if solid is not None:
@@ -114,7 +128,7 @@ def install(make_solid, read_mesh, earcut, check_capacity):
 
     manifold = types.ModuleType('manifold3d')
     manifold.__spec__ = importlib.machinery.ModuleSpec('manifold3d', None)
-    manifold.Mesh64, manifold.Manifold = Mesh64, Manifold
+    manifold.Mesh, manifold.Mesh64, manifold.Manifold = Mesh, Mesh64, Manifold
     manifold.__version__ = '3.5.0-meshgl64'
     triangulation = types.ModuleType('mapbox_earcut')
     triangulation.__spec__ = importlib.machinery.ModuleSpec('mapbox_earcut', None)
