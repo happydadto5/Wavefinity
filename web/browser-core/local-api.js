@@ -116,9 +116,15 @@ window.WFLocalAPI = (() => {
   function init() {
     if (!initialization) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 60000);
+      // First start downloads the whole engine (tens of MB). A slow connection needs far
+      // longer than a normal request, and aborting restarts the download from scratch.
+      const timer = setTimeout(() => controller.abort(), 600000);
       initialization = submit('__init__', null, { signal: controller.signal })
-        .catch(error => { initialization = null; throw error; }).finally(() => clearTimeout(timer));
+        .catch(error => {
+          initialization = null;
+          if (error?.name === 'AbortError') throw fail('Wavefinity took too long to start in this browser. Check your connection, then reload the page.', 'LOCAL_ENGINE_START_TIMEOUT', 504);
+          throw error;
+        }).finally(() => clearTimeout(timer));
     }
     return initialization;
   }

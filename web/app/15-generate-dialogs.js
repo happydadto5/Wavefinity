@@ -849,6 +849,9 @@ function watchServerVersion() {
     } catch (_error) {
       return; // A blip shouldn't flip the banner - only a confirmed different instance should.
     }
+    // Browser edition: there is no server to restart. Its health identity is made
+    // per page and never matches the catalog's, so it must not raise the banner.
+    if (health.runtime === "browser") return;
     if (health.instance === state.serverInstance) return;
     if (state.runtime.hosted && health.api_compat === state.apiCompat) {
       state.serverInstance = health.instance;

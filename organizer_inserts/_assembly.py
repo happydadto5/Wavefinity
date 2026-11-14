@@ -510,7 +510,35 @@ def make_fused_box(
     parts = build_features(box, features, box.base_thickness, grid=grid)
     if not parts:
         return box_mesh
-    return _without_slivers(union([box_mesh, *parts]))
+    fused = _without_slivers(union([box_mesh, *parts]))
+    pieces = len(fused.split(only_watertight=False))
+    if pieces > 1:
+        # A part that only rests on the floor (its underside exactly level with
+        # the floor top) can come out of the union as a loose piece, which then
+        # fails the one-solid check at export. Root the parts into the floor and
+        # join again; keep that result only when it really is more joined-up.
+        rooted = _without_slivers(union(
+            [box_mesh, *(_rooted(one, box.base_thickness) for one in parts)]))
+        if len(rooted.split(only_watertight=False)) < pieces:
+            return rooted
+    return fused
+
+
+# How far a floor-standing part's underside is pushed down into the floor when
+# it would otherwise stay loose. Thinner than the thinnest floor (0.4 mm).
+_ROOT_EMBED_MM = 0.1
+
+
+def _rooted(part: trimesh.Trimesh, floor_z: float) -> trimesh.Trimesh:
+    """``part`` with its floor-level underside sunk ``_ROOT_EMBED_MM`` into the
+    floor. Only vertices lying on the floor plane move, so nothing above the
+    floor changes shape or height."""
+    vertices = np.array(part.vertices, dtype=float)
+    low = np.abs(vertices[:, 2] - floor_z) < 1e-6
+    if not low.any():
+        return part
+    vertices[low, 2] -= _ROOT_EMBED_MM
+    return trimesh.Trimesh(vertices=vertices, faces=part.faces, process=False)
 
 
 # A fragment this thin and small is a boolean leftover, never printable

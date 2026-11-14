@@ -9,8 +9,11 @@ stay exactly as they are.
 ## What changes for users
 
 - No more ~60-second wake-up of a sleeping Python process: the site is static files on a CDN.
-- First load downloads the browser engine (Pyodide/WASM, about 62 MB uncompressed, about 51 MB gzip) and
-  starts it. That one-time delay remains; the browser caches the files afterwards.
+- First load downloads the browser engine (Pyodide/WASM) and starts it. Worked out on 2026-11-13 from
+  the files the live page actually requests on first load: about 45 MB uncompressed (43 MiB; about 37 MB
+  compressed), against the 64 MiB planning budget. The whole published site is larger (about 62 MB) because it also carries
+  vendored packages the app does not load at start. That one-time delay remains; the browser caches the
+  files afterwards.
 - Work stays on the user's own PC (their chosen Space folder). A DNS or hosting change neither uploads nor
   restores any user files. Browsers without folder access (Firefox/Safari) get the honest limited mode
   described in [static-capability-differences.md](static-capability-differences.md).
@@ -67,6 +70,13 @@ If Render's build image cannot run the command, report the exact error; the scri
 | `/*.mjs` and `/**/*.mjs` | `Content-Type` | `text/javascript; charset=utf-8` |
 | `/`, `/index.html`, `/Brochure.md`, `/brochure.md`, `/app/*`, `/spaces/*`, `/browser-core/*.js`, `/browser-core/contracts/*`, `/browser-core/engine/*` | `Cache-Control` | `no-cache` |
 
+- **Live header record (read from https://wavefinity-static.onrender.com on 2026-11-13).** The dashboard
+  value currently differs from the baseline row above in two ways, both set by Andrew in the dashboard:
+  `script-src` also carries `'unsafe-eval'`, and `connect-src` also carries the three AI provider origins
+  listed below. Everything else matches this table, and no COOP/COEP header is served. Keep this record
+  in step with the dashboard whenever a header is changed there. If `'unsafe-eval'` is ever removed to
+  tighten the policy, open the site afterwards and confirm a new bin still shows its 3D preview before
+  leaving it that way.
 - **No immutable caching rule.** No shipped asset has a content hash in its file name, and a stable name must
   never be cached immutably. Do not add one.
 - **No COOP/COEP headers.** The Manifold bridge is single-threaded and needs no cross-origin isolation.

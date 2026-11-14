@@ -1,6 +1,6 @@
 {
   "schema": "wavefinity-browser-catalog/1",
-  "sha256": "ae128f9a547f1d126dcebf2ad4ce2e7ca44eff43d541fa00a2c5939707742588",
+  "sha256": "c2a6524bda189d0bbdb0e0fff048ad1d8a9e20e2628bbfec160dc9486585a86a",
   "source_hashes": {
     "bambu_handoff.py": "f2a6f6b77c9dafbff9cba4eebf115a78c55705845db69c69895b01470183679c",
     "organizer_app.py": "eea3cbb2b6b67e603d11c1be96a85ca7869ce48700d03ca2bf08c3d8448c086f",
@@ -54,7 +54,7 @@
     "organizer_geometry/_nearest.py": "c5bd4b50ee8153333d1b2f3ab85764ad20b34eb8a9c6f57febb4684809f9f082",
     "organizer_geometry/_stages.py": "ac2d212e4004ef4a560ca72c698d77b41ba89da9557ce46307a9120b25493201",
     "organizer_inserts/__init__.py": "58548671b67eab9c9059b4d321cde9a6564b576821011ea679fde7ff43cbee7a",
-    "organizer_inserts/_assembly.py": "c64ac3e78f23ae574783aa5d1f373800fa6929426441113da0f6b53d6f656ad6",
+    "organizer_inserts/_assembly.py": "08558a366046048e9382de1db692b32359b1bead17202bf7d61185a54b35574f",
     "organizer_inserts/_bore/__init__.py": "9ccf8b78f63c7bc6c0495ad2582ae8e62da5b121468527fb37ea9389d2bb0de3",
     "organizer_inserts/_bore/_build.py": "a56ac31d21ac9f3b10bee64217d2106e33866c65de240d99e2c13db5f75f2010",
     "organizer_inserts/_bore/_consts.py": "daa58de941c5bc8504b44815923993eb3f26f84e7adfafdd06d3342629a5a0b4",
@@ -116,5 +116,5 @@
     "wavefinity_web_impl/_outputs.py": "524fa41b5a4e123d7d8bd77e2ebffb3f68dfce600df62b032c6e0d9496e50777",
     "wavefinity_web_impl/_runtime.py": "19e1ce2dd9d8187871f4115886c328cbefbad19babe54c77c4447e22476d603e"
   },
-  "source_sha256": "3fe0c52f86898e4923514dccb9b4c927b0c25ec69001c33636876e3375d8f42f"
+  "source_sha256": "4a98de2bed1697bbbce7711cf769764a4a2362e4df9ad28a51beb7f3f28134cc"
 }
