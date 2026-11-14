@@ -1,5 +1,101 @@
 "use strict";
+const MASCOT_HIDDEN_KEY = "wavefinity-mascot-hidden";
+
+function isMascotHidden() {
+  try {
+    return localStorage.getItem(MASCOT_HIDDEN_KEY) === "1";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function setMascotHiddenPreference(hidden) {
+  try {
+    if (hidden) localStorage.setItem(MASCOT_HIDDEN_KEY, "1");
+    else localStorage.removeItem(MASCOT_HIDDEN_KEY);
+  } catch (_error) { /* storage unavailable */ }
+}
+
+function wirePreviewMascot() {
+  const container = document.getElementById("preview-mascot");
+  const trigger = document.getElementById("preview-mascot-trigger");
+  const menu = document.getElementById("preview-mascot-menu");
+  const hideBtn = document.getElementById("preview-mascot-hide");
+  const settingsToggle = document.getElementById("settings-show-mascot");
+  if (!container || !trigger || !menu || !hideBtn) return;
+
+  function closeMenu() {
+    menu.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+  }
+
+  function unmountVideo() {
+    const video = trigger.querySelector("video");
+    if (video) {
+      video.pause();
+      video.remove();
+    }
+  }
+
+  function mountVideo() {
+    if (trigger.querySelector("video")) return;
+    const video = document.createElement("video");
+    video.className = "preview-mascot-video";
+    video.src = "/images/mascot-loop.webm";
+    video.autoplay = true;
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute("aria-hidden", "true");
+    trigger.appendChild(video);
+    video.play().catch(() => {});
+  }
+
+  function applyVisibility(hidden) {
+    closeMenu();
+    if (settingsToggle) settingsToggle.checked = !hidden;
+    if (hidden) {
+      unmountVideo();
+      container.hidden = true;
+    } else {
+      mountVideo();
+      container.hidden = false;
+    }
+  }
+
+  applyVisibility(isMascotHidden());
+
+  trigger.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const opening = menu.hidden;
+    menu.hidden = !opening;
+    trigger.setAttribute("aria-expanded", opening ? "true" : "false");
+  });
+
+  hideBtn.addEventListener("click", () => {
+    setMascotHiddenPreference(true);
+    applyVisibility(true);
+  });
+
+  if (settingsToggle) {
+    settingsToggle.addEventListener("change", () => {
+      const hidden = !settingsToggle.checked;
+      setMascotHiddenPreference(hidden);
+      applyVisibility(hidden);
+    });
+  }
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!menu.hidden && !container.contains(event.target)) closeMenu();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !menu.hidden) closeMenu();
+  });
+}
+
 async function init() {
+  wirePreviewMascot();
   wireAboutDialog();
   wireBinNameDialog();
   wireSafeDialogBackdrops();

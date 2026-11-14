@@ -1955,3 +1955,91 @@ body:not(.structural-design-active) .structural-2d-badge { display: none; }
 .structural-saving[hidden] { display: none; }
 .structural-saving-spinner { width: 16px; height: 16px; flex: 0 0 16px; border: 2px solid rgba(20,108,112,.25); border-top-color: var(--teal); border-radius: 50%; animation: preview-wait-spin .8s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .structural-saving-spinner { animation: none; border-color: var(--teal); } }
+
+.preview-mascot {
+  grid-row: 2;
+  grid-column: 1;
+  align-self: start;
+  justify-self: center;
+  position: relative;
+  margin-top: 8px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+.preview-mascot[hidden],
+.drawer-mode .preview-mascot,
+body.structural-design-active .preview-mascot,
+body:has(#welcome-dialog[open]) .preview-mascot {
+  display: none;
+}
+.preview-mascot-trigger {
+  pointer-events: auto;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  width: 54px;
+  height: 80px;
+  cursor: pointer;
+  display: block;
+  line-height: 0;
+  border-radius: 8px;
+}
+.preview-mascot-trigger:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+.preview-mascot-video {
+  width: 54px;
+  height: 80px;
+  display: block;
+  object-fit: contain;
+  pointer-events: none;
+}
+.preview-mascot-menu {
+  pointer-events: auto;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(20, 48, 58, .16);
+  padding: 4px;
+}
+.preview-mascot-menu[hidden] { display: none; }
+.preview-mascot-menu-item {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: block;
+}
+.preview-mascot-menu-item:hover,
+.preview-mascot-menu-item:focus-visible {
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+}
+.settings-mascot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+.settings-mascot-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--teal);
+  cursor: pointer;
+}

@@ -1290,6 +1290,12 @@ The Designer includes a real geometry preview.
 - Selected geometry can open its editor.
 - FRONT orientation tracks the physical bin front.
 
+## Preview mascot
+
+- The bin editor's preview screen floats Wavefinity's looping animated mascot at the top center without moving the layout or blocking clicks on the preview around it.
+- Clicking the mascot opens a menu with **Hide mascot**, which hides it immediately and remembers the choice across future sessions in that browser.
+- **Settings** includes a **Show mascot** toggle to bring it back or hide it at any time.
+
 ## Validation
 
 The preview is also part of the product validation loop:

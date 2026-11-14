@@ -466,6 +466,12 @@
       </div>
       <p id="bore-ceiling-warning" class="bore-ceiling-warning" role="status" hidden></p>
       <p id="storage-box-height-warning" class="bore-ceiling-warning" role="status" hidden></p>
+      <div id="preview-mascot" class="preview-mascot" hidden>
+        <button id="preview-mascot-trigger" class="preview-mascot-trigger" type="button" aria-label="Mascot options" aria-haspopup="menu" aria-expanded="false" aria-controls="preview-mascot-menu"></button>
+        <div id="preview-mascot-menu" class="preview-mascot-menu" role="menu" hidden>
+          <button id="preview-mascot-hide" class="preview-mascot-menu-item" type="button" role="menuitem">Hide mascot</button>
+        </div>
+      </div>
       <div class="canvas-wrap active" data-canvas="3d">
         <canvas id="preview-3d-solid" aria-hidden="true"></canvas>
         <canvas id="preview-3d" role="img" aria-label="3D design preview" aria-describedby="preview-help"></canvas>
@@ -837,6 +843,10 @@
     </div>
     <p class="welcome-lead">Your printer's build volume decides whether a cabinet part fits and how it is turned for printing.</p>
     <div class="welcome-printer-profile" data-printer-profile-host></div>
+    <label class="settings-mascot-row" for="settings-show-mascot">
+      <input id="settings-show-mascot" type="checkbox" checked>
+      <span>Show mascot</span>
+    </label>
     <div class="button-row">
       <button id="settings-slicer-picker" class="button secondary" type="button" title="Choose the slicer app Wavefinity sends print files to.">Change slicer</button>
       <button id="printer-settings-close" class="button primary" type="button">Done</button>
