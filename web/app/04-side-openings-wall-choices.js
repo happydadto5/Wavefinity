@@ -648,6 +648,25 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
   const verticalStack = (box?.stack?.mode || "none") === "direct";
   const standard = box?.standard_base !== false && !isB4B && !verticalStack;
   const ordinaryDefaultValue = fmt(ordinaryRules.default_mm ?? 0.8);
+  // A Gridfinity bin's base is its standard foot plus the floor skin, whatever
+  // preset is stored. Show that one fixed value in place of presets that
+  // would change nothing; the stored choice is kept for a later grid change.
+  const gridBase = !isB4B && select.id === "base-thickness"
+    ? number(state.catalog?.grids?.find(row => row.value === state.design?.grid)?.minimum_base_mm, 0)
+    : 0;
+  const fixedBase = gridBase > 0 && base <= gridBase + 1e-9;
+  select.disabled = fixedBase;
+  select.title = fixedBase ? "Gridfinity bins use a fixed base: the standard 4.75 mm foot plus a 1 mm floor." : "";
+  if (fixedBase) {
+    const held = standard ? "standard" : value;
+    const fixedSignature = JSON.stringify({ gridBase, held });
+    if (select.dataset.choices !== fixedSignature) {
+      select.replaceChildren(new Option(`${fmt(gridBase)} mm — Gridfinity foot and floor`, held));
+      select.dataset.choices = fixedSignature;
+    }
+    select.value = held;
+    return;
+  }
   const numericChoices = [...choices].sort((a, b) => number(a.value) - number(b.value));
   const knownValues = numericChoices.map(choice => fmt(choice.value));
   if (needsRequiredOption) knownValues.push(fmt(modeMin));
