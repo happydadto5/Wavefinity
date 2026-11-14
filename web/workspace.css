@@ -119,6 +119,11 @@ body.ws-task-bin #space-head,
 body.ws-task-container #space-head .space-head-title,
 body.ws-task-container #space-actions > .button-row { display: none; }
 body.ws-task-settings #space-head .space-head-title { display: none; }
+body.ws-task-settings #space-head { padding: 10px 12px; }
+body.ws-task-settings #space-actions { margin-top: 0; }
+body.ws-task-settings #space-head-edit-host { margin-top: 8px; }
+body.ws-task-settings .space-head-edit-host .space-buttons { display: none; }
+body.ws-task-settings .space-head-edit-host .space-dimension-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 /* Space details reuse the setup form for name and usable size for every kind.
    Container construction settings remain in the container editor. */
 

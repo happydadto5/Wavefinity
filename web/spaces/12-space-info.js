@@ -119,15 +119,6 @@ SP.renderSpaceInfoBody = () => {
         return;
     }
     head.hidden = false;
-    if (!document.getElementById("space-browser-recovery")) {
-        const recovery = document.createElement("button");
-        recovery.id = "space-browser-recovery";
-        recovery.type = "button";
-        recovery.className = "button secondary";
-        recovery.textContent = "Space / preferences recovery";
-        recovery.addEventListener("click", () => SP.showBrowserRecovery());
-        head.append(recovery);
-    }
     const viewing = document.getElementById("space-head-view");
     if (viewing) viewing.hidden = SP.editing && !(typeof WS !== "undefined" && WS.task === "settings");
     document.getElementById("space-head-name").textContent = state.activeSpace.name;
@@ -183,10 +174,6 @@ SP.spaceActionNote = message => {
     note.hidden = !message;
 };
 
-SP.copySpaceName = async names => (await api("/api/space/copy-name", {
-    name: state.activeSpace.name, names,
-})).name;
-
 SP.hostedActionParent = async folder => {
     let parent = (SP.hostedHome || await WFFileSystem.load("home"))?.handle;
     let path = parent ? await parent.resolve(folder.handle) : null;
@@ -217,7 +204,6 @@ SP.runSpaceAction = async action => {
       if (!(await SP.flushSetupAutosave()) || !(await SP.leaveSpaceSafely())) return;
       DL.requireSpaceContext(context);
       await SP.flushOutgoingResumeCheckpoint();
-      let copiedName;
       if (state.runtime.hosted) {
         const folder = state.browserFolder;
         const location = await SP.hostedActionParent(folder);
@@ -227,86 +213,35 @@ SP.runSpaceAction = async action => {
         const source = await SP.inspectHosted(folder);
         if (source.space_id !== spaceId) throw new Error("This is no longer the open Space. Nothing was changed.");
         const perform = async () => {
-          if (action === "copy") {
-            const names = [state.activeSpace.name, ...(SP.otherSpaces || []).map(one => one.name), ...(SP.recent || []).map(one => one.name)];
-            const entries = new Set();
-            for await (const [name, handle] of parent.entries()) {
-              entries.add(name.toLowerCase());
-              if (handle.kind === "directory") {
-                const raw = await WFFileSystem.readText(handle, FOLDER_METADATA);
-                if (raw) { try { names.push(JSON.parse(raw).space?.name || name); } catch (_) { names.push(name); } }
-              }
-            }
-            copiedName = await SP.copySpaceName(names);
-            while (entries.has(copiedName.toLowerCase())) {
-              names.push(copiedName); copiedName = await SP.copySpaceName(names);
-            }
-            if (copiedName.length > 80 || /[<>:"/\\|?*\x00-\x1f]/.test(copiedName) || /[. ]$/.test(copiedName))
-              throw new Error("The copied name cannot be used as a folder name. Shorten or rename this Space first.");
-            const handle = await parent.getDirectoryHandle(copiedName, { create: true });
-            const copiedFiles = [];
-            try {
-              await WFFileSystem.copyDirectory(folder.handle, handle, [FOLDER_METADATA], copiedFiles);
-              DL.requireSpaceContext(context);
-              const { current } = await SP.readMetadata(folder.handle);
-              if (await WFFileSystem.fileExists(handle, FOLDER_METADATA)) throw new Error("Space metadata appeared in the copy destination. It was not overwritten.");
-              await WFFileSystem.writeText(handle, FOLDER_METADATA, JSON.stringify({
-                ...current.data, space_id: crypto.randomUUID(),
-              }));
-              const space = { ...clone(state.activeSpace), name: copiedName };
-              const metadata = await SP.writeMetadata(handle, "space", space, true, {}, { freshIdentity: true });
-              // Change only the copied inventory's Space name, through the same server parser.
-              const copyFolder = { handle, name: copiedName };
-              const inventory = await SP.readInventoryFor(copyFolder, { migrate: true });
-              const updated = await api("/api/space/copy-text", { inventory_text: inventory, name: copiedName });
-              await WFFileSystem.writeText(handle, SP.inventoryFilenameFor(copyFolder), updated.inventory_text);
-              await SP.rememberHostedRecent(copyFolder, { folder_mode: "space", space, space_id: metadata.space_id }, () => DL.requireSpaceContext(context));
-            } catch (error) {
-              try {
-                await WFFileSystem.rollbackCopy(copiedFiles);
-                await parent.removeEntry(copiedName);
-              } catch (_cleanup) {
-                throw new Error(`Copy failed. An incomplete copy remains in “${copiedName}”; the original Space is unchanged.`);
-              }
-              throw error;
-            }
-          } else {
-            await WFFileSystem.removeDirectory(parent, entry);
-            SP.recent = (await SP.loadHostedRecent()).filter(one => one.space_id !== spaceId);
-            await SP.saveHostedRecent(SP.recent);
-            await WFFileSystem.save("active", null);
-          }
+          await WFFileSystem.removeDirectory(parent, entry);
+          SP.recent = (await SP.loadHostedRecent()).filter(one => one.space_id !== spaceId);
+          await SP.saveHostedRecent(SP.recent);
+          await WFFileSystem.save("active", null);
         };
         const pending = SP._inventoryWriteChain.then(perform, perform);
         SP._inventoryWriteChain = pending.catch(() => {});
         await pending;
       } else {
-        const result = await api(`/api/space/${action}`, { output: state.output, space_id: spaceId });
+        const result = await api("/api/space/delete", { output: state.output, space_id: spaceId });
         SP.recent = result.recent || [];
         if (result.other_spaces) SP.otherSpaces = result.other_spaces;
-        copiedName = result.name;
       }
       DL.requireSpaceContext(context);
-      if (action === "copy") {
-        SP.otherSpacesFresh = false;
-        SP.spaceActionNote(`Copied as ${copiedName}.`);
-      } else {
-        document.getElementById("space-delete-confirm").hidden = true;
-        SP.deleteSpaceId = null;
-        SP.cancelInlineEdit();
-        await SP.resetDrawer({ skipSafeLeave: true });
-        SP.resetDesignSession();
-        state.output = ""; state.browserFolder = null; state.activeSpaceId = null;
-        state.folderSelected = false;
+      document.getElementById("space-delete-confirm").hidden = true;
+      SP.deleteSpaceId = null;
+      SP.cancelInlineEdit();
+      await SP.resetDrawer({ skipSafeLeave: true });
+      SP.resetDesignSession();
+      state.output = ""; state.browserFolder = null; state.activeSpaceId = null;
+      state.folderSelected = false;
         setFolderState("design", null, false, false, null, {});
         SP.otherSpaces = (SP.otherSpaces || []).filter(one => one.space_id !== spaceId);
         SP.otherSpacesFresh = false;
         SP.spaceActionNote("");
         SP.renderSpaceInfo();
-        if (typeof WS !== "undefined") {
-          WS.task = "picker"; WS.prior = null; WS.message = "";
-        } else SP.showHome();
-      }
+      if (typeof WS !== "undefined") {
+        WS.task = "picker"; WS.prior = null; WS.message = "";
+      } else SP.showHome();
     } catch (error) {
       SP.spaceActionNote(friendlyError(error));
     } finally {
@@ -376,7 +311,6 @@ const wireInfoButtons = (prefix = "space-head") => {
     const btnEdit = document.getElementById(prefix + "-edit");
     if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
     if (prefix === "space-head") {
-      document.getElementById("space-head-copy")?.addEventListener("click", () => SP.runSpaceAction("copy"));
       document.getElementById("space-head-delete")?.addEventListener("click", () => {
         if (!state.activeSpace || SP.spaceActionBusy) return;
         SP.deleteSpaceId = state.activeSpaceId;

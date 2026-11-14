@@ -187,20 +187,29 @@ SP.updateReadouts = () => {
         }
     } else if (kind === "surface") {
         const trimKey = document.getElementById("surface-trim").value;
-        const resolved = SP.resolveSurface(
-            Number(document.getElementById("surface-x").value),
-            Number(document.getElementById("surface-y").value),
-            trimKey,
-        );
+        const enteredX = Number(document.getElementById("surface-x").value);
+        const enteredY = Number(document.getElementById("surface-y").value);
+        const resolved = SP.resolveSurface(enteredX, enteredY, trimKey);
         const readout = document.getElementById("surface-readout");
         const interior = document.getElementById("surface-size-readout");
         const trim = document.getElementById("surface-trim-readout");
-        const outside = document.getElementById("surface-outside-readout");
+        const sizeX = document.getElementById("surface-x-size");
+        const sizeY = document.getElementById("surface-y-size");
         readout.hidden = !resolved.ok;
         if (resolved.ok) {
             interior.textContent = SP.fieldText(resolved.fieldX, resolved.fieldY);
             trim.textContent = `${SP.surfaceTrimLabel(trimKey)} — ${fmt(resolved.trimWidth)} mm`;
-            outside.textContent = `${fmt(resolved.outerX)} × ${fmt(resolved.outerY)} mm`;
+            if (sizeX) {
+                sizeX.textContent = `${fmt(enteredX)} mm (${resolved.fieldX} units, ${fmt(resolved.outerX)} mm outside)`;
+                sizeX.hidden = false;
+            }
+            if (sizeY) {
+                sizeY.textContent = `${fmt(enteredY)} mm (${resolved.fieldY} units, ${fmt(resolved.outerY)} mm outside)`;
+                sizeY.hidden = false;
+            }
+        } else {
+            if (sizeX) { sizeX.hidden = true; sizeX.textContent = ""; }
+            if (sizeY) { sizeY.hidden = true; sizeY.textContent = ""; }
         }
     } else if (kind === "portable") {
         SP.syncNewStorageBoxLatchDefault();

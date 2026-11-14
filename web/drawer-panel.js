@@ -89,7 +89,6 @@ DP.build = () => {
     header.after(problems);
   }
   $("#drawer-panel").innerHTML = `
-    <p id="dl-manage-space-label" class="dl-note" hidden></p>
     <section id="dl-space-details-card" class="dl-card" aria-label="Space">
       <div class="dl-drawer-row">
         <label id="dl-drawer-label-row"><span id="dl-drawer-label">Drawer</span><select id="dl-drawer"></select></label>
@@ -870,10 +869,6 @@ DP.update = () => {
 
 DP.renderDrawer = () => {
   const drawer = DL.drawer();
-  const label = $("#dl-manage-space-label");
-  const space = WS.task === "settings" && WS.containerKind() && WS.spaceRows().find(one => one.current);
-  label.hidden = !space;
-  label.textContent = space ? `${space.name} \u00b7 ${space.meta}` : "";
   const minima = DP.drawerMinima();
   DV.syncControls();
   $("#dl-width").min = minima.x;

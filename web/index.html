@@ -46,7 +46,6 @@
             <div class="button-row">
               <button id="space-head-open" class="button secondary dl-small major-action" type="button">Open Space…</button>
               <button id="space-head-edit" class="button secondary dl-small major-action" type="button">Edit Space</button>
-              <button id="space-head-copy" class="button secondary dl-small" type="button">Copy Space</button>
               <button id="space-head-delete" class="button secondary dl-small" type="button">Delete Space</button>
               <button id="space-head-show" class="button secondary dl-small" type="button">Show Folder</button>
               <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
@@ -990,8 +989,8 @@
 
         <div id="space-fields-surface" class="space-type-fields" hidden>
           <div class="space-dimension-row">
-            <label class="space-field"><span>Maximum width</span><input id="surface-x" type="number" min="1" step="any"></label>
-            <label class="space-field"><span>Maximum depth</span><input id="surface-y" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Maximum width</span><span class="storage-size-field"><input id="surface-x" type="number" min="1" step="any" aria-describedby="surface-x-size"><span id="surface-x-size" class="storage-size-readout" hidden></span></span></label>
+            <label class="space-field"><span>Maximum depth</span><span class="storage-size-field"><input id="surface-y" type="number" min="1" step="any" aria-describedby="surface-y-size"><span id="surface-y-size" class="storage-size-readout" hidden></span></span></label>
             <label class="space-field"><span>Trim size</span>
               <select id="surface-trim"></select>
             </label>
@@ -1000,7 +999,6 @@
           <div id="surface-readout" class="derived-readout" hidden>
             <dt>Wavefinity interior</dt><dd id="surface-size-readout"></dd>
             <dt>Edge trim</dt><dd id="surface-trim-readout"></dd>
-            <dt>Finished outside</dt><dd id="surface-outside-readout"></dd>
           </div>
         </div>
 

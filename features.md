@@ -276,11 +276,10 @@ Wavefinity can also be used **without a typed Space**, in which case the user ca
 - Surface name.
 - **Maximum width** and **Maximum length** (mm): the largest rectangle the whole organizer, including its Base Trim, may occupy.
   - The inputs keep exactly what was entered; they are never replaced by the smaller rounded result. Changing trim size always re-resolves from the same maximum.
-  - The largest whole-Wavefinity-unit field that fits inside that rectangle is used; the readout shows the resolved field and the actual finished outside size.
+  - The largest whole-Wavefinity-unit field that fits inside that rectangle is used; the width and depth fields show the entered size, resolved units, and actual finished outside size inline.
   - The maximum is saved with the Space. A Surface saved before this existed is seeded from its current finished size, so it never grows.
 - Trim size/preset.
-- Computed usable Wavefinity field.
-- Finished outside size and remaining/border space readouts.
+- Computed usable Wavefinity field and edge trim readouts.
 
 ### Changing a Surface's size or trim
 
