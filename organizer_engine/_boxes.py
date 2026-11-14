@@ -89,7 +89,7 @@ def make_box(spec: BoxSpec, grid: str = "wavefinity") -> trimesh.Trimesh:
     if grid != "wavefinity":
         # Imported here for the same reason as the stack import below.
         from organizer_features.gridfinity import (
-            _single_volume, gridfinity_body, rim_lip,
+            _single_volume, gridfinity_body, rim_lip, rim_lip_support,
         )
 
         # Callers supply stack_effective_box(): a lid's rise is already taken
@@ -101,7 +101,9 @@ def make_box(spec: BoxSpec, grid: str = "wavefinity") -> trimesh.Trimesh:
         if vertical_stack_enabled(spec) and not lid_enabled(spec):
             # Stackable: the standard receiving lip stands on the nominal rim
             # (spec.z), above the typed height. Not Stackable keeps the plain top.
-            result = union([result, rim_lip(spec, grid, spec.z)])
+            # A 45 degree fillet under it lets the lip print without supports.
+            support = rim_lip_support(spec, grid, spec.z)
+            result = union([result, rim_lip(spec, grid, spec.z), *([support] if support else [])])
             _single_volume(result, "the Gridfinity body with its stacking rim")
         from organizer_features.side_openings import apply_side_openings
         result = apply_side_openings(spec, result, grid)

@@ -581,6 +581,41 @@ def rim_lip(spec: BoxSpec, grid: str, datum_z: float) -> trimesh.Trimesh:
     return difference([ring, rim_socket_cutter(spec, grid, datum_z)])
 
 
+def rim_lip_support(spec: BoxSpec, grid: str, datum_z: float) -> trimesh.Trimesh | None:
+    """A 45 degree fillet under the lip, so a bin's lip prints without supports.
+
+    The lip's foot is wider than the wall it stands on, which would leave a
+    flat ledge hanging inside the mouth. This fills below that ledge from the
+    wall's inside face (at the bottom) to the lip's narrowest opening (at the
+    lip's underside). None when the wall is already as wide as the lip.
+    """
+    profile = _profile(grid)
+    nx, ny = cell_counts(spec, grid)
+    ext_x, ext_y = nominal_extent(spec, grid)
+    cavity_radius = max(BODY_CORNER_RADIUS - spec.wall, _MIN_CAVITY_RADIUS)
+    cavity = (ext_x / 2.0 - spec.wall - cavity_radius,
+              ext_y / 2.0 - spec.wall - cavity_radius, cavity_radius)
+    mouth_radius = _rim_bands(grid)[0][1] / 2.0 - profile["foot_half"]
+    mouth = (profile["foot_half"] + (nx - 1) * profile["pitch"] / 2.0,
+             profile["foot_half"] + (ny - 1) * profile["pitch"] / 2.0, mouth_radius)
+    reach = max(cavity[0] + cavity[2] - mouth[0] - mouth[2],
+                cavity[1] + cavity[2] - mouth[1] - mouth[2])
+    if reach <= 1e-6:
+        return None
+    top = datum_z - RIM_UNDERCUT
+    bottom = top - reach
+
+    def ring_at(t: float) -> np.ndarray:
+        half_x, half_y, radius = (c + t * (m - c) for c, m in zip(cavity, mouth))
+        return _ring((0.0, 0.0), half_x, half_y, radius)
+
+    # The sloped face runs 0.1 mm past both ends so no cut face is coplanar.
+    over = 0.1 / reach
+    cutter = _loft_cavity([ring_at(-over), ring_at(1.0 + over)], [bottom - 0.1, top + 0.1])
+    block = _extrude_polygon(flat_outer_polygon(spec, grid), reach + 0.05)
+    return difference([translated(block, (0.0, 0.0, bottom)), cutter])
+
+
 def rim_mouth_polygon(spec: BoxSpec, grid: str) -> Polygon:
     """Whole-footprint outline inside the rim's narrowest receiving band."""
     profile = _profile(grid)

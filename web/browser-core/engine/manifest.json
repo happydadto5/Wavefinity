@@ -1,10 +1,10 @@
 {
   "archive": "canonical.zip",
-  "bytes": 735263,
+  "bytes": 735919,
   "catalog": {
     "schema": "wavefinity-browser-catalog/1",
-    "sha256": "c2a6524bda189d0bbdb0e0fff048ad1d8a9e20e2628bbfec160dc9486585a86a",
-    "source_sha256": "4a98de2bed1697bbbce7711cf769764a4a2362e4df9ad28a51beb7f3f28134cc"
+    "sha256": "2f5eb04c8d6a54f7292445d6a11608e2dd16bacfc55d2ba5bce7fe3fa2aaced5",
+    "source_sha256": "0763612692fcfddb9a0dc04ff07c59cccc7f8cbdb8275e405de86f0b16235bed"
   },
   "external_imports": [
     "PIL",
@@ -27,7 +27,7 @@
     "photo_nest": "B12 integrates the bundled cv2/Pillow browser packages"
   },
   "schema": "wavefinity-browser-engine/1",
-  "sha256": "a7d0687cde00502844bf180a84307cfe6cb546677e1250454f8ab5844ee2d82d",
+  "sha256": "d30ea85c36af32599b0272fc364151462c386005d40372947df25ac09f0d42b1",
   "size_accounting": {
     "assets": {
       "earcut/LICENSE": {
@@ -39,8 +39,8 @@
         "gzip_bytes": 5821
       },
       "engine/canonical.zip": {
-        "bytes": 735263,
-        "gzip_bytes": 726281
+        "bytes": 735919,
+        "gzip_bytes": 726861
       },
       "manifold64/LICENSE": {
         "bytes": 11558,
@@ -177,8 +177,8 @@
     },
     "planning_target_bytes": 67108864,
     "scope": "Entire B02 vendor tree and canonical.zip; excludes future UI/worker assets and manifest JSON. gzip totals are build encoding sizes, not observed network transfer. Hosting compression/traffic allowance is not established here.",
-    "total_bytes": 58745262,
-    "total_gzip_bytes": 51058819,
+    "total_bytes": 58745918,
+    "total_gzip_bytes": 51059399,
     "within_planning_target": true
   },
   "source_hash_mode": "UTF-8 without BOM, LF line endings",
@@ -344,8 +344,8 @@
       "source": "organizer_engine/__init__.py"
     },
     "organizer_engine/_boxes.py": {
-      "bytes": 26251,
-      "sha256": "c937c7fce7ac100e1137fe36799091d326a4bc1382b5ba97a557e9064ee11b67",
+      "bytes": 26438,
+      "sha256": "76e060ff9c3a38d3f5b2c91b920ec8e5b824187f754eae06e66737e9e979376d",
       "source": "organizer_engine/_boxes.py"
     },
     "organizer_engine/_export.py": {
@@ -394,8 +394,8 @@
       "source": "organizer_features/edge_mount.py"
     },
     "organizer_features/gridfinity.py": {
-      "bytes": 31266,
-      "sha256": "50938ba64c1a17377e8089606be0dc473e4eda0baac8d81f9e3c60bd2bd05b3a",
+      "bytes": 33033,
+      "sha256": "88a0bd10890b3cb0bdb7a85f85dbd9c676a24748fa140fcb61f681098e0cfd57",
       "source": "organizer_features/gridfinity.py"
     },
     "organizer_features/lid_handle.py": {
@@ -419,8 +419,8 @@
       "source": "organizer_features/side_openings.py"
     },
     "organizer_features/stack.py": {
-      "bytes": 43174,
-      "sha256": "cec73c4541dc55b4493b6038dcb3c64e71b3b2e311be218f99b900a349b6acc5",
+      "bytes": 43796,
+      "sha256": "41c73a1a3e5748a11979f517fcfb958d01aba180d13136c7ab96602c864cfb7b",
       "source": "organizer_features/stack.py"
     },
     "organizer_geometry/__init__.py": {
@@ -765,12 +765,12 @@
     },
     "wf_browser_core/catalog.json": {
       "bytes": 69805,
-      "sha256": "c2a6524bda189d0bbdb0e0fff048ad1d8a9e20e2628bbfec160dc9486585a86a",
+      "sha256": "2f5eb04c8d6a54f7292445d6a11608e2dd16bacfc55d2ba5bce7fe3fa2aaced5",
       "source": "web/browser-core/engine/catalog.json"
     },
     "wf_browser_core/catalog_manifest.json": {
       "bytes": 12217,
-      "sha256": "7a065ecab7ed1eeff108f0447c338567a9be05dcfafc274861f747c4893713d2",
+      "sha256": "dd3e8c21afc78aec024941cceb8c0b5103d8534ae461b54d89963cce256e9b7e",
       "source": "web/browser-core/engine/catalog_manifest.json"
     },
     "wf_browser_core/drawer_routes.py": {

@@ -760,8 +760,8 @@ def _lid_stack_rim(eff: BoxSpec) -> trimesh.Trimesh:
 def _make_grid_lid(eff: BoxSpec, grid: str) -> trimesh.Trimesh:
     """Flush plate, mouth-clearing skirt and optional perimeter socket ridge."""
     from organizer_features.gridfinity import (
-        _single_volume, flat_cavity_polygon, flat_outer_polygon,
-        rim_lip,
+        _polygons, _single_volume, _support_ribs, flat_cavity_polygon,
+        flat_outer_polygon, rim_lip,
     )
 
     outer = flat_outer_polygon(eff, grid)
@@ -782,6 +782,16 @@ def _make_grid_lid(eff: BoxSpec, grid: str) -> trimesh.Trimesh:
         # plate top; its overlap below fuses it into the plate.
         plate_top = eff.z + float(lid_spec(eff).thickness)
         lid = union([lid, rim_lip(eff, grid, plate_top)])
+        # This lid prints as built, skirt down, so its plate would bridge the
+        # whole mouth. The base's wavy lines, as deep as the skirt, carry it;
+        # interior parts already stop below the skirt.
+        ribs = _support_ribs(eff, grid).intersection(
+            locating.buffer(-STACK_LID_SKIRT_WIDTH + 0.1))
+        rib_meshes = [_extrude_polygon(part, STACK_SKIRT_DEPTH + 0.1) for part in _polygons(ribs)]
+        for mesh in rib_meshes:
+            mesh.apply_translation((0.0, 0.0, eff.z - STACK_SKIRT_DEPTH))
+        if rib_meshes:
+            lid = union([lid, *rib_meshes])
     _single_volume(lid, "the Gridfinity lid")
     lid.remove_unreferenced_vertices()
     return lid
