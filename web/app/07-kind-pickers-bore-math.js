@@ -541,7 +541,7 @@ async function selectKind(kind, reset = false) {
         // Fix 1137: this commit bypasses the debounced commit, so it clears
         // the starter-preview flag itself (see Change A8b).
         state.spaceStarterPreviewPending = false;
-        seedPartNameFromText(state.draft);
+        seedPartNameFromLabel(state.draft?.options?.text ?? "");
         state.selected = applyResult.selected;
         state.draftIsNew = false;
         state.draftTouched = false;
