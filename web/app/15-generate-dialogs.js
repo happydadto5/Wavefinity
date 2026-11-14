@@ -6,12 +6,13 @@ function setGenerationPrinterWarning(message) {
   node.hidden = !message;
 }
 
-// The parts dialog opens docked in a corner and NOT modal while files are
+// The parts dialog opens over the preview and NOT modal while files are
 // made, so the tree, the views and the previews stay usable behind it (a
 // 350 x 350 bin with a lid takes over a minute). Its own status line and the
 // row's status line both show progress.
 function openGenerationDialog(dialog) {
   if (!dialog || dialog.open) return;
+  positionGenerationDialog(dialog);
   dialog.classList.add("is-docked");
   try {
     dialog.show();
@@ -19,6 +20,18 @@ function openGenerationDialog(dialog) {
     // Already open
   }
 }
+
+function positionGenerationDialog(dialog) {
+  const preview = $(".workspace .canvas-wrap.active") || $(".workspace");
+  const bounds = preview?.getBoundingClientRect();
+  dialog.style.setProperty("--generation-left", `${(bounds?.left || 0) + 16}px`);
+  dialog.style.setProperty("--generation-top", `${(bounds?.top || 0) + 16}px`);
+}
+
+window.addEventListener("resize", () => {
+  const dialog = $("#generation-dialog.is-docked[open]");
+  if (dialog) positionGenerationDialog(dialog);
+});
 
 // An Export already running for the bin being exported again: the second
 // click joins it (no second request, no second file set) and says so in place.

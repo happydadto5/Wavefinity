@@ -1202,10 +1202,13 @@ dialog:not([open]) { display: none; }
 /* Docked, non-modal while files are made: the screen behind stays usable. */
 .generation-dialog.is-docked[open] {
   position: fixed;
-  inset: auto 16px 16px auto;
+  left: clamp(16px, var(--generation-left, 16px), max(16px, calc(100vw - min(440px, 100vw - 32px) - 16px)));
+  top: clamp(16px, var(--generation-top, 16px), max(16px, calc(100vh - 32px)));
+  right: auto;
+  bottom: auto;
   margin: 0;
   z-index: 60;
-  max-height: calc(100vh - 32px);
+  max-height: calc(100vh - clamp(16px, var(--generation-top, 16px), max(16px, 100vh - 32px)) - 16px);
   overflow: auto;
 }
 .generation-dialog::backdrop {
