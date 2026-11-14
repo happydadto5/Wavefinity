@@ -1,3 +1,4 @@
+# Historical: the Python Web Service was retired on 2026-11-14; kept for the recovery record.
 services:
   - type: web
     name: wavefinity

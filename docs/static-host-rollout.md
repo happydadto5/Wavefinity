@@ -1,10 +1,6 @@
 # Static host rollout (browser-only edition)
 
-This is the owner-approval handoff for moving Wavefinity from the Render Python Web Service to a Render
-**Static Site**. Writing this document, and the code that builds the site, changes **no** live hosting, DNS or
-domain. Nothing below happens until Andrew explicitly authorizes each step. The old service, `render.yaml`
-and the legacy hosting/recovery guide ([legacy-python-server-hosting.md](legacy-python-server-hosting.md))
-stay exactly as they are.
+This rollout handoff records the move to a Render **Static Site**. Andrew approved cutover on 2026-11-13; the public domains switched and the old Python Web Service was retired on 2026-11-14. See the [legacy hosting/recovery guide](legacy-python-server-hosting.md) for the recovery record.
 
 ## What changes for users
 
@@ -42,10 +38,9 @@ It regenerates `web/browser-core/engine/canonical.zip` and its manifest from the
 `dist/Brochure.md` and byte-identical `dist/brochure.md`. The bridge's C++/shell build inputs and the legacy `web/images/`
 duplicates (the canonical artwork is `images/`) are not shipped.
 
-## Render dashboard: create the NEW Static Site
+## Render dashboard: Static Site setup (historical)
 
-The existing Web Service cannot be converted. Create a separate service (a manual dashboard action, not a
-Blueprint; do not touch `render.yaml`):
+The Web Service could not be converted, so a separate Static Site was created through the dashboard, not a Blueprint:
 
 | Setting | Value |
 |---|---|
@@ -54,8 +49,8 @@ Blueprint; do not touch `render.yaml`):
 | Name | `wavefinity-static` (if free) |
 | Build Command | `python3 scripts/build-static-site.py` |
 | Publish Directory | `dist` |
-| Auto-Deploy | Off until Andrew chooses otherwise |
-| New hostname | **Read the real `*.onrender.com` name from the dashboard after creation. Do not guess it.** |
+| Auto-Deploy | On |
+| Hostname | `wavefinity-static.onrender.com` |
 
 If Render's build image cannot run the command, report the exact error; the script needs only Python 3.
 
@@ -66,28 +61,22 @@ If Render's build image cannot run the command, report the exact error; the scri
 | `/*` | `X-Content-Type-Options` | `nosniff` |
 | `/*` | `Referrer-Policy` | `no-referrer` |
 | `/*` | `X-Frame-Options` | `DENY` |
-| `/*` | `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'` |
+| `/*` | `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'` |
 | `/*.wasm` and `/**/*.wasm` | `Content-Type` | `application/wasm` |
 | `/*.mjs` and `/**/*.mjs` | `Content-Type` | `text/javascript; charset=utf-8` |
 | `/`, `/index.html`, `/Brochure.md`, `/brochure.md`, `/app/*`, `/spaces/*`, `/browser-core/*.js`, `/browser-core/contracts/*`, `/browser-core/engine/*` | `Cache-Control` | `no-cache` |
 
 - **Live header record (read from https://wavefinity-static.onrender.com on 2026-11-13).** The dashboard
-  value currently differs from the baseline row above in two ways, both set by Andrew in the dashboard:
-  `script-src` also carries `'unsafe-eval'`, and `connect-src` also carries the three AI provider origins
-  listed below. Everything else matches this table, and no COOP/COEP header is served. Keep this record
-  in step with the dashboard whenever a header is changed there. If `'unsafe-eval'` is ever removed to
-  tighten the policy, open the site afterwards and confirm a new bin still shows its 3D preview before
-  leaving it that way.
+  policy is reflected in the table above; no COOP/COEP header is served. Keep this record in step with
+  the dashboard whenever a header is changed there. The in-browser Python runtime requires `'unsafe-eval'`.
 - **No immutable caching rule.** No shipped asset has a content hash in its file name, and a stable name must
   never be cached immutably. Do not add one.
 - **No COOP/COEP headers.** The Manifold bridge is single-threaded and needs no cross-origin isolation.
-- **AI provider origins (needs Andrew's decision).** The bring-your-own-key AI chat calls the provider directly
-  from the browser. With the baseline `connect-src 'self'` those calls are blocked. To enable automatic
-  replies, add only the origins Andrew approves to `connect-src`: `https://api.openai.com`,
-  `https://api.anthropic.com`, `https://generativelanguage.googleapis.com`. Copy/paste AI works without any.
+- **AI provider origins.** The bring-your-own-key AI chat calls the three provider origins in the table directly
+  from the browser. Copy/paste AI works without them.
 - The microphone (AI dictation) needs no header here; no `Permissions-Policy` header is set.
 
-## Domain cutover (only after Andrew's explicit approval)
+## Domain cutover (completed 2026-11-14)
 
 Registration and authoritative DNS stay at Porkbun. No nameserver change, registrar transfer, new domain, or
 other host.
@@ -97,13 +86,12 @@ other host.
 2. Edit only the records Render's custom-domain instructions say must change, inside Porkbun. Keep the apex
    record only if Render's current instructions still call for it; point `www` at the new Static Site's real
    hostname.
-3. Confirm the apex serves over HTTPS and `www` redirects to it in the new site's settings.
+3. Confirm both domains serve over HTTPS and the apex redirects to `www` in the new site's settings.
 4. Fill in [static-host-rollback.md](static-host-rollback.md) **before** the old service is retired (B15).
 
-The exact current DNS record values live **only** in the private Help-Code record. They are deliberately not
-written here or in any code. Read them from there when Andrew approves.
+The exact DNS record values live **only** in the private Help-Code record; they are not written here or in code.
 
-## Approval required from Andrew, before any of these
+## Historical approval gates (approved for this cutover)
 
 - creating the Static Site if it could incur a charge or change a plan;
 - detaching either domain from the old service, or any change at Porkbun;

@@ -1,3 +1,4 @@
+# Historical: the Python Web Service was retired on 2026-11-14; kept for the recovery record.
 # Wavefinity on Hugging Face Spaces (Docker SDK).
 FROM python:3.14-slim
 

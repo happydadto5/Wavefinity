@@ -11,7 +11,7 @@ license: mit
 
 # Wavefinity — modular 3D-printable organizers
 
-Wavefinity is a parametric Python-backed application for designing and exporting **wavy, interlocking bins**, connectors, dividers, fitted holders and related organizer components. A browser editor provides 2D/3D previews; the CLI and local web service use the same geometry/export engine. The principal footprint grid is **7 mm**. Designs can include configurable walls, bases, lids, stacking, lettering and fitted inserts. Detailed product behavior and numerical constraints live in the references below, not in this introductory page.
+Wavefinity is a browser-only application with a Python geometry engine for designing and exporting **wavy, interlocking bins**, connectors, dividers, fitted holders and related organizer components. The live static edition runs the geometry/export engine in the browser and provides 2D/3D previews; the CLI and legacy local web service use the same engine. The principal footprint grid is **7 mm**. Designs can include configurable walls, bases, lids, stacking, lettering and fitted inserts. Detailed product behavior and numerical constraints live in the references below, not in this introductory page.
 
 ## User workflow
 
@@ -21,7 +21,11 @@ Wavefinity is a parametric Python-backed application for designing and exporting
 
 The **Side connector** joins two bins at a seam; separate 3-Way/4-Way Corner connectors support suitable equal-height bins. Connector fit depends on the associated bin wall. A Storage Box case and Surface Base Trim are structural outputs of their Spaces, not ordinary Designer bins.
 
-## Start locally
+## Live edition and local legacy server
+
+Use the browser-only edition at [www.wavefinity.org](https://www.wavefinity.org). It runs geometry locally in the browser and stores user files on the user's PC.
+
+### Start the legacy server locally
 
 Normal Windows launch: double-click `Launch_Organizer_UI.bat`. The launcher checks GitHub and safely updates the checkout before starting the local service, normally at **http://127.0.0.1:8765**. The Python geometry engine stays local; opening the browser does not move geometry computation to the browser.
 
@@ -42,6 +46,6 @@ Normal Windows launch: double-click `Launch_Organizer_UI.bat`. The launcher chec
 
 Detailed documentation is organized by topic to keep the introduction short. AI working instructions are maintained separately in [AGENTS.md](AGENTS.md).
 
-## Planned, not live
+## Migration references
 
-A browser-only geometry/hosting migration is **planned**, not the current runtime. Its authoritative design is the [execution specification](Future%20plans/Browser-only-migration-execution-spec.md); supporting contracts and route maps live in `Future plans/`. They are not deployed changes; the current runtime and hosting remain as described above.
+The browser-only migration design is recorded in the [execution specification](Future%20plans/Browser-only-migration-execution-spec.md); supporting contracts and route maps live in `Future plans/`. The [legacy hosting record](docs/legacy-python-server-hosting.md) documents recovery of the retired Python Web Service.
