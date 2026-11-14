@@ -1,6 +1,6 @@
 {
   "schema": "wavefinity-browser-catalog/1",
-  "sha256": "5fa7456f9223e349350d1bd0e77abc01fccefafb313f07bfd46aec1b5f0f7980",
+  "sha256": "12e7aaeb0454b2a23545cb9684059903d8aff58452b42f6608153831c9ea3574",
   "source_hashes": {
     "bambu_handoff.py": "f2a6f6b77c9dafbff9cba4eebf115a78c55705845db69c69895b01470183679c",
     "organizer_app.py": "eea3cbb2b6b67e603d11c1be96a85ca7869ce48700d03ca2bf08c3d8448c086f",
@@ -85,7 +85,7 @@
     "organizer_inserts/_slot.py": "f287af33b9bf523f8a4bfdd836034d268818c17cbc6597e51e6dd7aaa5574dea",
     "organizer_inserts/_steps.py": "6936d7ba911d52250ddf88a741f92002da7a637b37e4a9d668c9778fbb6a1122",
     "organizer_inserts/_text.py": "014cb23fd0e41f065210eb34745e09c9da379d750e7e4468e141defb8b466ba9",
-    "organizer_inserts/_walljoin.py": "b1f7c6d014240f62d8897908ac2b4d2ba13962c78eb8b356d6c6d4daa5cac197",
+    "organizer_inserts/_walljoin.py": "43b37cb8acd47c7e32565f4adfa70780f8f0d55c947241aaa2fffc1ac6e1f0c6",
     "organizer_inventory/__init__.py": "351ebaacdb3a4b52cdc4f43d85df58dce22584496d57c0db789beeff4e241b6c",
     "organizer_inventory/_merge.py": "a9baeeb4f003f396ebc528575079d4737b9f853d7bdb4a5b6ea96813a9bd143b",
     "organizer_inventory/_rows.py": "4f2bc7cb4ae411d3587e69279460764481d2bd5c9240581f7e3f431a458de050",
@@ -116,5 +116,5 @@
     "wavefinity_web_impl/_outputs.py": "524fa41b5a4e123d7d8bd77e2ebffb3f68dfce600df62b032c6e0d9496e50777",
     "wavefinity_web_impl/_runtime.py": "19e1ce2dd9d8187871f4115886c328cbefbad19babe54c77c4447e22476d603e"
   },
-  "source_sha256": "f90292066d5fabe9d25868ad1575c75ebd74cff1cb734933888c6d2f57be4b5c"
+  "source_sha256": "338a8c0d96c257ecb295ee2da78db7b6ef2ccdebc8667dfce6337b8aab130db4"
 }

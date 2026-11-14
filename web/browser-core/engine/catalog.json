@@ -160,7 +160,7 @@
     "unit_mm": 7.0
   },
   "base_unit": 7.0,
-  "build": "f90292066d5fabe9d25868ad1575c75ebd74cff1cb734933888c6d2f57be4b5c",
+  "build": "338a8c0d96c257ecb295ee2da78db7b6ef2ccdebc8667dfce6337b8aab130db4",
   "connector_rules": {
     "arm_thickness_floor_mm": 0.77,
     "arm_thickness_mm": 1.0,

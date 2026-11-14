@@ -90,7 +90,6 @@ def _footprint_from_solids(solids) -> "Polygon":
     the same region.
     """
     from shapely import polygons
-    from shapely.ops import unary_union
     batches = []
     for s in solids:
         tris = np.asarray(s.triangles, dtype=float)
@@ -107,7 +106,9 @@ def _footprint_from_solids(solids) -> "Polygon":
             batches.append(polygons(kept))
     if not batches:
         return Polygon()
-    return unary_union(np.concatenate(batches))
+    # The precision grid keeps sliver projections from failing the union in
+    # the browser (WebAssembly) GEOS build.
+    return shapely.union_all(np.concatenate(batches), grid_size=0.01)
 
 
 def _footprint_bounds(solids) -> "Polygon":
