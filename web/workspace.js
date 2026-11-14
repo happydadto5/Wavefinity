@@ -186,7 +186,7 @@ WS.renderSelector = () => {
     const drawerButtons = one.kind === "settings" ? WS.drawerButtons(locked) : "";
     // Story 2840: the Layout line's one button, Manage, opens the same space details screen as a click on the line.
     const manage = one.kind === "settings"
-      ? `<button type="button" class="ws-out" data-ws-pick="settings" data-id="" title="Layout or print your space"${locked ? " disabled" : ""}>Print</button>` : "";
+      ? `<button type="button" class="ws-out" data-ws-pick="settings" data-id="" title="Layout or print your space"${locked ? " disabled" : ""}>Manage</button>` : "";
 
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     // Story 2840: Print and Export are rendered only on the selected row; other rows carry no output buttons.
@@ -857,7 +857,7 @@ WS.rowOutputs = (one, picked) => {
   const printTitle = !live ? "Select this row to print it."
     : one.kind === "settings" ? "Choose which bins to print"
     : one.kind === "container" ? "Prepare a local 3MF to open in Bambu Studio"
-    : hosted ? "Printing needs local Wavefinity and a slicer"
+    : hosted ? "Prepare a 3MF to open in Bambu Studio"
     : !state.slicer?.available ? "A slicer is needed - use Printer Settings to choose one"
     : `Send the ${what} to ${state.slicer.name || "the slicer"}`;
   const exportTitle = !live ? "Select this row to export it."
@@ -868,13 +868,13 @@ WS.rowOutputs = (one, picked) => {
       : one.kind === "bin" && (currentOutputReport.rowIds.includes(one.id)
         || currentOutputReport.owner === "bin" && one.id === (state.designInventoryId || "")));
   const label = mode => running && currentOutputReport.action === mode ? wsEsc(currentOutputReport.short ?? currentOutputReport.text)
-    : one.kind === "bin" && hosted ? "Save file" : mode === "print" ? "Print" : "Export";
+    : mode === "print" ? "Print" : "Export";
   // Story 2815: the space line has no Print button; clicking the line opens the space details screen.
   // Story 2829: the space line has no Export button either; the details screen exports the space's files.
   if (one.kind === "settings") return "";
-  const binHostedSave = one.kind === "bin" && hosted;
-  const printButton = `<button type="button" class="ws-out ${tone}" ${attrs} data-output="${binHostedSave ? "export" : "print"}"${live && !running ? "" : " disabled"} title="${wsEsc(binHostedSave ? "Save this bin's file" : printTitle)}">${label(binHostedSave ? "export" : "print")}</button>`;
-  return printButton + (one.kind === "container" ? `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live && !running ? "" : " disabled"} title="${wsEsc(exportTitle)}">${label("export")}</button>` : "");
+  const printButton = `<button type="button" class="ws-out ${tone}" ${attrs} data-output="print"${live && !running ? "" : " disabled"} title="${wsEsc(printTitle)}">${label("print")}</button>`;
+  const exportButton = `<button type="button" class="ws-out ${tone}" ${attrs} data-output="export"${live && !running ? "" : " disabled"} title="${wsEsc(exportTitle)}">${label("export")}</button>`;
+  return printButton + exportButton;
 };
 
 // Story 2807: Duplicate and Delete sit on the selected bin's own row (and no other row). They are the same
