@@ -188,6 +188,9 @@ during a Space switch. Healthy bins still autosave normally.
 
 On **Welcome back**, click the last-Space summary card or **Open Last Space** to resume that Space. The card also supports keyboard focus and Enter/Space activation.
 
+The home screen lists existing Spaces alongside choices to create a new Space.
+The folder-opening link is offered until a folder has been selected or remembered.
+
 Structural Space outputs are not ordinary Designer bins:
 
 - **Storage Box** creates its own Storage Box case.

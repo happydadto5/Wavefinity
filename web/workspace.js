@@ -134,16 +134,15 @@ WS.current = () => {
 // Launch screen: existing spaces, My Bins, and (beside it) the New Space kinds.
 WS.renderPicker = () => {
   const spaces = WS.spaceRows();
-  const browserRequirement = state.runtime.hosted
-    ? (window.WFFileSystem?.supportsDirectoryPicker()
-      ? "Use Chrome or Edge on a computer — then you can pick a folder to keep your designs in."
-      : "Use Chrome or Edge on a computer. This browser or device can't give Wavefinity a folder, so here you can design and download parts only.")
+  const browserRequirement = state.runtime.hosted && !window.WFFileSystem?.supportsDirectoryPicker()
+    ? "Use Chrome or Edge on a computer. This browser or device can't give Wavefinity a folder, so here you can design and download parts only."
     : "";
+  const hasFolder = Boolean(state.folderSelected || SP.hostedHome?.handle || SP.pendingReconnect);
   const cards = spaces.map(one => `<li><button type="button" class="ws-menu-item" data-ws-act="open-space" data-src="${one.src}" data-index="${one.index ?? ""}" aria-label="${wsEsc(`Open ${[one.name, SP_KINDS[one.kind]?.label, one.meta].filter(Boolean).join(", ")}${one.invalid ? " (unavailable)" : ""}`)}"${one.invalid ? " disabled" : ""}>
       <span class="ws-card-icon" aria-hidden="true">${SP.compactKindIcon(one.kind)}</span>
       <span class="ws-card-text"><strong>${wsEsc(one.name)}</strong><small>${wsEsc([SP_KINDS[one.kind]?.label, one.meta].filter(Boolean).join(" · "))}</small></span></button></li>`).join("");
   return `<div class="ws-sel">
-    <div class="ws-sel-head"><h2>${spaces.length ? "Open a Space" : "Welcome to Wavefinity"}</h2></div>
+    <div class="ws-sel-head"><h2>${hasFolder || spaces.length ? "Open an existing space" : "Welcome to Wavefinity"}</h2></div>
     ${browserRequirement ? `<p>${wsEsc(browserRequirement)}</p>` : ""}
     ${spaces.length ? "" : '<p class="ws-links">No spaces yet - pick what you\'re organizing below.</p>'}
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
@@ -153,7 +152,7 @@ WS.renderPicker = () => {
         <span class="ws-card-icon" aria-hidden="true">📦</span>
         <span class="ws-card-text"><strong>My Bins / No Space</strong><small>Bins that are not in a Space</small></span></button></li>
     </ul>
-    <p class="ws-links"><button type="button" class="link-button" data-ws-act="open-folder">Open a Space folder…</button>${state.runtime.hosted ? "" : ' <button type="button" class="link-button" data-ws-act="storage">Change Wavefinity folder…</button>'}</p>
+    ${!hasFolder || !state.runtime.hosted ? `<p class="ws-links">${hasFolder ? "" : '<button type="button" class="link-button" data-ws-act="open-folder">Open a Space folder…</button>'}${state.runtime.hosted ? "" : ' <button type="button" class="link-button" data-ws-act="storage">Change Wavefinity folder…</button>'}</p>` : ""}
   </div>`;
 };
 
@@ -216,7 +215,7 @@ WS.KINDS = [
 ];
 
 WS.renderNewSpace = () => `<div class="ws-page ws-newspace">
-    <h2>New Space - what are you organizing?</h2>
+    <h2>Create a new space</h2>
     <div class="ws-choices">${WS.KINDS.map(([kind, title, text, img]) => `<button type="button" class="ws-choice" data-ws-act="new-space" data-kind="${kind}" aria-label="${wsEsc(`New Space: ${title} — ${text}`)}">
       <img src="/images/${img}" alt="" width="120" height="90" decoding="async"><strong>${title}</strong><small>${text}</small></button>`).join("")}</div>
     ${WS.task === "picker" ? "" : '<div class="ws-toprow"><button type="button" class="button secondary dl-small" data-ws-act="cancel">Cancel</button></div>'}
