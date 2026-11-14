@@ -65,7 +65,10 @@ def stacking_feet(box):
     from organizer_features.gridfinity import FOOT_HEIGHT, foot_solid
 
     validate_box(box)
-    feet = foot_solid(box, box.b4b.grid)
+    # A Storage Box always stands on a foot in every cell: Corner feet is an
+    # ordinary-bin option whose built-in supports are not built here.
+    from dataclasses import replace
+    feet = foot_solid(replace(box, corner_feet=False), box.b4b.grid)
     feet.apply_translation((0.0, 0.0, -FOOT_HEIGHT))
     return feet
 

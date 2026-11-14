@@ -27,6 +27,7 @@ from organizer_geometry import (
     _extrude_polygon,
     _loft_cavity,
     difference,
+    intersection,
     translated,
     union,
 )
@@ -361,19 +362,32 @@ def _lofted_cell(
     return _loft_cavity(rings, [z for z, _radius in sections])
 
 
+def _footed_centres(spec: BoxSpec, grid: str) -> list[tuple[float, float]]:
+    """Cells that carry a foot: every cell, or only the corner cells."""
+    centres = _cell_centres(spec, grid)
+    if not spec.corner_feet:
+        return centres
+    xs, ys = [c[0] for c in centres], [c[1] for c in centres]
+    return [(x, y) for x, y in centres if x in (min(xs), max(xs)) and y in (min(ys), max(ys))]
+
+
+def _foot_sections(grid: str) -> list[tuple[float, float]]:
+    """The foot's radius schedule plus the 0.10 mm cap that overlaps the shell."""
+    sections = list(_profile(grid)["radii"])
+    sections.append((FOOT_HEIGHT + FOOT_CAP, sections[-1][1]))
+    return sections
+
+
 def foot_solid(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
-    """Every cell's foot, z 0 to 4.75, plus the 0.10 mm cap above it.
+    """Every footed cell's foot, z 0 to 4.75, plus the 0.10 mm cap above it.
 
     The cap repeats the final section so the later union with the shell
-    overlaps in volume; the foot's visible profile ends at z = 4.75.
+    overlaps in volume; the foot's visible profile ends at z = 4.75. With
+    Corner feet only the corner cells are footed.
     """
     profile = _profile(grid)
-    sections = list(profile["radii"])
-    sections.append((FOOT_HEIGHT + FOOT_CAP, sections[-1][1]))
-    centres = _cell_centres(spec, grid)
-    if spec.corner_feet:
-        xs, ys = [c[0] for c in centres], [c[1] for c in centres]
-        centres = [(x, y) for x, y in centres if x in (min(xs), max(xs)) and y in (min(ys), max(ys))]
+    sections = _foot_sections(grid)
+    centres = _footed_centres(spec, grid)
     cells = [
         _lofted_cell(centre, profile["foot_half"], sections)
         for centre in centres
@@ -402,13 +416,19 @@ def _single_volume(mesh: trimesh.Trimesh, what: str) -> None:
         raise RuntimeError(f"{what} did not leave one connected printable solid")
 
 
-def _hollow_base_cutters(spec: BoxSpec, grid: str, feet: trimesh.Trimesh | None = None):
-    """Open the feet and base band, retaining the wavy supports and magnet pads."""
+def _polygons(shape) -> list[Polygon]:
+    """The non-empty polygons of any shapely result."""
+    parts = getattr(shape, "geoms", [shape])
+    return [part for part in parts if part.geom_type == "Polygon" and not part.is_empty]
+
+
+def _support_ribs(spec: BoxSpec, grid: str):
+    """Wavy built-in support lines, one wall thick, in both directions.
+
+    The same global phase is used for every parallel line. The pitch of the
+    waves is two support spacings; the lines continue through cell boundaries.
+    """
     profile = _profile(grid)
-    half = profile["foot_half"]
-    top = effective_base(spec, grid) - FLOOR_SKIN
-    # The same global phase is used for every parallel line. The pitch of the
-    # waves is two support spacings; the lines continue through cell boundaries.
     nx, ny = cell_counts(spec, grid)
     extent_x, extent_y = nx * profile["pitch"] / 2, ny * profile["pitch"] / 2
     spacing, amplitude, step = 21.0, 6.0, 1.0
@@ -424,49 +444,81 @@ def _hollow_base_cutters(spec: BoxSpec, grid: str, feet: trimesh.Trimesh | None 
                 across = offset + amplitude * math.sin(2 * math.pi * along / 42.0)
                 points.append((along, across) if swap else (across, along))
             lines.append(LineString(points).buffer(spec.wall / 2, cap_style=2, join_style=1))
-    ribs = unary_union(lines)
-    if spec.magnet_holes == "6x2" and (not spec.corner_feet or spec.hollow_base):
-        for x, y in _cell_centres(spec, grid):
-            if spec.corner_feet and (abs(x) != (nx - 1) * profile["pitch"] / 2 or abs(y) != (ny - 1) * profile["pitch"] / 2):
-                continue
-            for dx in (-13.0, 13.0):
-                for dy in (-13.0, 13.0):
-                    lines.append(Point(x + dx, y + dy).buffer(3.25 + spec.wall, resolution=16))
-    supports = unary_union(lines)
-    support_parts = list(supports.geoms) if supports.geom_type == "MultiPolygon" else [supports]
-    support_meshes = [translated(_extrude_polygon(part, top + 0.2), (0, 0, -0.1)) for part in support_parts]
+    return unary_union(lines)
 
-    voids = []
-    for centre in _cell_centres(spec, grid) if spec.hollow_base else []:
-        if spec.corner_feet and (abs(centre[0]) != (nx - 1) * profile["pitch"] / 2 or abs(centre[1]) != (ny - 1) * profile["pitch"] / 2):
-            continue
-        rings, heights = [], []
-        sections = [(-0.1, profile["radii"][0][1]), *profile["radii"]]
+
+def _base_cutters_and_supports(spec: BoxSpec, grid: str):
+    """Voids that lighten the base, and the built-in supports that print it.
+
+    Hollow base opens every footed cell (and any base band above the feet),
+    leaving the wavy ribs and magnet pads standing so the floor skin prints
+    over them without slicer supports. Corner feet leaves the other cells
+    with no foot; their floor is carried by the same ribs, trimmed to the
+    standard foot outline at every height so they drop into a baseplate
+    socket exactly as a foot would and never meet the plate's ridges.
+    """
+    profile = _profile(grid)
+    half = profile["foot_half"]
+    top = effective_base(spec, grid) - FLOOR_SKIN
+    ribs = _support_ribs(spec, grid)
+    footed = _footed_centres(spec, grid)
+    open_cells = [centre for centre in _cell_centres(spec, grid) if centre not in footed]
+
+    cutters = []
+    if spec.hollow_base:
+        kept = [ribs]
+        if spec.magnet_holes == "6x2":
+            for x, y in footed:
+                for dx in (-13.0, 13.0):
+                    for dy in (-13.0, 13.0):
+                        kept.append(Point(x + dx, y + dy).buffer(3.25 + spec.wall, resolution=16))
+        kept_meshes = [
+            translated(_extrude_polygon(part, top + 0.2), (0, 0, -0.1))
+            for part in _polygons(unary_union(kept))
+        ]
+        voids = []
+        for centre in footed:
+            rings, heights = [], []
+            sections = [(-0.1, profile["radii"][0][1]), *profile["radii"]]
+            if top > FOOT_HEIGHT:
+                sections.append((FOOT_HEIGHT + min(0.05, top - FOOT_HEIGHT), profile["radii"][-1][1]))
+            for z, radius in sections:
+                inner_radius = max(0.01, radius - spec.wall)
+                inner_half = half + radius - spec.wall - inner_radius
+                if inner_half <= 0:
+                    rings = []
+                    break
+                rings.append(_ring(centre, inner_half, inner_half, inner_radius))
+                heights.append(z)
+            # A foot no rib crosses stays solid: nothing would carry its floor.
+            if rings and Polygon(rings[0]).intersects(ribs):
+                voids.append(_loft_cavity(rings, heights))
         if top > FOOT_HEIGHT:
-            sections.append((FOOT_HEIGHT + min(0.05, top - FOOT_HEIGHT), profile["radii"][-1][1]))
-        for z, radius in sections:
-            inner_radius = max(0.01, radius - spec.wall)
-            inner_half = half + radius - spec.wall - inner_radius
-            if inner_half <= 0:
-                rings = []
-                break
-            rings.append(_ring(centre, inner_half, inner_half, inner_radius))
-            heights.append(z)
-        if rings and Polygon(rings[0]).intersects(ribs):
-            voids.append(_loft_cavity(rings, heights))
-    if top > FOOT_HEIGHT:
-        band = _extrude_polygon(flat_outer_polygon(spec, grid) if spec.corner_feet else flat_cavity_polygon(spec, grid), top - FOOT_HEIGHT)
-        voids.append(translated(band, (0, 0, FOOT_HEIGHT)))
-    # Removing the support footprint from each void makes each line fuse into
-    # the unchanged profile and floor, without projecting into the sockets.
-    cutters = [difference([void, *support_meshes, *([feet] if spec.corner_feet and not spec.hollow_base else [])]) for void in voids]
-    cutters = [cutter for cutter in cutters if len(cutter.vertices)]
-    if spec.corner_feet:
-        footprint = ribs.intersection(flat_outer_polygon(spec, grid))
-        parts = list(footprint.geoms) if footprint.geom_type == "MultiPolygon" else [footprint]
-        supports = [translated(_extrude_polygon(part, top + 0.1), (0, 0, 0)) for part in parts if part.geom_type == "Polygon" and not part.is_empty]
-        return cutters, supports
-    return cutters
+            # Inside the walls only, so the outer wall still joins every foot.
+            band = _extrude_polygon(flat_cavity_polygon(spec, grid), top - FOOT_HEIGHT)
+            voids.append(translated(band, (0, 0, FOOT_HEIGHT)))
+        # Removing the kept footprint from each void makes each line fuse into
+        # the unchanged profile and floor, without projecting into the sockets.
+        cutters = [difference([void, *kept_meshes]) for void in voids]
+        cutters = [cutter for cutter in cutters if len(cutter.vertices)]
+
+    supports = []
+    if open_cells:
+        sections = _foot_sections(grid)
+        height = sections[-1][0]
+        rib_meshes = [
+            translated(_extrude_polygon(part, height + 0.2), (0, 0, -0.1))
+            for part in _polygons(ribs.intersection(flat_outer_polygon(spec, grid)))
+        ]
+        envelopes = [_lofted_cell(centre, half, sections) for centre in open_cells]
+        if rib_meshes:
+            trimmed = intersection([
+                rib_meshes[0] if len(rib_meshes) == 1 else union(rib_meshes),
+                envelopes[0] if len(envelopes) == 1 else union(envelopes),
+            ])
+            if len(trimmed.vertices):
+                supports.append(trimmed)
+    return cutters, supports
 
 
 def gridfinity_body(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
@@ -488,30 +540,13 @@ def gridfinity_body(spec: BoxSpec, grid: str) -> trimesh.Trimesh:
     cavity = _extrude_polygon(flat_cavity_polygon(spec, grid), spec.z - floor + 1.0)
     cavity = translated(cavity, (0.0, 0.0, floor))
     fused = union([shell, feet])
-    if not spec.corner_feet:
-        _single_volume(fused, "the foot and shell union")
-    if spec.corner_feet:
-        cutters, supports = _hollow_base_cutters(spec, grid, feet)
+    _single_volume(fused, "the foot and shell union")
+    if spec.hollow_base or spec.corner_feet:
+        cutters, supports = _base_cutters_and_supports(spec, grid)
         if cutters:
             fused = difference([fused, *cutters])
         if supports:
             fused = union([fused, *supports])
-        if spec.magnet_holes == "6x2":
-            centres = _cell_centres(spec, grid)
-            xs, ys = [c[0] for c in centres], [c[1] for c in centres]
-            depth = min(2.4, FOOT_HEIGHT - FLOOR_SKIN)
-            pockets = []
-            for x, y in centres:
-                if x in (min(xs), max(xs)) and y in (min(ys), max(ys)):
-                    for dx in (-13.0, 13.0):
-                        for dy in (-13.0, 13.0):
-                            pocket = trimesh.creation.cylinder(radius=3.25, height=depth + 0.1, sections=64)
-                            pockets.append(translated(pocket, (x + dx, y + dy, (depth - 0.1) / 2)))
-            fused = difference([fused, *pockets])
-    elif spec.hollow_base:
-        cutters = _hollow_base_cutters(spec, grid)
-        if cutters:
-            fused = difference([fused, *cutters])
     body = difference([fused, cavity])
     _single_volume(body, "the Gridfinity body")
     return body

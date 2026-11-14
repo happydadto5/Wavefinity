@@ -12,15 +12,19 @@ Suggestions become local text downloads; slicer/log actions explain browser
 limits and Print remains intact. Final route assembly/deployment belongs to
 B14. See [browser capabilities and recovery](docs/static-capability-differences.md).
 
-Ordinary 21 mm and 42 mm Gridfinity bins offer **Hollow base**, on by default.
-Their feet have open undersides with wavy supports and retain the existing
-magnet pockets when selected. Turn it off for solid feet and base. Physical
-print performance remains unverified.
+Ordinary 21 mm and 42 mm Gridfinity bins offer two filament-saving base
+choices beside the Grid select. **Base** is Hollow by default: the feet have
+open undersides with built-in wavy supports and keep their magnet pockets when
+selected. Choose Solid for filled feet and base.
 
-**Corner feet**, off by default, limits Gridfinity feet and any magnet pockets
-to the corner cells and supports the open floor band with wavy lines. Hollow
-base controls whether those feet are hollow or solid. This applies to both
-Gridfinity pitches; physical print performance remains unverified.
+**Feet** is Every cell by default. Corners only keeps feet and any magnet
+pockets at the corner cells; the floor between them is carried by the same
+built-in wavy supports, trimmed to the standard foot outline so the bin still
+seats in a baseplate. Base controls whether the corner feet are hollow or
+solid. Bins up to two cells each way already have a foot in every cell.
+
+Both choices are shaped to print without slicer supports: the supports are
+part of the model. Physical print performance remains unverified.
 
 Bins on Wavefinity and both Gridfinity grids offer **Top 1 mm accent**, Off by
 default, with a nominal color choice (Blue by default). The color choice appears

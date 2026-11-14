@@ -13,9 +13,12 @@ B14 still owns final route assembly. See
 [browser capabilities](docs/static-capability-differences.md).
 
 Ordinary Gridfinity bins may set `box.corner_feet` to `true` (default `false`)
-to use only corner-cell feet with wavy floor supports. Magnet pockets then occur
-only in those feet. `box.hollow_base` controls whether the feet are hollow.
-Wavefinity bins ignore this option. Include it only when requested.
+to use only corner-cell feet (the UI's Feet: Corners only). Built-in wavy
+supports, trimmed to the standard foot outline, carry the floor of the other
+cells, so the bin still seats in a baseplate and needs no slicer supports.
+Magnet pockets then occur only in the corner feet. `box.hollow_base` controls
+whether the feet are hollow. Wavefinity bins ignore this option. Include it
+only when requested.
 
 Browser ordinary-output adapters use the same bin design schema and geometry
 rules. Export prepares files locally for the person's chosen folder or a
@@ -718,6 +721,6 @@ If a change is implementation-only and does not affect what the outside AI may l
 
 Ordinary 42 mm Gridfinity bins may set `box.magnet_holes` to `"6x2"` for magnet pockets or `"none"` (default). Never use `"6x2"` on Wavefinity, 21 mm Gridfinity, or container floors. The 6.5 mm diameter and 2.4 mm depth are unconfirmed starting values, not verified fit.
 
-Ordinary Gridfinity bins at either pitch have `box.hollow_base` on by default;
-set it to false for solid feet and base when requested. It has no effect on
+Ordinary Gridfinity bins at either pitch have `box.hollow_base` on by default
+(the UI's Base: Hollow); set it to false for solid feet and base when requested. It has no effect on
 Wavefinity bins or container floors. Physical print performance is unverified.
