@@ -458,6 +458,8 @@ WS.transition = async (task, arg) => {
   const from = WS.task;
   if (task === "newspace") {
     if (!(await WS.closeSettings()) || !(await WS.flushBin({ spaceSwitch: true }))) return false;
+    if (WS.task !== "newspace" && !SP.configureData) SP.setupPrinterProfile = null;
+    if (!(await SP.ensureSetupPrinterProfile())) return false;
     SP.close?.();
     WS.rememberPrior();
     WS.task = "newspace";
@@ -663,6 +665,7 @@ WS.newSpace = async kind => {
     SP.showFolderAccessNeeded("unsupported");
     return;
   }
+  if (WS.task !== "newspace" && !SP.configureData) SP.setupPrinterProfile = null;
   // Same rule as the type cards: a repeat-size template only prefills its own type.
   const candidate = SP.setupPrefillSpace;
   const candidateKind = candidate?.kind === "box" ? "portable" : candidate?.kind;

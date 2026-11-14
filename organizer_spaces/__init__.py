@@ -22,6 +22,7 @@ from __future__ import annotations
 
 # Names this module used to re-export from sibling modules (kept for compatibility).
 from organizer_outputs.printer_profile import (
+    normalise_printer_profile,
     PRINTER_PREF_KEYS,
     apply_printer_profile_to_preferences,
     default_printer_profile_state,
@@ -188,7 +189,7 @@ def _write_metadata(
     *, keep_bin_defaults: Any = _UNSET, bin_defaults: Any = _UNSET,
     part_defaults: Any = _UNSET, resume_design: Any = _UNSET, resume_pending: Any = _UNSET,
     preserve_space: bool = False, expected_space_id: str | None = None,
-    structural_output_updates: Any = _UNSET,
+    structural_output_updates: Any = _UNSET, printer_profile: Any = _UNSET,
 ) -> None:
     # The whole read/preserve/write transaction - including the temp-file
     # replace - is one critical section, so a resume checkpoint write can
@@ -310,6 +311,13 @@ def _write_metadata(
         else:
             payload["inventory"] = bool(inventory)
         target = folder / METADATA_FILE
+        # Folder build volume survives every metadata rewrite, independently of
+        # the Space definition and the user's global fallback preferences.
+        previous = _json_file(target, strict=True) if target.exists() else {}
+        saved_printer = previous.get("printer_profile") if printer_profile is _UNSET else printer_profile
+        if saved_printer is not None:
+            payload["printer_profile"] = (saved_printer if printer_profile is _UNSET
+                                          else normalise_printer_profile(saved_printer))
         temp = folder / f"{METADATA_FILE}.tmp"
         temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         temp.replace(target)
@@ -756,7 +764,22 @@ def space_routes(
         remember(target)
         return reply(target)
 
+    def setup_printer(payload, target=None):
+        raw = payload.get("printer_profile")
+        if raw is None and target is not None:
+            raw = (_json_file(target / METADATA_FILE) or {}).get("printer_profile")
+        if raw is None:
+            return _UNSET  # Existing API callers remain compatible.
+        profile = normalise_printer_profile(raw)
+        if payload.get("kind") in {"portable", "box"}:
+            for axis, label in (("x", "bed width"), ("y", "bed depth"), ("z", "build height")):
+                value = payload.get(axis)
+                if isinstance(value, (int, float)) and value > profile[f"{axis}_mm"]:
+                    raise ValueError(f"Interior {axis} exceeds printer {label} of {profile[f'{axis}_mm']:g} mm.")
+        return profile
+
     def configure(payload):
+        printer = setup_printer(payload)
         raw_def = {
             **{key: payload[key] for key in ("grid", "built_in_grid", "seated_lift_mm") if key in payload},
             "name": payload.get("name"),
@@ -800,7 +823,7 @@ def space_routes(
             try:
                 result = configure_space(target, raw_def=validated, mode="create")
                 space = result["layout"]["space"]
-                _write_metadata(target, "space", space, keep_bin_defaults=True)
+                _write_metadata(target, "space", space, keep_bin_defaults=True, printer_profile=printer)
             except Exception:
                 _cleanup_failed_auto_space(target)
                 raise
@@ -823,7 +846,7 @@ def space_routes(
             try:
                 result = configure_space(target, raw_def=raw_def, mode="create")
                 space = result["layout"]["space"]
-                _write_metadata(target, "space", space, keep_bin_defaults=True)
+                _write_metadata(target, "space", space, keep_bin_defaults=True, printer_profile=printer)
             except Exception:
                 if prior_inventory is not None:
                     try:
@@ -845,6 +868,7 @@ def space_routes(
         return remember_or_warn(target, "created")
 
     def configure_migrate(payload):
+        printer = setup_printer(payload, folder(payload))
         # The user's explicit Configure Existing / migration choice for an
         # already-selected folder: a v2/v3/legacy/inventory-derived Space, or
         # a plain design/inventory folder. Never rejected merely because
@@ -886,7 +910,7 @@ def space_routes(
                 # part_defaults - leaving those _UNSET lets _write_metadata() read
                 # the newest under-lock value instead of writing back this
                 # possibly-stale pre-lock copy (Fix 032 Correction 4, C4.1).
-                _write_metadata(target, "space", space, inventory)
+                _write_metadata(target, "space", space, inventory, printer_profile=printer)
             except Exception:
                 if prior_inventory is not None:
                     try:
@@ -913,6 +937,8 @@ def space_routes(
          needs_setup, _source, _prefill) = _folder_state(target, load_preferences())
         if mode != "space":
             raise ValueError("not a typed space")
+
+        setup_printer({**payload, "kind": existing_space["kind"]}, target)
 
         raw_def = {"name": payload.get("name"), "kind": existing_space["kind"], "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         raw_def.update({key: payload[key] for key in ("grid", "built_in_grid", "seated_lift_mm") if key in payload})
@@ -1383,6 +1409,20 @@ def space_routes(
             return done()
 
     def printer_profile_route(payload):
+        if payload.get("output"):
+            target = folder(payload)
+            info = describe(target, load_preferences())
+            if info["folder_mode"] != "space" or not info.get("space_id"):
+                raise ValueError("Open a configured Space before changing its printer settings.")
+            expected = _space_id(payload.get("space_id"))
+            if expected != info["space_id"]:
+                raise ValueError("This folder is not the Space that was open before. Nothing was changed.")
+            raw = None if payload.get("reset") is True else payload.get("profile")
+            if raw is not None or payload.get("reset") is True:
+                _write_metadata(target, "space", preserve_space=True, expected_space_id=expected,
+                                printer_profile=None if raw is None else normalise_printer_profile(raw))
+            raw = (_json_file(target / METADATA_FILE) or {}).get("printer_profile")
+            return {"profile": normalise_printer_profile(raw), "explicit": True} if raw else default_printer_profile_state()
         if payload.get("reset") is True:
             # One-click recovery: only the printer-profile keys go back to defaults.
             def clear(prefs: dict[str, Any]) -> None:

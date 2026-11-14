@@ -301,6 +301,10 @@ SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, chan
     metadata.resume_pending = resumePending;
     if (Object.keys(structuralOutputs).length) metadata.structural_outputs = structuralOutputs;
   }
+  const { current: previous } = await SP.readMetadata(handle);
+  const printer = Object.hasOwn(changes, "printer_profile") ? changes.printer_profile : previous?.data?.printer_profile;
+  if (printer != null) metadata.printer_profile = Object.hasOwn(changes, "printer_profile")
+    ? PrinterProfile.normalise(printer) : printer;
   await WFFileSystem.writeText(handle, FOLDER_METADATA, JSON.stringify(metadata, null, 2));
   return metadata;
 };

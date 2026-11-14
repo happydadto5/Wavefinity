@@ -2013,17 +2013,23 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _printer_profile_for(payload: dict[str, Any]) -> dict[str, float]:
-    """The one printer build volume. Hosted servers do not own the user's
-    profile, so the browser supplies it; local reads the saved preferences."""
-    if HOSTED:
-        raw = payload.get("printer_profile")
-        if raw is None:
-            return current_export_profile()
+    """Use the request's profile (including setup drafts), then the local
+    folder's saved build volume, with preferences as the legacy fallback."""
+    raw = payload.get("printer_profile")
+    if raw is not None:
         profile = normalise_printer_profile(raw)
         profile["configured"] = payload.get("printer_profile_configured") is True
         return profile
+    if HOSTED:
+        return current_export_profile()
     try:
-        return printer_profile_from_preferences(load_preferences())
+        from organizer_spaces._core import _json_file, METADATA_FILE
+        prefs = load_preferences()
+        folder = Path(str(payload.get("output") or prefs.get("output") or DEFAULT_OUTPUT)).expanduser().resolve()
+        saved = (_json_file(folder / METADATA_FILE, strict=True) or {}).get("printer_profile")
+        if saved is not None:
+            return {**normalise_printer_profile(saved), "configured": True}
+        return printer_profile_from_preferences(prefs)
     except ValueError as error:
         raise ValueError("Printer Settings could not be read. Open Printer Settings and choose Reset Printer Settings.") from error
 

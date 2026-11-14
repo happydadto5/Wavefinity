@@ -180,6 +180,7 @@ SP.applyFolder = async (info, options = {}) => {
     resumeDesign,
     resumePending,
   );
+  SP.adoptFolderPrinter(info.printer_profile);
   SP.readBinRecoveryCheckpoint();
   const requireAppliedOwner = SP.spaceOwnerGuard();
   if (initDesign && info.folder_mode === "space") await SP.initializeDesignForActiveSpace();

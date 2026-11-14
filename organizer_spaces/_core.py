@@ -571,6 +571,7 @@ def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
     return {
         "folder": str(folder),
         "folder_name": folder.name,
+        "printer_profile": (_json_file(folder / METADATA_FILE) or {}).get("printer_profile"),
         "missing": not folder.is_dir(),
         "folder_mode": mode,
         "space": space,

@@ -17,6 +17,8 @@ SP.clearSetupContext = () => {
   SP.setupPrefillSpace = null;
   SP.setupPreserveIds = false;
   SP.setupFormSnapshot = null;
+  SP.setupPrinterProfile = null;
+  SP.printerSetupActive = false;
 };
 
 // Only a committed type - current or explicit legacy metadata - may resume or
@@ -110,7 +112,13 @@ SP.rememberSpaceGrid = grid => {
   try { localStorage.setItem("wavefinity.preferredSpaceGrid", grid); } catch (_error) { /* Storage may be unavailable. */ }
 };
 
-SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
+SP.showSetup = async (kind, prefillSpace = null, { update = false } = {}) => {
+  if (update) {
+    SP.setupPrinterProfile = state.folderPrinterProfile;
+    SP.printerSetupActive = false;
+  }
+  if (!(await SP.ensureSetupPrinterProfile({ update }))) return;
+  SP.printerSetupActive = !update;
   if (update) {
     if (!SP.mountInlineEdit()) return;
     $("#space-form").hidden = false;
@@ -125,6 +133,9 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   // Fix 004 Correction 6.F.
   SP.isUpdate = update;
   SP.setupKind = kind;
+  for (const axis of ["x", "y", "z"]) {
+    document.getElementById(`portable-${axis}`).max = SP.setupPrinterProfile[`${axis}_mm`];
+  }
   SP.setupChangedField = null;
   SP.setupValidationStarted = false;
   $("#space-form").querySelectorAll("[data-setup-touched]").forEach(input => delete input.dataset.setupTouched);
@@ -307,6 +318,7 @@ SP.startMemoryOnly = () => SP.run(async () => {
   state.cabinetRecovery = null;
   state.folderSelected = false;
   setFolderState("design");
+  SP.adoptFolderPrinter(null);
   if (SP.renderSpaceInfo) SP.renderSpaceInfo();
   await loadFreshOrdinaryDesignForCurrentFolder();
   toast("Designing without a saved folder. Your work stays in this session — use 'Save design file' to keep it.", false, 9000);
@@ -442,7 +454,12 @@ SP.readOrdinarySetupValues = ({ focus = true } = {}) => {
           : "Must fit at least one Wavefinity unit after wall clearance."}`);
       }
       if (!Number.isFinite(raw) || raw <= 0) fail("Enter a dimension in mm greater than zero.", selector);
-      else if (raw > 2000 || used > 2000) fail("Dimensions must be at most 2000 mm.", selector);
+      else if (kind === "portable" && (raw > SP.setupPrinterProfile[`${axis}_mm`] || used > SP.setupPrinterProfile[`${axis}_mm`])) {
+        const bed = SP.setupPrinterProfile;
+        const label = { x: "bed width", y: "bed depth", z: "build height" }[axis];
+        fail(`Interior ${ { x: "width", y: "depth", z: "height" }[axis]} exceeds printer ${label} of ${fmt(bed[`${axis}_mm`])} mm (${fmt(bed.x_mm)} × ${fmt(bed.y_mm)} × ${fmt(bed.z_mm)} mm build volume).`, selector);
+      }
+      else if (kind === "drawer" && raw > 2000) fail("Dimensions must be at most 2000 mm.", selector);
       else if (axis === "z") {
         const minimum = kind === "drawer" ? ordinaryBinMinimumHeight() : Number(state.catalog?.b4b_rules?.min_secure_height_mm);
         if (raw < minimum) fail(kind === "drawer"
@@ -549,6 +566,7 @@ SP.create = async () => {
   const values = await SP.readSetupValues();
   if (!values) return;
   let { kind, name, x, y, z, trimSize, extra = {} } = values;
+  const printer = PrinterProfile.normalise(SP.setupPrinterProfile);
   if (kind === "storage_drawers" && state.runtime.hosted) {
     // Hosted Create assigns the stable drawer IDs here, exactly once; the
     // server keeps them. Local Create lets Python assign them.
@@ -661,7 +679,7 @@ SP.create = async () => {
       // `migrating`, now removed).
       let metadata;
       try {
-        metadata = await SP._writeMetadataNow(folder.handle, "space", space, true, {}, { expectedSpaceId });
+        metadata = await SP._writeMetadataNow(folder.handle, "space", space, true, { printer_profile: printer }, { expectedSpaceId });
       } catch (error) {
         try {
           if (priorInventory === null) await WFFileSystem.removeFile(folder.handle, inventoryName);
@@ -700,6 +718,7 @@ SP.create = async () => {
     info = {
       folder: folder.name, folder_name: folder.name, folder_mode: "space", space,
       space_id: metadata.space_id,
+      printer_profile: metadata.printer_profile,
       inventory: true, keep_bin_defaults: metadata.keep_bin_defaults,
       bin_defaults: metadata.bin_defaults, part_defaults: metadata.part_defaults,
       // A brand-new Space never inherits the previous Space's in-memory
@@ -710,7 +729,7 @@ SP.create = async () => {
     };
   } else {
     const payload = {
-      name, kind, x, y, z, keep_bin_defaults: true,
+      name, kind, x, y, z, keep_bin_defaults: true, printer_profile: printer,
       ...extra, ...(trimSize ? { trim_size: trimSize } : {}),
     };
     if (migrating) payload.output = folder;
@@ -951,6 +970,8 @@ SP.initializeDesignForActiveSpace = async () => {
 // Fix 004 Correction 6.A/E.
 SP.enterSetupFor = async (folder, data, { rememberPick = false } = {}) => {
     SP.configureData = folder;
+    SP.setupPrinterProfile = SP.validFolderPrinter(data?.printer_profile);
+    if (!(await SP.ensureSetupPrinterProfile())) return;
     SP.setupPrefillSpace = null;
 
     // Remember an explicit hosted pick regardless of which setup screen follows.

@@ -467,6 +467,7 @@ SP.inspectHosted = async folder => {
     resume_design: hasResumeCheckpoint ? resumeDesign : null,
     resume_pending: hasResumeCheckpoint ? resumePending : false,
     metadata_version: currentState.metadataVersion || null,
+    printer_profile: current?.data?.printer_profile || null,
     inventory: mode === "space" ? true : inventory,
     keep_bin_defaults: mode === "space" ? keepBinDefaults : false,
     bin_defaults: mode === "space" ? binDefaults : null,

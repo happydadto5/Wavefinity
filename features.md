@@ -406,7 +406,8 @@ All four supported kinds (No-Space bins, Plain Drawers, Storage Box and Storage 
 - Save Cabinet exports each part in the orientation chosen by the printer fit check, and a one-page assembly & print guide is linked from setup and the cabinet panel. A saved cabinet is a transaction: a failed or interrupted save is rolled back, and Saved status checks file contents.
 - Damaged cabinet settings keep Inventory and designs available and offer **Reset cabinet settings**. An existing folder cannot be converted into a Storage Drawers Space.
 - Add/Delete/Edit go through one serialized cabinet change, so an older queued layout save can never bring back a removed drawer.
-- One global printer build volume (X/Y/Z) sits beside the Wavefinity Folder on Welcome and is also used by Base Trim (which keeps its 10 mm printable-edge margin).
+- Folder setup first asks for printer bed width, bed depth and build height. The build volume is saved in that folder's metadata and loaded into PrinterProfile when the folder opens. Existing folders without a saved bed size are asked when their setup is next edited. Printer Settings changes the open Space's profile; outside a Space it retains the global fallback. Base Trim uses the current profile and keeps its 10 mm printable-edge margin.
+- Configure Storage Box limits Interior width, depth and height to that folder's respective printer dimensions, including grid-snapped width/depth. Oversize messages name the exceeded printer dimension and its size. Existing boxes are preserved; an oversize edit must be corrected before saving.
 - Recents show `N drawers · X × Y units each` for Wavefinity or the named Gridfinity grid and cell count, never the compatibility height total.
 
 ## 2.4 Pegboard Space

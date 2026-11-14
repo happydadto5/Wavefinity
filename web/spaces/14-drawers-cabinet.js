@@ -95,7 +95,7 @@ SP.mountStorageDrawersForm = (prefill, update) => {
     initialSpace: initial,
     initialGrid: SP.preferredSpaceGrid(),
     catalog: state.catalog,
-    printerProfile: PrinterProfile.current(),
+    printerProfile: SP.setupPrinterProfile || PrinterProfile.current(),
     mode: update ? "edit" : "create",
     // Setup and header Edit stay basic; the structural Design editor is the
     // only caller that mounts scope "full" (Fix 117).
@@ -105,7 +105,7 @@ SP.mountStorageDrawersForm = (prefill, update) => {
       openPrinterSettings: () => SP.openPrinterSettings(),
       onChange: () => { if (update) SP.queueSetupAutosave(); },
       requestSummary: ({ space, printer_profile }) => api("/api/space/storage-drawers-summary", {
-        space, printer_profile, printer_profile_configured: PrinterProfile.configured(),
+        space, printer_profile, printer_profile_configured: Boolean(SP.setupPrinterProfile) || PrinterProfile.configured(),
       }, { timeoutMs: 15000 }),
     },
     onReadyChange: ready => { if (primaryButton) primaryButton.disabled = !ready; },

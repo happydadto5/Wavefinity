@@ -1,6 +1,113 @@
 "use strict";
 
-// ---- global printer build volume (one runtime authority: PrinterProfile)
+// ---- folder printer build volume (one runtime authority: PrinterProfile)
+
+SP.validFolderPrinter = raw => {
+  try { return raw ? PrinterProfile.normalise(raw) : null; }
+  catch (_) { return null; }
+};
+
+SP.adoptFolderPrinter = raw => {
+  state.folderPrinterProfile = SP.validFolderPrinter(raw);
+  SP.printerSetupActive = false;
+  PrinterProfile.loadLocal(state.folderPrinterProfile
+    ? { profile: state.folderPrinterProfile, explicit: true }
+    : (SP.globalPrinterProfile || { profile: PrinterProfile.DEFAULT, explicit: false }));
+};
+
+SP.saveFolderPrinter = async (profile, { reset = false } = {}) => {
+  const requireOwner = SP.spaceOwnerGuard();
+  if (!state.activeSpaceId) {
+    const saved = await api("/api/space/printer-profile", reset ? { reset: true } : { profile });
+    SP.globalPrinterProfile = saved;
+    requireOwner();
+    return saved;
+  }
+  const next = reset ? null : PrinterProfile.normalise(profile);
+  if (state.runtime.hosted) {
+    await SP.writeMetadata(state.browserFolder.handle, "space", null, true,
+      { printer_profile: next }, { preserveSpace: true, expectedSpaceId: state.activeSpaceId });
+  } else {
+    await api("/api/space/printer-profile", { output: state.output, space_id: state.activeSpaceId,
+      ...(reset ? { reset: true } : { profile: next }) });
+  }
+  requireOwner();
+  state.folderPrinterProfile = next;
+  if (SP.isUpdate) {
+    SP.setupPrinterProfile = next || PrinterProfile.DEFAULT;
+    for (const axis of ["x", "y", "z"]) document.getElementById(`portable-${axis}`).max = SP.setupPrinterProfile[`${axis}_mm`];
+    if (SP.setupKind === "portable") SP.refreshSetupError();
+  }
+  return { profile: next || PrinterProfile.DEFAULT, explicit: Boolean(next) };
+};
+
+// A draft is kept separate from the outgoing folder's live PrinterProfile.
+SP.askPrinterBed = (initial = null) => new Promise(resolve => {
+  const dialog = document.createElement("dialog");
+  dialog.className = "welcome-dialog printer-settings-dialog";
+  dialog.setAttribute("aria-labelledby", "folder-printer-bed-title");
+  const form = document.createElement("form");
+  const title = document.createElement("h2");
+  title.id = "folder-printer-bed-title";
+  title.textContent = "Printer bed size for this folder";
+  const lead = document.createElement("p");
+  lead.textContent = "Enter the printer's bed width, bed depth and build height in millimetres before configuring this folder.";
+  form.append(title, lead);
+  const inputs = {};
+  for (const [axis, name] of [["x", "Bed width"], ["y", "Bed depth"], ["z", "Build height"]]) {
+    const label = document.createElement("label");
+    label.className = "space-field";
+    label.append(`${name} (mm)`);
+    const input = document.createElement("input");
+    input.type = "number"; input.min = "10"; input.max = "1000"; input.step = "any"; input.required = true;
+    input.value = initial?.[`${axis}_mm`] ?? "";
+    label.append(input); form.append(label); inputs[axis] = input;
+  }
+  const error = document.createElement("p");
+  error.className = "field-error"; error.setAttribute("role", "alert");
+  const actions = document.createElement("div");
+  actions.className = "welcome-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.className = "button secondary"; cancel.textContent = "Cancel";
+  const save = document.createElement("button");
+  save.type = "submit"; save.className = "button primary"; save.textContent = "Continue";
+  actions.append(cancel, save); form.append(error, actions); dialog.append(form);
+  let result = null;
+  cancel.addEventListener("click", () => dialog.close());
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    try {
+      result = PrinterProfile.normalise(Object.fromEntries(["x", "y", "z"].map(axis => [`${axis}_mm`, Number(inputs[axis].value)])));
+      dialog.close();
+    } catch (failure) { error.textContent = failure.message; }
+  });
+  dialog.addEventListener("close", () => { dialog.remove(); resolve(result); }, { once: true });
+  document.body.append(dialog); dialog.showModal(); inputs.x.focus();
+});
+
+SP.ensureSetupPrinterProfile = async ({ update = false } = {}) => {
+  if (SP.setupPrinterProfile) return true;
+  // Multiple navigation callbacks must share the same first-step prompt.
+  if (SP.printerSetupPending) return SP.printerSetupPending;
+  SP.printerSetupPending = (async () => {
+    const requireOwner = SP.spaceOwnerGuard();
+    const profile = await SP.askPrinterBed();
+    if (!profile) return false;
+    requireOwner();
+    if (update) {
+      try {
+        const saved = await SP.saveFolderPrinter(profile);
+        PrinterProfile.loadLocal(saved);
+      } catch (error) { toast(`Printer bed size could not be saved: ${error.message}`, true, 6000); return false; }
+    }
+    SP.setupPrinterProfile = profile;
+    SP.printerSetupActive = !update;
+    return true;
+  })();
+  try { return await SP.printerSetupPending; }
+  catch (error) { toast(error.message, true, 6000); return false; }
+  finally { SP.printerSetupPending = null; }
+};
 
 SP._printerHosts = new Map();
 
@@ -9,12 +116,12 @@ SP.mountPrinterProfiles = () => {
     if (SP._printerHosts.has(host)) return;
     const callbacks = {
       write: async (_key, value) => {
-        const saved = await api("/api/space/printer-profile", { profile: value.profile });
+        const saved = await SP.saveFolderPrinter(value.profile);
         PrinterProfile.loadLocal(saved);
       },
       // Only the printer keys return to defaults, and the reset is persisted.
       reset: async () => {
-        const saved = await api("/api/space/printer-profile", { reset: true });
+        const saved = await SP.saveFolderPrinter(null, { reset: true });
         PrinterProfile.loadLocal(saved);
       },
       onError: error => toast(error.message, true, 6000),
@@ -40,6 +147,8 @@ SP.initPrinterProfile = async () => {
   } catch (error) {
     toast(`Printer settings could not be loaded: ${error.message}`, true, 6000);
   }
+  SP.globalPrinterProfile = { profile: PrinterProfile.current(), explicit: PrinterProfile.configured(),
+    malformed: PrinterProfile.malformedMessage() };
   PrinterProfile.subscribe(profile => {
     SP.storageDrawersForm?.setPrinterProfile(profile);
     SP.cabinetInfo.key = "";
@@ -52,7 +161,19 @@ SP.initPrinterProfile = async () => {
 // ---- Printer Settings dialog: the one PrinterProfile authority, reachable from
 // the setup Summary and from the cabinet panel. Closing it changes nothing else.
 
-SP.openPrinterSettings = () => {
+SP.openPrinterSettings = async () => {
+  if (SP.printerSetupActive && (WS.task === "newspace" || (SP.dialog().open && !SP.isUpdate))) {
+    const profile = await SP.askPrinterBed(SP.setupPrinterProfile);
+    if (profile) {
+      SP.setupPrinterProfile = profile;
+      SP.storageDrawersForm?.setPrinterProfile(profile);
+      if (SP.setupKind === "portable") {
+        for (const axis of ["x", "y", "z"]) document.getElementById(`portable-${axis}`).max = profile[`${axis}_mm`];
+        SP.refreshSetupError();
+      }
+    }
+    return;
+  }
   const dialog = document.getElementById("printer-settings-dialog");
   if (dialog && !dialog.open) dialog.showModal();
 };

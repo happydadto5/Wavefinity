@@ -156,9 +156,11 @@ SP.refreshSetupOutside = () => {
   const x = SP.storageBoxSnap(num("portable-x")), y = SP.storageBoxSnap(num("portable-y")), z = num("portable-z");
   const minField = SP.storageBoxMinimumField();
   const minHeight = Number(state.catalog?.b4b_rules?.min_secure_height_mm);
-  const valid = ["portable-x", "portable-y", "portable-z"].every(id => {
-    const input = document.getElementById(id);
-    return input.value.trim() && !input.validity.badInput && Number(input.value) > 0 && Number(input.value) <= 2000;
+  const bed = SP.setupPrinterProfile || PrinterProfile.current();
+  const valid = ["x", "y", "z"].every((axis, index) => {
+    const input = document.getElementById(`portable-${axis}`);
+    return input.value.trim() && !input.validity.badInput && Number(input.value) > 0
+      && Number(input.value) <= bed[`${axis}_mm`] && [x, y, z][index] <= bed[`${axis}_mm`];
   }) && [x, y, z].every(Number.isFinite) && x >= minField && y >= minField && z >= minHeight;
   if (!valid || SP.setupKind !== "portable") { hideOutside(); hideFit(); return; }
   const space = { kind: "portable", name: "Storage Box", x, y, z, ...SP.storageBoxGridFields(), storage_box: SP.readStorageBoxForm() };
@@ -166,9 +168,7 @@ SP.refreshSetupOutside = () => {
     try {
       const result = await api("/api/space/structural-design", {
         space,
-        // Fix 111 N3: hosted supplies the printer profile so the server can
-        // warn when the case will not fit the printer; local reads its own.
-        printer_profile: PrinterProfile.current(), printer_profile_configured: PrinterProfile.configured(),
+        printer_profile: bed, printer_profile_configured: Boolean(SP.setupPrinterProfile) || PrinterProfile.configured(),
       });
       if (token !== SP.setupOutsideToken) return;
       const size = result.summary?.assembled_envelope_mm;
