@@ -105,6 +105,7 @@
       "handler": "aiConnection",
       "input_fields": [
         "action",
+        "mode",
         "provider",
         "name",
         "url",
@@ -115,6 +116,7 @@
         "trust_endpoint"
       ],
       "output_fields": [
+        "mode",
         "configured",
         "has_key",
         "provider",

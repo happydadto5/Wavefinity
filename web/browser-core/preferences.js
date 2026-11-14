@@ -59,6 +59,7 @@ async function validated(raw) {
   if (!object(raw)) throw new Error('Preferences must be an object.');
   const result = await values('preferences', raw);
   for (const key of UI_KEYS) if (Object.hasOwn(raw, key)) result[key] = structuredClone(raw[key]);
+  if (['manual', 'automatic'].includes(raw.ai_mode)) result.ai_mode = raw.ai_mode;
   if (Object.hasOwn(raw, 'ai_provider')) {
     // Import only named non-secret settings, never a credential or trust grant.
     const { providerSettings } = await import('./ai-providers.js');

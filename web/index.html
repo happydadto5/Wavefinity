@@ -694,12 +694,13 @@
     </div>
   </dialog>
 
-  <dialog id="ai-help-dialog" class="support-layout-dialog ai-help-dialog" aria-labelledby="ai-help-title">
-    <h2 id="ai-help-title">AI Design</h2>
-    <div id="ai-connection-offer" hidden>
-      <p>Copy and paste with your usual chat tool, or connect your own browser-compatible HTTPS AI provider. Direct requests start only when you choose Test connection or Ask my AI.</p>
-      <button type="button" id="ai-connection-configure" class="button secondary">Configure automatic AI</button>
-      <button type="button" id="ai-connection-later" class="button secondary">Not now</button>
+  <dialog id="ai-setup-dialog" class="support-layout-dialog ai-help-dialog" aria-labelledby="ai-setup-title">
+    <h2 id="ai-setup-title">AI Design setup</h2>
+    <div id="ai-connection-offer">
+      <p>Manual: copy a prompt into your own chat tool and paste its reply back.</p>
+      <p>Automatic: connect your own AI provider key and ask it directly. Your prompt and design context are sent to that provider; browser or provider policies may block access.</p>
+      <button type="button" id="ai-connection-later" class="button secondary">Continue with manual</button>
+      <button type="button" id="ai-connection-configure" class="button primary">Configure automatic</button>
     </div>
     <div id="ai-connection-form" hidden>
       <label class="ai-help-field">Provider adapter <select id="ai-connection-provider"><option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic Messages</option><option value="gemini">Gemini generateContent</option></select></label>
@@ -717,17 +718,10 @@
       <button type="button" id="ai-connection-clear" class="button secondary">Clear session key</button>
       <button type="button" id="ai-connection-cancel" class="button secondary">Cancel</button>
     </div>
-    <button type="button" id="ai-connection-edit" class="button secondary" hidden>AI connection settings</button>
-    <p>When you invoke AI, your prompt and design/Space descriptors go to your chosen provider. Geometry generation, meshes and folder files stay on this PC. CORS or organization policy may block direct chat; manual copy/paste remains available. Wavefinity supplies no provider key or proxy.</p>
-    <p class="ai-help-guide">
-      <span>Describe object</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
-      <span>Generate Prompt</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
-      <span>Give the prompt to your AI</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
-      <span>Copy response</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
-      <span>Paste answer</span><span class="ai-help-guide-arrow" aria-hidden="true">→</span>
-      <span>Generate Bin</span>
-    </p>
-    <label class="ai-help-field">1. Describe the object
+  </dialog>
+  <dialog id="ai-help-dialog" class="support-layout-dialog ai-help-dialog" aria-labelledby="ai-help-title">
+    <div class="ai-help-heading"><h2 id="ai-help-title">AI Design</h2><button type="button" id="ai-help-settings" class="button secondary" aria-label="AI Design settings" title="AI Design settings">⚙</button></div>
+    <label class="ai-help-field">1. Describe the object going into the bin.
       <textarea id="ai-help-description" rows="3" maxlength="4000" placeholder="e.g. A tray for my three small screwdrivers"></textarea>
     </label>
     <div id="ai-help-recent-block" class="ai-help-recent-block" hidden>
@@ -735,31 +729,25 @@
       <div id="ai-help-recent-list" class="ai-help-recent-list" role="listbox" aria-label="Recent descriptions" hidden></div>
     </div>
     <div class="button-row ai-help-row">
-      <button id="ai-help-dictate" type="button" class="button secondary" hidden>Dictate</button>
       <button id="ai-help-ask" type="button" class="button primary" hidden>Ask my AI</button>
-      <button id="ai-help-generate" type="button" class="button primary" disabled>2. Generate Prompt</button>
+      <button id="ai-help-generate" type="button" class="button primary" disabled>Generate Prompt</button>
     </div>
     <div id="ai-help-prompt-block" class="ai-help-field" hidden>
-      <label class="ai-help-field">3. Give this prompt to your AI — for example ChatGPT, Claude or Gemini — then copy its reply
+      <label class="ai-help-field">Copy this prompt into your AI
         <textarea id="ai-help-prompt" rows="4" readonly></textarea>
       </label>
       <div class="button-row ai-help-row">
         <button id="ai-help-copy" type="button" class="button secondary">Copy Prompt</button>
       </div>
     </div>
-    <label class="ai-help-field">5. Paste the AI's reply here (step 4 is copying it from your AI)
+    <label class="ai-help-field">2. Paste the AI's reply here.
       <textarea id="ai-help-response" rows="5" placeholder="Paste the AI's reply here"></textarea>
     </label>
     <p id="ai-help-status" class="ai-help-status" role="status" hidden></p>
-    <div id="ai-help-failure-actions" class="button-row ai-help-row">
-      <button id="ai-help-paste-manual" type="button" class="button secondary">Paste the answer manually</button>
-      <button id="ai-help-open-connection" type="button" class="button secondary">AI connection settings</button>
-    </div>
     <div class="button-row ai-help-row">
       <button id="ai-help-repair" type="button" class="button secondary" hidden>Make AI Fix Its Answer</button>
       <button id="ai-help-cancel" type="button" class="button secondary">Cancel</button>
-      <button id="ai-help-modify" type="button" class="button secondary">Modify Current Bin</button>
-      <button id="ai-help-generate-new" type="button" class="button primary">6. Generate as New Bin</button>
+      <button id="ai-help-generate-new" type="button" class="button primary">3. Generate Bin</button>
     </div>
   </dialog>
   <dialog id="bin-name-dialog" class="support-layout-dialog" aria-labelledby="bin-name-dialog-title">

@@ -294,7 +294,7 @@ const AI_SCHEMA = "wavefinity-ai-design-v1";
 // `generatedFor`: the trimmed description the current prompt/session was
 // generated from - Generate Prompt stays disabled while the live description
 // still equals it (Fix 078).
-const aiHelp = { session: null, busy: false, generation: 0, failure: null, recognition: null,
+const aiHelp = { session: null, busy: false, generation: 0, failure: null,
   generatedFor: null, openIdentityKey: null };
 
 function aiTypedSpaceActive() {
@@ -511,21 +511,19 @@ function aiSpaceViolation(design, baseline) {
   return null;
 }
 
-function aiSetStatus(message = "", { error = false, repair = false, actions = false } = {}) {
+function aiSetStatus(message = "", { error = false, repair = false } = {}) {
   const status = $("#ai-help-status");
   if (!status) return;
   status.textContent = message;
   status.hidden = !message;
   status.classList.toggle("error", error);
   const repairButton = $("#ai-help-repair");
-  if (repairButton) repairButton.hidden = !repair;
-  const actionRow = $("#ai-help-failure-actions");
-  if (actionRow) actionRow.hidden = false; // Copy/paste and settings remain available after every outcome.
+  if (repairButton) repairButton.hidden = !repair || aiMode !== "automatic";
 }
 
 function aiSetBusy(busy) {
   aiHelp.busy = busy;
-  ["#ai-help-modify", "#ai-help-generate-new", "#ai-help-repair", "#ai-help-cancel", "#ai-help-ask"].forEach(selector => {
+  ["#ai-help-settings", "#ai-help-generate-new", "#ai-help-repair", "#ai-help-cancel", "#ai-help-ask"].forEach(selector => {
     const button = $(selector);
     if (button) button.disabled = busy;
   });
@@ -555,7 +553,7 @@ function aiSetCopyState(label) {
 function aiShowPrompt(text) {
   const area = $("#ai-help-prompt");
   area.value = text;
-  $("#ai-help-prompt-block").hidden = false;
+  $("#ai-help-prompt-block").hidden = aiMode !== "manual";
   aiSetCopyState("Copy Prompt");
 }
 
@@ -621,7 +619,7 @@ async function aiGeneratePrompt() {
       };
       aiHelp.generatedFor = description;
       aiShowPrompt(result.prompt);
-      aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
+      aiSetStatus(aiMode === "manual" ? "Prompt ready. Copy it into your AI, then paste its reply below." : "Prompt ready.");
       await aiRecordRecentDescription(description);
       return true;
     }, false);
@@ -758,10 +756,7 @@ async function aiInstallCandidate(candidate, session, mode) {
   }, false);
 }
 
-// `mode` is "modify" or "new" - which bottom button the user clicked. Both
-// run the identical parse/session/schema/semantic/geometry/Space-cap proof
-// before either may mutate anything (Fix 078).
-async function aiProcessResponse(mode) {
+async function aiProcessResponse() {
   if (aiHelp.busy) return;
   const text = $("#ai-help-response").value;
   const session = aiHelp.session;
@@ -772,7 +767,7 @@ async function aiProcessResponse(mode) {
     const envelope = aiParseEnvelope(text);
     aiCheckSession(envelope, session);
     const candidate = await aiProveCandidate(envelope, session);
-    if (await aiInstallCandidate(candidate, session, mode)) {
+    if (await aiInstallCandidate(candidate, session, "new")) {
       aiHelp.session = null;
       $("#ai-help-dialog").close();
       toast("AI design applied.");
@@ -808,53 +803,14 @@ async function aiMakeRepairPrompt() {
       response: failure.response,
       error: failure.message,
     });
-    // Never auto-copy behind the user's back (Fix 078): show it and let the
-    // explicit Copy Prompt button own copy state, same as the initial prompt.
+    // Keep the repair prompt for the next explicit Ask my AI action.
     aiShowPrompt(result.prompt);
-    aiSetStatus(aiConnection?.configured ? "Repair prompt ready. Choose Ask my AI, or copy it to your AI and paste its new answer below." : "Repair prompt ready above. Copy it to your AI, then paste its new answer below.", { repair: true });
+    aiSetStatus("Repair prompt ready. Choose Ask my AI.", { repair: true });
   } catch (error) {
     aiSetStatus(friendlyError(error), { error: true, repair: true });
   } finally {
     aiSetBusy(false);
   }
-}
-
-// Dictation is a progressive enhancement: only offered when the browser has it.
-function aiSpeechRecognitionClass(win = window) {
-  return win.SpeechRecognition || win.webkitSpeechRecognition || null;
-}
-
-function aiWireDictation() {
-  const Recognition = aiSpeechRecognitionClass();
-  const button = $("#ai-help-dictate");
-  if (!button || !Recognition) return;
-  button.hidden = false;
-  const stop = () => {
-    aiHelp.recognition = null;
-    button.textContent = "Dictate";
-  };
-  button.addEventListener("click", () => {
-    if (aiHelp.recognition) {
-      aiHelp.recognition.stop();
-      return;
-    }
-    const recognition = new Recognition();
-    recognition.interimResults = false;
-    recognition.continuous = false;
-    recognition.lang = document.documentElement.lang || navigator.language || "en-US";
-    recognition.onresult = event => {
-      const heard = [...event.results].map(one => one[0]?.transcript || "").join(" ").trim();
-      if (!heard) return;
-      const field = $("#ai-help-description");
-      field.value = field.value && !/\s$/.test(field.value) ? `${field.value} ${heard}` : `${field.value}${heard}`;
-      aiUpdateGenerateAvailability();
-    };
-    recognition.onerror = () => { stop(); aiSetStatus("Dictation is not available right now. You can still type.", { error: true }); };
-    recognition.onend = stop;
-    aiHelp.recognition = recognition;
-    button.textContent = "Stop";
-    try { recognition.start(); } catch (_error) { stop(); }
-  });
 }
 
 // Every open is a fresh transaction (Fix 078): all current-dialog working
@@ -869,7 +825,6 @@ function aiResetDialog() {
   aiHelp.failure = null;
   aiHelp.generatedFor = null;
   aiHelp.openIdentityKey = aiIdentityKey();
-  aiHelp.recognition?.stop();
   aiSetCopyState("Copy Prompt");
   aiSetStatus("");
   aiUpdateGenerateAvailability();
@@ -877,6 +832,7 @@ function aiResetDialog() {
 }
 
 let aiConnection = null;
+let aiMode = null;
 async function aiSavedContext() {
   if (!aiSpaceContext()) return {};
   const folder = state.browserFolder, spaceId = state.activeSpaceId;
@@ -887,17 +843,29 @@ async function aiSavedContext() {
   return { inventory_text: inventory_text || "", space_metadata_text, space_id: spaceId };
 }
 async function aiConnectionRefresh() {
-  try {
-    aiConnection = await api("/api/ai/connection", { action: "status" });
-    $("#ai-connection-offer").hidden = aiConnection.configured;
-    $("#ai-connection-edit").hidden = !aiConnection.configured;
-    $("#ai-help-ask").hidden = !aiConnection.configured;
-  } catch (error) { aiSetStatus(friendlyError(error), { error: true }); }
+  aiConnection = await api("/api/ai/connection", { action: "status" });
+  aiMode = aiConnection.mode;
+}
+function aiApplyMode() {
+  $("#ai-help-ask").hidden = aiMode !== "automatic";
+  $("#ai-help-generate").hidden = aiMode !== "manual";
+  $("#ai-help-prompt-block").hidden = aiMode !== "manual" || !$("#ai-help-prompt").value;
+  $("#ai-help-repair").hidden = aiMode !== "automatic" || !aiHelp.failure;
+}
+async function aiChooseMode(mode) {
+  await api("/api/ai/connection", { action: "mode", mode });
+  aiMode = mode;
+  aiApplyMode();
+  $("#ai-setup-dialog").close();
+  if (!$("#ai-help-dialog").open) $("#ai-help-dialog").showModal();
+}
+function aiOpenSetup() {
+  aiConnectionForm(false);
+  if (!$("#ai-setup-dialog").open) $("#ai-setup-dialog").showModal();
 }
 function aiConnectionForm(show) {
   $("#ai-connection-form").hidden = !show;
-  $("#ai-connection-offer").hidden = show || Boolean(aiConnection?.configured);
-  $("#ai-connection-edit").hidden = show || !aiConnection?.configured;
+  $("#ai-connection-offer").hidden = show;
   $("#ai-connection-key").value = "";
   $("#ai-connection-key").placeholder = aiConnection?.has_key ? "Key in session memory (leave blank to keep)" : "Required for direct chat this session";
   $("#ai-connection-provider").value = aiConnection?.provider || "openai";
@@ -917,7 +885,8 @@ async function aiConnectionAction(action) {
   for (const id of ["save", "test", "clear"]) $("#ai-connection-" + id).disabled = true;
   try {
     await api("/api/ai/connection", payload);
-    if (action === "save" || action === "clear") { await aiConnectionRefresh(); aiConnectionForm(false); }
+    if (action === "save") { await aiConnectionRefresh(); await aiChooseMode("automatic"); }
+    else if (action === "clear") { await aiConnectionRefresh(); aiConnectionForm(true); status.textContent = "Session key cleared."; }
     else status.textContent = "Connection worked. Your AI answered.";
   } catch (error) { status.textContent = friendlyError(error); }
   finally { for (const id of ["save", "test", "clear"]) $("#ai-connection-" + id).disabled = false; }
@@ -927,73 +896,62 @@ async function aiAsk() {
   if (!aiHelp.session || aiHelp.generatedFor !== $("#ai-help-description").value.trim()) await aiGeneratePrompt();
   if (!aiHelp.session || aiHelp.busy) return;
   aiSetBusy(true);
-  let callFailed = false;
   try {
     aiCheckSession(null, aiHelp.session);
     aiSetStatus("Asking your AI...");
-    let result;
-    try {
-      result = await api("/api/ai/ask", { prompt: $("#ai-help-prompt").value });
-    } catch (callError) {
-      callFailed = true;
-      throw callError;
-    }
+    const result = await api("/api/ai/ask", { prompt: $("#ai-help-prompt").value });
     $("#ai-help-response").value = result.answer;
     const envelope = aiParseEnvelope(result.answer);
     aiCheckSession(envelope, aiHelp.session);
     await aiProveCandidate(envelope, aiHelp.session);
     aiHelp.failure = null;
-    aiSetStatus("Your AI's design is ready. Choose Modify Current Bin or Generate as New Bin.");
+    aiSetStatus("Your AI's answer is ready. Review it, then choose Generate Bin.");
   } catch (error) {
     const repairable = error instanceof AiHelpError && !error.stale && !error.operational && Boolean(aiHelp.session);
     if (repairable) aiHelp.failure = { response: $("#ai-help-response").value, message: error.message, session: aiHelp.session };
-    aiSetStatus(friendlyError(error), { error: true, repair: repairable, actions: callFailed });
+    aiSetStatus(friendlyError(error), { error: true, repair: repairable });
   } finally { aiSetBusy(false); }
-}
-
-function aiPasteManually() {
-  $("#ai-help-prompt-block").hidden = false;
-  aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
-  $("#ai-help-response").focus();
-}
-
-function aiOpenConnectionSettings() {
-  aiConnectionForm(true);
-  $("#ai-connection-url").focus();
 }
 
 function aiWireHelp() {
   const dialog = $("#ai-help-dialog");
   if (!dialog) return;
-  $("#ai-help-open").addEventListener("click", () => {
+  const setup = $("#ai-setup-dialog");
+  $("#ai-help-open").addEventListener("click", async () => {
     aiResetDialog();
-    aiConnectionForm(false);
-    aiConnectionRefresh();
-    if (!dialog.open) dialog.showModal();
+    try {
+      await aiConnectionRefresh();
+      aiApplyMode();
+      if (!aiMode || (aiMode === "automatic" && !aiConnection.has_key)) aiOpenSetup();
+      else if (!dialog.open) dialog.showModal();
+    } catch (error) {
+      if (!dialog.open) dialog.showModal();
+      aiSetStatus(friendlyError(error), { error: true });
+    }
   });
+  $("#ai-help-settings").addEventListener("click", aiOpenSetup);
   $("#ai-connection-configure").addEventListener("click", () => aiConnectionForm(true));
-  $("#ai-connection-edit").addEventListener("click", () => aiConnectionForm(true));
-  $("#ai-connection-later").addEventListener("click", () => { $("#ai-connection-offer").hidden = true; });
+  $("#ai-connection-later").addEventListener("click", async () => {
+    try { await aiChooseMode("manual"); }
+    catch (error) { aiConnectionForm(true); $("#ai-connection-status").textContent = friendlyError(error); }
+  });
   $("#ai-connection-cancel").addEventListener("click", () => aiConnectionForm(false));
   $("#ai-connection-test").addEventListener("click", () => aiConnectionAction("test"));
   $("#ai-connection-save").addEventListener("click", () => aiConnectionAction("save"));
   $("#ai-connection-clear").addEventListener("click", () => aiConnectionAction("clear"));
   $("#ai-connection-url").addEventListener("input", () => { $("#ai-connection-trust").checked = false; });
-  dialog.addEventListener("close", () => { $("#ai-connection-key").value = ""; });
+  setup.addEventListener("close", () => { $("#ai-connection-key").value = ""; });
   window.addEventListener("pagehide", () => { $("#ai-connection-key").value = ""; aiConnection = null; });
   $("#ai-help-ask").addEventListener("click", aiAsk);
-  $("#ai-help-paste-manual").addEventListener("click", aiPasteManually);
-  $("#ai-help-open-connection").addEventListener("click", aiOpenConnectionSettings);
   $("#ai-help-description").addEventListener("input", aiUpdateGenerateAvailability);
   $("#ai-help-generate").addEventListener("click", aiGeneratePrompt);
-  $("#ai-help-modify").addEventListener("click", () => aiProcessResponse("modify"));
-  $("#ai-help-generate-new").addEventListener("click", () => aiProcessResponse("new"));
+  $("#ai-help-generate-new").addEventListener("click", aiProcessResponse);
   $("#ai-help-repair").addEventListener("click", aiMakeRepairPrompt);
   $("#ai-help-copy").addEventListener("click", async () => {
     const copied = await aiCopyText($("#ai-help-prompt").value, $("#ai-help-prompt"));
     if (copied) {
       aiSetCopyState("Copied");
-      aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
+      aiSetStatus(aiMode === "manual" ? "Prompt ready. Copy it into your AI, then paste its reply below." : "Prompt ready.");
     } else {
       aiSetCopyState("Copy Prompt");
       aiSetStatus("Select the prompt and copy it.", { error: true });
@@ -1023,13 +981,10 @@ function aiWireHelp() {
     });
   }
   $("#ai-help-cancel").addEventListener("click", () => {
-    aiHelp.recognition?.stop();
     dialog.close();
   });
   // A check in flight owns the dialog; closing never applies anything half-checked.
   dialog.addEventListener("cancel", event => {
     if (aiHelp.busy) event.preventDefault();
-    else aiHelp.recognition?.stop();
   });
-  aiWireDictation();
 }

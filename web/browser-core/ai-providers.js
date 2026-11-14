@@ -43,8 +43,13 @@ function status(settings) {
 
 export async function aiConnection(payload = {}) {
   if (payload.action === 'status') {
-    const saved = (await loadPreferences()).ai_provider;
-    return status(connection || (saved ? providerSettings(saved) : null));
+    const prefs = await loadPreferences();
+    return { ...status(connection || (prefs.ai_provider ? providerSettings(prefs.ai_provider) : null)), mode: prefs.ai_mode || null };
+  }
+  if (payload.action === 'mode') {
+    if (!['manual', 'automatic'].includes(payload.mode)) throw fail('Choose an AI mode.');
+    await mutatePreferences(prefs => { prefs.ai_mode = payload.mode; });
+    return { mode: payload.mode };
   }
   if (payload.action === 'clear') {
     clearKey();

@@ -1164,13 +1164,8 @@ dialog:not([open]) { display: none; }
 .ai-help-dialog .ai-help-row { margin: 0 0 12px; }
 .ai-help-dialog .ai-help-status { margin: 0 0 12px; line-height: 1.4; color: var(--ink); }
 .ai-help-dialog .ai-help-status.error { color: var(--danger); }
-.ai-help-guide {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
-  margin: 0 0 14px; padding: 8px 10px; border-radius: 7px;
-  background: var(--teal-soft); color: var(--teal-dark);
-  font-size: 12px; font-weight: 650;
-}
-.ai-help-guide-arrow { color: var(--muted); font-weight: 400; }
+.ai-help-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ai-help-heading h2 { margin-right: auto; }
 .ai-help-recent-block { margin: 0 0 12px; }
 .ai-help-recent-list {
   display: grid; gap: 4px; margin-top: 6px; max-height: 220px; overflow-y: auto;
