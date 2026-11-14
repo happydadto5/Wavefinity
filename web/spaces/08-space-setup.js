@@ -937,6 +937,12 @@ SP.enterSetupFor = async (folder, data, { rememberPick = false } = {}) => {
     SP.configureData = folder;
     SP.setupPrefillSpace = null;
 
+    // Remember an explicit hosted pick regardless of which setup screen follows.
+    if (rememberPick && state.runtime.hosted && folder?.handle && !folder.home_name) {
+        try { await SP.rememberHostedHome(folder.handle); }
+        catch (error) { console.error(error); }
+    }
+
     // Includes "surface" for recovery: a Surface created during an earlier
     // incomplete v4 pass, missing setup_version, must still safely prefill
     // instead of falling through to the generic Configure-vs-Untyped prompt
@@ -974,12 +980,6 @@ SP.enterSetupFor = async (folder, data, { rememberPick = false } = {}) => {
     // A truly unmanaged folder is configured as a Space folder automatically
     // (SP.configureData stays set as the target for the first Space) - no
     // prompt. The user lands on the Spaces welcome screen to create it.
-    // A hosted pick that lands here is remembered as "home" so the next
-    // launch resumes to this folder and lists its Spaces.
-    if (rememberPick && state.runtime.hosted && folder?.handle && !folder.home_name) {
-        try { await SP.rememberHostedHome(folder.handle); }
-        catch (error) { console.error(error); }
-    }
     SP.close();
     return WS.go("picker");
 };
