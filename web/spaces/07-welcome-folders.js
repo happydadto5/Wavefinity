@@ -64,7 +64,7 @@ SP.afterPick = async (folder, leaveOptions) => {
         SP.showFolderAccessNeeded("denied");
         return null;
       }
-      folder = { ...folder, handle: await home.handle.getDirectoryHandle(folder.home_name) };
+      folder = { ...folder, handle: await home.handle.getDirectoryHandle(folder.home_name), home_handle: home.handle };
     }
     // A hosted object with no handle is not a folder and is never adopted.
     if (!folder.handle) {
@@ -74,7 +74,7 @@ SP.afterPick = async (folder, leaveOptions) => {
     SP.pendingReconnect = null; // a fresh pick replaces the remembered folder
     const inspected = await SP.inspectHosted(folder);
     if (inspected.needs_setup) {
-      SP.enterSetupFor(folder, inspected);
+      await SP.enterSetupFor(folder, inspected, { rememberPick: true });
       return inspected;
     }
     return SP.useHostedFolder(folder, { openPreferredView: true });
@@ -201,6 +201,21 @@ SP.sameHostedHandle = async (a, b) => {
   if (!a || !b || typeof a.isSameEntry !== "function") return false;
   try { return await a.isSameEntry(b); }
   catch (_error) { return false; }
+};
+
+// Records the parent folder as the hosted "home" so an "active" record that
+// carries a home_name never references a home that was not saved. A home
+// record already pointing at this same folder is left untouched.
+SP.rememberHostedHome = async handle => {
+  if (!handle) return;
+  const existing = SP.hostedHome || await WFFileSystem.load("home");
+  if (existing?.handle && await SP.sameHostedHandle(existing.handle, handle)) {
+    SP.hostedHome = existing;
+    return;
+  }
+  const home = { handle };
+  await WFFileSystem.save("home", home);
+  SP.hostedHome = home;
 };
 
 SP.rememberHostedRecent = async (folder, info, requireCurrent = () => {}) => {

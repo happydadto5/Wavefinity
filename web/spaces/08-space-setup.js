@@ -933,7 +933,7 @@ SP.initializeDesignForActiveSpace = async () => {
 // Configure-vs-Untyped prompt. Shared by SP.openExisting() and SP.launch()
 // so neither one silently migrates a folder it merely inspected - see
 // Fix 004 Correction 6.A/E.
-SP.enterSetupFor = (folder, data) => {
+SP.enterSetupFor = async (folder, data, { rememberPick = false } = {}) => {
     SP.configureData = folder;
     SP.setupPrefillSpace = null;
 
@@ -974,6 +974,12 @@ SP.enterSetupFor = (folder, data) => {
     // A truly unmanaged folder is configured as a Space folder automatically
     // (SP.configureData stays set as the target for the first Space) - no
     // prompt. The user lands on the Spaces welcome screen to create it.
+    // A hosted pick that lands here is remembered as "home" so the next
+    // launch resumes to this folder and lists its Spaces.
+    if (rememberPick && state.runtime.hosted && folder?.handle && !folder.home_name) {
+        try { await SP.rememberHostedHome(folder.handle); }
+        catch (error) { console.error(error); }
+    }
     SP.close();
     return WS.go("picker");
 };
@@ -985,7 +991,7 @@ SP.openExisting = async () => {
         ? await SP.inspectHosted(folder)
         : (await api("/api/space/inspect", { output: folder })).folder;
     if (data.needs_setup) {
-        SP.enterSetupFor(folder, data);
+        await SP.enterSetupFor(folder, data, { rememberPick: true });
         return true;
     }
     return SP.afterPick(folder);
@@ -1063,8 +1069,11 @@ SP.fail = (message, selector) => {
 SP.resumeSavedHosted = async saved => {
   try {
     const home = saved.home_name ? await WFFileSystem.load("home") : null;
-    const handle = saved.home_name ? await home.handle.getDirectoryHandle(saved.home_name) : saved.handle;
-    const folder = { handle, name: saved.home_name || handle.name, ...(saved.home_name ? { home_name: saved.home_name } : {}) };
+    // No home record: the active record's own handle is the Space folder
+    // itself, so resume from it as a plain folder.
+    const viaHome = Boolean(saved.home_name && home?.handle);
+    const handle = viaHome ? await home.handle.getDirectoryHandle(saved.home_name) : saved.handle;
+    const folder = { handle, name: viaHome ? saved.home_name : handle.name, ...(viaHome ? { home_name: saved.home_name } : {}) };
     const data = await SP.inspectHosted(folder);
     SP.assertExpectedHostedIdentity(data, saved.space_id || null);
     if (data.needs_setup) {

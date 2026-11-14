@@ -553,6 +553,12 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   // live editor identity, so it may run before the atomic identity
   // transition below (Fix 032 Correction 2, item 7). state.browserFolder
   // itself is set inside SP.applyFolder(), never here.
+  // An active record carrying a home_name must never reference an unrecorded
+  // home: when the parent handle is in hand, save "home" in the same act.
+  if (folder.home_name && folder.home_handle) {
+    await SP.rememberHostedHome(folder.home_handle);
+    requireOwner();
+  }
   await WFFileSystem.queueFolderWrite(folder.handle, () => {
     requireOwner();
     return WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null, ...(folder.home_name ? { home_name: folder.home_name } : {}) });
