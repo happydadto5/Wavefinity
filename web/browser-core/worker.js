@@ -3,9 +3,13 @@ let py, manifold, identity;
 const limit = 1536 * 1024 * 1024;
 const local = path => new URL(path, base).href;
 function capacity() {
+  // The manifold bridge factory (vendor/manifold64/bridge64.mjs) returns only
+  // locateFile/calledRun/Solid/make; its wasm memory (HEAPU8) is not exposed to JS,
+  // so it cannot be measured here. The guard is therefore scoped to the heaps that
+  // are readable: Pyodide's always, and the bridge's only if a build exposes it.
   const pythonBytes = py?._module?.HEAPU8?.buffer.byteLength;
-  const meshBytes = manifold?.HEAPU8?.buffer.byteLength;
-  if (!pythonBytes || !meshBytes) throw new Error('Cannot determine WebAssembly heap capacity.');
+  if (!pythonBytes) throw new Error('Cannot determine WebAssembly heap capacity.');
+  const meshBytes = manifold?.HEAPU8?.buffer?.byteLength || 0;
   if (pythonBytes + meshBytes > limit) throw new Error('Local geometry memory limit exceeded.');
 }
 async function initialize() {
@@ -62,8 +66,7 @@ self.onmessage = async ({ data: job }) => {
       return;
     }
     if (typeof job.path !== 'string' || !job.path.startsWith('/api/')) { send('error', { error: unsupported, status: 404 }); return; }
-    dispatchRoute ??= py.runPython("from wf_browser_core.route_dispatch import dispatch_worker_json
-dispatch_worker_json");
+    dispatchRoute ??= py.runPython("from wf_browser_core.route_dispatch import dispatch_worker_json\ndispatch_worker_json");
     capacity();
     const file = (bytes, name, mime) => {
       const buffer = bytes instanceof ArrayBuffer ? bytes : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
