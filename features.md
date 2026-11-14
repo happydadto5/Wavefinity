@@ -15,8 +15,8 @@ Modify Current Bin and Generate as New Bin remain available. Unsupported
 browsers get a pre-Space capability gate, temporary preview/download notices
 and explicit original-folder or Space/preferences export recovery controls.
 Suggestions become local text downloads; slicer/log actions explain browser
-limits and Print remains intact. Final route assembly/deployment belongs to
-B14. See [browser capabilities and recovery](docs/static-capability-differences.md).
+limits and Print remains intact. See
+[browser capabilities and recovery](docs/static-capability-differences.md).
 
 Ordinary 21 mm and 42 mm Gridfinity bins offer two filament-saving base
 choices beside the Grid select. **Base** is Hollow by default: the feet have
@@ -53,7 +53,7 @@ the band into several closed parts, kept registered in the same object.
 >
 > **Maintenance rule:** Any fix that adds, removes, renames, or materially changes a user-facing feature or option must update this file before the work is considered complete. If the change affects something an outside AI could legally choose, configure, return, or must avoid, the same fix must also update `ai-features.md`.
 >
-> Last reviewed: **2026-09-26**
+> Last reviewed: **2026-11-14**
 
 ---
 
@@ -78,8 +78,7 @@ exports use a browser-native writer with named parts, filament assignments
 and package/mesh integrity checks. Output files use local Blob handles: save
 to the selected folder, or download (a single ZIP for a multi-file set).
 Folder saves preserve collision choices and restore earlier files if a later
-write fails. Final route assembly remains B14 work; plate packaging and Print
-are separate migration packages. See
+write fails. See
 [browser outputs](docs/reference/browser-outputs.md).
 
 Browser Space/folder and preference route modules now use selected browser
@@ -87,8 +86,7 @@ directory handles, the existing `.wavefinity.json` identity, and queued folder
 writes. Explicit Space and preference backup/import APIs support recovery;
 imports without folder access are recovery data and do not enable autosave.
 Show Folder displays the selected folder in the app. A storage move retains
-the original folder as a reported recovery copy. Final route/UI assembly is
-still B14 work; these modules do not establish a complete browser edition.
+the original folder as a reported recovery copy.
 See [browser Space persistence](docs/reference/browser-space-persistence.md).
 
 The B10 local drawer adapter covers all inventory, design-source, fill,
@@ -99,8 +97,8 @@ person to open the named file in Bambu Studio. Only **I opened it in Bambu
 Studio**, for the same Space, design epoch and unchanged inventory/layout,
 records Printed. Saving the file alone leaves status unchanged; there is no
 Prepared status. Missing files, printer fit and partial generation retain
-their existing checks and errors. Final worker/route assembly remains B14;
-structural Space Print is covered by the B11 adapters below.
+their existing checks and errors. Structural Space Print is covered by the B11
+adapters below.
 
 The B11 browser adapters cover Storage Box cases, lids and hardware, Storage
 Drawers cabinets and drawers, Surface Base Trim, and pegboard hooks using the
@@ -112,15 +110,12 @@ files retain manifest ownership checks and interrupted-save recovery. Builds
 capture the Space, inventory and printer settings; stale results cannot be
 applied to another Space. Wavefinity 7 mm and Gridfinity 21/42 mm floors,
 external-plate clearance, lids, magnets, stacking and side openings retain
-their current rules and physical-fit limitations. Final route/worker assembly
-and shipping-bundle regeneration remain B14 work. See
+their current rules and physical-fit limitations. See
 [browser structural operations](docs/reference/browser-structural-operations.md).
 
-The browser migration has a Python dispatcher and bundled catalog/editor routes
+The browser edition has a Python dispatcher and bundled catalog/editor routes
 for validation, feature edits, layout fitting and pegboard layout choices.
-They share the existing Python rules and saved Space grid checks. Final worker
-and UI assembly remains a later migration step; these modules alone do not
-establish a complete browser edition. See
+They share the existing Python rules and saved Space grid checks. See
 [`browser-editor-routes.md`](docs/reference/browser-editor-routes.md).
 
 An earlier isolated browser geometry experiment has been removed from the
@@ -145,7 +140,7 @@ lid is assessed against the one-cell envelope and is **unsupported on both
 Gridfinity pitches** (its open swing reaches about 2.4 mm behind the bin against
 a 0.25 mm gap; nominal, unverified): the Lid selector omits it, says why, and
 saved or API designs asking for it are refused. It is never combined with Lid
-for stacking and makes no stackable claim. Awaiting Andrew's product decision.
+for stacking and makes no stackable claim. Hinged lids are permanently refused on Gridfinity.
 The No-Space Designer now has a Grid selector. Switching the untouched initial
 starter to Gridfinity starts at one cell by one cell and six height units.
 Otherwise switching grid keeps dimensions in millimetres and refuses sizes that
@@ -786,9 +781,7 @@ Options include:
 - diameter;
 - taper;
 - spacing;
-- X quantity;
-- Y quantity;
-- layout direction/orientation.
+- quantity and layout direction (in the top-level `count` and `along` fields; `options.count_x` / `options.count_y` are legacy/non-AI fields).
 
 ---
 
@@ -812,7 +805,7 @@ Divider bottoms support configurable bottom construction, including sloped/curve
 
 Controls include geometry such as:
 
-- bottom angle/depth;
+- bottom angle/depth (prefer setting `bottom_angle`; `slope_base` is an older compatibility flag);
 - support/crossbar behavior;
 - reverse/alternate behavior where supported.
 
@@ -851,7 +844,7 @@ Options include:
 Options include:
 
 - total height;
-- step count;
+- step count (in the top-level `count` field; `options.count` is a legacy/non-AI field);
 - quantity/layout;
 - sizing;
 - layout direction/orientation.
@@ -910,9 +903,9 @@ regardless of what style or rotation the last Label in this Space used.
 
 ## 6.10 Pocket — Legacy/internal
 
-A Pocket feature remains understood internally for compatibility but is **not currently palette-visible** as a normal user-facing feature.
+A Pocket feature remains understood internally for compatibility but is **not currently palette-visible** as a normal user-facing feature and is **not offered for AI Design**.
 
-Do not treat it as a current advertised feature unless it is deliberately restored to the palette.
+Do not treat it as a current advertised feature or offer it to AI Design unless it is deliberately restored to the palette.
 
 ---
 

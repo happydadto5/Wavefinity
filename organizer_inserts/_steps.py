@@ -25,7 +25,7 @@ def steps_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float
     capabilities=("qty", "size", "along"),
     options=(
         OptionDefinition("Step height", "height", "", minimum=0.1, note="mm of the tallest step; blank = half the bin height"),
-        OptionDefinition("Count", "count", "3", "integer", False, minimum=1, note="number of steps"),
+        OptionDefinition("Count", "count", "3", "integer", False, legacy=True, minimum=1, note="number of steps"),
     ), order=80,
 )
 def build_steps(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:

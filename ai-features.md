@@ -8,23 +8,13 @@ folder files remain on the PC. Never request or return credentials in an AI
 design response. Unsupported browsers have temporary previews/downloads
 only, with no Space autosave. Recovery means opening the same site in Windows
 desktop Chrome/Edge and selecting the original folder, or importing a saved
-Space/preferences export there; no automatic cross-browser transfer exists.
-B14 still owns final route assembly. See
+Space/preferences export there; no automatic cross-browser transfer exists. See
 [browser capabilities](docs/static-capability-differences.md).
-
-Ordinary Gridfinity bins may set `box.corner_feet` to `true` (default `false`)
-to use only corner-cell feet (the UI's Feet: Corners only). Built-in wavy
-supports, trimmed to the standard foot outline, carry the floor of the other
-cells, so the bin still seats in a baseplate and needs no slicer supports.
-Magnet pockets then occur only in the corner feet. `box.hollow_base` controls
-whether the feet are hollow. Wavefinity bins ignore this option. Include it
-only when requested.
 
 Browser ordinary-output adapters use the same bin design schema and geometry
 rules. Export prepares files locally for the person's chosen folder or a
 download; multiple downloaded files travel together in a ZIP. Do not return
-export URLs or claim files have been saved. Final browser route assembly is
-a later migration package.
+export URLs or claim files have been saved.
 
 Browser drawer Print prepares a local 3MF for the person to open in Bambu
 Studio. Printed changes only after their explicit confirmation for the same
@@ -37,8 +27,7 @@ Drawers and Surface Print, including combined container/bin Print. They build
 from the selected Space; cabinet structure is never an ordinary bin design
 or inventory row. Container floors and all existing Gridfinity options retain
 the canonical geometry and fit limits. External baseplate clearance remains
-provisional; do not claim verified physical fit. Final browser route assembly
-remains B14 work.
+provisional; do not claim verified physical fit.
 
 An ordinary bin on any supported grid may set `box.accent_band` to `true` for
 a top 1 mm accent (default `false`). `box.accent_color` defaults to `"blue"`;
@@ -145,6 +134,12 @@ unverified), so it is not a Gridfinity Lid choice and each grid row carries a
 selected grid, using the same catalog as the editor.
 Physical grid-lid fit is not yet print-confirmed.
 Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Gridfinity Side Openings are available on both pitches subject to the protected zones below. Edge Mount is excluded because it projects beyond the cell envelope; only Andrew may approve a separate inside-envelope replacement.
+
+## Gridfinity base options
+
+- `box.magnet_holes`: ordinary 42 mm Gridfinity bins may set `box.magnet_holes` to `"6x2"` for magnet pockets or `"none"` (default). Never use `"6x2"` on Wavefinity, 21 mm Gridfinity, or container floors. The 6.5 mm diameter and 2.4 mm depth are unconfirmed starting values, not verified fit.
+- `box.hollow_base`: ordinary Gridfinity bins at either pitch have `box.hollow_base` on (`true`) by default (the UI's Base: Hollow); set it to `false` for solid feet and base when requested. It has no effect on Wavefinity bins or container floors. Physical print performance is unverified.
+- `box.corner_feet`: ordinary Gridfinity bins may set `box.corner_feet` to `true` (default `false`) to use only corner-cell feet (the UI's Feet: Corners only). Built-in wavy supports, trimmed to the standard foot outline, carry the floor of the other cells, so the bin still seats in a baseplate and needs no slicer supports. On bins up to two cells each way, Corners only changes nothing because every cell already has a foot. Magnet pockets then occur only in the corner feet. `box.hollow_base` controls whether the feet are hollow. Wavefinity bins ignore this option. Include it only when requested.
 A Space's grid is fixed when created. Bins cannot enter a Space
 with a different grid. An external older design without a grid means Wavefinity;
 a saved bin inside a Space inherits that source Space's grid.
@@ -332,7 +327,7 @@ Typical controls:
 - diameter;
 - taper;
 - spacing;
-- quantity/layout.
+- quantity/layout — lives in the top-level `count` and `along` fields (do not use `options.count_x` or `options.count_y`).
 
 ## Dividers
 
@@ -345,7 +340,7 @@ Typical controls:
 - straight/wavy divider walls;
 - X/Y layout;
 - spacing;
-- bottom construction/slope behavior;
+- bottom construction/slope behavior (prefer setting `options.bottom_angle`; `options.slope_base` is an older compatibility flag);
 - compartment merging/spans;
 - per-compartment Scoop behavior;
 - Divider labels.
@@ -371,7 +366,7 @@ Tiered shelves/riser.
 Typical controls:
 
 - height;
-- number of steps;
+- number of steps — lives in the top-level `count` field (do not use `options.count`);
 - quantity/layout.
 
 ## Scoop
@@ -409,6 +404,10 @@ The generated prompt supplies the exact legal relief values.
 Lettering is automatically centered. Internal transport/editor fields that are not user choices must not be invented.
 
 **A design may contain at most one rim Label in total, not one per rim side.** A returned design with more than one rim Label is a semantic-answer defect and is rejected before it can be applied, the same as any other repairable defect.
+
+## Pocket (legacy/internal)
+
+Pocket is a legacy/internal compatibility part and is not palette-visible or offered for AI Design. Never add a `pocket` part to a returned design.
 
 ---
 
@@ -719,10 +718,3 @@ Update this file whenever a fix changes anything an outside AI could reasonably 
 - changed AI recommend-only restriction.
 
 If a change is implementation-only and does not affect what the outside AI may legally choose or return, this file does not need a cosmetic update.
-
-
-Ordinary 42 mm Gridfinity bins may set `box.magnet_holes` to `"6x2"` for magnet pockets or `"none"` (default). Never use `"6x2"` on Wavefinity, 21 mm Gridfinity, or container floors. The 6.5 mm diameter and 2.4 mm depth are unconfirmed starting values, not verified fit.
-
-Ordinary Gridfinity bins at either pitch have `box.hollow_base` on by default
-(the UI's Base: Hollow); set it to false for solid feet and base when requested. It has no effect on
-Wavefinity bins or container floors. Physical print performance is unverified.

@@ -901,6 +901,14 @@ def validate_bin_magnets(box: "BoxSpec", grid: str) -> None:
         raise ValueError("Magnet holes are only available on ordinary 42 mm Gridfinity bins")
 
 
+ACCENT_COLORS = ("blue", "red", "green", "yellow", "orange", "purple", "white", "black")
+DEFAULT_ACCENT_COLOR = "blue"
+GRIDFINITY_MAGNET_HOLE_CHOICES = ("none", "6x2")
+DEFAULT_MAGNET_HOLES = "none"
+DEFAULT_HOLLOW_BASE = True
+DEFAULT_CORNER_FEET = False
+
+
 @dataclass(frozen=True)
 class BoxSpec:
     x: float = 3.0 * GRID_PITCH
@@ -933,11 +941,11 @@ class BoxSpec:
     side_openings: SideOpeningSpec = field(default_factory=SideOpeningSpec)
     # Pegboard Space mounting. Inert for every ordinary/legacy design.
     pegboard: PegboardMountSpec = field(default_factory=PegboardMountSpec)
-    magnet_holes: str = "none"
+    magnet_holes: str = DEFAULT_MAGNET_HOLES
     accent_band: bool = False
-    accent_color: str = "blue"
-    hollow_base: bool = True
-    corner_feet: bool = False
+    accent_color: str = DEFAULT_ACCENT_COLOR
+    hollow_base: bool = DEFAULT_HOLLOW_BASE
+    corner_feet: bool = DEFAULT_CORNER_FEET
 
     def __post_init__(self) -> None:
         if not isinstance(self.corner_feet, bool):
@@ -946,11 +954,9 @@ class BoxSpec:
             raise ValueError("Hollow base must be a boolean")
         if not isinstance(self.accent_band, bool):
             raise ValueError("Accent band must be true or false")
-        if self.accent_color not in (
-            "blue", "red", "green", "yellow", "orange", "purple", "white", "black",
-        ):
+        if self.accent_color not in ACCENT_COLORS:
             raise ValueError("Accent color must be blue, red, green, yellow, orange, purple, white or black")
-        if self.magnet_holes not in ("none", "6x2"):
+        if self.magnet_holes not in GRIDFINITY_MAGNET_HOLE_CHOICES:
             raise ValueError("Magnet holes must be none or 6x2")
         if self.b4b.enabled and self.magnet_holes != "none":
             raise ValueError("Magnet holes are only available on ordinary 42 mm Gridfinity bins")

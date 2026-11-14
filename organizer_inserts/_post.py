@@ -152,8 +152,8 @@ def check_post_geometry_budget(box: BoxSpec, features: list[Feature], base_z: fl
         OptionDefinition("Diameter", "diameter", "12", minimum=0.1, note="mm at the base; must fit the zone"),
         OptionDefinition("Taper", "taper", "0", minimum=0.0, note="mm the peg narrows over its height; must be smaller than the diameter"),
         OptionDefinition("Spacing", "spacing", "4", minimum=0.0, note="mm between neighbouring posts"),
-        OptionDefinition("X quantity", "count_x", "", "integer", False, minimum=0, maximum=MAX_DIVIDER_COUNT, note="posts across X; 0 = none"),
-        OptionDefinition("Y quantity", "count_y", "", "integer", False, minimum=0, maximum=MAX_DIVIDER_COUNT, note="posts across Y; 0 = none"),
+        OptionDefinition("X quantity", "count_x", "", "integer", False, legacy=True, minimum=0, maximum=MAX_DIVIDER_COUNT, note="posts across X; 0 = none"),
+        OptionDefinition("Y quantity", "count_y", "", "integer", False, legacy=True, minimum=0, maximum=MAX_DIVIDER_COUNT, note="posts across Y; 0 = none"),
     ), order=40,
 )
 def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:

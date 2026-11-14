@@ -160,7 +160,7 @@
     "unit_mm": 7.0
   },
   "base_unit": 7.0,
-  "build": "bc7234ff350b044f1cd2e767e0c45c777bdd0034bf186d34bc7dedcb887caf15",
+  "build": "0a2a3a349a889d6b90bd27db80ee091cde5704c2be646f35955d6906d0331aa0",
   "connector_rules": {
     "arm_thickness_floor_mm": 0.77,
     "arm_thickness_mm": 1.0,
@@ -1110,6 +1110,7 @@
         },
         {
           "key": "count_x",
+          "legacy": true,
           "maximum": 200,
           "minimum": 0,
           "note": "posts across X; 0 = none",
@@ -1117,6 +1118,7 @@
         },
         {
           "key": "count_y",
+          "legacy": true,
           "maximum": 200,
           "minimum": 0,
           "note": "posts across Y; 0 = none",
@@ -1605,6 +1607,7 @@
         },
         {
           "key": "count",
+          "legacy": true,
           "minimum": 1,
           "note": "number of steps",
           "type": "integer"

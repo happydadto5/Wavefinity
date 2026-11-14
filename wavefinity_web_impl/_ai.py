@@ -12,7 +12,17 @@ from organizer_inserts import FEATURE_DEFINITIONS, Feature, Layout
 from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED
 
 from organizer_engine import GRID_PITCH, BoxSpec
-from organizer_engine._specs import validate_grid, cross_grid_message, grid_hinged_lid_refusal
+from organizer_engine._specs import (
+    ACCENT_COLORS,
+    DEFAULT_ACCENT_COLOR,
+    DEFAULT_CORNER_FEET,
+    DEFAULT_HOLLOW_BASE,
+    DEFAULT_MAGNET_HOLES,
+    GRIDFINITY_MAGNET_HOLE_CHOICES,
+    cross_grid_message,
+    grid_hinged_lid_refusal,
+    validate_grid,
+)
 from ._runtime import default_design
 from ._designs import _is_base_trim_design, validate_design_payload
 
@@ -115,11 +125,20 @@ AI_MEDIA_REASON = (
     "Recommend the person add it themselves with Photo Nest inside Wavefinity; "
     "never put this part in the returned design."
 )
+_ACCENT_BAND_RULES: dict[str, Any] = {
+    "accent_band": {"type": "boolean", "default": False},
+    "accent_color": {"default": DEFAULT_ACCENT_COLOR, "choices": list(ACCENT_COLORS)},
+    "band_height_mm": 1.0,
+    "filament_slot": 2,
+    "body_only": True,
+}
 AI_MODIFIER_BLOCKS = (
     ("accent_band", "Top 1 mm Accent",
-     "Set box.accent_band=true only when requested (default false). "
-     "box.accent_color defaults to blue; choices are blue, red, green, yellow, orange, purple, white, black. "
-     "Only the body's top 1 mm, including an open stacking rim, becomes named 3MF parts on filament slot 2. "
+     f"Set box.accent_band=true only when requested (default {str(_ACCENT_BAND_RULES['accent_band']['default']).lower()}). "
+     f"box.accent_color defaults to {_ACCENT_BAND_RULES['accent_color']['default']}; "
+     f"choices are {', '.join(_ACCENT_BAND_RULES['accent_color']['choices'])}. "
+     f"Only the body's top {_ACCENT_BAND_RULES['band_height_mm']:g} mm, including an open stacking rim, "
+     f"becomes named 3MF parts on filament slot {_ACCENT_BAND_RULES['filament_slot']}. "
      "Fit and lids are unchanged. The color is nominal; loaded filament determines the printed color. "
      "STL retains the full body without color separation.",
      ("box.accent_band", "box.accent_color")),
@@ -279,7 +298,7 @@ def _ai_modifier_examples() -> dict[str, dict[str, Any]]:
     design uses, so an example can never drift from the real serializer.
     """
     raw_blocks = {
-        "accent_band": {"accent_band": True, "accent_color": "blue"},
+        "accent_band": {"accent_band": True, "accent_color": DEFAULT_ACCENT_COLOR},
         "lid_with_handle": {"lid": {"enabled": True}},
         "stackable_bin": {"stack": {"mode": "direct"}},
         "inside_handles": {"lift_grabbers": {
@@ -514,7 +533,8 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "- Grid selection is available for No-Space bins, Plain Drawers, Storage Box and Storage Drawers only. Space Grid is immutable. Storage Box and Storage Drawers also choose immutable Floor or None; Floor builds the raised socket floor, None leaves room for an owner-supplied baseplate. Nominal cells describe the field, not the printed cavity. Measured seated lift is the added seated height, not total plate thickness; zero is measured, missing lift is not recorded. Container settings stay in the Space, never BoxSpec. Side Openings are available on both Gridfinity pitches, with the foot/base, stacking rim, corner radii and selected minimum wall protected; illegal openings are refused without clipping or shrinking. Edge Mount is excluded on Gridfinity because it projects beyond the cell envelope. Physical fit is unverified. On ordinary 42 mm Gridfinity bins only, box.magnet_holes may be none (default) or 6x2 when requested; never use it on 21 mm, Wavefinity, or container floors.",
         "- Storage Box grid_stacking is a structural Space option, never an ordinary AI bin result: Gridfinity 21/42 mm, Lid Only from 1x1 cells or latched screw-hinge lids with one or two latches (42 mm from 2x2; 21 mm from 3x3). Piano hinges, zero-latch latched lids, top labels and peg stacking are refused. Fit, closure, mating and flipped-lid barrel print quality remain unverified pending Andrew's recorded prints; remove the upper box before opening. Do not return the case or alter these Space settings.",
         "- Ordinary 21 mm and 42 mm Gridfinity bins have box.hollow_base on by default; set it false if solid feet and base are requested. It has no effect on Wavefinity bins or container floors. Physical print performance is unverified.",
-        "- Ordinary Gridfinity bins may set box.corner_feet=true when requested (default false). Only corner cells have feet and magnet pockets; built-in wavy supports trimmed to the standard foot outline carry the floor of the other cells, so the bin still seats in a baseplate and needs no slicer supports. box.hollow_base controls whether the corner feet are hollow. Wavefinity bins ignore this option.",
+        "- Ordinary Gridfinity bins may set box.corner_feet=true when requested (default false). Only corner cells have feet and magnet pockets; built-in wavy supports trimmed to the standard foot outline carry the floor of the other cells, so the bin still seats in a baseplate and needs no slicer supports. On bins up to two cells each way, Corners only changes nothing because every cell already has a foot. box.hollow_base controls whether the corner feet are hollow. Wavefinity bins ignore this option.",
+        "- Third-party stand-ins are external bins recorded in the Space Inventory for layout only. AI Design does not create or change stand-ins; it returns ordinary bins.",
         "- All values in the design are millimetres. Convert nothing silently; ask if unsure.",
         "- You may use any legal part, option or modifier in the CAPABILITY MANIFEST that best solves the request.",
         "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",
@@ -714,7 +734,7 @@ def ai_capability_manifest(grid: str = "wavefinity", *, catalog_payload) -> dict
     base = _ai_example_base()
     features: list[dict[str, Any]] = []
     for part in catalog["parts"]:
-        if (not part["palette_visible"] and part["kind"] != "pocket") or "box_modifier" in part["capabilities"]:
+        if not part["palette_visible"] or "box_modifier" in part["capabilities"]:
             continue
         entry: dict[str, Any] = {
             "kind": part["kind"], "title": part["title"],
@@ -752,13 +772,7 @@ def ai_capability_manifest(grid: str = "wavefinity", *, catalog_payload) -> dict
         "edge_mount": examples["edge_mount"],
     }
     modifier_rules = {
-        "accent_band": {
-            "accent_band": {"type": "boolean", "default": False},
-            "accent_color": {"default": "blue", "choices": [
-                "blue", "red", "green", "yellow", "orange", "purple", "white", "black",
-            ]},
-            "band_height_mm": 1.0, "filament_slot": 2, "body_only": True,
-        },
+        "accent_band": _ACCENT_BAND_RULES,
         "lid_stacking": {
             "lid_rules": catalog["lid_rules"], "stack_rules": catalog["stack_rules"],
         },
@@ -810,6 +824,25 @@ def ai_capability_manifest(grid: str = "wavefinity", *, catalog_payload) -> dict
                 "box.x / box.y": "footprint, whole multiples of base_unit_mm",
                 "box.z": "height in whole millimetres" if grid == "wavefinity" else "height in whole 7 mm units, satisfying the floor/rim/lid minimum",
                 "box.wall / box.base_thickness": "use the wall_rules / base_rules choices",
+                "box.magnet_holes": {
+                    "type": "string",
+                    "choices": list(GRIDFINITY_MAGNET_HOLE_CHOICES),
+                    "default": DEFAULT_MAGNET_HOLES,
+                    "available_on_grids": ["gridfinity"],
+                    "rules": "ordinary 42 mm Gridfinity bins only; never on 21 mm, Wavefinity, or container floors",
+                },
+                "box.hollow_base": {
+                    "type": "boolean",
+                    "default": DEFAULT_HOLLOW_BASE,
+                    "available_on_grids": ["gridfinity", "gridfinity_half"],
+                    "rules": "ordinary 21 mm and 42 mm Gridfinity bins only (true = hollow feet and base, false = solid); ignored on Wavefinity and container floors",
+                },
+                "box.corner_feet": {
+                    "type": "boolean",
+                    "default": DEFAULT_CORNER_FEET,
+                    "available_on_grids": ["gridfinity", "gridfinity_half"],
+                    "rules": "ordinary 21 mm and 42 mm Gridfinity bins only (true = corner-cell feet only with built-in wavy floor supports; on bins up to two cells each way, every cell already has a foot so this changes nothing); ignored on Wavefinity",
+                },
                 "scoop": "true adds the front finger scoop (also available as an interior part)",
                 "label / label_position": "rim ledge label text and its side",
                 "part_name": "the bin name",
@@ -828,7 +861,7 @@ def ai_capability_manifest(grid: str = "wavefinity", *, catalog_payload) -> dict
         "never_offer": [
             "Storage Box designs (box.b4b) or Base Trim designs (design_kind = base_trim)",
             "Photo Nest / traced contours (recommend only)",
-            "hidden, internal or legacy-only part kinds other than Pocket",
+            "hidden, internal or legacy-only part kinds (including Pocket)",
         ],
     }
 

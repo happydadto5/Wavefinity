@@ -15,7 +15,7 @@ These are **working rules**, not product documentation. [README.md](README.md) i
 3. Read only relevant source and the **specific** reference sections linked by [README.md](README.md). [Design notes](docs/reference/design-notes.md) preserve geometry decisions and traps; consult them when those decisions matter.
 4. Keep code and related documentation cohesive and scope-limited. Review the source/diff logically, not by executing tests.
 
-**Feature docs:** Material changes to user-facing capabilities update [features.md](features.md). If an outside AI may choose, configure, return or avoid the changed feature, also update [ai-features.md](ai-features.md) and keep the embedded AI Design prompt aligned. The implementation/catalog owns exact schemas and numerical validation limits.
+**Feature docs:** When an option is added, changed or removed, the same change updates [features.md](features.md), [ai-features.md](ai-features.md), and the embedded AI Design prompt in [wavefinity_web_impl/_ai.py](wavefinity_web_impl/_ai.py) (including its capability manifest), refreshes the browser catalog snapshot (`web/browser-core/engine/catalog.json`), and passes one check: the manifest never offers an option the answer validator (`_ai_semantic_violation`) rejects. The implementation/catalog owns exact schemas and numerical validation limits.
 
 ## Help-Code / Poller handoff
 

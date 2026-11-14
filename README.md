@@ -46,6 +46,8 @@ Normal Windows launch: double-click `Launch_Organizer_UI.bat`. The launcher chec
 
 Detailed documentation is organized by topic to keep the introduction short. AI working instructions are maintained separately in [AGENTS.md](AGENTS.md).
 
+**Feature & AI docs rule:** When an option is added, changed or removed, the same change updates [features.md](features.md), [ai-features.md](ai-features.md), and the embedded AI Design prompt in [wavefinity_web_impl/_ai.py](wavefinity_web_impl/_ai.py) (including its capability manifest), refreshes the browser catalog snapshot (`web/browser-core/engine/catalog.json`), and passes one check: the manifest never offers an option the answer validator (`_ai_semantic_violation`) rejects. The implementation/catalog owns exact schemas and numerical validation limits.
+
 ## Migration references
 
 The browser-only migration design is recorded in the [execution specification](Future%20plans/Browser-only-migration-execution-spec.md); supporting contracts and route maps live in `Future plans/`. The [legacy hosting record](docs/legacy-python-server-hosting.md) documents recovery of the retired Python Web Service.
