@@ -3,9 +3,8 @@
 // ------------------------------------------------ Folder access launch notice (Fix 116)
 // A hosted browser session can only save inventory and Spaces into a folder
 // the person has granted. When that access is missing at launch, say so with a
-// non-blocking banner. This is notification only: it reuses SP.canPersistSpace
-// (the same check the Inventory/Spaces actions use) and SP.open (the same path
-// as the "Select a folder..." button); it never changes folder access itself.
+// non-blocking banner. It reuses the Welcome folder-picking flow and the same
+// persistence check as Inventory and Spaces.
 
 SP.FOLDER_NOTICE_SUPPRESS_KEY = "wavefinity.suppressFolderAccessNotice";
 
@@ -43,11 +42,15 @@ SP.wireFolderAccessNotice = () => {
   const notice = document.getElementById("folder-access-notice");
   if (!notice || notice.dataset.wired) return;
   notice.dataset.wired = "1";
-  document.getElementById("folder-access-choose")?.addEventListener("click", () => {
+  document.getElementById("folder-access-choose")?.addEventListener("click", async () => {
     // Close the modal first so the flow opened below is not rendered behind an inert page.
     SP.hideFolderAccessNotice();
     if (SP.pendingReconnect) SP.reconnectSavedFolder();
-    else SP.open();
+    else {
+      const opened = await SP.openExisting();
+      const accessNeeded = SP.dialog().open && !document.getElementById("space-unsupported").hidden;
+      if (!opened && !accessNeeded) SP.showFolderAccessNoticeIfNeeded();
+    }
   });
   // "Design bins only": record the existing suppression key, then close.
   document.getElementById("folder-access-dismiss")?.addEventListener("click", () => {

@@ -984,8 +984,11 @@ SP.openExisting = async () => {
     const data = state.runtime.hosted
         ? await SP.inspectHosted(folder)
         : (await api("/api/space/inspect", { output: folder })).folder;
-    if (data.needs_setup) SP.enterSetupFor(folder, data);
-    else await SP.afterPick(folder);
+    if (data.needs_setup) {
+        SP.enterSetupFor(folder, data);
+        return true;
+    }
+    return SP.afterPick(folder);
 };
 
 SP.useUntypedFolder = async () => {
