@@ -167,7 +167,8 @@ filed but not built yet.
     Bin to make one*, each empty drawer of a Storage Drawers Space gets its own
     note, and a Pegboard never mentions stacking *(planned, Story 2859)*;
   - a Space with no bins shows *No bins yet. New Bin makes your first one.* in
-    the tree *(planned, Story 2859)*;
+    the tree until a new bin editor opens; its selected temporary row follows the
+    typed name and disappears if the unsaved editor is abandoned (Story 3100);
   - the bin's Height field says how tall a bin the Space takes, and turns red
     when the bin is taller *(planned, Story 2861)*;
   - with no slicer found, a line under Print says so and links to Printer

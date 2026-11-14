@@ -550,6 +550,7 @@ Each Inventory bin still keeps its own exact editable design.
 
 - Bin Name.
 - New Bin.
+- In a Space, a new bin appears selected in the tree with its current name while it is being edited; its temporary entry leaves when the unsaved editor is abandoned.
 - Duplicate Bin.
 - Edit an existing Inventory bin.
 - Save/Open standalone design files when outside a typed Space.

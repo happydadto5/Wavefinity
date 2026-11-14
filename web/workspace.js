@@ -101,6 +101,8 @@ WS.items = () => {
   const placed = new Set(bins.filter(one => DL.placedCount(one.id) > 0).map(one => one.id));
   const loose = bins.filter(one => !placed.has(one.id));
   if (loose.length) { add("group", null, "Not placed"); loose.forEach(one => binItem(one)); }
+  // A fresh editor has no inventory ID until it is saved.
+  if (WS.task === "bin" && !state.designInventoryId) add("bin", "", WS.looseName(), { draft: true });
   const drawers = DL.layout.drawers || [];
   if (DL.isStorageDrawers() || drawers.length > 1) {
     drawers.forEach((drawer, index) => {
@@ -187,7 +189,7 @@ WS.renderSelector = () => {
 
     const level = one.kind === "container" ? 1 : one.kind === "bin" && here && WS.containerKind() ? 2 : 0;
     // Story 2840: Print and Export are rendered only on the selected row; other rows carry no output buttons.
-    return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${one.kind === "bin" && here && !locked ? ' draggable="true"' : ""}${locked ? " disabled" : ""}>
+    return `<li class="ws-row ws-level-${level}"><button type="button" class="ws-rowbtn${picked ? " selected" : ""}${one.kind === "container" ? " container" : ""}" data-ws-pick="${one.kind}" data-id="${wsEsc(one.id)}" aria-pressed="${picked}"${one.kind === "bin" && !one.draft && here && !locked ? ' draggable="true"' : ""}${locked ? " disabled" : ""}>
       <span class="ws-label">${wsEsc(one.label)}</span>${one.note ? `<span class="ws-note">${wsEsc(one.note)}</span>` : ""}</button>${drawerButtons}${manage}${picked ? WS.rowOutputs(one, !locked) : ""}${WS.rowBinActions(one, picked, locked)}</li>`;
   }).join("");
   // Story 2725: live on any bin view (a bin in a space or a loose bin in My Bins). Greyed only on the
