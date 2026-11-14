@@ -183,6 +183,8 @@ Wavefinity has two top-level work areas:
 
 A **Space** owns the real-world context and inventory. The Designer owns one ordinary bin at a time.
 
+On a browser's first launch, a welcome animation and loading message appear while Wavefinity opens. Later launches use the normal startup screen.
+
 Opening or switching Spaces always proceeds past a bin that cannot save. Its
 exact design and unfinished edits are kept as a named set-aside entry in its
 own Space, with browser recovery storage as the fallback. A note names the bin,

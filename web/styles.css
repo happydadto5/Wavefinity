@@ -1379,6 +1379,8 @@ dialog:not([open]) { display: none; }
 }
 
 .startup-logo { display: block; width: 100%; max-height: min(42vh, 250px); object-fit: contain; margin: 0 auto 12px; border-radius: 8px; }
+.startup-animation { display: block; width: 100%; max-height: min(60vh, 400px); margin: 0 auto 12px; }
+.startup-logo[hidden], .startup-animation[hidden] { display: none; }
 
 .startup-cover-card h2 {
   margin: 0 0 8px;

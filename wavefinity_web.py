@@ -3124,6 +3124,9 @@ class WavefinityHandler(BaseHTTPRequestHandler):
         # Space-card artwork lives in the repository's canonical images/
         # folder, not under web/. Serve it from its own root rather than
         # duplicating the files or exposing APP_DIR itself.
+        if path == "/images/Welcome%20Animation.mp4":
+            self._send_static_file(WEB_ROOT, "images/Welcome Animation.mp4")
+            return
         if path.startswith("/images/"):
             self._send_static_file(
                 IMAGE_ROOT,
