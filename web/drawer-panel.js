@@ -1197,6 +1197,9 @@ DP.filteredBins = () => {
 };
 
 DP.renderInventory = (force = false) => {
+  // My Bins clears the Space layout before the fresh design refreshes these
+  // controls. There is no Space inventory to render in a memory-only session.
+  if (!DL.layout) return;
   DP.syncFilterSpace();
   const containerSignature = WS.containerKind() ? `${WS.sigKey("container")}|${WS.currentSig("container")}` : "";
   if (containerSignature !== DP.containerSignature) {

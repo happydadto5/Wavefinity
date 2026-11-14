@@ -1,5 +1,9 @@
 # Wavefinity Feature Catalog
 
+**My Bins / No Space** opens the ordinary bin editor without a saved folder
+in the hosted browser. Work stays in session memory; use **Save design file**
+to keep it.
+
 B13 adds browser-direct AI Help using the person's own OpenAI-compatible,
 Anthropic or Gemini credential where the provider permits browser access.
 Keys stay in session memory with a clear control; only non-secret connection
