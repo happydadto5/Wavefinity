@@ -522,11 +522,20 @@ async function selectKind(kind, reset = false) {
     }
     if (kind !== "nest" && !cradleGrown && !isBlankTextDraft(state.draft)) {
       try {
-        const applyResult = await api("/api/feature/apply", {
-          design: state.design,
-          feature: state.draft,
-          index: null,
-        });
+        // Keep the draft pipeline from auto-committing this same new part a
+        // second time while the immediate save is in flight.
+        state.draftAutoCommit = false;
+        let applyResult;
+        try {
+          applyResult = await api("/api/feature/apply", {
+            design: state.design,
+            feature: state.draft,
+            index: null,
+          });
+        } finally {
+          // A newer kind choice owns draftAutoCommit now; only restore our own.
+          if (request === state.kindRequest) state.draftAutoCommit = kind !== "nest";
+        }
         if (request !== state.kindRequest) return;
         state.design = applyResult.design;
         // Fix 1137: this commit bypasses the debounced commit, so it clears

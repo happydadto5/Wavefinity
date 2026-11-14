@@ -44,6 +44,8 @@ SP.wireFolderAccessNotice = () => {
   if (!notice || notice.dataset.wired) return;
   notice.dataset.wired = "1";
   document.getElementById("folder-access-choose")?.addEventListener("click", () => {
+    // Close the modal first so the flow opened below is not rendered behind an inert page.
+    SP.hideFolderAccessNotice();
     if (SP.pendingReconnect) SP.reconnectSavedFolder();
     else SP.open();
   });
