@@ -3058,8 +3058,16 @@ class WavefinityHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         policy = (
-            "default-src 'self'; script-src 'self'; style-src 'self'; "
-            "connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; "
+            # Same policy as the static host (docs/static-host-rollout.md): the
+            # in-browser engine (Pyodide/manifold) needs WebAssembly + eval in a
+            # worker. Without these it never starts and the page hangs on the
+            # opening splash.
+            "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; "
+            "worker-src 'self' blob:; "
+            "connect-src 'self' https://api.openai.com https://api.anthropic.com "
+            "https://generativelanguage.googleapis.com; "
+            "img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
+            "font-src 'self' data:; media-src 'self' blob:; object-src 'none'; "
             "base-uri 'none'; frame-ancestors 'none'"
         )
         self.send_header("Content-Security-Policy", policy)
@@ -3126,6 +3134,9 @@ class WavefinityHandler(BaseHTTPRequestHandler):
         # duplicating the files or exposing APP_DIR itself.
         if path == "/images/Welcome%20Animation.mp4":
             self._send_static_file(WEB_ROOT, "images/Welcome Animation.mp4")
+            return
+        if path == "/images/mascot-loop.webm":
+            self._send_static_file(WEB_ROOT, "images/mascot-loop.webm")
             return
         if path.startswith("/images/"):
             self._send_static_file(
