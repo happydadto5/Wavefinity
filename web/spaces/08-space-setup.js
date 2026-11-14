@@ -559,6 +559,11 @@ SP.create = async () => {
   const migrating = Boolean(SP.configureData);
   let folder = SP.configureData || null;
 
+  if (!migrating && state.runtime.hosted && name.trim().toLowerCase() === "loose bins") {
+    SP.fail("Loose Bins is reserved for bins without a Space. Choose another Space name.", "#space-name");
+    return;
+  }
+
   if (!migrating && state.runtime.hosted) {
     let home = SP.hostedHome || await WFFileSystem.load("home");
     if (home?.handle) {
@@ -1125,9 +1130,8 @@ SP.reconnectSavedFolder = () => SP.run(async () => {
     return;
   }
   SP.pendingReconnect = null;
-  if (saved.active) await SP.resumeSavedHosted(saved.active);
-  else if (!saved.homeReconnect) await SP.resumeSavedHosted(saved);
-  else SP.showHome();
+  if (saved.homeReconnect) await SP.showHostedFolderHome();
+  else await SP.resumeSavedHosted(saved);
 });
 
 // Fix 019 Item 6: "no remembered folder" and "permission not (yet) granted"
@@ -1149,7 +1153,7 @@ SP.launch = async () => {
     try {
       saved = await WFFileSystem.load("active");
       SP.hostedHome = await WFFileSystem.load("home");
-      const reconnectHome = Boolean(SP.hostedHome?.handle && (!saved?.handle || saved.home_name));
+      const reconnectHome = Boolean(SP.hostedHome?.handle);
       const permissionRecord = reconnectHome ? SP.hostedHome : saved;
       // Startup is not a user gesture: only already-granted permission may
       // resume silently. A handle whose permission needs renewing falls
@@ -1175,7 +1179,8 @@ SP.launch = async () => {
       return;
     }
     SP.pendingReconnect = null;
-    if (saved?.handle) await SP.resumeSavedHosted(saved);
+    if (SP.hostedHome?.handle) await SP.showHostedFolderHome();
+    else if (saved?.handle) await SP.resumeSavedHosted(saved);
     else SP.showResume(null, { startup: true });
     return;
   }

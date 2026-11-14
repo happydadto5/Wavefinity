@@ -135,6 +135,7 @@ WS.current = () => {
 
 // Launch screen: existing spaces, My Bins, and (beside it) the New Space kinds.
 WS.renderPicker = () => {
+  const folderHome = state.runtime.hosted && SP.homeAvailable && !SP.pendingReconnect;
   const spaces = WS.spaceRows();
   const browserRequirement = state.runtime.hosted && !window.WFFileSystem?.supportsDirectoryPicker()
     ? "Use Chrome or Edge on a computer. This browser or device can't give Wavefinity a folder, so here you can design and download parts only."
@@ -144,15 +145,15 @@ WS.renderPicker = () => {
       <span class="ws-card-icon" aria-hidden="true">${SP.compactKindIcon(one.kind)}</span>
       <span class="ws-card-text"><strong>${wsEsc(one.name)}</strong><small>${wsEsc([SP_KINDS[one.kind]?.label, one.meta].filter(Boolean).join(" · "))}</small></span></button></li>`).join("");
   return `<div class="ws-sel">
-    <div class="ws-sel-head"><h2>${hasFolder || spaces.length ? "Open an existing space" : "Welcome to Wavefinity"}</h2></div>
+    <div class="ws-sel-head"><h2>${folderHome ? wsEsc(SP.hostedHome.handle.name) : hasFolder || spaces.length ? "Open an existing space" : "Welcome to Wavefinity"}</h2></div>
     ${browserRequirement ? `<p>${wsEsc(browserRequirement)}</p>` : ""}
     ${spaces.length ? "" : '<p class="ws-links">No spaces yet - pick what you\'re organizing below.</p>'}
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
     ${SP.pendingReconnect ? `<p><button type="button" class="button primary" data-ws-act="reconnect">Reconnect folder</button>${SP.pendingReconnect.homeReconnect ? '<span> Your browser may offer "Allow on every visit" — choose it so you are not asked again.</span>' : ""}</p>` : ""}
     <ul class="ws-menu-list" aria-label="Your Spaces">${cards}
-      <li><button type="button" class="ws-menu-item" data-ws-act="my-bins" aria-label="Open My Bins, bins that are not in a Space">
+      <li><button type="button" class="ws-menu-item" data-ws-act="${folderHome ? "loose-bins" : "my-bins"}" aria-label="Open bins that are not in a Space">
         <span class="ws-card-icon" aria-hidden="true">📦</span>
-        <span class="ws-card-text"><strong>My Bins / No Space</strong><small>Bins that are not in a Space</small></span></button></li>
+        <span class="ws-card-text"><strong>${folderHome ? "Loose Bins / Just bins" : "My Bins / No Space"}</strong><small>Bins that are not in a Space</small></span></button></li>
     </ul>
     ${!hasFolder || !state.runtime.hosted ? `<p class="ws-links">${hasFolder ? "" : '<button type="button" class="link-button" data-ws-act="open-folder">Open a Space folder…</button>'}${state.runtime.hosted ? "" : ' <button type="button" class="link-button" data-ws-act="storage">Change Wavefinity folder…</button>'}</p>` : ""}
   </div>`;
@@ -202,6 +203,7 @@ WS.renderSelector = () => {
     <p id="ws-action-note" class="dl-note" role="status"${WS.treeNote ? "" : " hidden"}>${wsEsc(WS.treeNote)}</p>
     ${WS.message ? `<p class="field-error" role="alert">${wsEsc(WS.message)}</p>` : ""}
     <ul class="ws-items" aria-label="${here ? `Contents of ${wsEsc(WS.placeName())}` : "Bins that are not in a Space"}">${rows || '<li class="ws-empty">Nothing here yet. Choose New Bin to add the first bin.</li>'}</ul>
+    ${!here && WS.isLooseFolder() ? `<h3>Saved designs</h3><ul class="ws-menu-list">${(WS.looseDesigns || []).map((name, index) => `<li><button type="button" class="ws-menu-item" data-ws-act="loose-design" data-index="${index}">${wsEsc(name.replace(/\.wavefinity\.json$/i, ""))}</button></li>`).join("") || "<li>No saved designs yet.</li>"}</ul>` : ""}
   </div>`;
 };
 
@@ -227,6 +229,8 @@ WS.renderNewSpace = () => `<div class="ws-page ws-newspace">
 
 WS.spaceRows = () => {
   const rows = [];
+  const folderHome = state.runtime.hosted && SP.homeAvailable && !SP.pendingReconnect;
+  if (folderHome) return (SP.homeSpaces || []).map((one, index) => ({ src: "home", index, name: one.name, kind: one.kind, invalid: one.invalid, meta: one.error || SP.spaceListSize(one) }));
   const here = state.folderMode === "space" && state.activeSpace;
   if (here) {
     rows.push({ src: "current", name: state.activeSpace.name, kind: state.activeSpace.kind, current: true,
@@ -289,6 +293,9 @@ WS.closeSettings = async () => {
 };
 
 WS.flushBin = async ({ spaceSwitch = false } = {}) => {
+  if (spaceSwitch && WS.isLooseFolder() && designHasChanges()) {
+    return appConfirmAction({ title: "Leave this design?", message: "Unsaved changes to this Loose Bins design will be lost. Save the design first to keep them.", actionLabel: "Leave design" });
+  }
   if (["bin", "peek"].includes(WS.task) && WS.open() && typeof flushSpaceDesignAutosave === "function") {
     if (spaceSwitch) return SP.leaveBinForSpaceSwitch();
     return flushSpaceDesignAutosave({ deferDraftPreview: true });
@@ -462,7 +469,8 @@ WS.transition = async (task, arg) => {
     SP.close?.();
     WS.prior = null;
     WS.task = "picker";
-    SP.refreshOtherSpaces?.().then(() => WS.sync());
+    if (state.runtime.hosted && SP.homeAvailable) await SP.showHostedFolderHome();
+    else SP.refreshOtherSpaces?.().then(() => WS.sync());
     return true;
   }
   if (task === "bin" && !WS.open()) {
@@ -635,6 +643,11 @@ WS.openSpaceRow = button => {
     DV.fit();
     return WS.land();
   }
+  if (src === "home") {
+    const one = SP.homeSpaces[index];
+    if (one) WS.pickSpace({ handle: one.handle, name: one.folder_name, home_name: one.folder_name, home_handle: SP.hostedHome.handle }, one.name);
+    return null;
+  }
   if (src === "other") {
     const one = SP.otherSpaces[index];
     if (one) WS.pickSpace(one.folder, one.name);
@@ -655,6 +668,19 @@ WS.newSpace = async kind => {
   const candidateKind = candidate?.kind === "box" ? "portable" : candidate?.kind;
   if (kind === "storage_drawers" && SP.configureData) return;
   SP.showSetup(kind, candidateKind === kind ? candidate : null);
+};
+
+
+WS.isLooseFolder = () => Boolean(state.runtime.hosted && state.folderMode === "design" && state.browserFolder?.home_name === "Loose Bins" && SP.homeAvailable);
+WS.looseDesigns = [];
+WS.refreshLooseDesigns = async () => {
+  if (!WS.isLooseFolder()) return;
+  const handle = state.browserFolder.handle;
+  const names = await WFFileSystem.listFilenames(handle);
+  if (WS.isLooseFolder() && state.browserFolder.handle === handle) {
+    WS.looseDesigns = names.filter(name => /\.wavefinity\.json$/i.test(name)).sort((a, b) => a.localeCompare(b));
+    WS.sync();
+  }
 };
 
 // My Bins / No Space: leave any Space and land on the loose bin.
@@ -712,6 +738,13 @@ WS.onAction = async (act, button, event) => {
     case "open-space": return WS.openSpaceRow(button);
     case "reconnect": return SP.reconnectSavedFolder();
     case "my-bins": return WS.enterLoose();
+    case "loose-bins": return SP.run(SP.openLooseBins);
+    case "loose-design": return SP.run(async () => {
+      const name = WS.looseDesigns[Number(button.dataset.index)];
+      if (!name || !WS.isLooseFolder()) return;
+      const file = await (await state.browserFolder.handle.getFileHandle(name)).getFile();
+      await openDesign({ target: { files: [file], value: "" } });
+    });
     case "open-welcome": return WS.go("picker");
     case "open-folder": return SP.run(SP.openExisting);
     case "storage": return SP.changeStorageParent();

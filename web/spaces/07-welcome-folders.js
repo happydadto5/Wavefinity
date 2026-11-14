@@ -486,3 +486,50 @@ SP.doStorageChange = async mode => {
   }
 };
 
+
+// Enumerate the remembered home itself, rather than the browser's recent list.
+SP.showHostedFolderHome = async () => {
+  const home = SP.hostedHome?.handle;
+  if (!home) return SP.showResume(null, { startup: true });
+  SP.homeSpaces = [];
+  SP.homeAvailable = true;
+  try {
+    for await (const [name, handle] of home.entries()) {
+      if (handle.kind !== "directory" || name === "Loose Bins") continue;
+      try {
+        const info = await SP.inspectHosted({ handle, name });
+        if (info.folder_mode === "space" && info.space) {
+          SP.homeSpaces.push({ handle, folder_name: name, name: info.space.name || name,
+            kind: info.space.kind, size: [info.space.x, info.space.y, info.space.z] });
+        }
+      } catch (error) {
+        SP.homeSpaces.push({ handle, folder_name: name, name, invalid: true, error: "Could not read folder" });
+      }
+    }
+    SP.homeSpaces.sort((a, b) => a.name.localeCompare(b.name));
+    WS.message = "";
+  } catch (error) {
+    WS.message = `Could not read the working folder: ${friendlyError(error)}`;
+  }
+  SP.clearSetupContext();
+  SP.showResume(null, { startup: true });
+};
+
+SP.openLooseBins = async () => {
+  const home = SP.hostedHome?.handle;
+  if (!home || !(await WFFileSystem.requestReadWritePermission(home))) throw new Error("Folder access was not granted.");
+  if (!(await SP.leaveSpaceSafely())) return;
+  const handle = await home.getDirectoryHandle("Loose Bins", { create: true });
+  const folder = { handle, name: "Loose Bins", home_name: "Loose Bins", home_handle: home };
+  const info = await SP.inspectHosted(folder);
+  if (info.folder_mode === "space") {
+    throw new Error('"Loose Bins" contains Space data. Its contents were not changed.');
+  }
+  const opened = await SP.useHostedFolder(folder, { skipLeaveCheck: true });
+  if (!opened) return;
+  await loadFreshOrdinaryDesignForCurrentFolder();
+  await WS.refreshLooseDesigns();
+  WS.task = "bin";
+  WS.prior = null;
+  WS.sync();
+};

@@ -906,6 +906,19 @@ async function saveDesign() {
     await commitVisibleDraft();
     updateDesignFromForm();
     const body = JSON.stringify(state.design, null, 2) + "\n";
+    const filename = `${(state.design.part_name || "Wavefinity design").replace(/[^a-z0-9 _-]/gi, "").trim() || "Wavefinity design"}.wavefinity.json`;
+    if (WS.isLooseFolder()) {
+      const folder = state.browserFolder;
+      if (await WFFileSystem.fileExists(folder.handle, filename) && !(await appConfirmAction({
+        title: "Replace saved design?", message: `A design named ${filename} already exists in Loose Bins. Replace it?`, actionLabel: "Replace",
+      }))) return;
+      if (state.browserFolder !== folder) throw new Error("The folder changed. Save again in the current folder.");
+      await WFFileSystem.queueFolderWrite(folder.handle, () => WFFileSystem.writeText(folder.handle, filename, body));
+      state.cleanDesign = clone(state.design);
+      await WS.refreshLooseDesigns();
+      toast("Design saved to Loose Bins.");
+      return;
+    }
     const blob = new Blob([body], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);

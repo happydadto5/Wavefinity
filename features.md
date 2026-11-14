@@ -466,7 +466,11 @@ A Pegboard Space has a **Print Pegboard Hooks** button (hidden for other Space t
 
 On the hosted site, choose a home folder once; new Spaces get their own
 subfolders inside it. The browser may ask to reconnect the home folder on a
-later visit. Older Spaces remain in their existing folders.
+later visit. When the remembered home is available, its home screen lists the
+Spaces in that folder and offers new Space creation and **Just bins**. Just bins
+creates or reuses a **Loose Bins** subfolder; Save design stores a design there,
+and saved designs can be reopened from its list. Older Spaces remain in their
+existing folders.
 
 ## 3.2 Inventory
 
