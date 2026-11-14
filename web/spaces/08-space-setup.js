@@ -965,15 +965,17 @@ SP.enterSetupFor = (folder, data) => {
     }
 
     // Existing Wavefinity content with no committed typed Space goes straight
-    // to the three choices. A truly unmanaged folder still gets the explicit
-    // Configure-vs-Untyped confirmation first.
+    // to the type choices.
     if (recognized || data?.exists) {
         SP.showTypeCards();
         return;
     }
 
-    SP.showOnly("space-configure-prompt");
-    SP.showDialog();
+    // A truly unmanaged folder is configured as a Space folder automatically
+    // (SP.configureData stays set as the target for the first Space) - no
+    // prompt. The user lands on the Spaces welcome screen to create it.
+    SP.close();
+    return WS.go("picker");
 };
 
 SP.openExisting = async () => {
@@ -984,10 +986,6 @@ SP.openExisting = async () => {
         : (await api("/api/space/inspect", { output: folder })).folder;
     if (data.needs_setup) SP.enterSetupFor(folder, data);
     else await SP.afterPick(folder);
-};
-
-SP.configureFolder = async () => {
-    SP.showTypeCards();
 };
 
 SP.useUntypedFolder = async () => {

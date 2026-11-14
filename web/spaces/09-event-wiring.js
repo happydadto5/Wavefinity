@@ -103,21 +103,6 @@ SP.wire = () => {
     await SP.create();
   }));
 
-  const confYes = document.getElementById("space-configure-yes");
-  if (confYes) confYes.addEventListener("click", SP.configureFolder);
-  const confNo = document.getElementById("space-configure-no");
-  if (confNo) confNo.addEventListener("click", () => SP.run(SP.useUntypedFolder));
-  const confChoose = document.getElementById("space-configure-choose");
-  if (confChoose) confChoose.addEventListener("click", () => SP.run(async () => {
-    // Transition to a stable screen before clearing the selected target and
-    // asking for another folder, so a cancelled picker never leaves the
-    // user on a dead configure prompt referring to a cleared folder - see
-    // Fix 004 Correction 10.A.
-    SP.showHome();
-    SP.configureData = null;
-    await SP.openExisting();
-  }));
-
   const welcomeRecent = document.getElementById("welcome-recent");
   if (welcomeRecent) welcomeRecent.addEventListener("click", event => {
     const forget = event.target.closest("[data-forget]");
