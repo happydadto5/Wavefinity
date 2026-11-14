@@ -123,7 +123,8 @@ Production creation/export and AI Design options are unchanged.
 
 Space and design records preserve their grid identity: Wavefinity (7 mm),
 Gridfinity half (21 mm), or Gridfinity (42 mm). A Space keeps the grid chosen at
-creation; bin entry across different grids is refused without changing either
+creation. The last grid used to create a Space is remembered in the browser for
+the next new Space; bin entry across different grids is refused without changing either
 record. Older external designs use Wavefinity. Gridfinity body paths
 also support a loose plate lid, optionally with a receiving socket on a perimeter
 ridge, for both 42 mm and 21 mm pitches. For Storage Drawers using an external

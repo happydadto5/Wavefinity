@@ -98,6 +98,18 @@ SP.captureOrdinarySetupSnapshot = () => {
 // in its own form, so both keep their plain sentence.
 SP.updateSavedAsMessage = () => {};
 
+// Browser-local preference shared by the Space creation forms.
+SP.preferredSpaceGrid = () => {
+  try {
+    const grid = localStorage.getItem("wavefinity.preferredSpaceGrid");
+    return Object.hasOwn(SP.STORAGE_BOX_PITCHES, grid) ? grid : "wavefinity";
+  } catch (_error) { return "wavefinity"; }
+};
+SP.rememberSpaceGrid = grid => {
+  if (!Object.hasOwn(SP.STORAGE_BOX_PITCHES, grid)) return;
+  try { localStorage.setItem("wavefinity.preferredSpaceGrid", grid); } catch (_error) { /* Storage may be unavailable. */ }
+};
+
 SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   if (update) {
     if (!SP.mountInlineEdit()) return;
@@ -182,7 +194,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById('drawer-z').value = prefillSpace?.z || '';
       // Story 2973: the grid is chosen at setup and immutable once the Space exists.
       const gridSelect = document.getElementById("drawer-grid");
-      gridSelect.value = prefillSpace?.grid || "wavefinity";
+      gridSelect.value = prefillSpace?.grid || (update ? "wavefinity" : SP.preferredSpaceGrid());
       gridSelect.disabled = update;
       gridSelect.title = update ? "A Space's grid is set when it is created and cannot be changed." : "";
       document.getElementById("drawer-lift").value = prefillSpace?.seated_lift_mm ?? "";
@@ -208,11 +220,11 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById("surface-x").value = maximum ? fmt(maximum.x) : "";
       document.getElementById("surface-y").value = maximum ? fmt(maximum.y) : "";
   } else if (kind === "portable") {
-      // Story 2975: Grid (Wavefinity preselected) and, for a Gridfinity pitch,
+      // Story 2975: Grid and, for a Gridfinity pitch,
       // Floor/None are chosen at creation and immutable once the Space exists
       // (the Plain Drawer pattern above). Set before the size so the field is
       // read at the right pitch.
-      const grid = Object.hasOwn(SP.STORAGE_BOX_PITCHES, prefillSpace?.grid) ? prefillSpace.grid : "wavefinity";
+      const grid = Object.hasOwn(SP.STORAGE_BOX_PITCHES, prefillSpace?.grid) ? prefillSpace.grid : (update ? "wavefinity" : SP.preferredSpaceGrid());
       const gridSelect = document.getElementById("portable-grid");
       const floorSelect = document.getElementById("portable-floor");
       gridSelect.value = grid;
@@ -723,6 +735,8 @@ SP.create = async () => {
     // current - say so truthfully instead of silently dropping the warning.
     if (data.remember_warning) toast(data.remember_warning, true);
   }
+
+  if (["drawer", "portable", "storage_drawers"].includes(kind)) SP.rememberSpaceGrid(extra.grid);
 
   try {
     if (state.runtime.hosted) {

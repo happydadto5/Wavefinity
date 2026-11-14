@@ -57,7 +57,7 @@
   };
   const NAMED = (list, names, unit = "mm") => list.map((mm, index) => [String(mm),
     list.length === names.length ? `${names[index]} · ${mm.toFixed(2).replace(/\.?0+$/, "")} ${unit}` : `${mm} ${unit}`]);
-  const mount = ({ host, initialSpace, catalog, printerProfile, mode, callbacks = {}, onReadyChange = null, scope = "full" }) => {
+  const mount = ({ host, initialSpace, initialGrid: preferredGrid = "wavefinity", catalog, printerProfile, mode, callbacks = {}, onReadyChange = null, scope = "full" }) => {
     const epoch = ++mountSerial;
     const rules = window.StorageDrawers.catalogRules(catalog);
     const { baseUnit, minDrawerHeight, minUsableDrawerHeight, maxUsableHeight, minUnits, maxUnits, minDrawers, maxDrawers, labelLimit } = rules;
@@ -83,7 +83,7 @@
     // A brand-new Space starts at the legal grid size nearest 210 × 120 mm; a
     // supplied prefill keeps its own dimensions exactly.
     const startMm = mm => baseUnit * Math.min(maxUnits, Math.max(minUnits, Math.round(mm / baseUnit)));
-    const space = copy(initialSpace || { kind: "storage_drawers", name: "", grid: "wavefinity",
+    const space = copy(initialSpace || { kind: "storage_drawers", name: "", grid: preferredGrid,
       x: startMm(rules.defaultField[0]), y: startMm(rules.defaultField[1]) });
     space.storage_drawers = { ...defaults(), ...copy(space.storage_drawers || {}) };
     const block = space.storage_drawers;

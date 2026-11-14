@@ -93,6 +93,7 @@ SP.mountStorageDrawersForm = (prefill, update) => {
   SP.storageDrawersForm = StorageDrawersForm.mount({
     host,
     initialSpace: initial,
+    initialGrid: SP.preferredSpaceGrid(),
     catalog: state.catalog,
     printerProfile: PrinterProfile.current(),
     mode: update ? "edit" : "create",
