@@ -518,7 +518,7 @@ function aiSetStatus(message = "", { error = false, repair = false } = {}) {
   status.hidden = !message;
   status.classList.toggle("error", error);
   const repairButton = $("#ai-help-repair");
-  if (repairButton) repairButton.hidden = !repair || aiMode !== "automatic";
+  if (repairButton) repairButton.hidden = !repair;
 }
 
 function aiSetBusy(busy) {
@@ -805,7 +805,7 @@ async function aiMakeRepairPrompt() {
     });
     // Keep the repair prompt for the next explicit Ask my AI action.
     aiShowPrompt(result.prompt);
-    aiSetStatus("Repair prompt ready. Choose Ask my AI.", { repair: true });
+    aiSetStatus(aiMode === "manual" ? "Repair prompt ready. Copy it into your AI, then paste its new answer below." : "Repair prompt ready. Choose Ask my AI.", { repair: true });
   } catch (error) {
     aiSetStatus(friendlyError(error), { error: true, repair: true });
   } finally {
@@ -850,7 +850,7 @@ function aiApplyMode() {
   $("#ai-help-ask").hidden = aiMode !== "automatic";
   $("#ai-help-generate").hidden = aiMode !== "manual";
   $("#ai-help-prompt-block").hidden = aiMode !== "manual" || !$("#ai-help-prompt").value;
-  $("#ai-help-repair").hidden = aiMode !== "automatic" || !aiHelp.failure;
+  $("#ai-help-repair").hidden = !aiHelp.failure;
 }
 async function aiChooseMode(mode) {
   await api("/api/ai/connection", { action: "mode", mode });
