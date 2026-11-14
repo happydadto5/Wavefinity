@@ -86,14 +86,6 @@
         "bytes": 36920,
         "gzip_bytes": 36209
       },
-      "pyodide/libopenblas-0.3.26.zip": {
-        "bytes": 1916561,
-        "gzip_bytes": 1913550
-      },
-      "pyodide/lxml-6.0.0-cp313-cp313-pyodide_2025_0_wasm32.whl": {
-        "bytes": 1778068,
-        "gzip_bytes": 1769338
-      },
       "pyodide/matplotlib-3.8.4-cp313-cp313-pyodide_2025_0_wasm32.whl": {
         "bytes": 6722016,
         "gzip_bytes": 6604414
@@ -130,10 +122,6 @@
         "bytes": 8645967,
         "gzip_bytes": 2817221
       },
-      "pyodide/pyodide.js": {
-        "bytes": 17331,
-        "gzip_bytes": 6883
-      },
       "pyodide/pyodide.mjs": {
         "bytes": 16347,
         "gzip_bytes": 6570
@@ -154,10 +142,6 @@
         "bytes": 509225,
         "gzip_bytes": 376651
       },
-      "pyodide/scipy-1.14.1-cp313-cp313-pyodide_2025_0_wasm32.whl": {
-        "bytes": 13258838,
-        "gzip_bytes": 13161833
-      },
       "pyodide/setuptools-76.0.0-py3-none-any.whl": {
         "bytes": 953457,
         "gzip_bytes": 907272
@@ -177,8 +161,8 @@
     },
     "planning_target_bytes": 67108864,
     "scope": "Entire B02 vendor tree and canonical.zip; excludes future UI/worker assets and manifest JSON. gzip totals are build encoding sizes, not observed network transfer. Hosting compression/traffic allowance is not established here.",
-    "total_bytes": 58746081,
-    "total_gzip_bytes": 51059534,
+    "total_bytes": 41775283,
+    "total_gzip_bytes": 34207930,
     "within_planning_target": true
   },
   "source_hash_mode": "UTF-8 without BOM, LF line endings",
@@ -839,5 +823,5 @@
       "source": "web/browser-core/engine/three_mf.py"
     }
   },
-  "vendor_manifest_sha256": "8ba568549272c49eb8a7a37b10ac2b49b25972e0d41dfd1bd2bf8f5dae6e49e3"
+  "vendor_manifest_sha256": "faa9a9aa7a937957131a428ab59c0bacf7fc8a5e00bd1397208671c318331574"
 }
