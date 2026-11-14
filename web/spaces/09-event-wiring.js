@@ -125,17 +125,17 @@ SP.wire = () => {
       }
       SP.renderRecent();
     });
-    else SP.run(() => SP.afterPick(
+    else WS.pickSpace(
       state.runtime.hosted
         ? { handle: one.handle, name: one.folder_name || one.name, home_name: one.home_name }
-        : one.folder
-    ));
+        : one.folder, one.name
+    );
   });
   document.querySelectorAll("[data-other-spaces-list]").forEach(list =>
     list.addEventListener("click", event => {
       const button = event.target.closest("[data-other-index]");
       const one = SP.otherSpaces[Number(button?.dataset.otherIndex)];
-      if (one) SP.run(() => SP.afterPick(one.folder));
+      if (one) WS.pickSpace(one.folder, one.name);
     }));
 
   // Live Drawer/Portable readouts while the user types, not only when the

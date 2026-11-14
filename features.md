@@ -1,5 +1,7 @@
 # Wavefinity Feature Catalog
 
+Opening a Space from the Space list shows its name while its view loads; My Bins shows the same opening feedback.
+
 **My Bins / No Space** opens the ordinary bin editor without a saved folder
 in the hosted browser. Work stays in session memory; use **Save design file**
 to keep it.

@@ -146,6 +146,14 @@ body.ws-task-settings #space-note { display: none !important; }
 }
 .ws-switching[hidden] { display: none; }
 
+/* Space opening also covers the picker, whose workspace is hidden. */
+.ws-opening {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; border: 0;
+  align-items: center; justify-content: center;
+  background: #f8faf9; color: var(--teal-dark); font-size: 32px; font-weight: 700; text-align: center;
+}
+.ws-opening[open] { display: flex; }
+
 /* Setup is a full-screen task of its own. */
 body.ws-on #welcome-dialog[open] {
   position: fixed; inset: 0; width: 100vw; max-width: none; height: 100vh; max-height: none; margin: 0; border-radius: 0; overflow: auto;

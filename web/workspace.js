@@ -583,7 +583,7 @@ WS.arrive = () => {
 WS.settle = tries => {
   setTimeout(() => {
     if (WS.task !== "landing" || !WS.open()) return;
-    if (WS.busy || SP.busy) { if (tries < 60) WS.settle(tries + 1); return; }
+    if (WS.busy || SP.busy) { WS.settle(tries + 1); return; }
     WS.land().then(landed => { if (!landed && WS.landingPending) WS.endOpening(); });
   }, 150);
 };
@@ -593,21 +593,36 @@ WS.settle = tries => {
 // Open a Space from a row. On the open screen nothing is being edited, so leaving the
 // restored Space must not wait on an editor prompt; if the switch cannot proceed the
 // reason is shown on the screen itself, not only as a toast.
-// Opening a Space says so at once, over the middle section, until it is drawn (Story 2719).
-// The message is not held across WS.land: SP.run keeps SP.busy set, and settle waits on that.
-// Instead it is cleared by WS.sync once the view has left "landing" (see WS.endOpening).
+// Keep the opening cover independent of the workspace, which is hidden on the picker.
 WS.endOpening = () => {
   WS.landingPending = false;
-  WS.showSwitching("");
+  const cover = document.getElementById("ws-opening");
+  if (cover?.open) cover.close();
 };
 
+WS.beginOpening = name => {
+  let cover = document.getElementById("ws-opening");
+  if (!cover) {
+    cover = document.createElement("dialog");
+    cover.id = "ws-opening";
+    cover.className = "ws-opening";
+    cover.setAttribute("role", "status");
+    cover.addEventListener("cancel", event => event.preventDefault());
+    document.body.appendChild(cover);
+  }
+  cover.textContent = `Opening ${name || "Space"}...`;
+  if (!cover.open) cover.showModal();
+};
+
+WS.openingPaint = () => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+
 WS.pickSpace = (folder, name = "") => SP.run(async () => {
-  if (!(await WS.commitQueuedDelete())) return;
-  WS.message = "";
-  WS.landingPending = false;
-  if (name) WS.showSwitching(`Opening ${name}...`);
+  WS.beginOpening(name);
+  await WS.openingPaint();
   let opened = null;
   try {
+    if (!(await WS.commitQueuedDelete())) { WS.endOpening(); return; }
+    WS.message = "";
     opened = await SP.afterPick(folder, WS.task === "picker" ? { visible: false } : undefined);
   } catch (error) {
     WS.endOpening();
@@ -621,10 +636,23 @@ WS.pickSpace = (folder, name = "") => SP.run(async () => {
     WS.sync();
     return;
   }
-  // Adopted but not yet drawn: keep the message until the landing view is shown.
-  if (name && WS.open() && WS.task === "landing") WS.landingPending = true;
+  if (WS.open() && WS.task === "landing") WS.landingPending = true;
   else WS.endOpening();
 });
+
+WS.openMyBins = async open => {
+  if (SP.busy) return;
+  WS.beginOpening("My Bins");
+  try {
+    await WS.openingPaint();
+    await open();
+  } catch (error) {
+    console.error(error);
+    toast("Something went wrong. Please try again.", true, 6000);
+  } finally {
+    WS.endOpening();
+  }
+};
 
 WS.openSpaceRow = button => {
   const src = button.dataset.src;
@@ -642,8 +670,14 @@ WS.openSpaceRow = button => {
       }
       return null;
     }
-    DV.fit();
-    return WS.land();
+    return SP.run(async () => {
+      WS.beginOpening(state.activeSpace?.name);
+      try {
+        await WS.openingPaint();
+        DV.fit();
+        await WS.land();
+      } finally { WS.endOpening(); }
+    });
   }
   if (src === "home") {
     const one = SP.homeSpaces[index];
@@ -698,7 +732,7 @@ WS.enterLoose = async () => {
     WS.sync();
     return;
   }
-  WS.go("bin");
+  await WS.go("bin");
 };
 
 WS.printContainerNow = event => {
@@ -740,8 +774,8 @@ WS.onAction = async (act, button, event) => {
   switch (act) {
     case "open-space": return WS.openSpaceRow(button);
     case "reconnect": return SP.reconnectSavedFolder();
-    case "my-bins": return WS.enterLoose();
-    case "loose-bins": return SP.run(SP.openLooseBins);
+    case "my-bins": return WS.openMyBins(WS.enterLoose);
+    case "loose-bins": return WS.openMyBins(() => SP.run(SP.openLooseBins));
     case "loose-design": return SP.run(async () => {
       const name = WS.looseDesigns[Number(button.dataset.index)];
       if (!name || !WS.isLooseFolder()) return;
@@ -923,8 +957,6 @@ WS.sync = () => {
     WS.placeSeen = key;
     if (!first && key !== "space-pending") WS.arrive();
   }
-  // The opening message ends once the Space's view has been drawn (or the open did not land).
-  if (WS.landingPending && (WS.task !== "landing" || !WS.open())) WS.endOpening();
   // A task that needs an open Space falls back when that Space is gone.
   if (["landing", "container", "peek", "settings"].includes(WS.task) && !WS.open() && state.folderMode !== "space") {
     WS.task = "bin";
@@ -958,6 +990,7 @@ WS.sync = () => {
     if (wrap && !wrap.classList.contains("active")) wsActivatePreview(view);
   }
   WS.render();
+  if (WS.landingPending && (WS.task !== "landing" || !WS.open())) WS.endOpening();
   SP.renderBinRecovery();
   WS.measure();
   const signature = `${WS.task}|${[...DP.printSelected].join(",")}|${DP.containerPinned}|${state.designInventoryId || ""}|${WS.peekId || ""}|${WS.prior?.id ?? ""}`;
